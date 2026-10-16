@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useFinance } from '@/store/FinanceContext'
 import type { Card } from '@/types'
-import { CreditCard, Plus, Trash2, Users, Tag, Calendar } from 'lucide-react'
+import { CreditCard, Plus, Trash2, Users, Tag, Calendar, Edit2, Sparkles } from 'lucide-react'
 
 interface SharedCardsModalProps {
   open: boolean
@@ -88,111 +88,132 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/20">
+      <DialogContent className="sm:max-w-2xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
+        <DialogHeader className="space-y-1 pb-2 border-b border-white/[0.06]">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5">
+              <div className="size-9 rounded-xl bg-gradient-to-tr from-sky-500/20 to-indigo-500/20 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
                 <CreditCard className="size-5" />
               </div>
               <div>
-                <DialogTitle>Cartões de Crédito Compartilhados</DialogTitle>
-                <DialogDescription>
-                  Separa compras compartilhadas e compras de terceiros da fatura principal
+                <DialogTitle className="text-base sm:text-lg font-bold text-white">
+                  Cartões de Crédito
+                </DialogTitle>
+                <DialogDescription className="text-xs text-slate-400">
+                  Gerencie limites, datas de fechamento e cartões compartilhados
                 </DialogDescription>
               </div>
             </div>
+
             {!editingCard && (
-              <Button size="sm" onClick={handleOpenNew} className="bg-violet-600 hover:bg-violet-500 text-white gap-1.5">
-                <Plus className="size-4" /> Novo Cartão
+              <Button
+                size="sm"
+                onClick={handleOpenNew}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm"
+              >
+                <Plus className="size-3.5" />
+                <span>Novo Cartão</span>
               </Button>
             )}
           </div>
         </DialogHeader>
 
         {editingCard ? (
-          <div className="space-y-4 py-2 border border-slate-800 rounded-xl p-4 bg-slate-900/50">
-            <h4 className="text-sm font-semibold text-slate-200">
-              {editingCard.id.startsWith('new_') ? 'Cadastrar Novo Cartão' : `Editar ${editingCard.cardName}`}
-            </h4>
+          /* Form de Edição / Cadastro de Cartão */
+          <div className="space-y-4 py-2 border border-white/[0.08] rounded-2xl p-4 sm:p-5 bg-slate-950/70 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <Sparkles className="size-4 text-emerald-400" />
+                <span>{editingCard.id.startsWith('new_') ? 'Cadastrar Novo Cartão' : `Editar ${editingCard.cardName}`}</span>
+              </h4>
+              <Badge variant="outline" className="text-[10px] bg-slate-800 text-slate-300">
+                Titular: {editingCard.ownerName}
+              </Badge>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5 sm:col-span-2">
-                <label className="text-xs font-medium text-slate-300">Nome do Cartão (Ex: Nubank Ultravioleta)</label>
+                <label className="text-xs font-semibold text-slate-300">Nome do Cartão (Ex: Nubank Ultravioleta)</label>
                 <Input
                   value={cardName}
                   onChange={(e) => setCardName(e.target.value)}
                   placeholder="Nome do cartão"
-                  className="bg-slate-900 border-slate-700"
+                  className="h-10 text-xs sm:text-sm bg-slate-900 border-slate-700/80 rounded-xl"
+                  required
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Dia de Fechamento</label>
+                <label className="text-xs font-semibold text-slate-300">Dia de Fechamento da Fatura</label>
                 <Input
                   type="number"
                   min={1}
                   max={31}
                   value={closingDay}
                   onChange={(e) => setClosingDay(Number(e.target.value))}
-                  className="bg-slate-900 border-slate-700"
+                  className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl font-mono"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Dia de Vencimento</label>
+                <label className="text-xs font-semibold text-slate-300">Dia de Vencimento da Fatura</label>
                 <Input
                   type="number"
                   min={1}
                   max={31}
                   value={dueDay}
                   onChange={(e) => setDueDay(Number(e.target.value))}
-                  className="bg-slate-900 border-slate-700"
+                  className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl font-mono"
                 />
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">
-                <label className="text-xs font-medium text-slate-300">
+                <label className="text-xs font-semibold text-slate-300">
                   Terceiros Frequentes (separados por vírgula)
                 </label>
                 <Input
                   value={thirdPartiesInput}
                   onChange={(e) => setThirdPartiesInput(e.target.value)}
-                  placeholder="Mãe, Irmão, Amigo"
-                  className="bg-slate-900 border-slate-700"
+                  placeholder="Mãe, Irmão, Carlos"
+                  className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl"
                 />
                 <p className="text-[11px] text-slate-400">
-                  Gastos com estes nomes geram linha neutra no saldo e entram em "A Receber de Terceiros".
+                  Gastos lançados para estes terceiros entram no cálculo de <strong>A Receber</strong> sem impactar negativamente seu saldo pessoal.
                 </p>
               </div>
 
               {partner && (
-                <div className="sm:col-span-2 flex items-center justify-between p-3 rounded-lg bg-slate-800/60 border border-slate-700/60">
-                  <div className="flex items-center gap-2">
+                <div className="sm:col-span-2 flex items-center justify-between p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <div className="flex items-center gap-2.5">
                     <Users className="size-4 text-violet-400" />
-                    <span className="text-xs text-slate-200">
-                      Compartilhar com <strong>{partner.name}</strong>
-                    </span>
+                    <div>
+                      <span className="text-xs font-semibold text-slate-200 block">
+                        Compartilhar cartão com {partner.name}
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Permite que seu parceiro selecione este cartão ao lançar despesas
+                      </span>
+                    </div>
                   </div>
                   <input
                     type="checkbox"
                     checked={shareWithPartner}
                     onChange={(e) => setShareWithPartner(e.target.checked)}
-                    className="size-4 accent-violet-600 rounded cursor-pointer"
+                    className="size-5 accent-emerald-500 rounded cursor-pointer"
                   />
                 </div>
               )}
 
-              <div className="sm:col-span-2 space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Cor do Cartão</label>
-                <div className="flex gap-2">
+              <div className="sm:col-span-2 space-y-2">
+                <label className="text-xs font-semibold text-slate-300 block">Cor de Identificação</label>
+                <div className="flex gap-2.5 items-center">
                   {['violet', 'orange', 'slate', 'emerald', 'cyan', 'rose'].map((c) => (
                     <button
                       key={c}
                       type="button"
                       onClick={() => setColor(c)}
-                      className={`size-7 rounded-full border-2 transition-transform cursor-pointer ${
-                        color === c ? 'scale-110 border-white ring-2 ring-violet-500/50' : 'border-transparent opacity-70 hover:opacity-100'
+                      className={`size-8 rounded-full border-2 transition-transform cursor-pointer ${
+                        color === c ? 'scale-110 border-white ring-2 ring-emerald-500/40 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'
                       }`}
                       style={{
                         backgroundColor:
@@ -214,20 +235,23 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="ghost" size="sm" onClick={() => setEditingCard(null)}>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <Button variant="outline" size="sm" onClick={() => setEditingCard(null)} className="h-9 text-xs rounded-xl">
                 Cancelar
               </Button>
-              <Button size="sm" onClick={handleSave} className="bg-violet-600 hover:bg-violet-500 text-white">
+              <Button size="sm" onClick={handleSave} className="h-9 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-sm">
                 Salvar Cartão
               </Button>
             </div>
           </div>
         ) : (
+          /* Lista de Cartões Cadastrados */
           <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
             {cards.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-sm">
-                Nenhum cartão cadastrado ainda. Clique em "Novo Cartão" para começar.
+              <div className="text-center py-10 text-slate-400 text-xs rounded-2xl bg-slate-950/60 border border-white/[0.06] space-y-2">
+                <CreditCard className="size-8 mx-auto opacity-30 text-slate-500" />
+                <p className="font-semibold text-slate-300">Nenhum cartão cadastrado ainda.</p>
+                <p className="text-slate-500">Clique em "Novo Cartão" para começar a gerenciar seus cartões.</p>
               </div>
             ) : (
               cards.map((card) => {
@@ -236,13 +260,13 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
                 return (
                   <div
                     key={card.id}
-                    className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    className="p-4 rounded-2xl border border-white/[0.06] bg-slate-950/70 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md"
                   >
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-100 text-sm">{card.cardName}</span>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-100 text-sm">{card.cardName}</span>
                         {isOwner ? (
-                          <Badge variant="outline" className="text-[10px] bg-slate-800 text-slate-300">
+                          <Badge variant="outline" className="text-[10px] bg-slate-800 text-slate-300 border-slate-700">
                             Meu Cartão
                           </Badge>
                         ) : (
@@ -258,31 +282,38 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                        <span className="flex items-center gap-1">
+                        <span className="flex items-center gap-1.5">
                           <Calendar className="size-3.5 text-slate-500" />
-                          Fecha dia {card.closingDay} · Vence dia {card.dueDay}
+                          Fecha dia <strong className="text-slate-200">{card.closingDay}</strong> · Vence dia <strong className="text-slate-200">{card.dueDay}</strong>
                         </span>
                         {card.frequentThirdParties?.length > 0 && (
-                          <span className="flex items-center gap-1">
+                          <span className="flex items-center gap-1.5">
                             <Tag className="size-3.5 text-slate-500" />
-                            Terceiros: {card.frequentThirdParties.join(', ')}
+                            Terceiros: <strong className="text-slate-200">{card.frequentThirdParties.join(', ')}</strong>
                           </span>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 self-end sm:self-center">
-                      <Button variant="outline" size="sm" onClick={() => handleEdit(card)} className="text-xs h-8">
-                        Editar
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEdit(card)}
+                        className="text-xs h-8 rounded-lg border-slate-800 hover:text-white"
+                      >
+                        <Edit2 className="size-3 mr-1" />
+                        <span>Editar</span>
                       </Button>
                       {isOwner && (
                         <Button
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => handleDelete(card.id)}
-                          className="text-slate-400 hover:text-rose-400 h-8 w-8"
+                          className="text-slate-400 hover:text-rose-400 h-8 w-8 rounded-lg cursor-pointer"
+                          title="Excluir Cartão"
                         >
-                          <Trash2 className="size-4" />
+                          <Trash2 className="size-3.5" />
                         </Button>
                       )}
                     </div>
@@ -293,8 +324,8 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
           </div>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="pt-2 border-t border-white/[0.06]">
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl text-xs h-9">
             Fechar
           </Button>
         </DialogFooter>

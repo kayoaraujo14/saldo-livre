@@ -10,6 +10,8 @@ import {
   Zap,
   Sparkles,
   CheckCircle2,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react'
 
 interface FutureProjectionModalProps {
@@ -45,23 +47,25 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
-        <DialogHeader>
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+      <DialogContent className="sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
+        <DialogHeader className="space-y-1 pb-3 border-b border-white/[0.06]">
+          <div className="flex items-center gap-2.5">
+            <div className="size-9 rounded-xl bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center shrink-0">
               <CalendarRange className="size-5" />
             </div>
             <div>
-              <DialogTitle>Projeção e Fluxo de Caixa dos Próximos 6 Meses</DialogTitle>
-              <DialogDescription>
+              <DialogTitle className="text-base sm:text-lg font-bold text-white">
+                Projeção de Fluxo de Caixa (6 Meses)
+              </DialogTitle>
+              <DialogDescription className="text-xs text-slate-400">
                 Simulação de Entradas, Contas Fixas e Saldo Livre futuro para planejar gastos com segurança
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
-        <div className="py-3 space-y-3 max-h-[65vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="py-2 space-y-3 max-h-[62vh] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {projections.map((p) => {
               const isSelected = p.monthKey === month
               const isCurrent = p.monthKey === currentKey
@@ -74,39 +78,42 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
               return (
                 <div
                   key={p.monthKey}
-                  className={`p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
+                  className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 shadow-md ${
                     isSelected
-                      ? 'border-emerald-500/50 bg-emerald-950/20 shadow-md ring-1 ring-emerald-500/30'
-                      : 'border-slate-800 bg-slate-900/60 hover:border-slate-700/80'
+                      ? 'border-emerald-500/50 bg-emerald-950/20 shadow-lg ring-1 ring-emerald-500/30'
+                      : 'border-white/[0.06] bg-slate-950/70 hover:border-slate-700'
                   }`}
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-slate-100 text-sm">{p.label}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-100 text-sm capitalize">{p.label}</span>
                         {isCurrent && (
-                          <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800">
+                          <Badge variant="outline" className="text-[10px] py-0 px-2 bg-emerald-950/60 text-emerald-300 border-emerald-800">
                             Mês Atual
                           </Badge>
                         )}
                       </div>
 
                       {p.isGenerated ? (
-                        <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium">
-                          <CheckCircle2 className="size-3" /> Gerado
+                        <span className="text-[11px] text-emerald-400 flex items-center gap-1 font-semibold">
+                          <CheckCircle2 className="size-3.5" /> Lançamentos Gerados
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                          <Sparkles className="size-3 text-amber-400" /> Projetado
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <Sparkles className="size-3 text-amber-400" /> Simulado
                         </span>
                       )}
                     </div>
 
                     {/* Breakdown In vs Out */}
                     <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                      <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 flex flex-col">
-                        <span className="text-[11px] text-slate-400">Entradas Previstas:</span>
-                        <span className="font-bold text-emerald-400 text-sm mt-0.5">
+                      <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <TrendingUp className="size-3 text-emerald-400" />
+                          <span>Entradas Previstas</span>
+                        </span>
+                        <span className="font-bold font-mono text-emerald-400 text-sm mt-1">
                           +{formatBRL(p.projectedIncome)}
                         </span>
                         <span className="text-[10px] text-slate-500 mt-0.5">
@@ -114,9 +121,12 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                         </span>
                       </div>
 
-                      <div className="p-2 rounded-lg bg-slate-950/60 border border-slate-800/80 flex flex-col">
-                        <span className="text-[11px] text-slate-400">Saídas Previstas:</span>
-                        <span className="font-bold text-slate-200 text-sm mt-0.5">
+                      <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col">
+                        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                          <TrendingDown className="size-3 text-rose-400" />
+                          <span>Saídas Previstas</span>
+                        </span>
+                        <span className="font-bold font-mono text-slate-200 text-sm mt-1">
                           −{formatBRL(p.projectedExpense)}
                         </span>
                         <span className="text-[10px] text-slate-500 mt-0.5">
@@ -126,11 +136,11 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                     </div>
 
                     {/* Projected Free Balance & Daily Limit */}
-                    <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
+                    <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 flex items-center justify-between">
                       <div>
-                        <span className="text-[11px] text-slate-400 block">Saldo Livre Projetado:</span>
+                        <span className="text-[11px] font-medium text-slate-400 block">Saldo Livre Estimado:</span>
                         <span
-                          className={`text-base font-extrabold tracking-tight ${
+                          className={`text-lg font-black tracking-tight font-mono ${
                             isPositive ? 'text-emerald-400' : 'text-rose-400'
                           }`}
                         >
@@ -139,8 +149,8 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                       </div>
 
                       <div className="text-right">
-                        <span className="text-[11px] text-slate-400 block">Limite Diário:</span>
-                        <span className="text-xs font-bold text-cyan-300">
+                        <span className="text-[11px] font-medium text-slate-400 block">Gasto Seguro:</span>
+                        <span className="text-xs font-bold text-cyan-300 font-mono">
                           {p.projectedDailyLimit != null ? `${formatBRL(p.projectedDailyLimit)}/dia` : '—'}
                         </span>
                       </div>
@@ -150,11 +160,11 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                     <div className="space-y-1">
                       <div className="flex justify-between text-[10px] text-slate-400">
                         <span>Retenção de Saldo</span>
-                        <span>{retentionPct}% livre</span>
+                        <span className="font-semibold text-slate-200">{retentionPct}% livre</span>
                       </div>
-                      <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                      <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800">
                         <div
-                          className="h-full bg-emerald-500 rounded-full transition-all"
+                          className="h-full bg-emerald-500 rounded-full transition-all duration-300"
                           style={{ width: `${retentionPct}%` }}
                         />
                       </div>
@@ -162,27 +172,26 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                   </div>
 
                   {/* Month Actions */}
-                  <div className="flex items-center justify-between pt-2 border-t border-white/[0.06] text-xs">
-                    {!p.isGenerated && (
+                  <div className="flex items-center justify-between pt-2.5 border-t border-white/[0.06] text-xs gap-2">
+                    {!p.isGenerated ? (
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => handleGenerateForMonth(p.monthKey)}
-                        className="text-[11px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 h-7 px-2 gap-1"
+                        className="text-[11px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 h-8 px-2.5 gap-1 rounded-lg"
                       >
                         <Zap className="size-3" /> Gerar Lançamentos
                       </Button>
-                    )}
-                    {p.isGenerated && (
-                      <span className="text-[11px] text-slate-500">Lançamentos ativos</span>
+                    ) : (
+                      <span className="text-[11px] text-slate-500 font-medium">Lançamentos sincronizados</span>
                     )}
 
                     <Button
                       size="sm"
                       onClick={() => handleGoToMonth(p.monthKey)}
-                      className="text-xs h-7 ml-auto bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white gap-1"
+                      className="text-xs h-8 ml-auto bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white gap-1.5 rounded-lg px-3 cursor-pointer shadow-sm"
                     >
-                      <span>Visualizar</span>
+                      <span>Abrir Mês</span>
                       <ArrowRight className="size-3" />
                     </Button>
                   </div>
@@ -192,11 +201,11 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
           </div>
         </div>
 
-        <DialogFooter className="flex items-center justify-between sm:justify-between w-full">
-          <p className="text-[11px] text-slate-500">
+        <DialogFooter className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-white/[0.06] w-full">
+          <p className="text-[11px] text-slate-500 leading-tight">
             * As previsões usam seu salário cadastrado e seus moldes ativos de receitas e despesas.
           </p>
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl text-xs h-9 shrink-0">
             Fechar
           </Button>
         </DialogFooter>

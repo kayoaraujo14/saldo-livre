@@ -405,14 +405,12 @@ REGRAS DE FUNCIONAMENTO:
 3. ESTORNOS E REEMBOLSOS (VALORES NEGATIVOS):
 - Se o gasto for negativo (ex: "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"), defina obrigatoriamente categoria = "Estorno" e envie o valor negativo (ex: -8.40). Trata-se de estorno/crédito na fatura que alivia o Saldo Livre.
 
-4. COMPRAS PARCELADAS E ALOCAÇÃO NOS MESES PASSADOS E FUTUROS:
+4. COMPRAS PARCELADAS:
 - Notações como "9/12", "2/6" ou "10/12" indicam compras parceladas. Preencha parcelaAtual e totalParcelas (ex: parcelaAtual: 9, totalParcelas: 12).
-- O sistema aloca AUTOMATICAMENTE toda a série de parcelas pelos meses correspondentes:
-  * As parcelas ANTERIORES (ex: 1 a 8 de 9/12) são alocadas nos meses passados e marcadas como pagas (status: paid).
-  * A parcela ATUAL (ex: 9 de 9/12) é alocada no mês da fatura (ex: novembro) como pendente.
-  * As parcelas FUTURAS (ex: 10 a 12 de 9/12) são alocadas nos meses seguintes (dezembro, janeiro, fevereiro) como pendentes (status: pending), comprometendo o Saldo Livre e o orçamento futuro de cada mês!
-- Se o usuário pedir para gerar, expandir ou alocar as parcelas passadas e futuras de compras já existentes em novembro ou em qualquer mês:
-  Chame a ferramenta "expandirParcelamentos" com mes: "2026-11"! Ela varre todas as compras parceladas e gera todas as parcelas faltantes de uma só vez.
+- O sistema aloca AUTOMATICAMENTE toda a série de parcelas no banco de dados pelos meses correspondentes (passadas como pagas, atual e futuras como pendentes).
+- IMPORTANTE: Confirme a operação de forma simples e direta no mês atual. NÃO fique gerando previsões ou projeções detalhadas de meses futuros ao final da resposta a menos que o usuário peça especificamente.
+- Se o usuário pedir para gerar, expandir ou sincronizar as parcelas passadas e futuras de compras já existentes:
+  Chame a ferramenta "expandirParcelamentos" com mes: "2026-11"!
 
 5. REGISTRO EM LOTE:
 - Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE a ferramenta "registrarTransacoesLote". Isso processa todas as despesas em uma única chamada rápida!
@@ -426,8 +424,10 @@ REGRAS DE FUNCIONAMENTO:
 - Se o usuário pedir para excluir despesas duplicadas ou incorretas:
   Chame "excluirTransacoes" com termoBusca, mes ou apenasRecentes!
 
-7. CONFIRMAÇÃO:
-- Após executar uma ação, confirme em tom objetivo com o total adicionado/alterado/excluído e o impacto no Saldo Livre.`
+7. RESPOSTAS DIRETAS, CIRÚRGICAS E SEM PROJEÇÕES NÃO SOLICITADAS:
+- Seja ultra-útil, inteligente e direto ao ponto. Aprenda com as preferências do usuário.
+- Confirme a operação realizada e o novo Saldo Livre do mês em questão.
+- NÃO adicione parágrafos de projeção do futuro ao final das respostas (ex: "Para os próximos meses...", "Sua projeção futura é..."). Responda estritamente ao que foi pedido! Projeções só devem ser apresentadas se o usuário fizer uma pergunta explícita sobre o futuro ou pedir um planejamento/relatório.`
 }
 
 

@@ -32,17 +32,23 @@ import {
   CheckCircle2,
   Layers,
   RotateCcw,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
+import { MobileTransactionCard } from './mobile/MobileTransactionCard'
 
 type TabFilter = 'all' | 'income' | 'expense' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
 
 interface TransactionTableProps {
-  onOpenNewTx: () => void
+  onOpenNewTx?: () => void
   onEditTx: (tx: Transaction) => void
 }
 
-export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProps) {
+export function TransactionTable({ onEditTx }: TransactionTableProps) {
   const {
     monthTransactions,
     cards,
@@ -59,6 +65,9 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
 
   const [activeTab, setActiveTab] = useState<TabFilter>('all')
   const [search, setSearch] = useState('')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+  const [pageSize, setPageSize] = useState<number>(30)
+  const [currentPage, setCurrentPage] = useState<number>(1)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDesc, setEditDesc] = useState('')
   const [editDate, setEditDate] = useState('')
@@ -74,9 +83,9 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
 
   const currentUid = me?.uid ?? ''
 
-  // Filter list
+  // Filter and sort list by transaction date
   const filteredTxs = useMemo(() => {
-    return monthTransactions.filter((tx: Transaction) => {
+    const list = monthTransactions.filter((tx: Transaction) => {
       // Tab filter
       if (activeTab === 'income') {
         if (tx.type !== 'income') return false
@@ -113,7 +122,30 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
 
       return true
     })
-  }, [monthTransactions, activeTab, search, cards])
+
+    // Organize chronologically by transaction date
+    return [...list].sort((a, b) => {
+      const dateA = a.dueDate || a.competenceMonth || ''
+      const dateB = b.dueDate || b.competenceMonth || ''
+      const cmp = dateA.localeCompare(dateB)
+      if (cmp !== 0) {
+        return sortOrder === 'asc' ? cmp : -cmp
+      }
+      // If dates are identical, show income first, then expense
+      if (a.type !== b.type) {
+        return a.type === 'income' ? -1 : 1
+      }
+      return (b.createdAt || 0) - (a.createdAt || 0)
+    })
+  }, [monthTransactions, activeTab, search, cards, sortOrder])
+
+  // Pagination calculation
+  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filteredTxs.length / pageSize))
+  const startIdx = pageSize === 0 ? 0 : (currentPage - 1) * pageSize
+  const endIdx = pageSize === 0 ? filteredTxs.length : startIdx + pageSize
+  const pagedTxs = useMemo(() => {
+    return pageSize === 0 ? filteredTxs : filteredTxs.slice(startIdx, endIdx)
+  }, [filteredTxs, startIdx, endIdx, pageSize])
 
   // Count badges
   const counts = useMemo(() => {
@@ -197,15 +229,29 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
             </Badge>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative w-full sm:w-64">
-            <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por descrição, categoria..."
-              className="h-8 pl-8 text-xs bg-slate-950/70 border-slate-800 focus-visible:ring-emerald-500/40"
-            />
+          {/* Search Bar & Mobile Date Sort Toggle */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+              className="md:hidden h-8 px-2.5 rounded-lg bg-slate-950/70 border border-slate-800 hover:border-emerald-500/40 text-slate-300 hover:text-white text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+              title="Clique para alternar ordenação por data"
+            >
+              <ArrowUpDown className="size-3 text-emerald-400" />
+              <span className="text-[11px] font-medium">
+                {sortOrder === 'asc' ? '1→31' : '31→1'}
+              </span>
+            </button>
+
+            <div className="relative flex-1 sm:w-60">
+              <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Buscar por descrição, categoria..."
+                className="h-8 pl-8 text-xs bg-slate-950/70 border-slate-800 focus-visible:ring-emerald-500/40"
+              />
+            </div>
           </div>
         </div>
 
@@ -288,54 +334,106 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
             <span className="text-[10px] opacity-70">({counts.paid})</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('shared_card')}
-            className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'shared_card'
-                ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <span>💳 Cartão Compartilhado</span>
-            <span className="text-[10px] opacity-70">({counts.shared})</span>
-          </button>
+          {(counts.shared > 0 || activeTab === 'shared_card') && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('shared_card')}
+              className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'shared_card'
+                  ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <span>💳 Cartão Compartilhado</span>
+              <span className="text-[10px] opacity-70">({counts.shared})</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('third_party')}
-            className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'third_party'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <span>🏷️ Terceiros</span>
-            <span className="text-[10px] opacity-70">({counts.third})</span>
-          </button>
+          {(counts.third > 0 || activeTab === 'third_party') && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('third_party')}
+              className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'third_party'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <span>🏷️ Terceiros</span>
+              <span className="text-[10px] opacity-70">({counts.third})</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('friends_installments')}
-            className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
-              activeTab === 'friends_installments'
-                ? 'bg-violet-500/25 text-violet-200 border border-violet-500/40 font-semibold shadow-sm'
-                : 'text-slate-400 hover:text-violet-300 hover:bg-slate-800/50'
-            }`}
-          >
-            <span>🧑‍🤝‍🧑 Amigos / Parcelados</span>
-            <span className="text-[10px] opacity-70">({counts.friends_installments})</span>
-          </button>
+          {(counts.friends_installments > 0 || activeTab === 'friends_installments') && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('friends_installments')}
+              className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'friends_installments'
+                  ? 'bg-violet-500/25 text-violet-200 border border-violet-500/40 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-violet-300 hover:bg-slate-800/50'
+              }`}
+            >
+              <span>🧑‍🤝‍🧑 Amigos / Parcelados</span>
+              <span className="text-[10px] opacity-70">({counts.friends_installments})</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Table */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto">
+      {/* Mobile Transaction Cards Feed (Visible on screens < md) */}
+      <div className="md:hidden flex-1 overflow-y-auto p-3 space-y-2.5">
+        {filteredTxs.length === 0 ? (
+          <div className="text-center py-12 text-slate-400">
+            <Filter className="size-8 mx-auto mb-2 opacity-30" />
+            <p className="font-medium text-slate-300">Nenhuma transação encontrada</p>
+            <p className="text-[11px] text-slate-500 mt-1">Tente ajustar os filtros ou adicione uma nova transação.</p>
+          </div>
+        ) : (
+          pagedTxs.map((tx: Transaction) => (
+            <MobileTransactionCard
+              key={tx.id}
+              tx={tx}
+              currentUid={currentUid}
+              allTransactions={monthTransactions}
+              cards={cards}
+              onEdit={onEditTx}
+              onDelete={(targetTx) => {
+                if (targetTx.installmentGroupId) {
+                  setDeleteGroupTx(targetTx)
+                } else {
+                  deleteTransaction(targetTx.id)
+                }
+              }}
+              onCycleStatus={cycleStatus}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Main Table (Visible on md and above) */}
+      <div className="hidden md:block flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead className="sticky top-0 bg-[#0f172a] text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-white/[0.06] z-10">
             <tr>
               <th className="py-2.5 px-3 w-28">Status</th>
-              <th className="py-2.5 px-3 w-20">Data</th>
+              <th
+                onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                className="py-2.5 px-3 w-28 cursor-pointer select-none hover:text-white transition-colors group"
+                title="Clique para alternar ordem cronológica (1→31 ou 31→1)"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span>Data</span>
+                  {sortOrder === 'asc' ? (
+                    <ArrowUp className="size-3 text-emerald-400 shrink-0" />
+                  ) : (
+                    <ArrowDown className="size-3 text-emerald-400 shrink-0" />
+                  )}
+                  <span className="text-[9px] font-mono text-emerald-300 bg-emerald-500/15 px-1 py-0.5 rounded">
+                    {sortOrder === 'asc' ? '1→31' : '31→1'}
+                  </span>
+                </div>
+              </th>
               <th className="py-2.5 px-3 min-w-[200px]">Descrição</th>
               <th className="py-2.5 px-3 w-32">Categoria</th>
               <th className="py-2.5 px-3 w-40">Divisão / Pagador</th>
@@ -353,7 +451,7 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                 </td>
               </tr>
             ) : (
-              filteredTxs.map((tx: Transaction) => {
+              pagedTxs.map((tx: Transaction) => {
                 const isEditing = editingId === tx.id
                 const effAmount = effectiveAmount(tx)
                 const myImpact = impactFor(tx, currentUid, monthTransactions)
@@ -852,11 +950,78 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
         </table>
       </div>
 
-      {/* Footer: Quick Add Row */}
-      <div className="p-3 border-t border-white/[0.06] bg-slate-900/60">
-        <form onSubmit={handleQuickAdd} className="flex flex-col sm:flex-row items-center gap-2">
+      {/* Pagination & Count Toolbar */}
+      {filteredTxs.length > 0 && (
+        <div className="px-3.5 py-1.5 border-t border-white/[0.04] bg-slate-950/60 flex items-center justify-between text-xs text-slate-400 shrink-0">
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span>
+              Mostrando <strong className="text-slate-200">{startIdx + 1}–{Math.min(endIdx, filteredTxs.length)}</strong> de{' '}
+              <strong className="text-slate-200">{filteredTxs.length}</strong>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="size-5 text-slate-400 hover:text-white disabled:opacity-30 cursor-pointer"
+                  title="Página anterior"
+                >
+                  <ChevronLeft className="size-3" />
+                </Button>
+                <span className="text-[10px] font-mono text-slate-300 px-1">
+                  {currentPage} / {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="size-5 text-slate-400 hover:text-white disabled:opacity-30 cursor-pointer"
+                  title="Próxima página"
+                >
+                  <ChevronRight className="size-3" />
+                </Button>
+              </div>
+            )}
+
+            {filteredTxs.length > 30 && (
+              <div className="flex items-center gap-1 border-l border-slate-800/80 pl-2">
+                <span className="text-[10px] text-slate-500">Por pág:</span>
+                {[30, 60, 0].map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => {
+                      setPageSize(size)
+                      setCurrentPage(1)
+                    }}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
+                      pageSize === size
+                        ? 'bg-slate-800 text-emerald-400 font-bold border border-slate-700'
+                        : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    {size === 0 ? 'Tudo' : size}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Footer: Quick Add Row (Desktop) */}
+      <div className="hidden sm:block p-3 border-t border-white/[0.06] bg-slate-900/60">
+        <form onSubmit={handleQuickAdd} className="flex items-center gap-2">
           {/* Quick type toggle */}
-          <div className="flex items-center rounded-lg bg-slate-950 p-0.5 border border-slate-800">
+          <div className="flex items-center rounded-lg bg-slate-950 p-0.5 border border-slate-800 shrink-0">
             <button
               type="button"
               onClick={() => setQuickType('expense')}
@@ -903,13 +1068,13 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
             value={quickAmount}
             onChange={(e) => setQuickAmount(e.target.value)}
             placeholder="R$ 0,00"
-            className="h-8 text-xs bg-slate-950/70 border-slate-800 w-24 font-mono"
+            className="h-8 text-xs bg-slate-950/70 border-slate-800 w-24 font-mono shrink-0"
           />
 
           {quickType === 'expense' ? (
             <>
               <Select value={quickCat} onValueChange={(c) => setQuickCat(c as Category)}>
-                <SelectTrigger className="h-8 text-xs bg-slate-950/70 border-slate-800 w-28">
+                <SelectTrigger className="h-8 text-xs bg-slate-950/70 border-slate-800 w-28 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -922,7 +1087,7 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
               </Select>
 
               <Select value={quickSplit} onValueChange={(s) => setQuickSplit(s as SplitType)}>
-                <SelectTrigger className="h-8 text-xs bg-slate-950/70 border-slate-800 w-28">
+                <SelectTrigger className="h-8 text-xs bg-slate-950/70 border-slate-800 w-28 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -933,7 +1098,7 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
               </Select>
             </>
           ) : (
-            <Badge variant="outline" className="h-8 px-2.5 text-xs bg-emerald-500/10 text-emerald-300 border-emerald-500/30 flex items-center gap-1 font-mono">
+            <Badge variant="outline" className="h-8 px-2.5 text-xs bg-emerald-500/10 text-emerald-300 border-emerald-500/30 flex items-center gap-1 font-mono shrink-0">
               💰 Receita (+Saldo)
             </Badge>
           )}
@@ -941,20 +1106,9 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
           <Button
             type="submit"
             size="sm"
-            className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium gap-1 px-3"
+            className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium gap-1 px-3 shrink-0 cursor-pointer"
           >
             <Plus className="size-3.5" /> Adicionar
-          </Button>
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onOpenNewTx}
-            className="h-8 text-xs border-slate-800 text-slate-300 hover:text-white"
-            title="Abrir formulário detalhado com cartão, parcelas e divisões"
-          >
-            Mais Opções...
           </Button>
         </form>
       </div>

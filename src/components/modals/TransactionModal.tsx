@@ -20,6 +20,9 @@ import {
   AlertTriangle,
   Loader2,
   ShieldCheck,
+  Calendar,
+  Sparkles,
+  ReceiptText,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './DeleteInstallmentDialog'
 
@@ -76,7 +79,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
   const [cardId, setCardId] = useState<string>('')
   const [isReserve, setIsReserve] = useState(false)
 
-  // Feature 3: Parcelamento
+  // Parcelamento
   const [isInstallment, setIsInstallment] = useState(false)
   const [installmentsCount, setInstallmentsCount] = useState(3)
   const [installmentMode, setInstallmentMode] = useState<'total' | 'per_installment'>('total')
@@ -121,7 +124,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
       setCardId(editingTx.cardId || '')
       setIsReserve(Boolean(editingTx.reserveCardId))
       setIsInstallment(isGrp)
-      setEditScope('all') // Padrão: atualizar toda a série parcelada
+      setEditScope('all')
 
       if (editingTx.splitType === 'custom' || editingTx.allocations.length > 2) {
         setSplitType('custom')
@@ -186,7 +189,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
       setInstallmentMode('total')
       setEditScope('all')
     }
-  }, [editingTx, open, cards, me, friends])
+  }, [editingTx, open, cards, me, friends, partner])
 
   const handleAmountChange = (newAmountStr: string) => {
     setAmount(newAmountStr)
@@ -240,10 +243,10 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
     )
   }
 
-  const handleAddParticipant = (type: 'partner' | 'friend' | 'external', friendUid?: string) => {
+  const handleAddParticipant = (partType: 'partner' | 'friend' | 'external', friendUid?: string) => {
     const numTotal = Math.abs(parseFloat(amount.replace(',', '.'))) || 0
     let newP: CustomParticipantRow
-    if (type === 'partner' && partner) {
+    if (partType === 'partner' && partner) {
       newP = {
         id: `partner_${Date.now()}`,
         type: 'partner',
@@ -252,7 +255,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
         amount: 0,
         percentage: 0,
       }
-    } else if (type === 'friend' && friendUid) {
+    } else if (partType === 'friend' && friendUid) {
       const fr = friends.find((f) => f.uid === friendUid)
       newP = {
         id: `fr_${friendUid}_${Date.now()}`,
@@ -385,18 +388,17 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
     })
   }
 
-  const handleQuickFriendPreset = (friendUid: string, friendPct: number) => {
+  const handleQuickFriendPreset = (friendUid: string, pct: number) => {
     const numTotal = Math.abs(parseFloat(amount.replace(',', '.'))) || 0
     const fr = friends.find((f) => f.uid === friendUid)
     if (!fr) return
 
-    const myPct = Math.max(0, 100 - friendPct)
-    const myAmt = round2((numTotal * myPct) / 100)
-    const frAmt = round2(numTotal - myAmt)
+    const friendShare = round2((numTotal * pct) / 100)
+    const myShare = round2(numTotal - friendShare)
 
     setCustomParticipants([
-      { id: 'me', type: 'me', uid: me?.uid, name: me?.name || 'Você', amount: myAmt, percentage: myPct },
-      { id: `fr_${fr.uid}`, type: 'friend', uid: fr.uid, name: fr.name, amount: frAmt, percentage: friendPct },
+      { id: 'me', type: 'me', uid: me?.uid, name: me?.name || 'Você', amount: myShare, percentage: 100 - pct },
+      { id: `fr_${friendUid}`, type: 'friend', uid: friendUid, name: fr.name, amount: friendShare, percentage: pct },
     ])
   }
 
@@ -429,7 +431,6 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
           setCustomParticipants(participantsToUse)
         }
 
-        // Se a soma divergir, ajusta a diferença no usuário logado
         const totalPct = participantsToUse.reduce((s, p) => s + p.percentage, 0)
         if (Math.abs(totalPct - 100) > 0.5 && participantsToUse.some((p) => p.type === 'me')) {
           const othersPct = participantsToUse
@@ -460,7 +461,6 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
           return item
         })
 
-        // Identifica amigo da rede na divisão
         const friendPart = participantsToUse.find(
           (p) => p.type === 'friend' || (p.uid && p.uid !== me?.uid && (!partner || p.uid !== partner.uid)),
         )
@@ -546,20 +546,30 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
     }
   }
 
+  const isEstornoCat = category === 'Estorno'
+  const isIncomeType = type === 'income'
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>{editingTx ? 'Editar Transação' : 'Nova Transação'}</DialogTitle>
-            <DialogDescription>
-              {editingTx ? 'Atualize os dados e a divisão do lançamento' : 'Adicione uma receita, despesa individual, parcelada ou para um amigo'}
+      <DialogContent className="sm:max-w-2xl w-full max-h-[92vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <DialogHeader className="space-y-1 pb-1 border-b border-white/[0.06]">
+            <DialogTitle className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+              <div className="size-8 rounded-xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
+                <Sparkles className="size-4" />
+              </div>
+              <span>{editingTx ? 'Editar Lançamento' : 'Novo Lançamento'}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-400">
+              {editingTx
+                ? 'Atualize descrição, valores, cartão ou divisão de participantes'
+                : 'Cadastre receitas, compras individuais, parceladas ou compartilhadas com amigos'}
             </DialogDescription>
           </DialogHeader>
 
           {/* Conexão de Parcelas: Banner de Escopo de Edição */}
           {editingTx?.installmentGroupId && (
-            <div className="p-3.5 rounded-xl bg-violet-950/40 border border-violet-500/30 space-y-2.5 mt-3">
+            <div className="p-3.5 rounded-xl bg-violet-950/40 border border-violet-500/30 space-y-2.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="size-6 rounded-lg bg-violet-500/20 text-violet-300 flex items-center justify-center shrink-0">
@@ -575,7 +585,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   </div>
                 </div>
                 <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-500/30 font-mono">
-                  {editingTx.installmentNumber || 1}/{editingTx.installmentsTotal || '?'}
+                  Parcela {editingTx.installmentNumber || 1}/{editingTx.installmentsTotal || '?'}
                 </Badge>
               </div>
 
@@ -587,7 +597,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   <button
                     type="button"
                     onClick={() => setEditScope('all')}
-                    className={`p-2.5 rounded-lg text-left text-xs transition-all border cursor-pointer ${
+                    className={`p-2.5 rounded-xl text-left text-xs transition-all border cursor-pointer ${
                       editScope === 'all'
                         ? 'bg-violet-600/30 border-violet-400 text-white font-semibold shadow-sm'
                         : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -595,17 +605,17 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   >
                     <div className="flex items-center gap-1.5 font-bold text-xs text-violet-300">
                       <RefreshCw className="size-3 shrink-0" />
-                      <span>Em TODAS ({editingTx.installmentsTotal || 'todas'})</span>
+                      <span>Em TODAS as {editingTx.installmentsTotal || 'todas'} Parcelas</span>
                     </div>
                     <p className="text-[10px] text-slate-400 font-normal mt-0.5 leading-tight">
-                      Atualiza descrição, valor, categoria, cartão e divisão em toda a série
+                      Sincroniza descrição, valor e divisão em toda a série do cartão
                     </p>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setEditScope('single')}
-                    className={`p-2.5 rounded-lg text-left text-xs transition-all border cursor-pointer ${
+                    className={`p-2.5 rounded-xl text-left text-xs transition-all border cursor-pointer ${
                       editScope === 'single'
                         ? 'bg-violet-600/30 border-violet-400 text-white font-semibold shadow-sm'
                         : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -623,19 +633,23 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-4">
-            <div className="sm:col-span-2 flex gap-2 p-1 bg-slate-900 border border-slate-800 rounded-lg">
+          {/* 1. SELETOR DE TIPO (DESPESA vs RECEITA) & CAMPO HERO DE VALOR */}
+          <div className="space-y-3 p-3.5 sm:p-4 rounded-2xl bg-slate-950/60 border border-white/[0.07]">
+            {/* Segmented Type Switcher */}
+            <div className="flex p-1 bg-slate-900/90 border border-slate-800 rounded-xl gap-1">
               <button
                 type="button"
                 onClick={() => {
                   setType('expense')
                   if (status === 'estimated') setStatus('pending')
                 }}
-                className={`flex-1 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-all ${
-                  type === 'expense' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'text-slate-400'
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                  type === 'expense'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                💸 Despesa
+                <span>💸 Despesa / Saída</span>
               </button>
               <button
                 type="button"
@@ -645,445 +659,189 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   setSplitType('mine')
                   setIsInstallment(false)
                 }}
-                className={`flex-1 py-1.5 rounded-md text-xs font-semibold cursor-pointer transition-all ${
-                  type === 'income' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'text-slate-400'
+                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                  type === 'income'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                💰 Entrada (Receita)
+                <span>💰 Receita / Entrada</span>
               </button>
             </div>
 
-            <div className="space-y-1.5 sm:col-span-2">
-              <label className="text-xs font-medium text-slate-300">Descrição</label>
+            {/* Hero Value Input (Clean Financial Display) */}
+            <div className="pt-1">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                {isInstallment && installmentMode === 'total' ? 'Valor Total da Compra' : 'Valor do Lançamento'}
+              </label>
+              <div
+                className={`flex items-center px-4 py-2.5 rounded-xl border transition-all ${
+                  isIncomeType
+                    ? 'bg-emerald-950/20 border-emerald-500/30 focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-500/20'
+                    : isEstornoCat
+                      ? 'bg-cyan-950/20 border-cyan-500/30 focus-within:border-cyan-400'
+                      : 'bg-slate-900/80 border-slate-700/80 focus-within:border-emerald-500/50 focus-within:ring-2 focus-within:ring-emerald-500/20'
+                }`}
+              >
+                <span className="text-xl sm:text-2xl font-bold font-mono text-slate-400 mr-2 select-none">
+                  {isIncomeType ? '+ R$' : isEstornoCat ? '🔄 R$' : 'R$'}
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => handleAmountChange(e.target.value)}
+                  placeholder="0,00"
+                  className="w-full bg-transparent border-none outline-none text-2xl sm:text-3xl font-black font-mono text-white tracking-tight placeholder:text-slate-600"
+                  required
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {/* Estorno Information Pill */}
+            {category === 'Estorno' && (
+              <div className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/30 flex items-center gap-2 text-xs text-emerald-300 animate-in fade-in">
+                <RotateCcw className="size-4 shrink-0 text-emerald-400" />
+                <span>
+                  <strong>Estorno na Fatura:</strong> abaterá o valor no fechamento do cartão de crédito.
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* 2. DADOS PRINCIPAIS (DESCRIÇÃO, DATA, CATEGORIA E STATUS) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {/* Descrição */}
+            <div className="sm:col-span-2 space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <ReceiptText className="size-3.5 text-slate-400" />
+                <span>Descrição da Transação</span>
+              </label>
               <Input
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder={type === 'income' ? 'Ex: Salário, Freela, Venda...' : 'Ex: Supermercado, Aluguel, Tênis...'}
-                className="bg-slate-900 border-slate-700"
+                placeholder={isIncomeType ? 'Ex: Salário, Rendimentos, Pix de Amigo...' : 'Ex: Supermercado, Aluguel, Amazon Prime, Uber...'}
+                className="h-10 text-xs sm:text-sm bg-slate-900/90 border-slate-700/80 rounded-xl focus-visible:ring-emerald-500/30"
                 required
               />
             </div>
 
+            {/* Data */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">
-                {isInstallment && installmentMode === 'total' ? 'Valor Total da Compra (R$)' : 'Valor (R$)'}
-              </label>
-              <Input
-                value={amount}
-                onChange={(e) => handleAmountChange(e.target.value)}
-                placeholder="0,00"
-                className="bg-slate-900 border-slate-700 font-mono text-base"
-                required
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-slate-300">
-                {type === 'income' ? 'Data de Recebimento' : 'Data de Vencimento'}
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Calendar className="size-3.5 text-slate-400" />
+                <span>{isIncomeType ? 'Data de Recebimento' : 'Data de Vencimento'}</span>
               </label>
               <Input
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="bg-slate-900 border-slate-700"
+                className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl"
                 required
               />
             </div>
 
-            {type === 'income' ? (
-              <>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <label className="text-xs font-medium text-slate-300">Forma de Recebimento</label>
-                  <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
-                    <SelectTrigger className="bg-slate-900 border-slate-700">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pix">⚡ Pix</SelectItem>
-                      <SelectItem value="debit">🏦 Conta Corrente / TED</SelectItem>
-                      <SelectItem value="bill">📄 Boleto / Outro</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {parseFloat(amount.replace(',', '.')) > 0 && (
-                  <div className="sm:col-span-2 p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/20 space-y-1 text-xs">
-                    <span className="font-semibold text-emerald-300 flex items-center gap-1.5">
-                      💰 Impacto no Saldo Livre:
-                    </span>
-                    <p className="text-slate-300 text-[11px]">
-                      Esta entrada adicionará <strong className="text-emerald-400 font-mono">+R$ {parseFloat(amount.replace(',', '.')).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> diretamente ao seu Saldo Livre Real do mês.
-                    </p>
-                  </div>
-                )}
-              </>
+            {/* Categoria ou Método de Entrada */}
+            {isIncomeType ? (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Forma de Recebimento</label>
+                <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
+                  <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pix">⚡ Pix</SelectItem>
+                    <SelectItem value="debit">🏦 Conta Corrente / TED</SelectItem>
+                    <SelectItem value="bill">📄 Boleto / Outro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             ) : (
-              <>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-300">Categoria</label>
-                  <Select value={category} onValueChange={(v) => setCategory(v as Category)}>
-                    <SelectTrigger className="bg-slate-900 border-slate-700">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CATEGORIES.filter((c) => c !== 'Receita').map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c === 'Estorno' ? '🔄 Estorno / Crédito na Fatura' : c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">Categoria</label>
+                <Select value={category} onValueChange={(v) => setCategory(v as Category)}>
+                  <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.filter((c) => c !== 'Receita').map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c === 'Estorno' ? '🔄 Estorno / Crédito na Fatura' : c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-300">Status</label>
-                  <Select value={status} onValueChange={(v) => setStatus(v as TransactionStatus)}>
-                    <SelectTrigger className="bg-slate-900 border-slate-700">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="estimated">🟡 Estimado (Previsão)</SelectItem>
-                      <SelectItem value="pending">🟠 A Pagar (Valor Real)</SelectItem>
-                      <SelectItem value="paid">🟢 Já Pago</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Banner Estorno Informativo */}
-                {category === 'Estorno' && (
-                  <div className="sm:col-span-2 p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/30 flex items-start gap-2.5 text-xs text-emerald-200 animate-in fade-in duration-200">
-                    <RotateCcw className="size-4 text-emerald-400 shrink-0 mt-0.5" />
-                    <div className="space-y-1">
-                      <p className="font-semibold text-emerald-300">Lançamento de Estorno / Reembolso</p>
-                      <p className="text-[11px] text-emerald-300/80 leading-relaxed">
-                        Este valor entrará como crédito na fatura do cartão, abatendo o total cobrado e aliviando o Saldo Livre.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-1.5 sm:col-span-2">
-                  <label className="text-xs font-medium text-slate-300">Quem Paga / Divisão</label>
-                  <Select
-                    value={splitType === 'friend' ? 'custom' : splitType}
-                    onValueChange={(v) => handleSplitTypeChange(v as SplitType)}
+            {/* Status (Se despesa) */}
+            {!isIncomeType && (
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-xs font-semibold text-slate-300">Status do Lançamento</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStatus('pending')}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
+                      status === 'pending'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
                   >
-                    <SelectTrigger className="bg-slate-900 border-slate-700">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mine">👤 100% Meu (Desconta do meu Saldo)</SelectItem>
-                      {partner && <SelectItem value="split_50">🤝 Dividido 50/50 com {partner.name}</SelectItem>}
-                      {partner && <SelectItem value="partner">🔄 100% {partner.name} (Neutro no meu Saldo)</SelectItem>}
-                      <SelectItem value="custom">🧑‍🤝‍🧑 Dividir com Amigo / Multi-pessoas (% ou R$)</SelectItem>
-                      <SelectItem value="external">🏷️ Terceiro Externo não cadastrado</SelectItem>
-                    </SelectContent>
-                  </Select>
+                    🟠 A Pagar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatus('paid')}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
+                      status === 'paid'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    🟢 Já Pago
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStatus('estimated')}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
+                      status === 'estimated'
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    🟡 Estimado
+                  </button>
                 </div>
+              </div>
+            )}
+          </div>
 
-                {splitType === 'external' && (
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <label className="text-xs font-medium text-slate-300">Nome do Terceiro</label>
-                    <Input
-                      value={externalName}
-                      onChange={(e) => setExternalName(e.target.value)}
-                      placeholder="Ex: Mãe, Irmão, Carlos..."
-                      className="bg-slate-900 border-slate-700"
-                    />
-                  </div>
-                )}
-
-                {/* Feature: Divisão Personalizada com Amigos e Multi-pessoas */}
-                {(splitType === 'custom' || splitType === 'friend') && (
-                  <div className="space-y-3 sm:col-span-2 p-3.5 rounded-xl bg-slate-900/90 border border-slate-700/80 shadow-sm animate-in fade-in duration-200">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
-                      <div>
-                        <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                          <Users2 className="size-3.5 text-violet-400" />
-                          <span>Divisão com Amigos e Participantes</span>
-                        </label>
-                        <p className="text-[11px] text-slate-400">
-                          Divida entre amigos ou terceiros definindo a porcentagem (%) ou o valor em reais (R$).
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-1 shrink-0 flex-wrap">
-                        {friends.length > 0 && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleQuickFriendPreset(friends[0].uid, 100)}
-                              className="px-2 py-1 text-[10px] font-semibold rounded-md bg-violet-950/70 hover:bg-violet-900/70 text-violet-300 border border-violet-700/60 cursor-pointer transition-all"
-                              title={`Atribuir 100% para ${friends[0].name}`}
-                            >
-                              100% {friends[0].name}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleQuickFriendPreset(friends[0].uid, 50)}
-                              className="px-2 py-1 text-[10px] font-semibold rounded-md bg-violet-950/50 hover:bg-violet-900/50 text-violet-300 border border-violet-700/40 cursor-pointer transition-all"
-                              title={`Dividir 50/50 com ${friends[0].name}`}
-                            >
-                              50/50 {friends[0].name}
-                            </button>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleDistributeEqually}
-                          className="px-2 py-1 text-[10px] font-semibold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer transition-all"
-                        >
-                          ⚖️ Igual
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleAdjustDiffToMe}
-                          className="px-2 py-1 text-[10px] font-semibold rounded-md bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 cursor-pointer transition-all"
-                        >
-                          ⚡ Diferença em Mim
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Live Progress Bar & Distribution Summary */}
-                    {(() => {
-                      const numTotal = Math.abs(parseFloat(amount.replace(',', '.'))) || 0
-                      const totalAllocated = customParticipants.reduce((s, p) => s + p.amount, 0)
-                      const diff = round2(numTotal - totalAllocated)
-                      const isBalanced = numTotal > 0 && Math.abs(diff) <= 0.05
-
-                      return (
-                        <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 space-y-2">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-400">
-                              Total Compra: <strong className="text-slate-200 font-mono">{formatBRL(numTotal)}</strong>
-                            </span>
-                            <div className="flex items-center gap-1.5">
-                              {isBalanced ? (
-                                <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30 gap-1 font-semibold">
-                                  <CheckCircle2 className="size-2.5" /> 100% Distribuído
-                                </Badge>
-                              ) : diff > 0 ? (
-                                <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 gap-1 font-semibold">
-                                  <AlertTriangle className="size-2.5" /> Faltam {formatBRL(diff)}
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-500/30 gap-1 font-semibold">
-                                  <AlertTriangle className="size-2.5" /> Ultrapassou {formatBRL(Math.abs(diff))}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Segmented bar */}
-                          <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden flex">
-                            {customParticipants.map((p, idx) => (
-                              <div
-                                key={p.id}
-                                className={`h-full ${PARTICIPANT_COLORS[idx % PARTICIPANT_COLORS.length]} transition-all duration-200`}
-                                style={{ width: `${Math.min(100, Math.max(0, p.percentage))}%` }}
-                                title={`${p.name}: ${p.percentage}% (${formatBRL(p.amount)})`}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      )
-                    })()}
-
-                    {/* Participant Rows */}
-                    <div className="space-y-2">
-                      {customParticipants.map((p, idx) => {
-                        const color = PARTICIPANT_COLORS[idx % PARTICIPANT_COLORS.length]
-                        return (
-                          <div
-                            key={p.id}
-                            className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
-                          >
-                            <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <span className={`size-2.5 rounded-full ${color} shrink-0`} />
-                              {p.type === 'external' ? (
-                                <Input
-                                  value={p.name}
-                                  onChange={(e) => {
-                                    const val = e.target.value
-                                    setCustomParticipants((prev) =>
-                                      prev.map((item) => (item.id === p.id ? { ...item, name: val } : item)),
-                                    )
-                                  }}
-                                  placeholder="Nome (ex: Mãe, Carlos)"
-                                  className="h-7 text-xs bg-slate-900 border-slate-700 flex-1 max-w-[160px]"
-                                />
-                              ) : (
-                                <span className="text-xs font-semibold text-slate-200 truncate">
-                                  {p.name}
-                                </span>
-                              )}
-                              <Badge variant="outline" className={`text-[9px] py-0 px-1 border ${
-                                p.type === 'friend'
-                                  ? 'bg-violet-950/50 text-violet-300 border-violet-700/50'
-                                  : p.type === 'partner'
-                                    ? 'bg-sky-950/50 text-sky-300 border-sky-700/50'
-                                    : p.type === 'me'
-                                      ? 'bg-emerald-950/50 text-emerald-300 border-emerald-700/50'
-                                      : 'bg-slate-800/80 text-slate-400 border-slate-700'
-                              }`}>
-                                {p.type === 'me'
-                                  ? 'Você'
-                                  : p.type === 'partner'
-                                    ? 'Parceiro(a)'
-                                    : p.type === 'friend'
-                                      ? 'Amigo(a) da Rede'
-                                      : 'Terceiro'}
-                              </Badge>
-                            </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0 flex-wrap sm:flex-nowrap">
-                              {/* Quick row preset pills */}
-                              <div className="flex items-center gap-0.5 mr-1">
-                                {[100, 50, 25].map((pctPreset) => (
-                                  <button
-                                    key={pctPreset}
-                                    type="button"
-                                    onClick={() => handleSetParticipantPctPreset(p.id, pctPreset)}
-                                    className={`px-1.5 py-0.5 text-[9px] font-semibold rounded border transition-all cursor-pointer ${
-                                      Math.round(p.percentage) === pctPreset
-                                        ? 'bg-violet-500/30 text-violet-300 border-violet-500/60 font-bold'
-                                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
-                                    }`}
-                                  >
-                                    {pctPreset}%
-                                  </button>
-                                ))}
-                              </div>
-
-                              {/* Percentage input */}
-                              <div className="relative w-18">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  step={0.5}
-                                  value={p.percentage}
-                                  onChange={(e) => handleParticipantPctChange(p.id, parseFloat(e.target.value))}
-                                  className="h-7 text-xs bg-slate-900 border-slate-700 pr-4 font-mono text-right"
-                                />
-                                <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">
-                                  %
-                                </span>
-                              </div>
-
-                              {/* Exact Amount input */}
-                              <div className="relative w-24">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={0.01}
-                                  value={p.amount}
-                                  onChange={(e) => handleParticipantAmountChange(p.id, parseFloat(e.target.value))}
-                                  className="h-7 text-xs bg-slate-900 border-slate-700 pl-5 font-mono text-right"
-                                />
-                                <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">
-                                  R$
-                                </span>
-                              </div>
-
-                              {/* Delete button */}
-                              {p.type !== 'me' && customParticipants.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveParticipant(p.id)}
-                                  className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-900 transition-colors cursor-pointer"
-                                  title="Remover esta pessoa da divisão"
-                                >
-                                  <Trash2 className="size-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    {/* Add Participant Selector / Buttons */}
-                    <div className="pt-2 border-t border-slate-800 flex items-center gap-1.5 flex-wrap">
-                      <span className="text-[10px] text-slate-400 font-medium mr-1 flex items-center gap-1">
-                        <UserPlus className="size-3 text-slate-500" /> + Adicionar:
-                      </span>
-
-                      {partner && !customParticipants.some((p) => p.type === 'partner') && (
-                        <button
-                          type="button"
-                          onClick={() => handleAddParticipant('partner')}
-                          className="px-2 py-1 text-[10px] font-semibold rounded-md bg-sky-950/60 hover:bg-sky-900/60 text-sky-300 border border-sky-700/60 cursor-pointer transition-all flex items-center gap-1"
-                        >
-                          <span>🤝 {partner.name}</span>
-                        </button>
-                      )}
-
-                      {friends
-                        .filter((f) => !customParticipants.some((p) => p.uid === f.uid))
-                        .map((f) => (
-                          <button
-                            key={f.uid}
-                            type="button"
-                            onClick={() => handleAddParticipant('friend', f.uid)}
-                            className="px-2 py-1 text-[10px] font-semibold rounded-md bg-violet-950/60 hover:bg-violet-900/60 text-violet-300 border border-violet-700/60 cursor-pointer transition-all flex items-center gap-1"
-                          >
-                            <span>🧑‍🤝‍🧑 {f.name}</span>
-                          </button>
-                        ))}
-
-                      <button
-                        type="button"
-                        onClick={() => handleAddParticipant('external')}
-                        className="px-2 py-1 text-[10px] font-semibold rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer transition-all flex items-center gap-1"
-                      >
-                        <span>🏷️ + Terceiro Externo</span>
-                      </button>
-                    </div>
-
-                    {/* Notice de Aceite Mútuo se houver amigo da rede */}
-                    {customParticipants.some((p) => p.type === 'friend') && (
-                      <div className="p-2.5 rounded-lg bg-violet-950/40 border border-violet-500/30 flex items-start gap-2 text-xs text-violet-200">
-                        <ShieldCheck className="size-4 text-violet-400 shrink-0 mt-0.5" />
-                        <div className="space-y-0.5">
-                          <p className="font-semibold text-violet-300">Aceite Mútuo de Amigos da Rede</p>
-                          <p className="text-[11px] text-violet-300/80 leading-relaxed">
-                            A despesa será lançada no seu cartão, mas a cobrança só comprometerá o Saldo Livre de{' '}
-                            <strong>
-                              {customParticipants
-                                .filter((p) => p.type === 'friend')
-                                .map((p) => p.name)
-                                .join(', ')}
-                            </strong>{' '}
-                            após o aceite no aplicativo dele(a).
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
+          {/* 3. PAGAMENTO E CARTÃO (SE DESPESA) */}
+          {!isIncomeType && (
+            <div className="space-y-3 p-3.5 rounded-2xl bg-slate-950/60 border border-white/[0.07]">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-300">Método de Pagamento</label>
+                  <label className="text-xs font-semibold text-slate-300">Método de Pagamento</label>
                   <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
-                    <SelectTrigger className="bg-slate-900 border-slate-700">
+                    <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="credit_card">💳 Cartão de Crédito</SelectItem>
                       <SelectItem value="pix">⚡ Pix</SelectItem>
-                      <SelectItem value="debit">🏦 Débito</SelectItem>
-                      <SelectItem value="bill">📄 Boleto</SelectItem>
+                      <SelectItem value="debit">🏦 Débito em Conta</SelectItem>
+                      <SelectItem value="bill">📄 Boleto Bancário</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 {paymentMethod === 'credit_card' && (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-slate-300">Cartão Utilizado</label>
+                    <label className="text-xs font-semibold text-slate-300">Cartão Utilizado</label>
                     <Select value={cardId} onValueChange={setCardId}>
-                      <SelectTrigger className="bg-slate-900 border-slate-700">
+                      <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
                         <SelectValue placeholder="Selecione o cartão" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1096,200 +854,486 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                     </Select>
                   </div>
                 )}
+              </div>
 
-                {/* Feature 3: Compra Parcelada no Cartão de Crédito */}
-                {!editingTx && (
-                  <div className="sm:col-span-2 p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <CreditCard className="size-3.5 text-violet-400" />
-                        <span className="text-xs font-semibold text-slate-200">Compra Parcelada?</span>
+              {/* Compra Parcelada Toggle */}
+              {paymentMethod === 'credit_card' && !editingTx && (
+                <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="size-4 text-violet-400" />
+                      <div>
+                        <span className="text-xs font-bold text-white block">Compra Parcelada?</span>
+                        <span className="text-[10px] text-slate-400">Gera repetições automáticas nos meses seguintes</span>
                       </div>
-                      <input
-                        type="checkbox"
-                        checked={isInstallment}
-                        onChange={(e) => setIsInstallment(e.target.checked)}
-                        className="size-4 accent-violet-500 rounded cursor-pointer"
-                      />
                     </div>
-
-                    {isInstallment && (
-                      <div className="pt-2 border-t border-slate-800/80 space-y-2.5 animate-in fade-in duration-200">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div className="space-y-1">
-                            <label className="text-[11px] text-slate-400">Número de Parcelas</label>
-                            <Select
-                              value={String(installmentsCount)}
-                              onValueChange={(v) => setInstallmentsCount(Number(v))}
-                            >
-                              <SelectTrigger className="h-8 text-xs bg-slate-950 border-slate-700">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {[2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 18, 24, 36, 48].map((n) => (
-                                  <SelectItem key={n} value={String(n)}>
-                                    {n}x parcelas ({n} meses)
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[11px] text-slate-400">O valor digitado acima é:</label>
-                            <div className="flex gap-1 pt-0.5">
-                              <button
-                                type="button"
-                                onClick={() => setInstallmentMode('total')}
-                                className={`flex-1 py-1 px-1.5 text-[10px] rounded border font-medium cursor-pointer transition-all ${
-                                  installmentMode === 'total'
-                                    ? 'bg-violet-500/20 text-violet-300 border-violet-500/30'
-                                    : 'bg-slate-950 text-slate-400 border-slate-800'
-                                }`}
-                              >
-                                Valor Total
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setInstallmentMode('per_installment')}
-                                className={`flex-1 py-1 px-1.5 text-[10px] rounded border font-medium cursor-pointer transition-all ${
-                                  installmentMode === 'per_installment'
-                                    ? 'bg-violet-500/20 text-violet-300 border-violet-500/30'
-                                    : 'bg-slate-950 text-slate-400 border-slate-800'
-                                }`}
-                              >
-                                Por Parcela
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {parseFloat(amount.replace(',', '.')) > 0 && (
-                          <div className="p-2.5 rounded-lg bg-violet-950/40 border border-violet-800/40 text-[11px] text-violet-200 space-y-1">
-                            <span className="font-semibold text-violet-300">
-                              🗓️ Repetição Automática nos Meses Seguintes:
-                            </span>
-                            <p className="text-slate-300">
-                              {installmentMode === 'total'
-                                ? `Serão criadas ${installmentsCount} parcelas de ${formatBRL(parseFloat(amount.replace(',', '.')) / installmentsCount)} (totalizando ${formatBRL(parseFloat(amount.replace(',', '.')))}).`
-                                : `Serão criadas ${installmentsCount} parcelas de ${formatBRL(parseFloat(amount.replace(',', '.')))} (totalizando ${formatBRL(parseFloat(amount.replace(',', '.')) * installmentsCount)}).`}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    <input
+                      type="checkbox"
+                      checked={isInstallment}
+                      onChange={(e) => setIsInstallment(e.target.checked)}
+                      className="size-5 accent-emerald-500 rounded cursor-pointer"
+                    />
                   </div>
-                )}
 
-                {/* Live Impact Preview */}
-                {parseFloat(amount.replace(',', '.')) > 0 && (() => {
-                  const rawVal = parseFloat(amount.replace(',', '.'))
-                  const isCustom = splitType === 'custom' || splitType === 'friend'
-                  let myVal = rawVal
-                  let othersVal = 0
-
-                  if (isCustom && customParticipants.length > 0) {
-                    const myRow = customParticipants.find((p) => p.type === 'me')
-                    myVal = myRow ? myRow.amount : 0
-                    othersVal = customParticipants
-                      .filter((p) => p.type !== 'me')
-                      .reduce((s, p) => s + p.amount, 0)
-                  } else if (splitType === 'split_50') {
-                    myVal = rawVal / 2
-                    othersVal = rawVal / 2
-                  } else if (splitType === 'partner') {
-                    myVal = 0
-                    othersVal = rawVal
-                  } else if (splitType === 'external') {
-                    myVal = 0
-                    othersVal = rawVal
-                  }
-
-                  const hasFriendInCustom = isCustom && customParticipants.some((p) => p.type === 'friend')
-                  const friendNames = isCustom
-                    ? customParticipants
-                        .filter((p) => p.type === 'friend')
-                        .map((p) => p.name)
-                        .join(', ')
-                    : ''
-
-                  return (
-                    <div className="sm:col-span-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
-                      <span className="font-semibold text-slate-200">
-                        Reflexo nos Saldos Individuais:
-                      </span>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                        <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex flex-col">
-                          <span className="text-slate-400">Seu Saldo Livre:</span>
-                          <span
-                            className={`font-bold mt-0.5 ${
-                              myVal > 0 ? 'text-rose-400' : 'text-slate-400'
-                            }`}
+                  {isInstallment && (
+                    <div className="p-3 rounded-xl bg-violet-950/20 border border-violet-500/30 space-y-2.5 animate-in fade-in">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-300">Número de Parcelas</label>
+                          <Select
+                            value={String(installmentsCount)}
+                            onValueChange={(v) => setInstallmentsCount(Number(v))}
                           >
-                            {myVal > 0 ? `−${formatBRL(myVal)}` : 'R$ 0,00 (Neutro)'}
-                          </span>
+                            <SelectTrigger className="h-8 text-xs bg-slate-900 border-slate-700 rounded-lg">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {[2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 18, 24, 36, 48].map((n) => (
+                                <SelectItem key={n} value={String(n)}>
+                                  {n}x parcelas ({n} meses)
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
 
-                        <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex flex-col">
-                          <span className="text-slate-400">
-                            {hasFriendInCustom
-                              ? `Cobrança para ${friendNames || 'Amigo'}:`
-                              : isCustom && othersVal > 0
-                                ? 'A receber de participantes:'
-                                : splitType === 'external'
-                                  ? `A receber de ${externalName}:`
-                                  : partner ? `Saldo de ${partner.name}:` : 'Acerto:'}
-                          </span>
-                          <span className="font-bold text-emerald-400 mt-0.5">
-                            {othersVal > 0
-                              ? hasFriendInCustom
-                                ? `+${formatBRL(othersVal)} (Aguardando aceite)`
-                                : `+${formatBRL(othersVal)}`
-                              : splitType === 'partner'
-                                ? `−${formatBRL(rawVal)}`
-                                : splitType === 'split_50'
-                                  ? `−${formatBRL(rawVal / 2)}`
-                                  : 'Sem pendências'}
-                          </span>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-semibold text-slate-300">O valor digitado acima é:</label>
+                          <div className="flex gap-1 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setInstallmentMode('total')}
+                              className={`flex-1 py-1.5 px-2 text-xs rounded-lg border font-semibold cursor-pointer transition-all ${
+                                installmentMode === 'total'
+                                  ? 'bg-violet-500/25 text-violet-300 border-violet-500/40'
+                                  : 'bg-slate-900 text-slate-400 border-slate-800'
+                              }`}
+                            >
+                              Valor Total
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setInstallmentMode('per_installment')}
+                              className={`flex-1 py-1.5 px-2 text-xs rounded-lg border font-semibold cursor-pointer transition-all ${
+                                installmentMode === 'per_installment'
+                                  ? 'bg-violet-500/25 text-violet-300 border-violet-500/40'
+                                  : 'bg-slate-900 text-slate-400 border-slate-800'
+                              }`}
+                            >
+                              Por Parcela
+                            </button>
+                          </div>
                         </div>
                       </div>
+
+                      {parseFloat(amount.replace(',', '.')) > 0 && (
+                        <p className="text-xs text-violet-300 font-medium">
+                          ✓ Serão geradas <strong>{installmentsCount} parcelas</strong> de{' '}
+                          <strong className="text-white font-mono">
+                            {formatBRL(
+                              installmentMode === 'total'
+                                ? parseFloat(amount.replace(',', '.')) / installmentsCount
+                                : parseFloat(amount.replace(',', '.')),
+                            )}
+                          </strong>{' '}
+                          cada.
+                        </p>
+                      )}
                     </div>
-                  )
-                })()}
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
-                {errorMessage && (
-                  <div className="sm:col-span-2 p-3 rounded-xl bg-rose-950/50 border border-rose-500/40 text-xs text-rose-300 flex items-start gap-2 animate-in fade-in">
-                    <AlertTriangle className="size-4 text-rose-400 shrink-0 mt-0.5" />
-                    <span>{errorMessage}</span>
+          {/* 4. DIVISÃO INTELIGENTE COM AMIGOS E PARTICIPANTES (SE DESPESA) */}
+          {!isIncomeType && (
+            <div className="space-y-3 p-3.5 rounded-2xl bg-slate-950/60 border border-white/[0.07]">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span>Quem Paga / Divisão</span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    {splitType === 'mine' ? '👤 100% Meu' : splitType === 'split_50' ? '🤝 50/50' : '👥 Personalizada'}
+                  </span>
+                </label>
+                <Select
+                  value={splitType === 'friend' ? 'custom' : splitType}
+                  onValueChange={(v) => handleSplitTypeChange(v as SplitType)}
+                >
+                  <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mine">👤 100% Meu (Desconta do meu Saldo Livre)</SelectItem>
+                    {partner && <SelectItem value="split_50">🤝 Dividido 50/50 com {partner.name}</SelectItem>}
+                    {partner && <SelectItem value="partner">🔄 100% {partner.name} (Neutro no meu Saldo)</SelectItem>}
+                    <SelectItem value="custom">🧑‍🤝‍🧑 Dividir com Amigos / Multi-pessoas (% ou R$)</SelectItem>
+                    <SelectItem value="external">🏷️ Terceiro Externo não cadastrado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {splitType === 'external' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300">Nome do Terceiro</label>
+                  <Input
+                    value={externalName}
+                    onChange={(e) => setExternalName(e.target.value)}
+                    placeholder="Ex: Mãe, Irmão, Carlos..."
+                    className="h-10 text-xs bg-slate-900 border-slate-700 rounded-xl"
+                  />
+                </div>
+              )}
+
+              {/* Painel de Divisão Personalizada Multi-Pessoas */}
+              {(splitType === 'custom' || splitType === 'friend') && (
+                <div className="space-y-3 p-3.5 rounded-xl bg-slate-900/80 border border-slate-700/70 shadow-sm animate-in fade-in">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                    <div>
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Users2 className="size-3.5 text-violet-400" />
+                        <span>Participantes da Divisão</span>
+                      </span>
+                      <p className="text-[11px] text-slate-400">
+                        Ajuste em porcentagem (%) ou valor exato (R$) para cada amigo.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap">
+                      {friends.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => handleQuickFriendPreset(friends[0].uid, 50)}
+                          className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-violet-950/70 hover:bg-violet-900/70 text-violet-300 border border-violet-700/60 cursor-pointer"
+                        >
+                          50/50 {friends[0].name.split(' ')[0]}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleDistributeEqually}
+                        className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer"
+                      >
+                        ⚖️ Igual
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAdjustDiffToMe}
+                        className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-700/60 cursor-pointer"
+                      >
+                        ⚡ Diferença em Mim
+                      </button>
+                    </div>
                   </div>
-                )}
-              </>
-            )}
-          </div>
 
-          <DialogFooter className="flex-row items-center justify-between gap-2 pt-2">
+                  {/* Barra de Progresso de Distribuição */}
+                  {(() => {
+                    const numTotal = Math.abs(parseFloat(amount.replace(',', '.'))) || 0
+                    const totalAllocated = customParticipants.reduce((s, p) => s + p.amount, 0)
+                    const diff = round2(numTotal - totalAllocated)
+                    const isBalanced = numTotal > 0 && Math.abs(diff) <= 0.05
+
+                    return (
+                      <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800/80 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400">
+                            Total: <strong className="text-white font-mono">{formatBRL(numTotal)}</strong>
+                          </span>
+                          <div>
+                            {isBalanced ? (
+                              <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30 gap-1 font-semibold">
+                                <CheckCircle2 className="size-2.5" /> 100% Equilibrado
+                              </Badge>
+                            ) : diff > 0 ? (
+                              <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 gap-1 font-semibold">
+                                <AlertTriangle className="size-2.5" /> Restam {formatBRL(diff)}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-300 border-rose-500/30 gap-1 font-semibold">
+                                <AlertTriangle className="size-2.5" /> Excedeu {formatBRL(Math.abs(diff))}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Barra multicolorida */}
+                        <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden flex">
+                          {customParticipants.map((p, idx) => (
+                            <div
+                              key={p.id}
+                              className={`h-full ${PARTICIPANT_COLORS[idx % PARTICIPANT_COLORS.length]} transition-all`}
+                              style={{ width: `${Math.min(100, Math.max(0, p.percentage))}%` }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Linhas de Cada Participante */}
+                  <div className="space-y-2">
+                    {customParticipants.map((p, idx) => {
+                      const color = PARTICIPANT_COLORS[idx % PARTICIPANT_COLORS.length]
+                      return (
+                        <div
+                          key={p.id}
+                          className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className={`size-2.5 rounded-full ${color} shrink-0`} />
+                            {p.type === 'external' ? (
+                              <Input
+                                value={p.name}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  setCustomParticipants((prev) =>
+                                    prev.map((item) => (item.id === p.id ? { ...item, name: val } : item)),
+                                  )
+                                }}
+                                placeholder="Nome do terceiro"
+                                className="h-7 text-xs bg-slate-900 border-slate-700 flex-1 max-w-[140px]"
+                              />
+                            ) : (
+                              <span className="text-xs font-semibold text-slate-200 truncate">
+                                {p.name}
+                              </span>
+                            )}
+                            <Badge variant="outline" className="text-[9px] py-0 px-1 border border-slate-700 text-slate-300">
+                              {p.type === 'me'
+                                ? 'Você'
+                                : p.type === 'partner'
+                                  ? 'Parceiro(a)'
+                                  : p.type === 'friend'
+                                    ? 'Amigo(a)'
+                                    : 'Terceiro'}
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Preset pills */}
+                            <div className="flex items-center gap-1">
+                              {[100, 50, 25].map((pctPreset) => (
+                                <button
+                                  key={pctPreset}
+                                  type="button"
+                                  onClick={() => handleSetParticipantPctPreset(p.id, pctPreset)}
+                                  className={`px-1.5 py-0.5 text-[9px] font-semibold rounded border transition-all cursor-pointer ${
+                                    Math.round(p.percentage) === pctPreset
+                                      ? 'bg-violet-500/30 text-violet-300 border-violet-500/60 font-bold'
+                                      : 'bg-slate-900 text-slate-400 border-slate-800'
+                                  }`}
+                                >
+                                  {pctPreset}%
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* % Input */}
+                            <div className="relative w-16">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={0.5}
+                                value={p.percentage}
+                                onChange={(e) => handleParticipantPctChange(p.id, parseFloat(e.target.value))}
+                                className="h-7 text-xs bg-slate-900 border-slate-700 pr-4 font-mono text-right"
+                              />
+                              <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">
+                                %
+                              </span>
+                            </div>
+
+                            {/* R$ Input */}
+                            <div className="relative w-24">
+                              <Input
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                value={p.amount}
+                                onChange={(e) => handleParticipantAmountChange(p.id, parseFloat(e.target.value))}
+                                className="h-7 text-xs bg-slate-900 border-slate-700 pl-5 font-mono text-right"
+                              />
+                              <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[10px] text-slate-500 font-bold">
+                                R$
+                              </span>
+                            </div>
+
+                            {p.type !== 'me' && customParticipants.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveParticipant(p.id)}
+                                className="p-1 rounded text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                                title="Remover"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Botões de Adicionar Participante */}
+                  <div className="pt-2 border-t border-slate-800 flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-slate-400 font-medium mr-1 flex items-center gap-1">
+                      <UserPlus className="size-3 text-slate-500" /> + Adicionar:
+                    </span>
+
+                    {partner && !customParticipants.some((p) => p.type === 'partner') && (
+                      <button
+                        type="button"
+                        onClick={() => handleAddParticipant('partner')}
+                        className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-sky-950/60 hover:bg-sky-900/60 text-sky-300 border border-sky-700/60 cursor-pointer"
+                      >
+                        🤝 {partner.name}
+                      </button>
+                    )}
+
+                    {friends
+                      .filter((f) => !customParticipants.some((p) => p.uid === f.uid))
+                      .map((f) => (
+                        <button
+                          key={f.uid}
+                          type="button"
+                          onClick={() => handleAddParticipant('friend', f.uid)}
+                          className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-violet-950/60 hover:bg-violet-900/60 text-violet-300 border border-violet-700/60 cursor-pointer"
+                        >
+                          🧑‍🤝‍🧑 {f.name}
+                        </button>
+                      ))}
+
+                    <button
+                      type="button"
+                      onClick={() => handleAddParticipant('external')}
+                      className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer"
+                    >
+                      🏷️ + Terceiro
+                    </button>
+                  </div>
+
+                  {/* Aviso de Aceite Mútuo de Amigos */}
+                  {customParticipants.some((p) => p.type === 'friend') && (
+                    <div className="p-2.5 rounded-xl bg-violet-950/40 border border-violet-500/30 flex items-start gap-2 text-xs text-violet-200">
+                      <ShieldCheck className="size-4 text-violet-400 shrink-0 mt-0.5" />
+                      <p className="text-[11px] text-violet-300/80 leading-relaxed">
+                        A despesa será lançada no seu cartão e uma solicitação de aprovação será enviada automaticamente para{' '}
+                        <strong>
+                          {customParticipants
+                            .filter((p) => p.type === 'friend')
+                            .map((p) => p.name)
+                            .join(', ')}
+                        </strong>.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 5. REFLEXO NO SALDO LIVRE (LIVE IMPACT PREVIEW) */}
+          {parseFloat(amount.replace(',', '.')) > 0 && (() => {
+            const rawVal = parseFloat(amount.replace(',', '.'))
+            if (isIncomeType) {
+              return (
+                <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/25 flex items-center justify-between text-xs animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <span className="size-2 rounded-full bg-emerald-400 animate-ping" />
+                    <span className="text-slate-300 font-medium">Impacto no Saldo Livre Real:</span>
+                  </div>
+                  <strong className="text-sm font-bold font-mono text-emerald-400">
+                    +{formatBRL(rawVal)}
+                  </strong>
+                </div>
+              )
+            }
+
+            const isCustom = splitType === 'custom' || splitType === 'friend'
+            let myVal = rawVal
+            let othersVal = 0
+
+            if (isCustom && customParticipants.length > 0) {
+              const myRow = customParticipants.find((p) => p.type === 'me')
+              myVal = myRow ? myRow.amount : 0
+              othersVal = customParticipants
+                .filter((p) => p.type !== 'me')
+                .reduce((s, p) => s + p.amount, 0)
+            } else if (splitType === 'split_50') {
+              myVal = rawVal / 2
+              othersVal = rawVal / 2
+            } else if (splitType === 'partner') {
+              myVal = 0
+              othersVal = rawVal
+            } else if (splitType === 'external') {
+              myVal = 0
+              othersVal = rawVal
+            }
+
+            return (
+              <div className="p-3 rounded-2xl bg-slate-950/70 border border-white/[0.07] space-y-2 text-xs">
+                <span className="font-semibold text-slate-300 block">
+                  Resumo do Impacto Financeiro:
+                </span>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block mb-0.5">Seu Saldo Livre:</span>
+                    <strong className={`text-xs font-mono font-bold ${myVal > 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                      {myVal > 0 ? `−${formatBRL(myVal)}` : 'R$ 0,00 (Neutro)'}
+                    </strong>
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-slate-400 block mb-0.5">A Receber / Amigos:</span>
+                    <strong className="text-xs font-mono font-bold text-emerald-400">
+                      {othersVal > 0 ? `+${formatBRL(othersVal)}` : 'R$ 0,00'}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* Mensagem de Erro (se houver) */}
+          {errorMessage && (
+            <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-500/40 text-xs text-rose-300 flex items-start gap-2 animate-in fade-in">
+              <AlertTriangle className="size-4 text-rose-400 shrink-0 mt-0.5" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Footer com Ações */}
+          <DialogFooter className="flex-col-reverse sm:flex-row items-center justify-between gap-2 pt-3 border-t border-white/[0.06]">
             {editingTx && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={() => setDeleteConfirmOpen(true)}
-                className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 gap-1.5 cursor-pointer mr-auto"
-                title="Excluir despesa ou parcelamento"
+                className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 gap-1.5 cursor-pointer w-full sm:w-auto sm:mr-auto"
+                title="Excluir lançamento"
               >
                 <Trash2 className="size-3.5" />
-                <span>Excluir</span>
+                <span>Excluir Lançamento</span>
               </Button>
             )}
-            <div className="flex items-center gap-2 ml-auto">
-              <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onOpenChange(false)}
+                className="flex-1 sm:flex-initial h-9 text-xs border-slate-800 text-slate-300 hover:text-white rounded-xl"
+              >
                 Cancelar
               </Button>
               <Button
                 type="submit"
                 size="sm"
                 disabled={isSubmitting}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50"
+                className="flex-1 sm:flex-initial h-9 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md shadow-emerald-950/40 disabled:opacity-50"
               >
                 {isSubmitting ? (
                   <span className="flex items-center gap-1.5">
@@ -1299,11 +1343,11 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                 ) : editingTx ? (
                   editingTx.installmentGroupId && editScope === 'all'
                     ? `Salvar em Todas as ${editingTx.installmentsTotal || ''} Parcelas`
-                    : 'Atualizar Esta Parcela'
+                    : 'Atualizar Lançamento'
                 ) : isInstallment ? (
                   `Criar ${installmentsCount} Parcelas`
                 ) : (
-                  'Criar Transação'
+                  'Salvar Lançamento'
                 )}
               </Button>
             </div>

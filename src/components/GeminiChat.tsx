@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import {
   formatGeminiErrorMessage,
 } from '@/lib/gemini'
 import { runDemoAgent } from '@/lib/demoAgent'
+import { effectiveAmount } from '@/lib/finance'
 import { monthLabel, todayKey } from '@/lib/utils'
 import {
   Bot,
@@ -25,6 +26,7 @@ import {
   KeyRound,
   Trash2,
   CheckCircle2,
+  RefreshCw,
 } from 'lucide-react'
 
 interface GeminiChatProps {
@@ -45,24 +47,108 @@ Estou conectado aos seus lançamentos em tempo real. Você pode falar comigo em 
 Como posso ajudar hoje?`,
 }
 
-const CHIPS = [
-  'A conta de luz veio R$ 245 para o dia 22',
-  'Jantar de R$ 160 no cartão compartilhado dividido 50/50',
-  'Minha mãe usou R$ 120 do meu cartão na farmácia',
-  'Quanto ainda posso gastar no fim de semana sem furar o mês?',
-  'Me dê um relatório de onde posso economizar este mês',
-]
+const PROMPT_HISTORY_KEY = 'saldo_livre_user_prompt_history'
+
+function getLearnedPrompts(): string[] {
+  try {
+    const raw = localStorage.getItem(PROMPT_HISTORY_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+function saveLearnedPrompt(prompt: string) {
+  try {
+    const trimmed = prompt.trim()
+    if (trimmed.length < 5 || trimmed.startsWith('AIzaSy')) return
+    const existing = getLearnedPrompts()
+    const updated = [trimmed, ...existing.filter((p) => p.toLowerCase() !== trimmed.toLowerCase())].slice(0, 10)
+    localStorage.setItem(PROMPT_HISTORY_KEY, JSON.stringify(updated))
+  } catch {
+    // ignore
+  }
+}
 
 export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
-  const { me, partner, month, cards, friends, executeTool } = useFinance()
+  const { me, partner, month, cards, friends, executeTool, monthTransactions } = useFinance()
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [suggestionOffset, setSuggestionOffset] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const apiKey = getGeminiApiKey()
   const isLiveGemini = Boolean(apiKey)
   const [activeModel, setActiveModel] = useState<string>(getSelectedGeminiModel())
+
+  // Sugestões inteligentes aprendendo com os dados e histórico do usuário
+  const dynamicSuggestions = useMemo(() => {
+    const list: string[] = []
+
+    // 1. Prompts aprendidos do histórico do próprio usuário
+    const learned = getLearnedPrompts()
+    if (learned.length > 0) {
+      list.push(...learned.slice(0, 2))
+    }
+
+    // 2. Contas pendentes ou estimadas do mês atual
+    const pendingBills = monthTransactions.filter(
+      (t) => t.type === 'expense' && t.status !== 'paid' && t.totalAmount > 0,
+    )
+    if (pendingBills.length > 0) {
+      const bill = pendingBills[0]
+      const cleanName = bill.description.replace(/\s*\(\d+\/\d+\)/, '').trim()
+      list.push(`A conta de ${cleanName} veio R$ ${effectiveAmount(bill)}, atualize para mim`)
+      list.push(`Marcar conta de ${cleanName} como paga`)
+    }
+
+    // 3. Divisões com amigos conectados
+    if (friends.length > 0) {
+      const topFriend = friends[0]
+      list.push(`Almoço de R$ 90 dividido 50/50 com ${topFriend.name}`)
+      list.push(`Lançar compra de R$ 120 onde ${topFriend.name} paga 100%`)
+    } else if (partner) {
+      list.push(`Jantar de R$ 160 dividido 50/50 com ${partner.name}`)
+    }
+
+    // 4. Cartões de crédito cadastrados
+    if (cards.length > 0) {
+      const card = cards[0]
+      list.push(`Quanto falta para fechar a fatura do cartão ${card.cardName}?`)
+    }
+
+    // 5. Categorias mais frequentes
+    const catCounts: Record<string, number> = {}
+    monthTransactions.forEach((t) => {
+      catCounts[t.category] = (catCounts[t.category] || 0) + 1
+    })
+    const topCategory = Object.keys(catCounts).sort((a, b) => catCounts[b] - catCounts[a])[0]
+    if (topCategory && topCategory !== 'Receita') {
+      list.push(`Quanto gastei com ${topCategory} em ${monthLabel(month)}?`)
+      list.push(`Adicionar despesa de R$ 45 em ${topCategory}`)
+    }
+
+    // 6. Consultas de limite e planejamento
+    list.push('Quanto ainda posso gastar hoje sem furar o Saldo Livre?')
+    list.push('Quais contas ainda estão pendentes de pagamento este mês?')
+    list.push('Quais compras parceladas estão ativas na minha fatura?')
+
+    // Remove duplicatas
+    return Array.from(new Set(list))
+  }, [monthTransactions, friends, partner, cards, month])
+
+  // Pega fatia rotacionada de 4-5 chips
+  const displayedChips = useMemo(() => {
+    if (dynamicSuggestions.length <= 5) return dynamicSuggestions
+    const count = 5
+    const start = (suggestionOffset * count) % dynamicSuggestions.length
+    const slice = dynamicSuggestions.slice(start, start + count)
+    if (slice.length < count) {
+      return [...slice, ...dynamicSuggestions.slice(0, count - slice.length)]
+    }
+    return slice
+  }, [dynamicSuggestions, suggestionOffset])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -120,6 +206,8 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
       }
       return
     }
+
+    saveLearnedPrompt(text)
 
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
@@ -221,12 +309,10 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
               ) : (
                 <Badge
                   variant="outline"
-                  onClick={onOpenApiKey}
-                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono cursor-pointer hover:bg-amber-950/80 transition-colors"
-                  title="Clique para conectar com a chave do Gemini"
+                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono"
                 >
                   <span className="size-1.5 rounded-full bg-amber-400" />
-                  demo offline (conectar)
+                  demo offline
                 </Badge>
               )}
             </div>
@@ -234,15 +320,17 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
         </div>
 
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onOpenApiKey}
-            className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer"
-            title="Configurar Chave Gemini"
-          >
-            <KeyRound className="size-3.5" />
-          </Button>
+          {isLiveGemini && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onOpenApiKey}
+              className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer"
+              title="Configurar Chave Gemini"
+            >
+              <KeyRound className="size-3.5" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -362,12 +450,23 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
 
       {/* Suggestion Chips */}
       <div className="px-3 pt-2 pb-1 border-t border-white/[0.04] bg-slate-950/40">
-        <div className="text-[10px] text-slate-400 mb-1.5 flex items-center gap-1 font-medium">
-          <Sparkles className="size-2.5 text-amber-400" />
-          Sugestões rápidas:
+        <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
+          <div className="flex items-center gap-1 font-medium">
+            <Sparkles className="size-2.5 text-amber-400" />
+            <span>Sugestões inteligentes:</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuggestionOffset((prev) => prev + 1)}
+            className="text-[10px] text-slate-400 hover:text-emerald-400 flex items-center gap-1 cursor-pointer transition-colors"
+            title="Ver outras sugestões inteligentes"
+          >
+            <RefreshCw className="size-2.5" />
+            <span>Mais</span>
+          </button>
         </div>
         <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {CHIPS.map((chip, idx) => (
+          {displayedChips.map((chip, idx) => (
             <button
               key={idx}
               type="button"

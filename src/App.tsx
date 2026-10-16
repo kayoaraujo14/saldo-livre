@@ -12,12 +12,31 @@ import { ApiKeyModal } from '@/components/modals/ApiKeyModal'
 import { TransactionModal } from '@/components/modals/TransactionModal'
 import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal'
 import { FriendsModal } from '@/components/modals/FriendsModal'
+import { InstallAppModal } from '@/components/modals/InstallAppModal'
+import { ScrollToTop } from '@/components/ui/ScrollToTop'
+import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
+import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
+import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
+import { usePwaInstall } from '@/hooks/usePwaInstall'
 import { Button } from '@/components/ui/button'
-import { Clock } from 'lucide-react'
+import { Clock, ArrowRight, ReceiptText, Smartphone } from 'lucide-react'
 import type { Transaction } from '@/types'
 
 function MainDashboard() {
-  const { setMonth, pendingChargeGroups, pendingFriendRequests } = useFinance()
+  const {
+    setMonth,
+    pendingChargeGroups,
+    pendingFriendRequests,
+    monthTransactions,
+    cards,
+    me,
+    cycleStatus,
+    deleteTransaction,
+    generateBills,
+  } = useFinance()
+
+  const { canInstall, isInstalled, isIOS, promptInstall } = usePwaInstall()
+
   const [cardsModalOpen, setCardsModalOpen] = useState(false)
   const [recurringModalOpen, setRecurringModalOpen] = useState(false)
   const [receivablesModalOpen, setReceivablesModalOpen] = useState(false)
@@ -25,7 +44,18 @@ function MainDashboard() {
   const [txModalOpen, setTxModalOpen] = useState(false)
   const [projectionModalOpen, setProjectionModalOpen] = useState(false)
   const [friendsModalOpen, setFriendsModalOpen] = useState(false)
+  const [installModalOpen, setInstallModalOpen] = useState(false)
+  const [installDismissed, setInstallDismissed] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
+  const [generatingBills, setGeneratingBills] = useState(false)
+
+  // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
+  const [mobileTab, setMobileTab] = useState<MobileTab>('home')
+
+  const handleSelectMobileTab = (tab: MobileTab) => {
+    setMobileTab(tab)
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }
 
   const handleOpenNewTx = () => {
     setEditingTx(null)
@@ -37,30 +67,44 @@ function MainDashboard() {
     setTxModalOpen(true)
   }
 
+  const handleGenerate = async () => {
+    setGeneratingBills(true)
+    try {
+      await generateBills()
+    } finally {
+      setGeneratingBills(false)
+    }
+  }
+
   const totalPendingNotifications = pendingChargeGroups.length + pendingFriendRequests.length
+  const currentUid = me?.uid ?? ''
+
+  // Recent transactions preview for mobile home tab
+  const recentTransactions = monthTransactions.slice(0, 4)
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300">
-      {/* 1. Header */}
+    <div className="flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden">
+      {/* 1. Header (Sticky & Native Safe-Top Padded) */}
       <Header
         onOpenCards={() => setCardsModalOpen(true)}
         onOpenRecurring={() => setRecurringModalOpen(true)}
         onOpenApiKey={() => setApiKeyModalOpen(true)}
         onOpenProjection={() => setProjectionModalOpen(true)}
         onOpenFriends={() => setFriendsModalOpen(true)}
+        onOpenNewTx={handleOpenNewTx}
       />
 
       {/* 2. Main Content Area */}
-      <main className="flex-1 max-w-[1720px] w-full mx-auto px-4 sm:px-6 py-4 space-y-4">
+      <main className="flex-1 max-w-[1720px] w-full mx-auto px-3 sm:px-6 py-3.5 sm:py-4 space-y-4">
         {/* Top Notification Banner if there are pending actions */}
         {totalPendingNotifications > 0 && (
-          <div className="p-3 rounded-xl bg-gradient-to-r from-amber-500/15 to-violet-500/15 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in slide-in-from-top-1">
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-violet-500/15 to-transparent border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in slide-in-from-top-1">
             <div className="flex items-center gap-2.5 text-amber-200">
               <span className="size-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
               <span>
                 {pendingChargeGroups.length > 0 ? (
                   <>
-                    Você possui <strong>{pendingChargeGroups.length} despesa(s) no cartão</strong> enviada(s) por amigos aguardando seu aceite de comprometimento.
+                    Você possui <strong>{pendingChargeGroups.length} despesa(s) no cartão</strong> compartilhada(s) por amigos aguardando sua aprovação.
                   </>
                 ) : (
                   <>
@@ -72,7 +116,7 @@ function MainDashboard() {
             <Button
               size="sm"
               onClick={() => setFriendsModalOpen(true)}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold h-7 text-xs px-3 self-end sm:self-auto cursor-pointer"
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold h-7 text-xs px-3 self-end sm:self-auto cursor-pointer rounded-lg shadow-sm"
             >
               <Clock className="size-3 mr-1" />
               Revisar e Aceitar
@@ -80,31 +124,170 @@ function MainDashboard() {
           </div>
         )}
 
-        {/* KPI Grid (Top Section) */}
-        <KpiGrid
-          onOpenReceivables={() => setReceivablesModalOpen(true)}
-          onOpenProjection={() => setProjectionModalOpen(true)}
-          onOpenRecurring={() => setRecurringModalOpen(true)}
-        />
+        {/* ============================================================== */}
+        {/* DESKTOP LAYOUT (Screen >= 1024px / lg)                          */}
+        {/* ============================================================== */}
+        <div className="hidden lg:block space-y-4">
+          {/* KPI Dashboard (Refactored Hero + Secondary Cards) */}
+          <KpiGrid
+            onOpenReceivables={() => setReceivablesModalOpen(true)}
+          />
 
-        {/* Responsive Split-Screen: 65% Table / 35% Gemini Chat */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:h-[calc(100vh-275px)] min-h-[640px]">
-          {/* Left Panel: Financial Table (65% width) */}
-          <section className="lg:col-span-7 xl:col-span-8 h-full flex flex-col">
-            <TransactionTable
-              onOpenNewTx={handleOpenNewTx}
-              onEditTx={handleEditTx}
+          {/* Spacious Split-Screen: 65% Table / 35% Gemini Chat */}
+          <div className="grid grid-cols-12 gap-4 h-[calc(100vh-290px)] max-h-[calc(100vh-290px)] min-h-[520px]">
+            {/* Left Panel: Financial Table (65% width) */}
+            <section className="col-span-7 xl:col-span-8 h-full min-h-0 flex flex-col">
+              <TransactionTable
+                onOpenNewTx={handleOpenNewTx}
+                onEditTx={handleEditTx}
+              />
+            </section>
+
+            {/* Right Panel: Gemini AI Agent Chat (35% width) */}
+            <section className="col-span-5 xl:col-span-4 h-full min-h-0 flex flex-col">
+              <GeminiChat onOpenApiKey={() => setApiKeyModalOpen(true)} />
+            </section>
+          </div>
+        </div>
+
+        {/* ============================================================== */}
+        {/* DEDICATED MOBILE LAYOUT (Screen < 1024px / lg:hidden)           */}
+        {/* ============================================================== */}
+        <div className="lg:hidden space-y-3.5">
+          {/* View 1: Mobile INÍCIO (Dashboard Hero, KPIs & Quick Preview) */}
+          {mobileTab === 'home' && (
+            <div className="space-y-3.5 animate-in fade-in duration-200">
+              {/* Native PWA Install Banner (Dismissible & Discreet) */}
+              {!isInstalled && !installDismissed && (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900/80 to-teal-950/30 border border-emerald-500/35 flex items-center justify-between gap-3 shadow-md">
+                  <div
+                    onClick={() => setInstallModalOpen(true)}
+                    className="flex items-center gap-3 cursor-pointer flex-1"
+                  >
+                    <div className="size-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                      <Smartphone className="size-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Instalar Saldo Livre</span>
+                      <span className="text-[11px] text-slate-400">Acesse em tela cheia com 1 toque</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      onClick={() => setInstallModalOpen(true)}
+                      className="h-7 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] rounded-lg shadow-sm cursor-pointer"
+                    >
+                      Instalar
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setInstallDismissed(true)
+                      }}
+                      className="size-7 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center cursor-pointer text-xs"
+                      title="Dispensar aviso"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* KPI Grid */}
+              <KpiGrid
+                onOpenReceivables={() => setReceivablesModalOpen(true)}
+              />
+
+              {/* Recent Transactions Preview Section (Directly below KPIs, with no duplicate button clutter!) */}
+              <div className="glass-card rounded-2xl p-4 border border-white/[0.08] space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
+                    <ReceiptText className="size-4 text-emerald-400" />
+                    Últimos Lançamentos
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectMobileTab('transactions')}
+                    className="text-xs text-emerald-400 font-semibold hover:underline flex items-center gap-0.5 cursor-pointer"
+                  >
+                    Ver todos <ArrowRight className="size-3" />
+                  </button>
+                </div>
+
+                {recentTransactions.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-6">
+                    Nenhum lançamento registrado neste mês.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {recentTransactions.map((tx) => (
+                      <MobileTransactionCard
+                        key={tx.id}
+                        tx={tx}
+                        currentUid={currentUid}
+                        allTransactions={monthTransactions}
+                        cards={cards}
+                        onEdit={handleEditTx}
+                        onDelete={(targetTx) => deleteTransaction(targetTx.id)}
+                        onCycleStatus={cycleStatus}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* View 2: Mobile EXTRATO (Full Transaction Feed with Mobile Cards) */}
+          {mobileTab === 'transactions' && (
+            <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
+              <TransactionTable
+                onOpenNewTx={handleOpenNewTx}
+                onEditTx={handleEditTx}
+              />
+            </div>
+          )}
+
+          {/* View 3: Mobile COPILOTO IA (Full-Height Conversational Assistant) */}
+          {mobileTab === 'chat' && (
+            <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
+              <GeminiChat onOpenApiKey={() => setApiKeyModalOpen(true)} />
+            </div>
+          )}
+
+          {/* View 4: Mobile MENU & TOOLS (Quick Touch Access to Modals & Settings) */}
+          {mobileTab === 'menu' && (
+            <MobileMenuSheet
+              onOpenCards={() => setCardsModalOpen(true)}
+              onOpenRecurring={() => setRecurringModalOpen(true)}
+              onOpenApiKey={() => setApiKeyModalOpen(true)}
+              onOpenProjection={() => setProjectionModalOpen(true)}
+              onOpenFriends={() => setFriendsModalOpen(true)}
+              onGenerateBills={handleGenerate}
+              onOpenInstall={() => setInstallModalOpen(true)}
+              isInstalled={isInstalled}
+              canInstall={canInstall}
+              generating={generatingBills}
             />
-          </section>
-
-          {/* Right Panel: Gemini AI Agent Chat (35% width) */}
-          <section className="lg:col-span-5 xl:col-span-4 h-full flex flex-col">
-            <GeminiChat onOpenApiKey={() => setApiKeyModalOpen(true)} />
-          </section>
+          )}
         </div>
       </main>
 
-      {/* Modals & Dialogs */}
+      {/* Mobile Bottom Navigation Dock */}
+      <MobileBottomNav
+        currentTab={mobileTab}
+        onSelectTab={handleSelectMobileTab}
+        onOpenNewTx={handleOpenNewTx}
+        unreadAlertsCount={totalPendingNotifications}
+        txCount={monthTransactions.length}
+      />
+
+      {/* Floating Scroll to Top Button */}
+      <ScrollToTop />
+
+      {/* Modals & Dialogs (Unified across Desktop and Mobile) */}
       <SharedCardsModal open={cardsModalOpen} onOpenChange={setCardsModalOpen} />
       <RecurringBillsModal open={recurringModalOpen} onOpenChange={setRecurringModalOpen} />
       <ReceivablesModal open={receivablesModalOpen} onOpenChange={setReceivablesModalOpen} />
@@ -122,6 +305,13 @@ function MainDashboard() {
       <FriendsModal
         open={friendsModalOpen}
         onOpenChange={setFriendsModalOpen}
+      />
+      <InstallAppModal
+        open={installModalOpen}
+        onOpenChange={setInstallModalOpen}
+        isIOS={isIOS}
+        isInstalled={isInstalled}
+        onPromptInstall={promptInstall}
       />
     </div>
   )

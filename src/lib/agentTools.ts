@@ -488,11 +488,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       lines: [
         { label: 'Valor da parcela', value: money(total) },
         ...(isInstallment
-          ? [
-              { label: 'Série Completa', value: `${totalParcelas}x de ${money(total)} (${monthLabel(firstMonth)} a ${monthLabel(lastMonth)})` },
-              ...(pastCount > 0 ? [{ label: 'Passadas (Pagas)', value: `${pastCount} parcela(s)` }] : []),
-              ...(futureCount > 0 ? [{ label: 'Futuras (Comprometidas)', value: `${futureCount} parcela(s)` }] : []),
-            ]
+          ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
           : []),
         { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
         { label: 'Vencimento', value: formatShortDate(finalDueDate) },
@@ -1060,7 +1056,7 @@ async function relatorio(env: AgentEnv): Promise<ToolResult> {
     },
     action: {
       kind: 'report',
-      title: `Projeção de ${monthLabel(env.monthKey)}`,
+      title: `Resumo de ${monthLabel(env.monthKey)}`,
       lines: [
         { label: 'Saldo Livre Real', value: money(s.freeBalance), tone: s.freeBalance >= 0 ? 'positive' : 'negative' },
         { label: 'Limite diário', value: s.dailyLimit != null ? `${money(s.dailyLimit)} × ${s.daysRemaining}d` : 'Mês encerrado' },
