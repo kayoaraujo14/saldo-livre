@@ -31,10 +31,11 @@ import {
   Clock,
   CheckCircle2,
   Layers,
+  RotateCcw,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 
-type TabFilter = 'all' | 'income' | 'expense' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
+type TabFilter = 'all' | 'income' | 'expense' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
 
 interface TransactionTableProps {
   onOpenNewTx: () => void
@@ -81,6 +82,9 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
         if (tx.type !== 'income') return false
       } else if (activeTab === 'expense') {
         if (tx.type === 'income') return false
+      } else if (activeTab === 'refund') {
+        const isRef = tx.category === 'Estorno' || tx.totalAmount < 0 || effectiveAmount(tx) < 0
+        if (!isRef) return false
       } else if (activeTab === 'pending_estimated') {
         if (tx.status === 'paid') return false
       } else if (activeTab === 'paid') {
@@ -117,6 +121,7 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
       all: monthTransactions.length,
       income: monthTransactions.filter((t: Transaction) => t.type === 'income').length,
       expense: monthTransactions.filter((t: Transaction) => t.type !== 'income').length,
+      refund: monthTransactions.filter((t: Transaction) => t.category === 'Estorno' || t.totalAmount < 0 || effectiveAmount(t) < 0).length,
       pending: monthTransactions.filter((t: Transaction) => t.status !== 'paid').length,
       paid: monthTransactions.filter((t: Transaction) => t.status === 'paid').length,
       shared: monthTransactions.filter((t: Transaction) => {
@@ -162,9 +167,12 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
     const num = parseFloat(quickAmount.replace(',', '.'))
     if (!quickDesc.trim() || isNaN(num) || num <= 0) return
 
+    const isRefund = quickCat === 'Estorno'
+    const finalAmount = isRefund ? -Math.abs(num) : num
+
     await createManual({
       description: quickDesc.trim(),
-      amount: num,
+      amount: finalAmount,
       category: quickType === 'income' ? 'Receita' : quickCat,
       date: todayKey(),
       type: quickType,
@@ -239,6 +247,20 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
           >
             <span>💸 Despesas ({counts.expense})</span>
           </button>
+
+          {counts.refund > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('refund')}
+              className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'refund'
+                  ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-500/40 font-semibold shadow-xs'
+                  : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-800/50'
+              }`}
+            >
+              <span>🔄 Estornos ({counts.refund})</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -336,6 +358,7 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                 const effAmount = effectiveAmount(tx)
                 const myImpact = impactFor(tx, currentUid, monthTransactions)
                 const split = detectSplit(tx, currentUid)
+                const isRefund = tx.category === 'Estorno' || effAmount < 0 || tx.totalAmount < 0
                 const card = cards.find((c) => c.id === tx.cardId)
                 const isReserve = Boolean(tx.reserveCardId)
                 const reserveInfo = isReserve ? getReserveInfo(tx, monthTransactions) : null
@@ -433,6 +456,14 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                             >
                               {tx.description}
                             </span>
+
+                            {/* Estorno / Reembolso Tag */}
+                            {isRefund && (
+                              <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-500/15 text-emerald-300 border-emerald-500/40 gap-1 font-semibold shadow-xs">
+                                <RotateCcw className="size-2.5 text-emerald-400" />
+                                <span>Estorno / Crédito</span>
+                              </Badge>
+                            )}
 
                             {/* Recurring bill indicator */}
                             {tx.recurringBillId && (
@@ -572,7 +603,7 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                         <SelectContent>
                           {CATEGORIES.map((c) => (
                             <SelectItem key={c} value={c}>
-                              {c}
+                              {c === 'Estorno' ? '🔄 Estorno (Crédito Cartão)' : c}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -591,7 +622,13 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                         <div className="flex flex-col gap-1">
                           <Select
                             value={split}
-                            onValueChange={(val) => changeSplit(tx, val as SplitType)}
+                            onValueChange={(val) => {
+                              if (val === 'custom') {
+                                onEditTx(tx)
+                              } else {
+                                changeSplit(tx, val as SplitType)
+                              }
+                            }}
                           >
                             <SelectTrigger size="inline" className="text-slate-300">
                               <SelectValue />
@@ -606,8 +643,31 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                                   🧑‍🤝‍🧑 {tx.assignedFriendName || 'Amigo'} ({friendPctOf(tx)}%)
                                 </SelectItem>
                               )}
+                              <SelectItem value="custom">
+                                ⚖️ Multi-pessoas / Específico...
+                              </SelectItem>
                             </SelectContent>
                           </Select>
+
+                          {/* Multi-participant custom allocations preview chips */}
+                          {split === 'custom' && tx.allocations && tx.allocations.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1 max-w-[220px]">
+                              {tx.allocations.map((a, i) => (
+                                <span
+                                  key={i}
+                                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-slate-300 font-medium inline-flex items-center gap-1 shadow-2xs"
+                                  title={`${a.name || 'Participante'}: ${formatBRL(Math.abs(a.amount))}`}
+                                >
+                                  <span className="text-slate-400 truncate max-w-[65px]">
+                                    {a.name || (a.uid === currentUid ? 'Você' : 'Outro')}:
+                                  </span>
+                                  <span className="text-emerald-400 font-mono font-semibold">
+                                    {formatBRL(Math.abs(a.amount))}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
 
                           {/* Who paid the bill vs Who benefits */}
                           {card && (
@@ -643,7 +703,16 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                         <div className="flex flex-col items-end gap-0.5">
                           {/* My Real Impact on Free Balance */}
                           <div className="flex items-center gap-1.5">
-                            {myImpact === 0 ? (
+                            {isRefund ? (
+                              <div className="flex flex-col items-end">
+                                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                                  +{formatBRL(Math.abs(myImpact))}
+                                </span>
+                                <Badge variant="outline" className="text-[9px] py-0 px-1 bg-emerald-950/60 text-emerald-300 border-emerald-600/50">
+                                  Crédito na fatura
+                                </Badge>
+                              </div>
+                            ) : myImpact === 0 ? (
                               <span className="text-xs font-semibold text-slate-500">
                                 R$ 0,00 <span className="text-[10px] font-normal text-slate-500">(Neutro)</span>
                               </span>
@@ -658,11 +727,19 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                             )}
                           </div>
 
-                          {/* Total gross amount if split or external */}
-                          {effAmount !== myImpact && (
-                            <span className="text-[10px] text-slate-400">
-                              Total compra: {formatBRL(effAmount)}
-                            </span>
+                          {/* Total gross amount if split or external or refund */}
+                          {isRefund ? (
+                            Math.abs(effAmount) !== Math.abs(myImpact) && (
+                              <span className="text-[10px] text-emerald-500/80">
+                                Estorno total: −{formatBRL(Math.abs(effAmount))}
+                              </span>
+                            )
+                          ) : (
+                            effAmount !== myImpact && (
+                              <span className="text-[10px] text-slate-400">
+                                Total compra: {formatBRL(effAmount)}
+                              </span>
+                            )
                           )}
 
                           {/* Friend Pending / Accepted Tags */}
@@ -678,7 +755,7 @@ export function TransactionTable({ onOpenNewTx, onEditTx }: TransactionTableProp
                           )}
 
                           {/* Shared Card Receivables / Payables Tag */}
-                          {!tx.assignedFriendUid && tx.paidByUid === currentUid && effAmount > myImpact && (
+                          {!isRefund && !tx.assignedFriendUid && tx.paidByUid === currentUid && effAmount > myImpact && (
                             <Badge variant="outline" className="text-[9px] py-0 px-1 bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-sans">
                               +{formatBRL(effAmount - myImpact)} a receber
                             </Badge>

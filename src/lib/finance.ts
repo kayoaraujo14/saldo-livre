@@ -17,11 +17,12 @@ import type {
   UserProfile,
   FutureMonthProjection,
 } from '@/types'
-import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, normalize, round2, shiftMonth } from './utils'
+import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
 
 export interface Party {
   uid: string
   name: string
+  email?: string
 }
 
 // ------------------------------------------------------------------
@@ -30,6 +31,72 @@ export interface Party {
 export function effectiveAmount(tx: Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>) {
   return tx.actualAmount ?? tx.estimatedAmount ?? tx.totalAmount ?? 0
 }
+
+/**
+ * Calcula a data de vencimento da fatura e o mês de competência (orçamento comprometido)
+ * para compras no cartão de crédito, respeitando a data de fechamento e vencimento do cartão.
+ */
+export function calculateCardInvoiceDates(
+  purchaseDate: string,
+  card?: Card | null,
+  explicitDueDate?: string | null,
+  explicitMonth?: string | null,
+): { dueDate: string; competenceMonth: string } {
+  if (explicitDueDate && /^\d{4}-\d{2}-\d{2}$/.test(explicitDueDate.trim())) {
+    const cleanDueDate = explicitDueDate.trim()
+    const cleanMonth = explicitMonth && /^\d{4}-\d{2}$/.test(explicitMonth.trim())
+      ? explicitMonth.trim()
+      : cleanDueDate.slice(0, 7)
+    return { dueDate: cleanDueDate, competenceMonth: cleanMonth }
+  }
+
+  if (explicitMonth && /^\d{4}-\d{2}$/.test(explicitMonth.trim())) {
+    const cleanMonth = explicitMonth.trim()
+    const dueDayNum = card?.dueDay ?? 10
+    const cleanDueDate = `${cleanMonth}-${String(dueDayNum).padStart(2, '0')}`
+    return { dueDate: cleanDueDate, competenceMonth: cleanMonth }
+  }
+
+  if (!card || !card.closingDay || !card.dueDay) {
+    const cleanMonth = purchaseDate.slice(0, 7)
+    return { dueDate: purchaseDate, competenceMonth: cleanMonth }
+  }
+
+  const parts = purchaseDate.split('-')
+  let year = parseInt(parts[0], 10)
+  let month = parseInt(parts[1], 10)
+  const day = parseInt(parts[2], 10)
+
+  if (isNaN(year) || isNaN(month) || isNaN(day)) {
+    const today = todayKey()
+    return { dueDate: today, competenceMonth: today.slice(0, 7) }
+  }
+
+  // Se a compra ocorreu no dia de fechamento ou após, a fatura fecha no ciclo seguinte
+  if (day >= card.closingDay) {
+    month += 1
+    if (month > 12) {
+      month = 1
+      year += 1
+    }
+  }
+
+  // Se o dia de vencimento for numericamente menor que o de fechamento (ex: fecha dia 25, vence dia 5),
+  // a fatura que fechou em `month` só vence no mês seguinte.
+  if (card.dueDay < card.closingDay) {
+    month += 1
+    if (month > 12) {
+      month = 1
+      year += 1
+    }
+  }
+
+  const competenceMonth = `${year}-${String(month).padStart(2, '0')}`
+  const dueDate = `${competenceMonth}-${String(card.dueDay).padStart(2, '0')}`
+
+  return { dueDate, competenceMonth }
+}
+
 
 // ------------------------------------------------------------------
 // D. Divisões: allocations → userImpact → visibleToUids
@@ -55,6 +122,8 @@ export interface SplitInput {
   acceptanceStatus?: 'pending_approval' | 'accepted' | 'rejected' | null
   /** Percentual (1–100) cobrado do amigo. Padrão: 100 */
   friendSharePct?: number | null
+  /** Divisão personalizada multi-pessoas com valores específicos */
+  customAllocations?: Allocation[]
   /** Mantém flags de reembolso já marcadas ao reconstruir */
   previous?: Allocation[]
 }
@@ -131,6 +200,23 @@ export function buildSplit(input: SplitInput) {
       ]
       break
     }
+    case 'custom': {
+      if (input.customAllocations && input.customAllocations.length > 0) {
+        allocations = input.customAllocations.map((a) => {
+          const item: Allocation = {
+            type: a.type,
+            name: a.name.trim() || 'Participante',
+            amount: round2(a.amount),
+            reimbursed: a.uid === payerUid ? true : wasReimbursed(a.uid ?? a.name),
+          }
+          if (a.uid) item.uid = a.uid
+          return item
+        })
+      } else {
+        allocations = [userAlloc(me, total)]
+      }
+      break
+    }
   }
 
   const visible = new Set<string>([me.uid, payerUid])
@@ -170,12 +256,22 @@ export function rescaleSplit(tx: Transaction, newTotal: number) {
 
 /** Detecta o tipo de divisão do ponto de vista de quem está olhando. */
 export function detectSplit(tx: Transaction, viewerUid: string): SplitType {
+  if (tx.splitType === 'custom') return 'custom'
+  if (tx.allocations.length > 2) return 'custom'
   if (tx.assignedFriendUid) return 'friend'
-  if (tx.allocations.some((a) => a.type === 'EXTERNAL')) return 'external'
+  if (tx.allocations.some((a) => a.type === 'EXTERNAL')) {
+    if (tx.allocations.length === 1) return 'external'
+    return 'custom'
+  }
   const users = tx.allocations.filter((a) => a.type === 'PLATFORM_USER')
   const mine = users.some((a) => a.uid === viewerUid)
   const others = users.some((a) => a.uid !== viewerUid)
-  if (mine && others) return 'split_50'
+  if (mine && others) {
+    const myAlloc = users.find((a) => a.uid === viewerUid)?.amount ?? 0
+    const otherAlloc = users.find((a) => a.uid !== viewerUid)?.amount ?? 0
+    if (Math.abs(myAlloc - otherAlloc) > 0.05) return 'custom'
+    return 'split_50'
+  }
   if (mine) return 'mine'
   return 'partner'
 }
@@ -186,6 +282,7 @@ export const SPLIT_LABELS: Record<SplitType, { label: string; emoji: string; sho
   partner: { label: '100% Parceiro(a)', emoji: '🔄', short: 'Parceiro(a)' },
   friend: { label: '🧑‍🤝‍🧑 Amigo da Rede', emoji: '🧑‍🤝‍🧑', short: 'Amigo' },
   external: { label: 'Terceiro Externo', emoji: '🏷️', short: 'Terceiro' },
+  custom: { label: 'Divisão Personalizada', emoji: '⚖️', short: 'Personalizada' },
 }
 
 // ------------------------------------------------------------------
@@ -656,6 +753,7 @@ export function pickCard(meUid: string, cards: Card[], splitType: SplitType, hin
 // Heurística de categoria
 // ------------------------------------------------------------------
 const CATEGORY_HINTS: [Category, RegExp][] = [
+  ['Estorno', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|credito na fatura|credit voucher|cashback/],
   ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|financiamento|iptu|casa|apartamento/],
   ['Alimentação', /jantar|almoco|cafe|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira/],
   ['Transporte', /uber|99|gasolina|combustivel|onibus|metro|estacionamento|carro|pedagio/],
@@ -664,7 +762,8 @@ const CATEGORY_HINTS: [Category, RegExp][] = [
   ['Assinaturas', /netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one/],
 ]
 
-export function guessCategory(text: string): Category {
+export function guessCategory(text: string, amount?: number): Category {
+  if (typeof amount === 'number' && amount < 0) return 'Estorno'
   const n = normalize(text)
   for (const [c, re] of CATEGORY_HINTS) if (re.test(n)) return c
   return 'Outros'

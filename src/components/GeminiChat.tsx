@@ -8,8 +8,12 @@ import { useFinance } from '@/store/FinanceContext'
 import type { ActionCardData, ChatMessage } from '@/types'
 import {
   getGeminiApiKey,
+  setGeminiApiKey,
   runGeminiAgent,
   buildSystemInstruction,
+  getSelectedGeminiModel,
+  testGeminiConnection,
+  formatGeminiErrorMessage,
 } from '@/lib/gemini'
 import { runDemoAgent } from '@/lib/demoAgent'
 import { monthLabel, todayKey } from '@/lib/utils'
@@ -50,7 +54,7 @@ const CHIPS = [
 ]
 
 export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
-  const { me, partner, month, cards, executeTool } = useFinance()
+  const { me, partner, month, cards, friends, executeTool } = useFinance()
   const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -58,6 +62,7 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
 
   const apiKey = getGeminiApiKey()
   const isLiveGemini = Boolean(apiKey)
+  const [activeModel, setActiveModel] = useState<string>(getSelectedGeminiModel())
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -67,9 +72,54 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
     scrollToBottom()
   }, [messages, loading])
 
+  useEffect(() => {
+    const current = getSelectedGeminiModel()
+    if (current && current !== activeModel) {
+      setActiveModel(current)
+    }
+  })
+
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend ?? input).trim()
     if (!text || loading) return
+
+    // Detecção mágica: se o usuário colar uma chave do Google AI Studio no chat
+    if (text.startsWith('AIzaSy') && text.length >= 35 && text.length <= 45 && !text.includes(' ')) {
+      setInput('')
+      setMessages((prev) => [
+        ...prev,
+        { id: `usr_${Date.now()}`, role: 'user', content: '🔑 *[Chave de API do Gemini inserida]*' },
+      ])
+      setLoading(true)
+      try {
+        const test = await testGeminiConnection(text)
+        if (test.ok) {
+          setGeminiApiKey(text)
+          if (test.modelUsed) setActiveModel(test.modelUsed)
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `bot_${Date.now()}`,
+              role: 'assistant',
+              content: `🎉 **Chave da API do Google Gemini validada e conectada com sucesso!**\n\nAgora estou conectado diretamente à nuvem do Google usando o modelo **${test.modelUsed || activeModel}** com Function Calling em tempo real.\n\nVocê já pode me pedir para lançar despesas, registrar compras divididas ou atualizar contas!`,
+            },
+          ])
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `bot_${Date.now()}`,
+              role: 'assistant',
+              content: `⚠️ Não consegui validar a chave inserida no Google AI Studio:\n*${test.message}*.\n\nVerifique se a chave foi copiada corretamente ou utilize o botão 🔑 acima para configurar.`,
+              error: true,
+            },
+          ])
+        }
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
 
     const userMsg: ChatMessage = {
       id: `usr_${Date.now()}`,
@@ -85,13 +135,25 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
       let result: { text: string; actions: ActionCardData[] }
 
       if (apiKey) {
-        // Run with live Gemini 2.5 Flash via Function Calling
+        // Run with live Gemini Flash via Function Calling
         const sys = buildSystemInstruction({
           userName: me?.name ?? 'Usuário',
           partnerName: partner?.name ?? null,
           today: todayKey(),
           monthLabel: monthLabel(month),
-          cards: cards.map((c) => `${c.cardName} (${c.ownerName})`),
+          monthKey: month,
+          cards: cards.map((c) => ({
+            id: c.id,
+            name: c.cardName,
+            owner: c.ownerName,
+            closingDay: c.closingDay,
+            dueDay: c.dueDay,
+          })),
+          friends: (friends || []).map((f) => ({
+            uid: f.uid,
+            name: f.name,
+            email: f.email,
+          })),
         })
 
         result = await runGeminiAgent({
@@ -100,6 +162,8 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
           userMessage: text,
           systemInstruction: sys,
           execute: executeTool,
+          model: activeModel,
+          onModelChanged: (newModel) => setActiveModel(newModel),
         })
       } else {
         // Offline demo agent fallback with natural language heuristics
@@ -116,10 +180,11 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
       setMessages((prev) => [...prev, botMsg])
     } catch (err) {
       console.error(err)
+      const friendlyMessage = formatGeminiErrorMessage(err)
       const errorMsg: ChatMessage = {
         id: `err_${Date.now()}`,
         role: 'assistant',
-        content: `Ocorreu um erro ao processar sua solicitação: ${(err as Error).message}. Se a chave estiver inválida, clique no ícone 🔑 para atualizar.`,
+        content: `⚠️ ${friendlyMessage}\n\nSe a instabilidade nos servidores do Google persistir, você pode aguardar alguns instantes ou alternar para o Gemini 3.8 Flash no botão 🔑 acima.`,
         error: true,
       }
       setMessages((prev) => [...prev, errorMsg])
@@ -150,13 +215,18 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
               <h3 className="text-xs font-bold text-white tracking-tight m-0">Copiloto Saldo Livre</h3>
               {isLiveGemini ? (
                 <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800 gap-1 font-mono">
-                  <span className="size-1.5 rounded-full bg-emerald-400" />
-                  gemini-2.5-flash
+                  <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  {activeModel}
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono">
+                <Badge
+                  variant="outline"
+                  onClick={onOpenApiKey}
+                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono cursor-pointer hover:bg-amber-950/80 transition-colors"
+                  title="Clique para conectar com a chave do Gemini"
+                >
                   <span className="size-1.5 rounded-full bg-amber-400" />
-                  demo offline
+                  demo offline (conectar)
                 </Badge>
               )}
             </div>
@@ -168,7 +238,7 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
             variant="ghost"
             size="icon-sm"
             onClick={onOpenApiKey}
-            className="size-7 text-slate-400 hover:text-emerald-400"
+            className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer"
             title="Configurar Chave Gemini"
           >
             <KeyRound className="size-3.5" />
@@ -177,13 +247,30 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
             variant="ghost"
             size="icon-sm"
             onClick={() => setMessages([INITIAL_MESSAGE])}
-            className="size-7 text-slate-400 hover:text-slate-200"
+            className="size-7 text-slate-400 hover:text-slate-200 cursor-pointer"
             title="Limpar conversa"
           >
             <Trash2 className="size-3.5" />
           </Button>
         </div>
       </div>
+
+      {/* Offline Alert Banner */}
+      {!isLiveGemini && (
+        <div className="mx-3.5 mt-2.5 p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-xs text-amber-300 animate-in fade-in">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="size-3.5 text-amber-400 shrink-0" />
+            <span className="text-[11px]">Chat em modo offline. Conecte sua API Key do Gemini.</span>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenApiKey}
+            className="text-[11px] font-semibold text-amber-200 hover:text-white underline cursor-pointer shrink-0 ml-2"
+          >
+            Conectar
+          </button>
+        </div>
+      )}
 
       {/* Message History */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">

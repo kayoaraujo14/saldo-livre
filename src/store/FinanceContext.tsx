@@ -5,12 +5,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { User } from 'firebase/auth'
 import type {
+  Allocation,
   Card,
   Friendship,
   FriendSplitInput,
   InstallmentGroupUpdateInput,
   MonthSummary,
   NewTransaction,
+  PendingChargeGroup,
   RecurringBill,
   SplitType,
   Transaction,
@@ -22,6 +24,8 @@ import {
   buildSplit,
   clampPct,
   computeSummary,
+  friendPctOf,
+  friendShareOf,
   generateMonthBills,
   nextStatus,
   resolvePartner,
@@ -32,7 +36,7 @@ import * as fb from '@/lib/firebase'
 import { DEMO_CARDS, DEMO_RECURRING, DEMO_USERS, buildDemoTransactions } from '@/lib/mockData'
 import { createToolExecutor } from '@/lib/agentTools'
 import type { ToolExecutor } from '@/lib/gemini'
-import { currentMonthKey, uid as makeId, shiftDateMonth, round2, dateInMonth, formatInstallmentDesc, stripInstallmentSuffix } from '@/lib/utils'
+import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, formatInstallmentDesc, stripInstallmentSuffix } from '@/lib/utils'
 
 type Mode = 'demo' | 'firebase'
 
@@ -44,15 +48,59 @@ interface DemoState {
   friendships: Friendship[]
 }
 
-const DEMO_KEY = 'saldo-livre:demo-state:v1'
+const DEMO_KEY = 'saldo-livre:demo-state:v3'
 const FORCE_DEMO_KEY = 'saldo-livre:force-demo'
 
 function freshDemo(): DemoState {
+  const M = currentMonthKey()
+  const gId = 'demo_group_curso'
+  const kayoParty: Party = { uid: DEMO_USERS[0].uid, name: 'Kayo' }
+  const marinaParty: Party = { uid: DEMO_USERS[1].uid, name: 'Marina' }
+
+  const split = buildSplit({
+    splitType: 'friend',
+    total: 120,
+    me: kayoParty,
+    partner: marinaParty,
+    assignedFriend: marinaParty,
+    friendSharePct: 50,
+    payerUid: DEMO_USERS[0].uid,
+    createdByUid: DEMO_USERS[0].uid,
+  })
+
+  const sampleInstallments: Transaction[] = [1, 2, 3].map((num) => ({
+    id: `tx_demo_install_${num}`,
+    createdByUid: DEMO_USERS[0].uid,
+    paidByUid: DEMO_USERS[0].uid,
+    cardId: 'card_nubank',
+    description: `Curso Masterclass Design (${num}/3)`,
+    category: 'Outros',
+    type: 'expense',
+    paymentMethod: 'credit_card',
+    status: 'pending',
+    estimatedAmount: null,
+    actualAmount: 120,
+    totalAmount: 120,
+    dueDate: dateInMonth(shiftMonth(M, num - 1), 10),
+    competenceMonth: shiftMonth(M, num - 1),
+    visibleToUids: split.visibleToUids,
+    userImpact: split.userImpact,
+    allocations: split.allocations,
+    assignedFriendUid: DEMO_USERS[1].uid,
+    assignedFriendName: 'Marina Costa',
+    friendSharePct: 50,
+    acceptanceStatus: 'pending_approval',
+    installmentGroupId: gId,
+    installmentNumber: num,
+    installmentsTotal: 3,
+    createdAt: Date.now() - 3600000,
+  }))
+
   return {
     users: DEMO_USERS,
     cards: DEMO_CARDS,
     recurring: DEMO_RECURRING,
-    transactions: buildDemoTransactions(),
+    transactions: [...buildDemoTransactions(), ...sampleInstallments],
     friendships: [
       {
         id: 'demo_f1',
@@ -96,6 +144,7 @@ export interface ManualTransactionInput {
   assignedFriendName?: string | null
   /** Percentual (1–100) da despesa cobrado do amigo */
   friendSharePct?: number | null
+  customAllocations?: Allocation[]
   // Feature 3: Parcelamento
   isInstallment?: boolean
   installmentsCount?: number
@@ -146,7 +195,13 @@ interface FinanceContextValue {
   updateInstallmentGroup: (groupId: string, input: InstallmentGroupUpdateInput) => Promise<number>
   cycleStatus: (tx: Transaction) => Promise<void>
   setStatus: (tx: Transaction, status: TransactionStatus) => Promise<void>
-  changeSplit: (tx: Transaction, splitType: SplitType, externalName?: string, friend?: FriendSplitInput) => Promise<void>
+  changeSplit: (
+    tx: Transaction,
+    splitType: SplitType,
+    externalName?: string,
+    friend?: FriendSplitInput,
+    customAllocations?: Allocation[],
+  ) => Promise<void>
   changeAmount: (tx: Transaction, values: { estimatedAmount?: number | null; actualAmount?: number | null }) => Promise<void>
   markReimbursed: (txId: string, allocationIndex: number, value: boolean) => Promise<void>
   generateBills: () => Promise<{ created: number; skipped: number }>
@@ -162,6 +217,7 @@ interface FinanceContextValue {
   friends: FriendItem[]
   pendingFriendRequests: Friendship[]
   pendingChargeRequests: Transaction[]
+  pendingChargeGroups: PendingChargeGroup[]
   sendFriendRequest: (email: string) => Promise<{ success: boolean; message: string }>
   respondFriendRequest: (friendshipId: string, accept: boolean) => Promise<void>
   removeFriend: (friendshipId: string) => Promise<void>
@@ -315,6 +371,86 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       (t) => t.assignedFriendUid === currentUid && t.acceptanceStatus === 'pending_approval',
     )
   }, [transactions, currentUid])
+
+  const pendingChargeGroups = useMemo((): PendingChargeGroup[] => {
+    if (!currentUid) return []
+    const rawPending = transactions.filter(
+      (t) => t.assignedFriendUid === currentUid && t.acceptanceStatus === 'pending_approval',
+    )
+
+    const groups: PendingChargeGroup[] = []
+    const seenGroups = new Set<string>()
+
+    for (const tx of rawPending) {
+      const gId = tx.installmentGroupId
+      if (gId) {
+        if (seenGroups.has(gId)) continue
+        seenGroups.add(gId)
+
+        const items = rawPending
+          .filter((t) => t.installmentGroupId === gId)
+          .sort((a, b) => (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0))
+
+        const primaryTx = items[0]
+        const baseDesc = stripInstallmentSuffix(primaryTx.description)
+        const sender = users.find((u) => u.uid === primaryTx.createdByUid)
+        const friendPct = friendPctOf(primaryTx)
+
+        const totalAmount = round2(items.reduce((s, t) => s + t.totalAmount, 0))
+        const friendShareAmount = round2(items.reduce((s, t) => s + friendShareOf(t), 0))
+
+        const dates = items.map((t) => t.dueDate).sort()
+        const firstDueDate = dates[0] || primaryTx.dueDate
+        const lastDueDate = dates[dates.length - 1] || primaryTx.dueDate
+
+        groups.push({
+          id: gId,
+          isInstallment: true,
+          installmentGroupId: gId,
+          installmentsCount: items.length,
+          baseDescription: baseDesc,
+          cardId: primaryTx.cardId,
+          senderUid: primaryTx.createdByUid,
+          senderName: sender?.displayName || 'Amigo',
+          totalAmount,
+          friendShareAmount,
+          friendSharePct: friendPct,
+          firstDueDate,
+          lastDueDate,
+          perInstallmentAmount: primaryTx.totalAmount,
+          perInstallmentFriendShare: friendShareOf(primaryTx),
+          items,
+          primaryTx,
+        })
+      } else {
+        const sender = users.find((u) => u.uid === tx.createdByUid)
+        const friendPct = friendPctOf(tx)
+        const friendShare = friendShareOf(tx)
+
+        groups.push({
+          id: tx.id,
+          isInstallment: false,
+          installmentGroupId: null,
+          installmentsCount: 1,
+          baseDescription: tx.description,
+          cardId: tx.cardId,
+          senderUid: tx.createdByUid,
+          senderName: sender?.displayName || 'Amigo',
+          totalAmount: tx.totalAmount,
+          friendShareAmount: friendShare,
+          friendSharePct: friendPct,
+          firstDueDate: tx.dueDate,
+          lastDueDate: tx.dueDate,
+          perInstallmentAmount: tx.totalAmount,
+          perInstallmentFriendShare: friendShare,
+          items: [tx],
+          primaryTx: tx,
+        })
+      }
+    }
+
+    return groups
+  }, [transactions, currentUid, users])
 
   const sendFriendRequest = useCallback(
     async (email: string) => {
@@ -651,6 +787,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           externalName: input.externalName,
           assignedFriend,
           friendSharePct,
+          customAllocations: input.customAllocations,
           acceptanceStatus: isFriend ? 'pending_approval' : null,
           previous: t.allocations,
         })
@@ -709,20 +846,36 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   )
 
   const changeSplit = useCallback(
-    async (tx: Transaction, splitType: SplitType, externalName?: string, friend?: FriendSplitInput) => {
+    async (
+      tx: Transaction,
+      splitType: SplitType,
+      externalName?: string,
+      friend?: FriendSplitInput,
+      customAllocations?: Allocation[],
+    ) => {
       if (!me) return
       const isFriend = splitType === 'friend'
-      const assignedFriend: Party | null = isFriend
-        ? friend
-          ? { uid: friend.uid, name: friend.name }
-          : tx.assignedFriendUid && tx.assignedFriendName
-            ? { uid: tx.assignedFriendUid, name: tx.assignedFriendName }
-            : null
-        : null
-      // Sem amigo definido não há como cobrar — ignora (evita cobrança "órfã" que ninguém consegue aceitar)
+      // Detecta amigo em divisões friend ou custom
+      let assignedFriend: Party | null = null
+      if (friend) {
+        assignedFriend = { uid: friend.uid, name: friend.name }
+      } else if (customAllocations) {
+        const fa = customAllocations.find(
+          (a) => a.type === 'PLATFORM_USER' && a.uid && a.uid !== me.uid && (!partnerParty || a.uid !== partnerParty.uid)
+        )
+        if (fa && fa.uid) assignedFriend = { uid: fa.uid, name: fa.name }
+      } else if (isFriend && tx.assignedFriendUid && tx.assignedFriendName) {
+        assignedFriend = { uid: tx.assignedFriendUid, name: tx.assignedFriendName }
+      }
+
+      // Sem amigo definido não há como cobrar no modo friend específico
       if (isFriend && !assignedFriend) return
 
-      const pct = isFriend ? clampPct(friend?.pct ?? tx.friendSharePct ?? 100) : null
+      let pct = isFriend ? clampPct(friend?.pct ?? tx.friendSharePct ?? 100) : null
+      if (assignedFriend && !pct && customAllocations && Math.abs(tx.totalAmount) > 0) {
+        const fa = customAllocations.find((a) => a.uid === assignedFriend!.uid)
+        if (fa) pct = clampPct(round2((fa.amount / Math.abs(tx.totalAmount)) * 100))
+      }
       const split = buildSplit({
         splitType,
         total: tx.totalAmount,
@@ -733,14 +886,15 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         externalName,
         assignedFriend,
         friendSharePct: pct,
+        customAllocations,
         acceptanceStatus: tx.acceptanceStatus,
         previous: tx.allocations,
       })
 
       // Se o amigo ou o percentual mudou, o amigo precisa aprovar os novos termos
       const termsChanged =
-        isFriend &&
-        (tx.assignedFriendUid !== assignedFriend!.uid || clampPct(tx.friendSharePct ?? 100) !== pct)
+        assignedFriend &&
+        (tx.assignedFriendUid !== assignedFriend.uid || clampPct(tx.friendSharePct ?? 100) !== pct)
 
       await updateTransaction(tx.id, {
         allocations: split.allocations,
@@ -749,7 +903,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         assignedFriendUid: assignedFriend?.uid ?? null,
         assignedFriendName: assignedFriend?.name ?? null,
         friendSharePct: pct,
-        acceptanceStatus: isFriend
+        acceptanceStatus: assignedFriend
           ? termsChanged || !tx.acceptanceStatus
             ? 'pending_approval'
             : tx.acceptanceStatus
@@ -786,15 +940,29 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       const isInstallment = Boolean(input.isInstallment && input.installmentsCount && input.installmentsCount > 1)
       const installmentsTotal = isInstallment ? Number(input.installmentsCount) : 1
 
-      // Feature 2: Amigo atribuído
-      const assignedFriend: Party | null =
-        input.splitType === 'friend' && input.assignedFriendUid && input.assignedFriendName
-          ? { uid: input.assignedFriendUid, name: input.assignedFriendName }
-          : null
+      // Feature 2: Amigo atribuído (suporta tanto friend quanto custom)
+      let assignedFriend: Party | null = null
+      if (input.assignedFriendUid && input.assignedFriendName) {
+        assignedFriend = { uid: input.assignedFriendUid, name: input.assignedFriendName }
+      } else if (input.customAllocations) {
+        const fa = input.customAllocations.find(
+          (a) => a.type === 'PLATFORM_USER' && a.uid && a.uid !== me.uid && (!partnerParty || a.uid !== partnerParty.uid)
+        )
+        if (fa && fa.uid) assignedFriend = { uid: fa.uid, name: fa.name }
+      }
+
       if (input.splitType === 'friend' && !assignedFriend) {
         throw new Error('Selecione um amigo da sua rede para enviar a cobrança.')
       }
-      const friendSharePct = assignedFriend ? clampPct(input.friendSharePct ?? 100) : null
+
+      let friendSharePct = input.friendSharePct != null ? clampPct(input.friendSharePct) : null
+      if (assignedFriend && friendSharePct == null) {
+        if (input.customAllocations && Math.abs(input.amount) > 0) {
+          const fa = input.customAllocations.find((a) => a.uid === assignedFriend!.uid)
+          if (fa) friendSharePct = clampPct(round2((fa.amount / Math.abs(input.amount)) * 100))
+        }
+        if (friendSharePct == null) friendSharePct = 100
+      }
 
       const initialStatus = assignedFriend ? ('pending_approval' as const) : undefined
 
@@ -833,6 +1001,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           externalName: input.externalName,
           assignedFriend,
           friendSharePct,
+          customAllocations: input.customAllocations,
           acceptanceStatus: initialStatus,
         })
 
@@ -863,6 +1032,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           installmentGroupId,
           installmentNumber: isInstallment ? i : null,
           installmentsTotal: isInstallment ? installmentsTotal : null,
+          splitType: input.type === 'income' ? 'mine' : input.splitType,
         })
       }
 
@@ -957,13 +1127,14 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // ---------------- Agente (refs para sempre ler o estado mais recente) ----------------
-  const agentEnvRef = useRef<{ me: Party | null; partner: Party | null; month: string; cards: Card[] }>({
+  const agentEnvRef = useRef<{ me: Party | null; partner: Party | null; month: string; cards: Card[]; friends: FriendItem[] }>({
     me: null,
     partner: null,
     month,
     cards,
+    friends: [],
   })
-  agentEnvRef.current = { me, partner: partnerParty, month, cards }
+  agentEnvRef.current = { me, partner: partnerParty, month, cards, friends }
 
   const executeTool = useMemo(
     () =>
@@ -976,11 +1147,15 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           monthKey: env.month,
           getCards: () => (mode === 'demo' ? demoRef.current.cards : agentEnvRef.current.cards),
           getTransactions: () => (mode === 'demo' ? demoRef.current.transactions : fbTxRef.current),
+          getFriends: () => friends,
+          lookupUserByEmail,
           addTransaction,
+          addMany,
           updateTransaction,
+          deleteTransaction,
         }
       }),
-    [mode, addTransaction, updateTransaction],
+    [mode, friends, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction],
   )
 
   const value: FinanceContextValue = {
@@ -1031,6 +1206,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     friends,
     pendingFriendRequests,
     pendingChargeRequests,
+    pendingChargeGroups,
     sendFriendRequest,
     respondFriendRequest,
     removeFriend,

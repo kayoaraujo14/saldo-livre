@@ -72,9 +72,13 @@ VITE_FIREBASE_APP_ID=1:1234567890:web:abcdef
 
 ---
 
-## 🤖 Agente IA Gemini (gemini-2.5-flash com Function Calling)
+## 🤖 Agente IA Gemini (gemini-3.5-flash-lite com Function Calling)
 
-O Agente lateral no chat dispõe de 3 ferramentas automatizadas:
-1. `registrarTransacao`: Registra novas receitas ou despesas com divisões automáticas (`allocations`, `userImpact`, `visibleToUids`).
-2. `atualizarContaPrevista`: Localiza contas em aberto por busca fonética/sinônimos (ex: "luz", "água", "financiamento"), preenche o valor real e recalcula o Saldo Livre e limite diário.
-3. `obterRelatorioEProjecaoMensal`: Gera projeções orçamentárias detalhadas em tabelas Markdown com recomendações de economia.
+O Agente lateral no chat dispõe de 6 ferramentas automatizadas:
+1. `registrarTransacao`: Registra despesas ou receitas individuais calculando automaticamente a fatura do cartão (vencimento e competência) e divisões (Meu, Amigo na plataforma, Casal 50/50, Terceiro).
+2. `registrarTransacoesLote`: Registra múltiplas despesas de uma só vez (ideal para colar faturas completas com parcelas e estornos).
+3. `editarTransacoes`: Edita e corrige despesas existentes em lote (mover mês de fatura `YYYY-MM`, novo vencimento, reatribuir para amigo ou terceiro, alterar valores).
+4. `excluirTransacoes`: Exclui despesas individualmente ou em lote por termo de busca, mês ou lote recente.
+5. `atualizarContaPrevista`: Localiza contas em aberto por busca fonética/sinônimos (ex: "luz", "água", "financiamento"), preenche o valor real e recalcula o Saldo Livre e limite diário.
+6. `obterRelatorioEProjecaoMensal`: Gera projeções orçamentárias detalhadas em tabelas Markdown com recomendações de economia.
+

@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useFinance } from '@/store/FinanceContext'
-import { friendPctOf, friendShareOf } from '@/lib/finance'
+import type { PendingChargeGroup } from '@/types'
+import { friendShareOf } from '@/lib/finance'
 import { formatBRL, formatShortDate } from '@/lib/utils'
 import {
   Users2,
@@ -20,6 +21,9 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Percent,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 
 interface FriendsModalProps {
@@ -30,9 +34,8 @@ interface FriendsModalProps {
 export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
   const {
     friends,
-    users,
     pendingFriendRequests,
-    pendingChargeRequests,
+    pendingChargeGroups,
     sendFriendRequest,
     respondFriendRequest,
     removeFriend,
@@ -42,13 +45,18 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
   } = useFinance()
 
   const [activeTab, setActiveTab] = useState<'approvals' | 'friends' | 'statement'>(
-    pendingChargeRequests.length > 0 ? 'approvals' : 'friends',
+    pendingChargeGroups.length > 0 ? 'approvals' : 'friends',
   )
   const [inviteEmail, setInviteEmail] = useState('')
   const [sendingInvite, setSendingInvite] = useState(false)
   const [inviteFeedback, setInviteFeedback] = useState<{ text: string; success: boolean } | null>(null)
   const [actionFeedback, setActionFeedback] = useState<{ text: string; success: boolean } | null>(null)
-  const [processingTxId, setProcessingTxId] = useState<string | null>(null)
+  const [processingGroupId, setProcessingGroupId] = useState<string | null>(null)
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Record<string, boolean>>({})
+
+  const toggleGroupExpand = (groupId: string) => {
+    setExpandedGroupIds((prev) => ({ ...prev, [groupId]: !prev[groupId] }))
+  }
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -64,20 +72,24 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
     }
   }
 
-  const handleChargeResponse = async (tx: any, accept: boolean) => {
-    setProcessingTxId(tx.id)
+  const handleChargeResponse = async (group: PendingChargeGroup, accept: boolean) => {
+    setProcessingGroupId(group.id)
     setActionFeedback(null)
     try {
-      await respondChargeRequest(tx, accept)
+      await respondChargeRequest(group.primaryTx, accept)
       setActionFeedback({
         text: accept
-          ? `Gasto "${tx.description}" aceito com sucesso! Entrou no seu comprometimento.`
-          : `Gasto "${tx.description}" recusado.`,
+          ? group.isInstallment
+            ? `Compra parcelada "${group.baseDescription}" (${group.installmentsCount} parcelas de ${formatBRL(group.perInstallmentFriendShare)}) aceita com sucesso! Entrou no seu comprometimento mensal.`
+            : `Gasto "${group.baseDescription}" aceito com sucesso! Entrou no seu comprometimento.`
+          : group.isInstallment
+            ? `Compra parcelada "${group.baseDescription}" recusada.`
+            : `Gasto "${group.baseDescription}" recusado.`,
         success: accept,
       })
       setTimeout(() => setActionFeedback(null), 4500)
     } finally {
-      setProcessingTxId(null)
+      setProcessingGroupId(null)
     }
   }
 
@@ -111,9 +123,9 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
           >
             <Clock className="size-3.5" />
             <span>Aprovações Pendentes</span>
-            {pendingChargeRequests.length > 0 && (
+            {pendingChargeGroups.length > 0 && (
               <span className="size-4 rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold flex items-center justify-center">
-                {pendingChargeRequests.length}
+                {pendingChargeGroups.length}
               </span>
             )}
           </button>
@@ -167,12 +179,12 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
         {/* Tab 1: Aprovações de Cobrança Pendentes */}
         {activeTab === 'approvals' && (
           <div className="py-3 space-y-3 overflow-y-auto pr-1 flex-1">
-            {pendingChargeRequests.length === 0 ? (
+            {pendingChargeGroups.length === 0 ? (
               <div className="p-8 text-center rounded-xl bg-slate-900/40 border border-slate-800 space-y-2">
                 <CheckCircle2 className="size-8 text-emerald-400/60 mx-auto" />
                 <p className="text-sm font-medium text-slate-300">Nenhuma despesa pendente de aceite</p>
                 <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                  Quando um amigo cadastrar uma compra feita no cartão dele para você pagar (integral ou percentual), ela aparecerá aqui para você aprovar antes de comprometer seu saldo.
+                  Quando um amigo cadastrar uma compra feita no cartão dele para você pagar (integral ou dividida por cota), ela aparecerá aqui agrupada por compra para você aprovar antes de comprometer seu saldo.
                 </p>
               </div>
             ) : (
@@ -180,51 +192,58 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
                 <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-2 text-xs text-amber-300">
                   <AlertTriangle className="size-4 shrink-0 mt-0.5" />
                   <span>
-                    Ao aceitar uma despesa, apenas a sua <strong>cota atribuída</strong> entrará no cálculo das suas saídas comprometidas, reduzindo o seu Saldo Livre.
+                    Ao aceitar uma despesa ou compra parcelada, a sua <strong>cota atribuída</strong> entrará no cálculo das suas saídas comprometidas mês a mês, atualizando o seu Saldo Livre.
                   </span>
                 </div>
 
-                {pendingChargeRequests.map((tx) => {
-                  const card = cards.find((c) => c.id === tx.cardId)
-                  const isProcessing = processingTxId === tx.id
-                  const isInstallment = Boolean(tx.installmentGroupId && tx.installmentsTotal)
-                  const friendShare = friendShareOf(tx)
-                  const friendPct = friendPctOf(tx)
-                  const sender = users.find((u) => u.uid === tx.createdByUid)
+                {pendingChargeGroups.map((group) => {
+                  const card = cards.find((c) => c.id === group.cardId)
+                  const isProcessing = processingGroupId === group.id
+                  const isExpanded = Boolean(expandedGroupIds[group.id])
 
                   return (
                     <div
-                      key={tx.id}
+                      key={group.id}
                       className="p-4 rounded-xl border border-amber-500/30 bg-slate-900/70 space-y-3 shadow-lg"
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
+                        <div className="space-y-1 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-slate-100 text-sm">{tx.description}</span>
-                            {isInstallment && (
-                              <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-500/30">
-                                Parcela {tx.installmentNumber}/{tx.installmentsTotal}
+                            <span className="font-semibold text-slate-100 text-sm">{group.baseDescription}</span>
+                            {group.isInstallment && (
+                              <Badge variant="outline" className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-500/30 gap-1 font-medium">
+                                <Layers className="size-2.5" />
+                                Compra Parcelada ({group.installmentsCount}x)
                               </Badge>
                             )}
-                            {friendPct < 100 && (
+                            {group.friendSharePct < 100 ? (
                               <Badge variant="outline" className="text-[10px] bg-cyan-500/10 text-cyan-300 border-cyan-500/30 gap-1">
                                 <Percent className="size-2.5" />
-                                Cota: {friendPct}%
+                                Sua Cota: {group.friendSharePct}%
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30">
+                                Cota Integral (100%)
                               </Badge>
                             )}
                           </div>
+
                           <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap">
-                            <span>Vencimento: {formatShortDate(tx.dueDate)}</span>
+                            {group.isInstallment ? (
+                              <span>Período: {formatShortDate(group.firstDueDate)} até {formatShortDate(group.lastDueDate)}</span>
+                            ) : (
+                              <span>Vencimento: {formatShortDate(group.firstDueDate)}</span>
+                            )}
                             {card && (
                               <>
                                 <span>•</span>
                                 <span>Cartão: {card.cardName}</span>
                               </>
                             )}
-                            {sender && (
+                            {group.senderName && (
                               <>
                                 <span>•</span>
-                                <span className="text-amber-300">Enviado por: {sender.displayName}</span>
+                                <span className="text-amber-300">Enviado por: {group.senderName}</span>
                               </>
                             )}
                           </div>
@@ -232,42 +251,96 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
 
                         <div className="text-right shrink-0">
                           <span className="text-base font-bold text-amber-300 block font-mono">
-                            {formatBRL(friendShare)}
+                            {formatBRL(group.friendShareAmount)}
                           </span>
-                          <span className="text-[10px] text-slate-500">
-                            {friendPct < 100 ? `${friendPct}% de ${formatBRL(tx.totalAmount)}` : '100% da compra'}
-                          </span>
+                          {group.isInstallment ? (
+                            <>
+                              <span className="text-[10px] text-slate-300 font-medium block">
+                                {group.installmentsCount}x de {formatBRL(group.perInstallmentFriendShare)}/mês
+                              </span>
+                              {group.friendSharePct < 100 && (
+                                <span className="text-[10px] text-slate-500 block">
+                                  ({group.friendSharePct}% do total de {formatBRL(group.totalAmount)})
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 block">
+                              {group.friendSharePct < 100 ? `${group.friendSharePct}% de ${formatBRL(group.totalAmount)}` : '100% da compra'}
+                            </span>
+                          )}
                         </div>
                       </div>
 
+                      {/* Expandable installment breakdown if multi-installment */}
+                      {group.isInstallment && (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => toggleGroupExpand(group.id)}
+                            className="flex items-center gap-1 text-[11px] text-violet-400 hover:text-violet-300 font-medium cursor-pointer transition-colors"
+                          >
+                            {isExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                            <span>{isExpanded ? 'Ocultar cronograma das parcelas' : `Ver cronograma das ${group.installmentsCount} parcelas`}</span>
+                          </button>
+
+                          {isExpanded && (
+                            <div className="mt-2 rounded-lg bg-slate-950/80 border border-slate-800 p-2.5 space-y-1">
+                              <div className="grid grid-cols-3 text-[10px] font-semibold text-slate-400 px-2 pb-1 border-b border-slate-800">
+                                <span>Parcela</span>
+                                <span>Vencimento</span>
+                                <span className="text-right">Sua Cota</span>
+                              </div>
+                              <div className="max-h-36 overflow-y-auto space-y-0.5 divide-y divide-slate-800/50">
+                                {group.items.map((it) => (
+                                  <div key={it.id} className="grid grid-cols-3 text-xs text-slate-300 px-2 py-1 items-center">
+                                    <span className="font-mono text-slate-400">
+                                      Parcela {it.installmentNumber || 1}/{group.installmentsCount}
+                                    </span>
+                                    <span className="text-slate-300">{formatShortDate(it.dueDate)}</span>
+                                    <span className="text-right font-mono font-medium text-amber-300">
+                                      {formatBRL(friendShareOf(it))}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between pt-2 border-t border-slate-800 gap-2 flex-wrap">
-                        <span className="text-[11px] text-slate-400">
-                          {isInstallment
-                            ? `Compra em ${tx.installmentsTotal}x de ${formatBRL(friendShare)}. Aceitar atualizará todas as parcelas.`
-                            : friendPct < 100
-                              ? `Divisão: você paga ${friendPct}% (${formatBRL(friendShare)}) e ${sender?.displayName || 'o titular'} arca com o restante.`
+                        <span className="text-[11px] text-slate-400 flex-1 min-w-[200px]">
+                          {group.isInstallment
+                            ? `Compra parcelada em ${group.installmentsCount}x de ${formatBRL(group.perInstallmentAmount)}. Sua parte é de ${formatBRL(group.perInstallmentFriendShare)}/mês (${group.friendSharePct}%). Ao aceitar, todas as parcelas serão lançadas no seu mês a mês.`
+                            : group.friendSharePct < 100
+                              ? `Divisão: você arca com ${group.friendSharePct}% (${formatBRL(group.friendShareAmount)}) e ${group.senderName} com o restante.`
                               : 'Gasto no cartão para você pagar integralmente.'}
                         </span>
 
-                        <div className="flex items-center gap-2 ml-auto">
+                        <div className="flex items-center gap-2 ml-auto shrink-0">
                           <Button
                             size="sm"
                             variant="outline"
                             disabled={isProcessing}
-                            onClick={() => handleChargeResponse(tx, false)}
+                            onClick={() => handleChargeResponse(group, false)}
                             className="h-7 text-xs border-rose-500/30 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200 cursor-pointer"
                           >
                             <XCircle className="size-3.5 mr-1" />
-                            Recusar
+                            {group.isInstallment ? 'Recusar Compra' : 'Recusar'}
                           </Button>
                           <Button
                             size="sm"
                             disabled={isProcessing}
-                            onClick={() => handleChargeResponse(tx, true)}
+                            onClick={() => handleChargeResponse(group, true)}
                             className="h-7 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium cursor-pointer shadow-sm"
                           >
                             <CheckCircle2 className="size-3.5 mr-1" />
-                            {isProcessing ? 'Aceitando...' : `Aceitar (${formatBRL(friendShare)})`}
+                            {isProcessing
+                              ? 'Aceitando...'
+                              : group.isInstallment
+                                ? `Aceitar Compra (${formatBRL(group.friendShareAmount)})`
+                                : `Aceitar (${formatBRL(group.friendShareAmount)})`}
                           </Button>
                         </div>
                       </div>

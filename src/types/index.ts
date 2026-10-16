@@ -7,8 +7,7 @@ export type PaymentMethod = 'pix' | 'credit_card' | 'debit' | 'bill'
 export type TransactionStatus = 'estimated' | 'pending' | 'paid'
 export type EstimationRule = 'fixed' | 'last_month' | 'avg_3_months'
 
-/** Tipo de divisão SEMPRE relativo a quem está visualizando/criando. */
-export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external'
+export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external' | 'custom'
 
 export const CATEGORIES = [
   'Moradia',
@@ -18,6 +17,7 @@ export const CATEGORIES = [
   'Lazer',
   'Assinaturas',
   'Cartão Terceiros',
+  'Estorno',
   'Receita',
   'Outros',
 ] as const
@@ -131,6 +131,7 @@ export interface Transaction {
   installmentGroupId?: string | null
   installmentNumber?: number | null
   installmentsTotal?: number | null
+  splitType?: SplitType | null
 }
 
 export interface FriendSplitInput {
@@ -148,8 +149,29 @@ export interface InstallmentGroupUpdateInput {
   splitType?: SplitType
   externalName?: string
   friend?: FriendSplitInput
+  customAllocations?: Allocation[]
   date?: string
   status?: TransactionStatus
+}
+
+export interface PendingChargeGroup {
+  id: string
+  isInstallment: boolean
+  installmentGroupId?: string | null
+  installmentsCount: number
+  baseDescription: string
+  cardId?: string | null
+  senderUid: string
+  senderName: string
+  totalAmount: number
+  friendShareAmount: number
+  friendSharePct: number
+  firstDueDate: string
+  lastDueDate: string
+  perInstallmentAmount: number
+  perInstallmentFriendShare: number
+  items: Transaction[]
+  primaryTx: Transaction
 }
 
 export type NewTransaction = Omit<Transaction, 'id'>

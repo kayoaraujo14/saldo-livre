@@ -93,9 +93,21 @@ export function initials(name: string) {
     .join('')
 }
 
-/** Remove chaves `undefined` (o Firestore rejeita undefined). */
-export function stripUndefined<T extends object>(obj: T): T {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T
+/** Remove chaves `undefined` profundamente (o Firestore rejeita undefined em qualquer nível). */
+export function stripUndefined<T>(val: T): T {
+  if (val === undefined || val === null) {
+    return val
+  }
+  if (Array.isArray(val)) {
+    return val.map((item) => stripUndefined(item)) as unknown as T
+  }
+  if (typeof val === 'object' && !(val instanceof Date)) {
+    const entries = Object.entries(val as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, stripUndefined(v)])
+    return Object.fromEntries(entries) as T
+  }
+  return val
 }
 
 export function normalize(s: string) {

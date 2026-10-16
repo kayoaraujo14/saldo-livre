@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useFinance } from '@/store/FinanceContext'
 import { monthLabel, shiftMonth, currentMonthKey } from '@/lib/utils'
-import { getGeminiApiKey } from '@/lib/gemini'
+import { getGeminiApiKey, getSelectedGeminiModel } from '@/lib/gemini'
 import {
   ChevronLeft,
   ChevronRight,
@@ -42,7 +42,7 @@ export function Header({
     signOut,
     switchProfile,
     pendingFriendRequests,
-    pendingChargeRequests,
+    pendingChargeGroups,
   } = useFinance()
 
   const [generating, setGenerating] = useState(false)
@@ -50,6 +50,16 @@ export function Header({
 
   const isCurrentMonth = month === currentMonthKey()
   const hasGeminiKey = Boolean(getGeminiApiKey())
+  const activeModel = getSelectedGeminiModel()
+  const modelLabel = hasGeminiKey
+    ? activeModel.includes('3.5')
+      ? 'Gemini 3.5 Lite'
+      : activeModel.includes('3.8')
+        ? 'Gemini 3.8 Flash'
+        : activeModel.includes('2.5')
+          ? 'Gemini 2.5 Flash'
+          : 'Gemini Conectado'
+    : 'Gemini Offline'
 
   const handlePrevMonth = () => setMonth(shiftMonth(month, -1))
   const handleNextMonth = () => setMonth(shiftMonth(month, 1))
@@ -160,7 +170,7 @@ export function Header({
               size="sm"
               onClick={onOpenFriends}
               className={`text-xs h-8 gap-1.5 transition-all relative ${
-                pendingFriendRequests.length > 0 || pendingChargeRequests.length > 0
+                pendingFriendRequests.length > 0 || pendingChargeGroups.length > 0
                   ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25 font-semibold'
                   : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-300'
               }`}
@@ -168,9 +178,9 @@ export function Header({
             >
               <Users2 className="size-3.5 text-violet-400" />
               <span>Amigos</span>
-              {pendingFriendRequests.length + pendingChargeRequests.length > 0 && (
+              {pendingFriendRequests.length + pendingChargeGroups.length > 0 && (
                 <span className="size-4 rounded-full bg-amber-500 text-slate-950 font-bold text-[10px] flex items-center justify-center animate-pulse">
-                  {pendingFriendRequests.length + pendingChargeRequests.length}
+                  {pendingFriendRequests.length + pendingChargeGroups.length}
                 </span>
               )}
             </Button>
@@ -205,7 +215,7 @@ export function Header({
             >
               <KeyRound className="size-3.5 text-emerald-400" />
               <span className="size-2 rounded-full bg-emerald-400" />
-              <span className="hidden md:inline">{hasGeminiKey ? 'Gemini 2.5' : 'Gemini Offline'}</span>
+              <span className="hidden md:inline">{modelLabel}</span>
             </Button>
 
             {/* Current Logged-in User & Logout */}

@@ -17,7 +17,7 @@ import { Clock } from 'lucide-react'
 import type { Transaction } from '@/types'
 
 function MainDashboard() {
-  const { setMonth, pendingChargeRequests, pendingFriendRequests } = useFinance()
+  const { setMonth, pendingChargeGroups, pendingFriendRequests } = useFinance()
   const [cardsModalOpen, setCardsModalOpen] = useState(false)
   const [recurringModalOpen, setRecurringModalOpen] = useState(false)
   const [receivablesModalOpen, setReceivablesModalOpen] = useState(false)
@@ -37,7 +37,7 @@ function MainDashboard() {
     setTxModalOpen(true)
   }
 
-  const totalPendingNotifications = pendingChargeRequests.length + pendingFriendRequests.length
+  const totalPendingNotifications = pendingChargeGroups.length + pendingFriendRequests.length
 
   return (
     <div className="flex flex-col min-h-screen bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300">
@@ -58,9 +58,9 @@ function MainDashboard() {
             <div className="flex items-center gap-2.5 text-amber-200">
               <span className="size-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
               <span>
-                {pendingChargeRequests.length > 0 ? (
+                {pendingChargeGroups.length > 0 ? (
                   <>
-                    Você possui <strong>{pendingChargeRequests.length} despesa(s) no cartão</strong> enviada(s) por amigos aguardando seu aceite de comprometimento.
+                    Você possui <strong>{pendingChargeGroups.length} despesa(s) no cartão</strong> enviada(s) por amigos aguardando seu aceite de comprometimento.
                   </>
                 ) : (
                   <>
