@@ -2,7 +2,7 @@
  * Implementação das ferramentas do agente (usada tanto pelo Gemini real
  * quanto pelo agente offline do Modo Demo).
  */
-import type { Allocation, Card, Category, NewTransaction, PaymentMethod, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
+import type { Allocation, Card, Category, NewTransaction, PaymentMethod, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
 import { CATEGORIES } from '@/types'
 import {
   amountPatch,
@@ -38,6 +38,7 @@ import {
 export interface AgentEnv {
   getTransactions: () => Transaction[]
   getCards: () => Card[]
+  getRecurring?: () => RecurringBill[]
   getFriends?: () => Array<{ uid: string; name: string; email?: string }>
   lookupUserByEmail?: (email: string) => Promise<UserProfile | null>
   me: Party
@@ -47,6 +48,14 @@ export interface AgentEnv {
   addMany?: (txs: NewTransaction[]) => Promise<void>
   updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<void>
   deleteTransaction: (id: string) => Promise<void>
+  addCard?: (card: Partial<Card>) => Promise<string>
+  updateCard?: (id: string, patch: Partial<Card>) => Promise<void>
+  deleteCard?: (id: string) => Promise<void>
+  addRecurring?: (bill: Partial<RecurringBill>) => Promise<string>
+  updateRecurring?: (id: string, patch: Partial<RecurringBill>) => Promise<void>
+  deleteRecurring?: (id: string) => Promise<void>
+  addFriend?: (email: string) => Promise<void>
+  respondFriend?: (id: string, accept: boolean) => Promise<void>
 }
 
 const SPLIT_MAP: Record<string, SplitType> = {
@@ -103,6 +112,12 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
         return atualizar(env, args)
       case 'obterRelatorioEProjecaoMensal':
         return relatorio(env)
+      case 'gerenciarCartoes':
+        return gerenciarCartoes(env, args)
+      case 'gerenciarContasRecorrentes':
+        return gerenciarContasRecorrentes(env, args)
+      case 'gerenciarAmizades':
+        return gerenciarAmizades(env, args)
       default:
         return { response: { ok: false, erro: `Ferramenta desconhecida: ${name}` } }
     }
@@ -1065,4 +1080,177 @@ async function relatorio(env: AgentEnv): Promise<ToolResult> {
       ],
     },
   }
+}
+
+async function gerenciarCartoes(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const acao = String(args.acao || 'listar')
+  if (acao === 'listar') {
+    const cartoes = env.getCards().map((c) => ({
+      id: c.id,
+      nome: c.cardName,
+      titular: c.ownerName,
+      diaFechamento: c.closingDay,
+      diaVencimento: c.dueDay
+    }))
+    return {
+      response: { ok: true, cartoes },
+      action: {
+        kind: 'report',
+        title: 'Cartões Listados',
+        lines: [{ label: 'Cartões Encontrados', value: cartoes.length.toString() }],
+      },
+    }
+  }
+
+  if (!env.addCard || !env.updateCard || !env.deleteCard) {
+    return { response: { ok: false, erro: 'As funções de cartão não estão injetadas neste ambiente.' } }
+  }
+
+  if (acao === 'adicionar') {
+    const nome = String(args.nome || '')
+    const f = Number(args.fechamento || 1)
+    const v = Number(args.vencimento || 10)
+    if (!nome) return { response: { ok: false, erro: 'Nome é obrigatório para adicionar' } }
+    const id = await env.addCard({ cardName: nome, closingDay: f, dueDay: v, ownerName: env.me.name, ownerUid: env.me.uid, sharedWithUids: [], sharedWithUsers: [], frequentThirdParties: [] })
+    return {
+      response: { ok: true, id },
+      action: { kind: 'created', title: 'Cartão Adicionado', lines: [{ label: 'Cartão', value: nome }] },
+    }
+  }
+
+  const id = String(args.id || '')
+  if (!id) return { response: { ok: false, erro: 'ID obrigatório para edição ou exclusão.' } }
+
+  if (acao === 'editar') {
+    const patch: Partial<Card> = {}
+    if (args.nome) patch.cardName = String(args.nome)
+    if (args.fechamento) patch.closingDay = Number(args.fechamento)
+    if (args.vencimento) patch.dueDay = Number(args.vencimento)
+    await env.updateCard(id, patch)
+    return {
+      response: { ok: true },
+      action: { kind: 'updated', title: 'Cartão Editado', lines: [{ label: 'ID', value: id }] },
+    }
+  }
+
+  if (acao === 'excluir') {
+    await env.deleteCard(id)
+    return {
+      response: { ok: true },
+      action: { kind: 'updated', title: 'Cartão Excluído', lines: [{ label: 'ID', value: id }] },
+    }
+  }
+  return { response: { ok: false, erro: 'Ação inválida' } }
+}
+
+async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const acao = String(args.acao || 'listar')
+  if (acao === 'listar') {
+    const contas = (env.getRecurring?.() || []).map((c) => ({
+      id: c.id,
+      descricao: c.description,
+      valorBase: c.defaultAmount,
+      diaVencimento: c.dueDay,
+      ativo: c.active,
+      categoria: c.category
+    }))
+    return {
+      response: { ok: true, contas },
+      action: {
+        kind: 'report',
+        title: 'Contas Recorrentes Listadas',
+        lines: [{ label: 'Contas Encontradas', value: contas.length.toString() }],
+      },
+    }
+  }
+
+  if (!env.addRecurring || !env.updateRecurring || !env.deleteRecurring) {
+    return { response: { ok: false, erro: 'As funções de conta recorrente não estão disponíveis.' } }
+  }
+
+  if (acao === 'adicionar') {
+    const desc = String(args.descricao || '')
+    const valor = Number(args.valor || 0)
+    if (!desc || valor <= 0) return { response: { ok: false, erro: 'Descrição e valor são obrigatórios.' } }
+    const cat = (args.categoria as Category) || 'Outros'
+    const dueDay = Number(args.diaVencimento || 10)
+    const id = await env.addRecurring({
+      description: desc,
+      defaultAmount: valor,
+      dueDay,
+      category: cat,
+      active: true,
+      ownerUid: env.me.uid,
+      estimationRule: 'fixed',
+      type: 'expense'
+    })
+    return {
+      response: { ok: true, id },
+      action: { kind: 'created', title: 'Assinatura/Conta Recorrente Criada', lines: [{ label: 'Descrição', value: desc }] },
+    }
+  }
+
+  const id = String(args.id || '')
+  if (!id) return { response: { ok: false, erro: 'ID obrigatório.' } }
+
+  if (acao === 'pausar' || acao === 'ativar') {
+    const active = acao === 'ativar'
+    await env.updateRecurring(id, { active })
+    return {
+      response: { ok: true },
+      action: { kind: 'updated', title: active ? 'Conta Ativada' : 'Conta Pausada', lines: [{ label: 'ID', value: id }] },
+    }
+  }
+
+  if (acao === 'excluir') {
+    await env.deleteRecurring(id)
+    return {
+      response: { ok: true },
+      action: { kind: 'updated', title: 'Conta Excluída', lines: [{ label: 'ID', value: id }] },
+    }
+  }
+  return { response: { ok: false, erro: 'Ação inválida' } }
+}
+
+async function gerenciarAmizades(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const acao = String(args.acao || 'listar')
+  if (acao === 'listar') {
+    const amigos = (env.getFriends?.() || []).map(f => ({ id: f.uid, nome: f.name, email: f.email }))
+    return {
+      response: { ok: true, amigos },
+      action: {
+        kind: 'report',
+        title: 'Amigos Listados',
+        lines: [{ label: 'Amigos Encontrados', value: amigos.length.toString() }],
+      },
+    }
+  }
+
+  if (!env.addFriend || !env.respondFriend) {
+    return { response: { ok: false, erro: 'Funções de amizade indisponíveis.' } }
+  }
+
+  if (acao === 'adicionar') {
+    const email = String(args.email || '')
+    if (!email) return { response: { ok: false, erro: 'Email obrigatório' } }
+    await env.addFriend(email)
+    return {
+      response: { ok: true },
+      action: { kind: 'created', title: 'Convite Enviado', lines: [{ label: 'Para', value: email }] },
+    }
+  }
+
+  const id = String(args.id || '')
+  if (!id) return { response: { ok: false, erro: 'ID do pedido obrigatório' } }
+
+  if (acao === 'aceitar' || acao === 'recusar') {
+    const aceitar = acao === 'aceitar'
+    await env.respondFriend(id, aceitar)
+    return {
+      response: { ok: true },
+      action: { kind: 'updated', title: aceitar ? 'Pedido Aceito' : 'Pedido Recusado', lines: [{ label: 'ID', value: id }] },
+    }
+  }
+
+  return { response: { ok: false, erro: 'Ação inválida' } }
 }

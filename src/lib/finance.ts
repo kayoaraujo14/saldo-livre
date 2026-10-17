@@ -72,26 +72,32 @@ export function calculateCardInvoiceDates(
     return { dueDate: today, competenceMonth: today.slice(0, 7) }
   }
 
-  // Se a compra ocorreu no dia de fechamento ou após, a fatura fecha no ciclo seguinte
+  // Determina o mês de fechamento da fatura
+  let closingMonth = month
+  let closingYear = year
+
   if (day >= card.closingDay) {
-    month += 1
-    if (month > 12) {
-      month = 1
-      year += 1
+    closingMonth += 1
+    if (closingMonth > 12) {
+      closingMonth = 1
+      closingYear += 1
     }
   }
 
-  // Se o dia de vencimento for numericamente menor que o de fechamento (ex: fecha dia 25, vence dia 5),
-  // a fatura que fechou em `month` só vence no mês seguinte.
+  // O vencimento será no próprio mês do fechamento se dueDay for >= closingDay (raro mas possível)
+  // Mas na imensa maioria dos bancos (fecha 25, vence 5), o vencimento cai no mês SEGUINTE ao fechamento.
+  let dueMonth = closingMonth
+  let dueYear = closingYear
+
   if (card.dueDay < card.closingDay) {
-    month += 1
-    if (month > 12) {
-      month = 1
-      year += 1
+    dueMonth += 1
+    if (dueMonth > 12) {
+      dueMonth = 1
+      dueYear += 1
     }
   }
 
-  const competenceMonth = `${year}-${String(month).padStart(2, '0')}`
+  const competenceMonth = `${dueYear}-${String(dueMonth).padStart(2, '0')}`
   const dueDate = `${competenceMonth}-${String(card.dueDay).padStart(2, '0')}`
 
   return { dueDate, competenceMonth }
@@ -105,7 +111,13 @@ export function deriveImpact(allocations: Allocation[], visibleToUids: string[])
   const impact: Record<string, number> = {}
   for (const u of visibleToUids) impact[u] = 0
   for (const a of allocations) {
-    if (a.type === 'PLATFORM_USER' && a.uid) impact[a.uid] = round2((impact[a.uid] ?? 0) + a.amount)
+    if (a.type === 'PLATFORM_USER' && a.uid) {
+      // Quando alguém reembolsa, o impacto NÃO some, pois a pessoa que pagou a fatura
+      // original já pagou pro banco de qualquer forma, e quem foi reembolsado já enviou o dinheiro.
+      // O impacto deve sempre refletir o valor de cota de cada um na transação para o mês,
+      // para bater o orçamento (Saldo Livre) de cada usuário com precisão bancária.
+      impact[a.uid] = round2((impact[a.uid] ?? 0) + a.amount)
+    }
   }
   return impact
 }
