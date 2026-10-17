@@ -41,10 +41,10 @@ const INITIAL_MESSAGE: ChatMessage = {
 Estou conectado aos seus lançamentos em tempo real. Você pode falar comigo em linguagem natural para:
 - Atualizar contas que chegaram ou foram pagas (ex: *"A conta de luz veio R$ 245 para o dia 22"*)
 - Lançar compras individuais ou divididas no cartão (ex: *"Jantar de R$ 160 50/50"*)
-- Lançar compras de terceiros neutras (ex: *"Minha mãe usou R$ 120 na farmácia"*)
-- Consultar seu limite diário e pedir projeções (ex: *"Quanto ainda posso gastar no fim de semana?"*)
+- Analisar ativamente suas finanças e sugerir cortes de custos.
+- Consultar seu limite diário, gerenciar cartões, amizades, assinaturas e pedir projeções (ex: *"Quanto ainda posso gastar no fim de semana?"*)
 
-Como posso ajudar hoje?`,
+Sou o seu consultor financeiro. Como posso ajudar hoje?`,
 }
 
 const PROMPT_HISTORY_KEY = 'saldo_livre_user_prompt_history'

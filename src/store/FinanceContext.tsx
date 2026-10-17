@@ -1127,14 +1127,15 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // ---------------- Agente (refs para sempre ler o estado mais recente) ----------------
-  const agentEnvRef = useRef<{ me: Party | null; partner: Party | null; month: string; cards: Card[]; friends: FriendItem[] }>({
+  const agentEnvRef = useRef<{ me: Party | null; partner: Party | null; month: string; cards: Card[]; recurring: RecurringBill[]; friends: FriendItem[] }>({
     me: null,
     partner: null,
     month,
     cards,
+    recurring: [],
     friends: [],
   })
-  agentEnvRef.current = { me, partner: partnerParty, month, cards, friends }
+  agentEnvRef.current = { me, partner: partnerParty, month, cards, recurring, friends }
 
   const executeTool = useMemo(
     () =>
@@ -1147,15 +1148,72 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           monthKey: env.month,
           getCards: () => (mode === 'demo' ? demoRef.current.cards : agentEnvRef.current.cards),
           getTransactions: () => (mode === 'demo' ? demoRef.current.transactions : fbTxRef.current),
+          getRecurring: () => (mode === 'demo' ? demoRef.current.recurring : agentEnvRef.current.recurring),
           getFriends: () => friends,
           lookupUserByEmail,
           addTransaction,
           addMany,
           updateTransaction,
           deleteTransaction,
+          addCard: async (c) => {
+             const id = c.id || makeId()
+             const cardToSave = { ...c, id } as Card
+             if (mode === 'demo') {
+                commitDemo(s => ({ ...s, cards: [...s.cards, cardToSave] }))
+             } else {
+                await fb.fsSaveCard(cardToSave)
+             }
+             return id
+          },
+          updateCard: async (id, patch) => {
+             if (mode === 'demo') {
+                commitDemo(s => ({ ...s, cards: s.cards.map(x => x.id === id ? { ...x, ...patch } : x) }))
+             } else {
+                const existing = agentEnvRef.current.cards.find(x => x.id === id)
+                if (existing) await fb.fsSaveCard({ ...existing, ...patch } as Card)
+             }
+          },
+          deleteCard: async (id) => {
+             if (mode === 'demo') {
+                commitDemo(s => ({ ...s, cards: s.cards.filter(x => x.id !== id) }))
+             } else {
+                await fb.fsDeleteCard(id)
+             }
+          },
+          addRecurring: async (r) => {
+             const id = r.id || makeId()
+             const toSave = { ...r, id } as RecurringBill
+             if (mode === 'demo') {
+                commitDemo(s => ({ ...s, recurring: [...s.recurring, toSave] }))
+             } else {
+                await fb.fsSaveRecurring(toSave)
+             }
+             return id
+          },
+          updateRecurring: async (id, patch) => {
+             if (mode === 'demo') {
+                commitDemo(s => ({ ...s, recurring: s.recurring.map(x => x.id === id ? { ...x, ...patch } : x) }))
+             } else {
+                const existing = agentEnvRef.current.recurring.find(x => x.id === id)
+                if (existing) await fb.fsSaveRecurring({ ...existing, ...patch } as RecurringBill)
+             }
+          },
+          deleteRecurring: async (id) => {
+             if (mode === 'demo') {
+                commitDemo(s => ({ ...s, recurring: s.recurring.filter(x => x.id !== id) }))
+             } else {
+                await fb.fsDeleteRecurring(id)
+             }
+          },
+          addFriend: async (email) => {
+             await sendFriendRequest(email)
+          },
+          respondFriend: async (id, accept) => {
+             await respondFriendRequest(id, accept)
+          }
         }
       }),
-    [mode, friends, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction],
+    [mode, friends, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction, commitDemo, sendFriendRequest, respondFriendRequest],
   )
 
   const value: FinanceContextValue = {

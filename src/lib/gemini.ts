@@ -160,6 +160,9 @@ export type ToolName =
   | 'expandirParcelamentos'
   | 'atualizarContaPrevista'
   | 'obterRelatorioEProjecaoMensal'
+  | 'gerenciarCartoes'
+  | 'gerenciarContasRecorrentes'
+  | 'gerenciarAmizades'
 
 export interface ToolResult {
   response: Record<string, unknown>
@@ -354,6 +357,51 @@ export const functionDeclarations: FunctionDeclaration[] = [
       'Retorna os totais atualizados do mês do usuário: Saldo Livre Real, Limite Diário Seguro, dias restantes, gastos por categoria, contas pendentes/estimadas, reservas e valores a receber de terceiros/parceiro(a).',
     parameters: { type: Type.OBJECT, properties: {} },
   },
+  {
+    name: 'gerenciarCartoes',
+    description: 'Adiciona, edita, exclui ou lista os cartões de crédito do usuário.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        acao: { type: Type.STRING, enum: ['listar', 'adicionar', 'editar', 'excluir'] },
+        id: { type: Type.STRING, description: 'ID do cartão para edição/exclusão.' },
+        nome: { type: Type.STRING, description: 'Nome do novo cartão ou novo nome na edição.' },
+        fechamento: { type: Type.NUMBER, description: 'Dia de fechamento do cartão.' },
+        vencimento: { type: Type.NUMBER, description: 'Dia de vencimento da fatura do cartão.' },
+      },
+      required: ['acao'],
+    },
+  },
+  {
+    name: 'gerenciarContasRecorrentes',
+    description: 'Adiciona, pausa, ativa ou lista contas recorrentes (assinaturas e despesas fixas) do usuário.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        acao: { type: Type.STRING, enum: ['listar', 'adicionar', 'pausar', 'ativar', 'excluir'] },
+        id: { type: Type.STRING, description: 'ID da conta recorrente.' },
+        descricao: { type: Type.STRING, description: 'Nome da assinatura/conta (ex: "Netflix").' },
+        valor: { type: Type.NUMBER, description: 'Valor base da assinatura.' },
+        diaVencimento: { type: Type.NUMBER, description: 'Dia de vencimento.' },
+        categoria: { type: Type.STRING, enum: [...CATEGORIES] },
+        mesesLimite: { type: Type.NUMBER, description: 'Se for um plano temporário, quantos meses vai durar.' },
+      },
+      required: ['acao'],
+    },
+  },
+  {
+    name: 'gerenciarAmizades',
+    description: 'Lista amigos ou envia pedidos de amizade na plataforma (via e-mail).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        acao: { type: Type.STRING, enum: ['listar', 'adicionar', 'aceitar', 'recusar', 'excluir'] },
+        email: { type: Type.STRING, description: 'Email do amigo para enviar solicitação de amizade.' },
+        id: { type: Type.STRING, description: 'ID do pedido de amizade ou amigo.' },
+      },
+      required: ['acao'],
+    },
+  },
 ]
 
 export function buildSystemInstruction(ctx: {
@@ -424,10 +472,11 @@ REGRAS DE FUNCIONAMENTO:
 - Se o usuário pedir para excluir despesas duplicadas ou incorretas:
   Chame "excluirTransacoes" com termoBusca, mes ou apenasRecentes!
 
-7. RESPOSTAS DIRETAS, CIRÚRGICAS E SEM PROJEÇÕES NÃO SOLICITADAS:
-- Seja ultra-útil, inteligente e direto ao ponto. Aprenda com as preferências do usuário.
-- Confirme a operação realizada e o novo Saldo Livre do mês em questão.
-- NÃO adicione parágrafos de projeção do futuro ao final das respostas (ex: "Para os próximos meses...", "Sua projeção futura é..."). Responda estritamente ao que foi pedido! Projeções só devem ser apresentadas se o usuário fizer uma pergunta explícita sobre o futuro ou pedir um planejamento/relatório.`
+7. POSTURA DE CONSULTOR FINANCEIRO E ANÁLISE PROATIVA:
+- Você é a coisa mais inteligente possível. Além de executar as ações que o usuário pedir (como registrar ou excluir transações), observe ativamente o saldo livre e os dados que o relatório lhe retorna.
+- Se você perceber que o limite diário está negativo, que as despesas são maiores que as receitas, ou que o usuário vai estourar o orçamento do mês, AJA como um consultor financeiro. Avise o usuário e DÊ DICAS personalizadas (ex: onde ele pode cortar gastos com base nas categorias mais caras cadastradas).
+- Se o usuário pedir planejamento, projeções para meses futuros ou conselhos financeiros de investimentos, não hesite em dar análises aprofundadas e gerar o relatório do mês seguinte para avaliá-lo.
+- Não gere previsões gigantes ao final de cada mensagem simples de lançamento de transação (seja sucinto e direto na confirmação da ação). Mas, se a situação exigir um alerta crítico ou se o usuário PERGUNTAR algo, faça análises e traga planos de redução de custo com tom acolhedor e estratégico.`
 }
 
 
