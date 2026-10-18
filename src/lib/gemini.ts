@@ -7,17 +7,18 @@ import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } 
 import type { ActionCardData, ChatMessage, ChatAttachment } from '@/types'
 import { CATEGORIES } from '@/types'
 
-export const GEMINI_MODEL = 'gemini-3.5-flash-lite'
+export const GEMINI_MODEL = 'gemini-3-flash'
 export const GEMINI_MODELS = [
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (Padrão — Maior cota RPD e ultrarrápido)' },
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+  { id: 'gemini-3-flash', label: 'Gemini 3 Flash (Padrão — Melhor Custo-Benefício)' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (O Mais Inteligente — Limites rígidos)' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (Mais Rápido / Alta Disponibilidade)' },
+  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite (Leve)' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Alternativa Estável)' },
 ] as const
 
 const LS_KEY = 'saldo-livre:gemini-api-key'
 const LS_MODEL_KEY = 'saldo-livre:gemini-model'
-const LS_MIGRATION_KEY = 'saldo-livre:model-migrated-v3.5-lite'
+const LS_MIGRATION_KEY = 'saldo-livre:model-migrated-v3-flash'
 
 export const envGeminiKey = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) || null
 export const envGeminiModel = (import.meta.env.VITE_GEMINI_MODEL as string | undefined) || null
@@ -32,7 +33,7 @@ export function setGeminiApiKey(key: string | null) {
 }
 
 export function getSelectedGeminiModel(): string {
-  // Migra automaticamente para o Gemini 3.5 Flash-Lite garantindo maior cota diária (RPD)
+  // Migra automaticamente para o Gemini 3 Flash garantindo melhor balanço entre performance e cota (RPD)
   const migrated = localStorage.getItem(LS_MIGRATION_KEY)
   if (!migrated) {
     localStorage.setItem(LS_MIGRATION_KEY, 'true')
@@ -41,7 +42,8 @@ export function getSelectedGeminiModel(): string {
   }
 
   const saved = localStorage.getItem(LS_MODEL_KEY)
-  if (!saved || saved === 'gemini-2.0-flash') {
+  // Limpa modelos fictícios ou depreciados do local storage
+  if (!saved || saved === 'gemini-2.0-flash' || saved === 'gemini-3.8-flash' || saved === 'gemini-1.5-flash') {
     return envGeminiModel || GEMINI_MODEL
   }
   return saved
@@ -106,10 +108,11 @@ export async function testGeminiConnection(
   const ai = new GoogleGenAI({ apiKey: trimmed })
   const candidates = [
     model,
-    'gemini-3.5-flash-lite',
-    'gemini-3.8-flash',
+    'gemini-3-flash',
+    'gemini-2.5-pro',
     'gemini-2.5-flash',
-    'gemini-1.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
   ].filter((m, idx, arr) => arr.indexOf(m) === idx)
 
   let lastErr: unknown = null
@@ -615,15 +618,17 @@ REGRAS DE FUNCIONAMENTO:
 - Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas:
   Chame "consultarTransacoes" para obter a lista exata!
 
-7. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO:
-- NUNCA invente, deduza ou presuma números, lançamentos, compras, dívidas, faturas ou saldos que não constem nos dados reais informados acima ou que não sejam retornados pelas ferramentas.
+7. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO (GUARDRAILS COMPORTAMENTAIS):
+- NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais informados acima.
+- SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores prováveis ou inventados. O fluxo deve parar e aguardar a resposta dele.
+- CITE OS IDs DE REFERÊNCIA, categorias e números de comprovantes (se houver) sempre que confirmar a preparação de uma tarefa de CRUD/Lançamento.
+- APLIQUE RIGOROSAMENTE a formatação da moeda corrente nas respostas visuais (ex: R$ 45,00 em vez de 45 ou $45).
+- NÃO faça cálculos matemáticos soltos por conta própria para dar saldos. Você deve sempre consultar os dados fornecidos no CONTEXTO ATUAL acima (soma no backend) ou chamar "obterRelatorioEProjecaoMensal".
 - NUNCA afirme que o usuário comprou algo ou gastou determinado valor a menos que conste nos LANÇAMENTOS REAIS acima ou seja retornado pela ferramenta "consultarTransacoes".
 - Se o usuário perguntar algo sobre seu extrato, compras passadas ou se um pagamento foi feito, consulte os LANÇAMENTOS REAIS acima ou chame "consultarTransacoes". Se não encontrar, diga com sinceridade e exatidão: "Não encontrei nenhum lançamento de [X] registrado no mês de ${ctx.monthLabel}."
 - Seja extremamente DIRETO, OBJETIVO e SUCINTO. Elimine rodeios, introduções prolixas, encerramentos repetitivos e sermões não solicitados.
 - Ao registrar, editar ou excluir despesas, confirme a operação em NO MÁXIMO 2 a 3 linhas objetivas.
-- NÃO dê sermões ou lições financeiras a menos que o usuário explicitamente peça conselhos ("Como posso economizar?", "Analise meu mês", "Quanto posso gastar?").
-- NUNCA responda repetindo a pergunta do usuário ou inventando historinhas fictícias.
-- Use SEMPRE os valores exatos em Reais (R$). Seus números de Saldo Livre e Limite Diário devem ser SEMPRE os valores exatos informados nos DADOS FINANCEIROS REAIS acima.
+- NÃO dê sermões ou lições financeiras a menos que o usuário explicitamente peça conselhos.
 
 8. IMPORTAÇÃO DE FATURAS E EXTRATOS BANCÁRIOS EM PDF (ONBOARDING & GASTOS ANTERIORES):
 - Se o usuário anexar um arquivo PDF (fatura de cartão ou extrato de conta bancária) ou colar dados de lançamentos:
@@ -662,16 +667,15 @@ REGRAS DE FUNCIONAMENTO:
   - Explique que o Saldo Livre conta com suporte a conexão Open Finance (Pluggy.ai sob regulamentação do Banco Central).
   - Oriente o usuário a clicar no botão "🏦 Open Finance" no topo do app para conectar contas do Nubank, Itaú, Inter, Bradesco e sincronizar extratos de forma 100% automática e contínua sem depender de arquivos PDF manuais.
 
-10. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER EXECUÇÃO NO SISTEMA:
-- Antes de efetivar alterações no banco de dados (criar despesas/receitas, importar faturas/extratos em lote, excluir gastos, editar transações, atualizar contas previstas ou gerenciar cartões), as ferramentas SEMPRE retornam "aguardandoConfirmacao: true" junto com um cartão interativo de confirmação.
+10. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER EXECUÇÃO NO SISTEMA (HUMAN-IN-THE-LOOP):
+- NUNCA assuma que você executa as ações no banco diretamente. Antes de efetivar alterações no banco de dados, o backend (Firestore) é bloqueado e as ferramentas SEMPRE retornam "aguardandoConfirmacao: true" em um estado de DRAFT (rascunho).
 - QUANDO A FERRAMENTA RETORNAR "aguardandoConfirmacao: true":
-  * O seu papel é demonstrar com total clareza e acolhimento que você ENTENDEU a solicitação do usuário.
-  * Resuma o que você entendeu de forma direta e acolhedora:
+  * O seu papel é apenas preparar a ação e exibi-la para o usuário.
+  * Demonstre com total clareza que você ENTENDEU a solicitação e cite os parâmetros montados.
+  * Resuma o que você entendeu de forma direta:
     - Exemplo de despesa: "Entendi que você deseja registrar uma despesa de **R$ 45,00** na **Padaria** no débito para o mês de **Outubro 2026**."
-    - Exemplo de exclusão: "Entendi que você deseja excluir o lançamento **Supermercado Pão de Açúcar** no valor de **R$ 342,80**."
-    - Exemplo de lote/PDF: "Entendi que você deseja importar **12 lançamentos** da fatura (totalizando **R$ 2.450,00**) para vencer em **Novembro 2026**."
-  * Convide o usuário a revisar os detalhes no cartão abaixo e confirmar clicando no botão **🟢 Confirmar e Executar** ou respondendo **'Sim' / 'Pode lançar'** no chat.
-  * NUNCA afirme que a ação já foi salva ou gravada! Diga que ela está preparada e aguardando a confirmação dele para ser executada.
+  * Convide o usuário a revisar os detalhes no cartão visual e confirmar clicando no botão **🟢 Confirmar e Executar** (a execução real no banco ocorrerá apenas após esse clique explícito do usuário).
+  * NUNCA afirme que a ação já foi salva ou gravada! Diga sempre que a transação foi "preparada/criada em modo rascunho" e está "aguardando a aprovação e confirmação explícita".
 
 EXEMPLOS PRÁTICOS E PADRÕES BANCÁRIOS BRASIL (FEW-SHOT):
 
@@ -834,11 +838,14 @@ async function callGeminiWithResilience(params: {
   const { ai, contents, systemInstruction, tools, onModelChanged } = params
   let currentModel = params.model
 
+  // Cascata de Fallback Inteligente: do melhor custo/benefício/raciocínio para a maior velocidade/disponibilidade.
+  // 1º tenta o modelo solicitado. Se falhar, tenta Pro (se ainda houver cota), senão cai para os Flash/Lite.
   const fallbackPool = [
-    'gemini-3.5-flash-lite',
-    'gemini-3.8-flash',
+    'gemini-3-flash',
+    'gemini-2.5-pro',
     'gemini-2.5-flash',
-    'gemini-1.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
   ]
 
   const modelsToTry = [
@@ -915,6 +922,17 @@ export async function runGeminiAgent(opts: {
   const contents: Content[] = buildChatContents(opts.history, opts.userMessage, opts.attachment)
   const actions: ActionCardData[] = []
   let activeModel = opts.model || getSelectedGeminiModel() || GEMINI_MODEL
+
+  // Implementação Padrão Router (Roteamento Dinâmico de Modelos)
+  // Encaminha análises de DRE, auditorias complexas e diagnósticos de conciliação para o Gemini 2.5 Pro (quando configurado via Router).
+  const analysisRegex = /(analis(?:e|ar)|relat(?:ório|orios)|auditori|diagn[óo]stico|dre|balan[çc]o|resumo detalhado|compara[çc][ãa]o)/i
+  if (analysisRegex.test(opts.userMessage)) {
+    // Força uso temporário do modelo mais inteligente para essa requisição complexa
+    activeModel = 'gemini-2.5-pro'
+  } else if (!opts.model && activeModel === 'gemini-2.5-pro') {
+     // Se não pediu modelo e for normal CRUD, forçamos o flash para economizar as cotas do PRO.
+     activeModel = 'gemini-3-flash'
+  }
 
   for (let step = 0; step < 6; step++) {
     let res: any
