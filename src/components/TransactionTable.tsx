@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useFinance } from '@/store/FinanceContext'
 import {
   CATEGORIES,
+  CATEGORY_GROUPS,
   type Category,
   type SplitType,
   type Transaction,
@@ -108,8 +109,9 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         const q = search.toLowerCase()
         const matchesDesc = tx.description.toLowerCase().includes(q)
         const matchesCat = tx.category.toLowerCase().includes(q)
+        const matchesSubcat = tx.subcategory?.toLowerCase().includes(q)
         const matchesAlloc = tx.allocations.some((a) => a.name.toLowerCase().includes(q))
-        if (!matchesDesc && !matchesCat && !matchesAlloc) return false
+        if (!matchesDesc && !matchesCat && !matchesSubcat && !matchesAlloc) return false
       }
 
       return true
@@ -691,23 +693,35 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                       )}
                     </td>
 
-                    {/* 4. Category (Inline Select) */}
+                    {/* 4. Category & Subcategory */}
                     <td className="py-2 px-3 align-middle">
-                      <Select
-                        value={tx.category}
-                        onValueChange={(cat) => updateTransaction(tx.id, { category: cat as Category })}
-                      >
-                        <SelectTrigger size="inline" className="text-slate-300">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CATEGORIES.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c === 'Estorno' ? '🔄 Estorno (Crédito Cartão)' : c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="flex flex-col gap-0.5">
+                        <Select
+                          value={tx.category}
+                          onValueChange={(cat) =>
+                            updateTransaction(tx.id, {
+                              category: cat as Category,
+                              subcategory: CATEGORY_GROUPS[cat as Category]?.subcategories?.[0] || null,
+                            })
+                          }
+                        >
+                          <SelectTrigger size="inline" className="text-slate-300">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CATEGORIES.map((c) => (
+                              <SelectItem key={c} value={c}>
+                                {c === 'Estorno' ? '🔄 Estorno (Crédito Cartão)' : c}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {tx.subcategory && (
+                          <span className="text-[10px] text-emerald-400/90 font-medium px-1 truncate max-w-[130px]" title={tx.subcategory}>
+                            › {tx.subcategory}
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* 5. Division / Payer (Inline Select) */}
@@ -715,7 +729,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                       {tx.type === 'income' ? (
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <Badge variant="outline" className="text-[10px] py-0.5 px-2 bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
-                            💰 Receita Pessoal
+                            💰 {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita Pessoal'}
                           </Badge>
                           {thirdParty && (
                             <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 bg-sky-500/15 text-sky-300 border-sky-500/35 font-medium">

@@ -94,6 +94,7 @@ function MainDashboard() {
     <div className="flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden">
       {/* 1. Header (Sticky & Native Safe-Top Padded) */}
       <Header
+        onOpenNewTx={handleOpenNewTx}
         onOpenCards={() => setCardsModalOpen(true)}
         onOpenRecurring={() => setRecurringModalOpen(true)}
         onOpenApiKey={() => setApiKeyModalOpen(true)}
@@ -282,7 +283,6 @@ function MainDashboard() {
       <MobileBottomNav
         currentTab={mobileTab}
         onSelectTab={handleSelectMobileTab}
-        onOpenNewTx={handleOpenNewTx}
         unreadAlertsCount={totalPendingNotifications}
         txCount={monthTransactions.length}
       />

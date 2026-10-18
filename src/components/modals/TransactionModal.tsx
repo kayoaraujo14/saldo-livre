@@ -5,8 +5,8 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useFinance } from '@/store/FinanceContext'
-import { CATEGORIES, type Allocation, type Category, type PaymentMethod, type SplitType, type Transaction, type TransactionStatus } from '@/types'
-import { clampPct, effectiveAmount, friendPctOf } from '@/lib/finance'
+import { CATEGORIES, CATEGORY_GROUPS, type Allocation, type Category, type PaymentMethod, type SplitType, type Transaction, type TransactionStatus } from '@/types'
+import { clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory } from '@/lib/finance'
 import { todayKey, formatBRL, stripInstallmentSuffix, round2 } from '@/lib/utils'
 import {
   CreditCard,
@@ -67,6 +67,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState<Category>('Alimentação')
+  const [subcategory, setSubcategory] = useState<string>('Supermercado')
   const [date, setDate] = useState(todayKey())
   const [type, setType] = useState<'expense' | 'income'>('expense')
   const [status, setStatus] = useState<TransactionStatus>('pending')
@@ -117,6 +118,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
       setDescription(isGrp ? stripInstallmentSuffix(editingTx.description) : editingTx.description)
       setAmount(String(Math.abs(effectiveAmount(editingTx))))
       setCategory(editingTx.category)
+      setSubcategory(editingTx.subcategory || CATEGORY_GROUPS[editingTx.category]?.subcategories?.[0] || '')
       setDate(editingTx.dueDate)
       setType(editingTx.type)
       setStatus(editingTx.status)
@@ -175,6 +177,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
       setDescription('')
       setAmount('')
       setCategory('Alimentação')
+      setSubcategory('Supermercado')
       setDate(todayKey())
       setType('expense')
       setStatus('pending')
@@ -477,6 +480,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             description: description.trim(),
             amount: numericAmount,
             category,
+            subcategory: subcategory || null,
             date,
             status,
             paymentMethod,
@@ -493,6 +497,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
           await updateTransaction(editingTx.id, {
             description: description.trim(),
             category,
+            subcategory: subcategory || null,
             dueDate: date,
             paymentMethod,
             cardId: paymentMethod === 'credit_card' ? (cardId || null) : null,
@@ -517,6 +522,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
           description: description.trim(),
           amount: numericAmount,
           category,
+          subcategory: subcategory || null,
           date,
           type,
           status,
@@ -720,7 +726,18 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
               </label>
               <Input
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value
+                  setDescription(val)
+                  if (!editingTx && val.trim().length >= 3) {
+                    const guess = guessCategoryAndSubcategory(val)
+                    if (type === 'expense') {
+                      setCategory(guess.category)
+                      const subs = CATEGORY_GROUPS[guess.category]?.subcategories || []
+                      setSubcategory(guess.subcategory || subs[0] || '')
+                    }
+                  }
+                }}
                 placeholder={isIncomeType ? 'Ex: Salário, Rendimentos, Pix de Amigo...' : 'Ex: Supermercado, Aluguel, Amazon Prime, Uber...'}
                 className="h-10 text-xs sm:text-sm bg-slate-900/90 border-slate-700/80 rounded-xl focus-visible:ring-emerald-500/30"
                 required
@@ -742,37 +759,87 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
               />
             </div>
 
-            {/* Categoria ou Método de Entrada */}
+            {/* Categoria / Subcategoria de Receita e Forma de Recebimento */}
             {isIncomeType ? (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Forma de Recebimento</label>
-                <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
-                  <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pix">⚡ Pix</SelectItem>
-                    <SelectItem value="debit">🏦 Conta Corrente / TED</SelectItem>
-                    <SelectItem value="bill">📄 Boleto / Outro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Tipo de Receita</label>
+                  <Select
+                    value={subcategory || 'Salário Principal'}
+                    onValueChange={(v) => setSubcategory(v)}
+                  >
+                    <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CATEGORY_GROUPS.Receita.subcategories.map((sub) => (
+                        <SelectItem key={sub} value={sub}>
+                          {sub}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Forma de Recebimento</label>
+                  <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
+                    <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pix">⚡ Pix</SelectItem>
+                      <SelectItem value="debit">🏦 Conta Corrente / TED</SelectItem>
+                      <SelectItem value="bill">📄 Boleto / Outro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
             ) : (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Categoria</label>
-                <Select value={category} onValueChange={(v) => setCategory(v as Category)}>
-                  <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CATEGORIES.filter((c) => c !== 'Receita').map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c === 'Estorno' ? '🔄 Estorno / Crédito na Fatura' : c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Categoria Principal</label>
+                  <Select
+                    value={category}
+                    onValueChange={(v) => {
+                      const newCat = v as Category
+                      setCategory(newCat)
+                      const subs = CATEGORY_GROUPS[newCat]?.subcategories || []
+                      setSubcategory(subs[0] || '')
+                    }}
+                  >
+                    <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CATEGORIES.filter((c) => c !== 'Receita').map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c === 'Estorno' ? '🔄 Estorno / Crédito na Fatura' : c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Subcategoria</label>
+                  <Select
+                    value={subcategory || (CATEGORY_GROUPS[category]?.subcategories?.[0] ?? '')}
+                    onValueChange={(v) => setSubcategory(v)}
+                  >
+                    <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                      <SelectValue placeholder="Selecione um subgrupo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(CATEGORY_GROUPS[category]?.subcategories || []).map((sub) => (
+                        <SelectItem key={sub} value={sub}>
+                          {sub}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
             )}
 
             {/* Status (Se despesa) */}

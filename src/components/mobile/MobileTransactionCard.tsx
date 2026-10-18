@@ -100,11 +100,16 @@ export function MobileTransactionCard({
             </Badge>
           ) : isIncome ? (
             <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-[10px] font-bold px-2 py-0.5">
-              <ArrowDownLeft className="size-2.5 mr-1" /> Receita
+              <ArrowDownLeft className="size-2.5 mr-1" /> {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita'}
             </Badge>
           ) : (
-            <span className="text-[11px] font-medium text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60">
-              {tx.category}
+            <span className="text-[11px] font-medium text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60 inline-flex items-center gap-1">
+              <span>{tx.category}</span>
+              {tx.subcategory && (
+                <span className="text-emerald-400 font-normal">
+                  › {tx.subcategory}
+                </span>
+              )}
             </span>
           )}
 

@@ -187,6 +187,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
         descricao: { type: Type.STRING, description: 'Descrição da despesa ou receita. Ex: "Decolar", "Amazon", "Uber".' },
         valorTotal: { type: Type.NUMBER, description: 'Valor da compra em reais (aceita valores negativos para estornos/reembolsos na fatura).' },
         categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria da despesa. Use "Cartão Terceiros" para terceiros sem conta.' },
+        subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Aluguel & Condomínio", "Energia Elétrica", etc.).' },
         metodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Padrão: credit_card.' },
         status: {
           type: Type.STRING,
@@ -295,6 +296,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
                   '"paid" para extrato de conta corrente (já liquidado na conta); "pending" para compras no cartão na fatura a vencer.',
               },
               categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria. Para entradas e salários use "Receita".' },
+              subcategoria: { type: Type.STRING, description: 'Subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Energia Elétrica", etc.).' },
               contraparte: { type: Type.STRING, description: 'Nome limpo do recebedor, pagador ou estabelecimento (ex: "Brisanet Telecom", "João da Silva", "Empresa XPTO").' },
               categoria_filtro: {
                 type: Type.STRING,
@@ -352,6 +354,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
         novoValor: { type: Type.NUMBER, description: 'Novo valor corrigido da compra.' },
         novaDescricao: { type: Type.STRING, description: 'Nova descrição.' },
         novaCategoria: { type: Type.STRING, enum: [...CATEGORIES] },
+        novaSubcategoria: { type: Type.STRING, description: 'Nova subcategoria específica.' },
         novoTipo: { type: Type.STRING, enum: ['expense', 'income'], description: 'Altera o tipo da transação para receita ("income") ou despesa ("expense").' },
         novoMetodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Altera o método de pagamento (ex: para "pix", "debit" ou "credit_card").' },
         novoStatus: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'] },
@@ -388,7 +391,8 @@ export const functionDeclarations: FunctionDeclaration[] = [
       type: Type.OBJECT,
       properties: {
         termoBusca: { type: Type.STRING, description: 'Termo de busca na descrição (ex: "Uber", "Mercado", "iFood").' },
-        categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Filtra por categoria.' },
+        categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Filtra por categoria ou grupo principal.' },
+        subcategoria: { type: Type.STRING, description: 'Filtra por subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", etc.).' },
         mes: { type: Type.STRING, description: 'Mês de competência (YYYY-MM). Padrão: mês atual.' },
         status: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'], description: 'Filtra por status.' },
         limite: { type: Type.NUMBER, description: 'Quantidade máxima de resultados (padrão: 15).' },
@@ -520,6 +524,7 @@ export function buildSystemInstruction(ctx: {
     daysRemaining: number
     receivableTotal: number
     byCategory: Array<{ category: string; amount: number }>
+    bySubcategory?: Array<{ category: string; subcategory: string; amount: number; count: number }>
   } | null
   recentTransactions?: Array<{
     id?: string
@@ -527,6 +532,7 @@ export function buildSystemInstruction(ctx: {
     description: string
     amount: number
     category: string
+    subcategory?: string | null
     status: string
     split?: string
   }>
@@ -552,13 +558,14 @@ export function buildSystemInstruction(ctx: {
 - Total Comprometido: R$ ${ctx.summary.committed.toFixed(2)} (Já Pago: R$ ${ctx.summary.paid.toFixed(2)}, A Pagar/Pendente: R$ ${(ctx.summary.committed - ctx.summary.paid).toFixed(2)})
 - Valores a Receber: R$ ${ctx.summary.receivableTotal.toFixed(2)}
 - Gastos por Categoria neste mês:
-  ${ctx.summary.byCategory.length > 0 ? ctx.summary.byCategory.map((c) => `* ${c.category}: R$ ${c.amount.toFixed(2)}`).join('\n  ') : '* Nenhuma despesa computada ainda'}`
+  ${ctx.summary.byCategory.length > 0 ? ctx.summary.byCategory.map((c) => `* ${c.category}: R$ ${c.amount.toFixed(2)}`).join('\n  ') : '* Nenhuma despesa computada ainda'}
+${ctx.summary.bySubcategory && ctx.summary.bySubcategory.length > 0 ? `- Gastos Detalhados por Subgrupo/Subcategoria:\n  ${ctx.summary.bySubcategory.map((s) => `* ${s.category} › ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count} item${s.count > 1 ? 's' : ''})`).join('\n  ')}` : ''}`
     : `DADOS FINANCEIROS: Mês ${ctx.monthLabel} (${ctx.monthKey})`
 
   const recentTxsDesc =
     ctx.recentTransactions && ctx.recentTransactions.length > 0
       ? `LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS (${ctx.recentTransactions.length} itens):
-${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.category} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
+${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.subcategory ? `${t.category} › ${t.subcategory}` : t.category} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
       : 'LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento.'
 
   const validPending = (ctx.pendingTransactions || []).filter((t) => t.categoria_filtro === 'valida')
@@ -622,7 +629,22 @@ REGRAS DE FUNCIONAMENTO:
 3. ESTORNOS E REEMBOLSOS (VALORES NEGATIVOS):
 - Se o gasto for negativo (ex: "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"), defina obrigatoriamente categoria = "Estorno" e envie o valor negativo (ex: -8.40). Trata-se de estorno/crédito na fatura que alivia o Saldo Livre.
 
-4. COMPRAS PARCELADAS:
+4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
+- O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:
+  * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
+  * Moradia: Aluguel, Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV, Manutenção & Reformas, Móveis & Utensílios.
+  * Transporte: Combustível, Aplicativos (Uber/99), Transporte Público, Financiamento Veicular, Seguro Auto, IPVA & Licenciamento, Manutenção & Mecânica, Estacionamento & Pedágio.
+  * Saúde: Farmácia & Medicamentos, Consultas Médicas, Exames Laboratoriais, Plano de Saúde, Odontologia, Terapia & Psicologia.
+  * Lazer: Streaming & Assinaturas, Viagens & Hospedagem, Cinema & Teatros, Passeios & Eventos, Games & Hobbies.
+  * Compras: Roupas & Calçados, Eletrônicos & Informática, Cuidados Pessoais & Cosméticos, Casa & Decoração, Livros & Papelaria.
+  * Educação: Mensalidade Escolar/Faculdade, Cursos & Treinamentos, Material Didático, Idiomas.
+  * Pets: Veterinário & Vacinas, Ração & Alimentação Pet, Pet Shop & Banho, Medicamentos Pet.
+  * Outros: Tributos & Taxas, Doações, Imprevistos, Outros.
+  * Receita: Salário Principal, Salário Parceiro(a), Renda Extra & Freelas, Rendimentos & Dividendos, Reembolsos, Pix Recebido, Outras Receitas.
+- Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)").
+- Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), chame "consultarTransacoes" com subcategoria ou utilize o relatório do mês, gerando respostas comparativas detalhadas com clareza.
+
+5. COMPRAS PARCELADAS:
 - Notações como "9/12", "2/6" ou "10/12" indicam compras parceladas. Preencha parcelaAtual e totalParcelas (ex: parcelaAtual: 9, totalParcelas: 12).
 - O sistema aloca AUTOMATICAMENTE toda a série de parcelas no banco de dados pelos meses correspondentes (passadas como pagas, atual e futuras como pendentes).
 - IMPORTANTE: Confirme a operação de forma simples e direta no mês atual. NÃO fique gerando previsões ou projeções detalhadas de meses futuros ao final da resposta a menos que o usuário peça especificamente.

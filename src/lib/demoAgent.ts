@@ -4,9 +4,9 @@
  * completo sem API key.
  */
 import type { ActionCardData, ChatAttachment, PendingBatchTransaction } from '@/types'
-import { CATEGORIES } from '@/types'
+import { CATEGORIES, CATEGORY_GROUPS } from '@/types'
 import type { ToolExecutor } from './gemini'
-import { guessCategory } from './finance'
+import { guessCategory, guessCategoryAndSubcategory } from './finance'
 import { dateInMonth, formatBRL, formatShortDate, monthLabel, normalize, round2, todayKey } from './utils'
 import { parseTransactionsFromText } from './pdfParser'
 
@@ -303,6 +303,12 @@ export async function runDemoAgent(
     if (d.aReceberTotal > 0) tips.push(`Você tem **${formatBRL(d.aReceberTotal)}** a receber. Cobrar isso aumenta seu caixa real (não muda o Saldo Livre, que já desconsidera esses valores).`)
     if (d.comprometidoEstimado > 0) tips.push(`Ainda há **${formatBRL(d.comprometidoEstimado)}** só em estimativas — quando as contas reais chegarem, atualize para refinar o saldo.`)
 
+    const subcats = (d.gastosPorSubcategoria as { category: string; subcategory: string; amount: number; count: number }[]) ?? []
+    const subcatRows = subcats
+      .slice(0, 10)
+      .map((s) => `| ${s.category} › ${s.subcategory} | ${formatBRL(s.amount)} | ${((s.amount / totalCat) * 100).toFixed(0)}% |`)
+      .join('\n')
+
     return {
       text: `### 📊 Relatório de ${d.mes}
 
@@ -314,12 +320,18 @@ export async function runDemoAgent(
 | **Saldo Livre Real** | **${formatBRL(d.saldoLivreReal)}** |
 | Limite diário seguro | ${d.limiteDiarioSeguro != null ? formatBRL(d.limiteDiarioSeguro) : '—'} |
 
-**Onde vai o seu dinheiro**
+**Onde vai o seu dinheiro (Categorias Principais)**
 
 | Categoria | Meu impacto | % |
 |---|---|---|
 ${rows || '| — | — | — |'}
 
+${subcats.length > 0 ? `**Detalhamento por Subgrupos Específicos**
+
+| Grupo › Subgrupo | Valor | % |
+|---|---|---|
+${subcatRows}
+` : ''}
 **💡 Onde economizar**
 ${tips.map((t) => `- ${t}`).join('\n') || '- Seu mês está equilibrado. Continue assim!'}`,
       actions,
@@ -411,20 +423,35 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
 
   // ---------------- Consulta de Transações / Gastos ----------------
   if (isQuestion || /consult|listar transac|pesquis|buscar|extrato|ultimas compras|ultimos lancamentos|historico de gastos|gastos com|gastei com|gastei no|gastei na/.test(n)) {
-    // Check if user is asking about a category
+    // Check if user is asking about a subcategory or category
     let matchedCategory: string | undefined
-    for (const cat of CATEGORIES) {
-      if (normalize(cat) === 'receita') continue
-      if (n.includes(normalize(cat))) {
-        matchedCategory = cat
-        break
+    let matchedSubcategory: string | undefined
+
+    for (const [catName, meta] of Object.entries(CATEGORY_GROUPS)) {
+      for (const sub of meta.subcategories) {
+        if (n.includes(normalize(sub))) {
+          matchedSubcategory = sub
+          matchedCategory = catName
+          break
+        }
+      }
+      if (matchedSubcategory) break
+    }
+
+    if (!matchedCategory) {
+      for (const cat of CATEGORIES) {
+        if (normalize(cat) === 'receita') continue
+        if (n.includes(normalize(cat))) {
+          matchedCategory = cat
+          break
+        }
       }
     }
 
     // Check if user is asking about a search term (e.g. "uber", "ifood", "mercado")
     let searchTerm: string | undefined
     const searchMatch = message.match(/\b(?:no|na|em|com|de)\s+([A-Za-zÀ-ÿ0-9]{3,20})\b/i)
-    if (searchMatch && !matchedCategory) {
+    if (searchMatch && !matchedCategory && !matchedSubcategory) {
       const term = searchMatch[1].trim()
       if (!/^(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|cartao|credito|debito|fatura|hoje|ontem)$/i.test(normalize(term))) {
         searchTerm = term
@@ -434,6 +461,7 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
     const r = await execute('consultarTransacoes', {
       termoBusca: searchTerm,
       categoria: matchedCategory,
+      subcategoria: matchedSubcategory,
       mes: monthKey,
     })
     if (r.action) actions.push(r.action)
@@ -442,14 +470,14 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
 
     if (items.length === 0) {
       return {
-        text: `🔍 Não encontrei nenhum lançamento ${matchedCategory ? `na categoria **${matchedCategory}**` : searchTerm ? `com o termo "**${searchTerm}**"` : ''} registrado em **${monthLabel(monthKey)}**.`,
+        text: `🔍 Não encontrei nenhum lançamento ${matchedSubcategory ? `no subgrupo **${matchedSubcategory}** (${matchedCategory})` : matchedCategory ? `na categoria **${matchedCategory}**` : searchTerm ? `com o termo "**${searchTerm}**"` : ''} registrado em **${monthLabel(monthKey)}**.`,
         actions,
       }
     }
 
     const total = d.somaTotal as number
     const meuImpacto = d.somaMeuImpacto as number
-    const listFormatted = items.slice(0, 8).map((t) => `• **${t.descricao}**: ${formatBRL(t.valorTotal)} (${t.dataVencimento || t.mesCompetencia})`).join('\n')
+    const listFormatted = items.slice(0, 8).map((t) => `• **${t.descricao}** ${t.subcategoria ? `(${t.categoria} › ${t.subcategoria})` : `(${t.categoria})`}: ${formatBRL(t.valorTotal)} (${t.dataVencimento || t.mesCompetencia})`).join('\n')
 
     return {
       text: `🔍 Encontrei **${d.totalEncontrados}** lançamento(s) em **${monthLabel(monthKey)}**:\n\n` +
@@ -479,10 +507,15 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
     const method = /cartao|credito/.test(n) ? 'credit_card' : /debito/.test(n) ? 'debit' : /boleto/.test(n) ? 'bill' : tipoDivisao === 'TERCEIRO' ? 'credit_card' : 'pix'
     const cardHint = /cartao (da|do) (parceir|namorad|esposa|marido)/.test(n) ? 'parceira' : undefined
     const descricao = income ? 'Receita extra' : extractDescription(message, n)
+    const guessed = guessCategoryAndSubcategory(n, amount || undefined)
+    const categoria = tipoDivisao === 'TERCEIRO' ? 'Cartão Terceiros' : guessed.category
+    const subcategoria = tipoDivisao === 'TERCEIRO' ? null : guessed.subcategory
+
     const r = await execute('registrarTransacao', {
       descricao,
       valorTotal: amount,
-      categoria: tipoDivisao === 'TERCEIRO' ? 'Cartão Terceiros' : guessCategory(n),
+      categoria,
+      subcategoria,
       metodoPagamento: method,
       status: /paguei|pago/.test(n) ? 'paid' : method === 'credit_card' ? 'pending' : 'paid',
       data: date ?? todayKey(),

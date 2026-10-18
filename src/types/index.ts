@@ -10,18 +10,192 @@ export type EstimationRule = 'fixed' | 'last_month' | 'avg_3_months'
 export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external' | 'custom'
 
 export const CATEGORIES = [
-  'Moradia',
   'Alimentação',
+  'Moradia',
   'Transporte',
   'Saúde',
   'Lazer',
   'Assinaturas',
+  'Educação',
+  'Compras',
+  'Pets',
   'Cartão Terceiros',
   'Estorno',
   'Receita',
   'Outros',
 ] as const
 export type Category = (typeof CATEGORIES)[number]
+
+export interface CategoryDetail {
+  icon: string
+  color: string
+  description: string
+  subcategories: readonly string[]
+}
+
+export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
+  Alimentação: {
+    icon: 'Utensils',
+    color: '#10b981',
+    description: 'Refeições, mantimentos e consumo alimentar',
+    subcategories: [
+      'Supermercado',
+      'Restaurante',
+      'Delivery & Lanches',
+      'Padaria & Café',
+      'Feira & Hortifruti',
+      'Açougue & Peixaria',
+      'Bares & Bebidas',
+    ],
+  },
+  Moradia: {
+    icon: 'Home',
+    color: '#06b6d4',
+    description: 'Despesas com residência e utilidades',
+    subcategories: [
+      'Aluguel & Condomínio',
+      'Energia Elétrica',
+      'Água & Saneamento',
+      'Gás',
+      'Internet & TV a Cabo',
+      'Manutenção & Reparos',
+      'Móveis & Eletrodomésticos',
+      'IPTU & Taxas',
+    ],
+  },
+  Transporte: {
+    icon: 'Car',
+    color: '#3b82f6',
+    description: 'Locomoção, veículos e mobilidade urbana',
+    subcategories: [
+      'Combustível',
+      'Aplicativos (Uber/99)',
+      'Transporte Público (Metrô/Ônibus)',
+      'Estacionamento & Pedágio',
+      'Manutenção & Revisão',
+      'Seguro & IPVA',
+      'Lavagem & Estética Automotiva',
+    ],
+  },
+  Saúde: {
+    icon: 'HeartPulse',
+    color: '#f43f5e',
+    description: 'Saúde física, mental e bem-estar',
+    subcategories: [
+      'Farmácia & Remédios',
+      'Consultas & Exames',
+      'Plano de Saúde & Dental',
+      'Academia & Treinos',
+      'Terapia & Psicologia',
+      'Cuidados Pessoais & Estética',
+    ],
+  },
+  Lazer: {
+    icon: 'Sparkles',
+    color: '#a855f7',
+    description: 'Entretenimento, passeios e viagens',
+    subcategories: [
+      'Cinema, Teatro & Shows',
+      'Viagens & Hospedagem',
+      'Passeios & Experiências',
+      'Jogos & Games',
+      'Festas, Baladas & Eventos',
+      'Hobbies & Atividades',
+    ],
+  },
+  Assinaturas: {
+    icon: 'RefreshCw',
+    color: '#8b5cf6',
+    description: 'Serviços recorrentes e digitais',
+    subcategories: [
+      'Streaming de Vídeo (Netflix/Max/Disney)',
+      'Streaming de Música (Spotify/Apple)',
+      'Softwares, IA & Cloud (iCloud/ChatGPT)',
+      'Telefonia Celular',
+      'Clubes & Assinaturas Recorrentes',
+    ],
+  },
+  Educação: {
+    icon: 'GraduationCap',
+    color: '#eab308',
+    description: 'Estudos, capacitação e desenvolvimento',
+    subcategories: [
+      'Cursos Online & Certificações',
+      'Faculdade & Pós-Graduação',
+      'Livros & E-books',
+      'Material Escolar & Papelaria',
+      'Idiomas',
+    ],
+  },
+  Compras: {
+    icon: 'ShoppingBag',
+    color: '#ec4899',
+    description: 'Bens de consumo pessoal e vestuário',
+    subcategories: [
+      'Roupas & Acessórios',
+      'Calçados',
+      'Eletrônicos & Informática',
+      'Casa & Decoração',
+      'Presentes',
+    ],
+  },
+  Pets: {
+    icon: 'Dog',
+    color: '#f97316',
+    description: 'Despesas com animais de estimação',
+    subcategories: [
+      'Ração & Petiscos',
+      'Veterinário & Medicamentos',
+      'Banho, Tosa & Cuidados',
+      'Acessórios & Brinquedos',
+    ],
+  },
+  Receita: {
+    icon: 'TrendingUp',
+    color: '#22c55e',
+    description: 'Entradas, salários e rendimentos',
+    subcategories: [
+      'Salário Principal',
+      'Adiantamento / 13º Salário',
+      'Freelance & Prestação de Serviços',
+      'Rendimentos & Investimentos',
+      'Reembolsos & Devoluções',
+      'Pix Recebido',
+      'Outras Receitas',
+    ],
+  },
+  'Cartão Terceiros': {
+    icon: 'Users',
+    color: '#6366f1',
+    description: 'Compras passadas para terceiros no cartão',
+    subcategories: [
+      'Compras de Amigos',
+      'Compras de Familiares',
+      'Outros Terceiros',
+    ],
+  },
+  Estorno: {
+    icon: 'RotateCcw',
+    color: '#14b8a6',
+    description: 'Créditos, cancelamentos e cashback na fatura',
+    subcategories: [
+      'Crédito na Fatura',
+      'Devolução / Cancelamento',
+      'Cashback Recebido',
+    ],
+  },
+  Outros: {
+    icon: 'Tag',
+    color: '#64748b',
+    description: 'Despesas diversas não classificadas',
+    subcategories: [
+      'Tarifas Bancárias & Juros',
+      'Impostos & Taxas Governamentais',
+      'Doações & Caridade',
+      'Diversos',
+    ],
+  },
+}
 
 /** Coleção `users` */
 export interface UserProfile {
@@ -72,6 +246,7 @@ export interface RecurringBill {
   ownerUid: string
   description: string
   category: Category
+  subcategory?: string | null
   dueDay: number
   defaultAmount: number
   estimationRule: EstimationRule
@@ -103,6 +278,7 @@ export interface Transaction {
   cardId?: string | null
   description: string
   category: Category
+  subcategory?: string | null
   type: TransactionType
   paymentMethod: PaymentMethod
   status: TransactionStatus
@@ -144,6 +320,7 @@ export interface InstallmentGroupUpdateInput {
   description: string
   amount?: number
   category?: Category
+  subcategory?: string | null
   paymentMethod?: PaymentMethod
   cardId?: string | null
   splitType?: SplitType
@@ -193,6 +370,7 @@ export interface MonthSummary {
   receivableFromFriends: number
   payableToOthers: number
   byCategory: { category: string; amount: number }[]
+  bySubcategory?: { category: string; subcategory: string; amount: number; count: number }[]
 }
 
 export interface FutureMonthProjection {
@@ -239,6 +417,7 @@ export interface PendingBatchTransaction {
   contraparte: string
   categoria_filtro: 'valida' | 'ignorada'
   categoria?: string
+  subcategoria?: string
   metodoPagamento?: 'pix' | 'credit_card' | 'debit' | 'bill'
   motivoIgnorado?: string
 }

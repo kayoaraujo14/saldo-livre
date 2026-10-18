@@ -132,6 +132,7 @@ export interface ManualTransactionInput {
   description: string
   amount: number
   category: Transaction['category']
+  subcategory?: string | null
   date: string
   type: Transaction['type']
   status: TransactionStatus
@@ -802,6 +803,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         const patch: Partial<Transaction> = {
           description: newDesc,
           category: input.category ?? t.category,
+          subcategory: input.subcategory !== undefined ? input.subcategory : (t.subcategory ?? null),
           paymentMethod: input.paymentMethod ?? t.paymentMethod,
           cardId: input.paymentMethod === 'credit_card' ? (input.cardId ?? null) : null,
           status: input.status ?? t.status,
@@ -1018,6 +1020,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           cardId: input.paymentMethod === 'credit_card' ? (card?.id ?? null) : null,
           description: curDesc,
           category: input.type === 'income' ? 'Receita' : input.category,
+          subcategory: input.subcategory || null,
           type: input.type,
           paymentMethod: input.paymentMethod,
           status: input.status,

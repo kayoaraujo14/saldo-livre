@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  Plus,
   Zap,
   CreditCard,
   RefreshCw,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react'
 
 interface HeaderProps {
+  onOpenNewTx: () => void
   onOpenCards: () => void
   onOpenRecurring: () => void
   onOpenApiKey: () => void
@@ -39,6 +41,7 @@ interface HeaderProps {
 }
 
 export function Header({
+  onOpenNewTx,
   onOpenCards,
   onOpenRecurring,
   onOpenApiKey,
@@ -154,8 +157,17 @@ export function Header({
 
           {/* 2. Right: Action Buttons & Menus */}
           <div className="flex items-center gap-2">
-
-
+            {/* Botão de Adicionar Lançamento (Exclusivo no Cabeçalho - Entrada ou Despesa) */}
+            <Button
+              size="sm"
+              onClick={onOpenNewTx}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-2.5 sm:px-3.5 gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer flex items-center rounded-xl transition-all active:scale-95"
+              title="Adicionar lançamento (entrada ou despesa)"
+            >
+              <Plus className="size-3.5 stroke-[2.5]" />
+              <span className="hidden xs:inline">Novo Lançamento</span>
+              <span className="xs:hidden">Lançamento</span>
+            </Button>
 
             {/* Friends Button (Desktop: visible with badge; Mobile: accessible via Menu & top alert banner) */}
             <Button

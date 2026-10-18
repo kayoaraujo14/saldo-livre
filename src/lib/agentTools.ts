@@ -14,7 +14,7 @@ import {
   detectSplit,
   effectiveAmount,
   getReserveInfo,
-  guessCategory,
+  guessCategoryAndSubcategory,
   impactFor,
   listReceivables,
   pickCard,
@@ -180,12 +180,22 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     method = 'debit'
   }
 
-  let category = (CATEGORIES as readonly string[]).includes(String(args.categoria))
+  const guessed = guessCategoryAndSubcategory(description, total)
+  let category: Category = (CATEGORIES as readonly string[]).includes(String(args.categoria))
     ? (args.categoria as Category)
-    : guessCategory(description, total)
+    : guessed.category
   if (total < 0 && category === 'Outros') category = 'Estorno'
   if (splitType === 'external' && category === 'Outros') category = 'Cartão Terceiros'
   if (type === 'income') category = 'Receita'
+
+  let subcategory: string | null = null
+  if (typeof args.subcategoria === 'string' && args.subcategoria.trim()) {
+    subcategory = args.subcategoria.trim()
+  } else if (category === guessed.category && guessed.subcategory) {
+    subcategory = guessed.subcategory
+  } else if (category === 'Receita') {
+    subcategory = guessed.subcategory || 'Outras Receitas'
+  }
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args.data)) ? String(args.data) : todayKey()
   const status = (['estimated', 'pending', 'paid'].includes(String(args.status))
@@ -409,6 +419,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       ...(isInstallment
         ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
         : []),
+      { label: 'Categoria', value: subcategory ? `${category} › ${subcategory}` : category },
       { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
       { label: 'Vencimento', value: formatShortDate(finalDueDate) },
       {
@@ -442,6 +453,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
         valorParcela: total,
         tipo: type,
         categoria: category,
+        subcategoria: subcategory,
         ehParcelamento: isInstallment,
         parcelaAtual: isInstallment ? parcelaAtual : 1,
         totalParcelas: isInstallment ? totalParcelas : 1,
@@ -505,6 +517,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
         cardId: card?.id ?? null,
         description: instDesc,
         category,
+        subcategory,
         type,
         paymentMethod: method,
         status: instStatus,
@@ -560,6 +573,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       cardId: card?.id ?? null,
       description: cleanBaseDesc || description,
       category,
+      subcategory,
       type,
       paymentMethod: method,
       status,
@@ -602,6 +616,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       parcelasFuturasComprometidas: futureCount,
       periodoParcelamento: isInstallment ? `${monthLabel(firstMonth)} até ${monthLabel(lastMonth)}` : monthLabel(competenceMonth),
       categoria: category,
+      subcategoria: subcategory,
       mesCompetenciaFatura: competenceMonth,
       dataVencimento: finalDueDate,
       cartao: card ? `${card.cardName} (titular: ${card.ownerName})` : null,
@@ -622,6 +637,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
         ...(isInstallment
           ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
           : []),
+        { label: 'Categoria', value: subcategory ? `${category} › ${subcategory}` : category },
         { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
         { label: 'Vencimento', value: formatShortDate(finalDueDate) },
         {
@@ -697,13 +713,20 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
 
       const txDate = (typeof item.data === 'string' && item.data.trim()) || defaultVenc || `${targetMonth}-01`
 
+      const guessed = guessCategoryAndSubcategory(desc, val)
+      const resolvedCategory = typeof item.categoria === 'string' ? item.categoria : resolvedTipo === 'income' ? 'Receita' : guessed.category
+      const resolvedSubcat = typeof item.subcategoria === 'string' && item.subcategoria.trim()
+        ? item.subcategoria.trim()
+        : (resolvedCategory === guessed.category ? guessed.subcategory : (resolvedTipo === 'income' ? 'Outras Receitas' : undefined))
+
       pendingTransactionsList.push({
         data: txDate,
         tipo: resolvedTipo,
         valor_exato: round2(val),
         contraparte,
         categoria_filtro: filterCat,
-        categoria: typeof item.categoria === 'string' ? item.categoria : resolvedTipo === 'income' ? 'Receita' : 'Outros',
+        categoria: resolvedCategory,
+        subcategoria: resolvedSubcat || undefined,
         metodoPagamento: (typeof item.metodoPagamento === 'string' ? item.metodoPagamento : defaultMetodo) as any,
         motivoIgnorado: motivoIgn,
       })
@@ -1289,6 +1312,7 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
   const novaCategoria = (CATEGORIES as readonly string[]).includes(String(args.novaCategoria))
     ? (args.novaCategoria as Category)
     : undefined
+  const novaSubcategoria = typeof args.novaSubcategoria === 'string' ? args.novaSubcategoria.trim() : undefined
   const novoStatus = (['estimated', 'pending', 'paid'].includes(String(args.novoStatus))
     ? args.novoStatus
     : undefined) as TransactionStatus | undefined
@@ -1312,6 +1336,7 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
       ...(novaDescricao ? [{ label: 'Nova Descrição', value: novaDescricao }] : []),
       ...(novoValor !== undefined ? [{ label: 'Novo Valor', value: money(novoValor) }] : []),
       ...(novaCategoria ? [{ label: 'Nova Categoria', value: novaCategoria }] : []),
+      ...(novaSubcategoria !== undefined ? [{ label: 'Nova Subcategoria', value: novaSubcategoria || 'Nenhuma' }] : []),
       ...(novoStatus ? [{ label: 'Novo Status', value: novoStatus === 'paid' ? 'Pago' : 'Pendente' }] : []),
     ]
 
@@ -1356,6 +1381,9 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
     }
     if (novaCategoria) {
       patch.category = novaCategoria
+    }
+    if (novaSubcategoria !== undefined) {
+      patch.subcategory = novaSubcategoria || null
     }
     if (novoTipo) {
       patch.type = novoTipo
@@ -1578,6 +1606,7 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   const all = env.getTransactions()
   const termo = typeof args.termoBusca === 'string' ? args.termoBusca.trim() : ''
   const categoria = typeof args.categoria === 'string' ? args.categoria.trim() : ''
+  const subcategoria = typeof args.subcategoria === 'string' ? args.subcategoria.trim() : ''
   const mes = typeof args.mes === 'string' && /^\d{4}-\d{2}$/.test(args.mes) ? args.mes : ''
   const status = typeof args.status === 'string' ? args.status : ''
   const limite = typeof args.limite === 'number' && args.limite > 0 ? args.limite : 20
@@ -1609,8 +1638,15 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   const filtered = all.filter((t) => {
     if (mes && t.competenceMonth !== mes) return false
     if (categoria && t.category !== categoria) return false
+    if (subcategoria) {
+      if (t.subcategory) {
+        if (!normalize(t.subcategory).includes(normalize(subcategoria))) return false
+      } else {
+        if (!matchesSearch(t.description, subcategoria)) return false
+      }
+    }
     if (status && t.status !== status) return false
-    if (termo && !matchesSearch(t.description, termo)) return false
+    if (termo && !matchesSearch(t.description, termo) && !(t.subcategory && matchesSearch(t.subcategory, termo))) return false
     return true
   })
 
@@ -1629,6 +1665,7 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
     dataVencimento: t.dueDate,
     mesCompetencia: t.competenceMonth,
     categoria: t.category,
+    subcategoria: t.subcategory || null,
     status: t.status,
     tipo: t.type,
     divisao: t.splitType || 'mine',
@@ -1642,6 +1679,7 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
     ...(mes ? [{ label: 'Mês', value: monthLabel(mes) }] : []),
     ...(termo ? [{ label: 'Filtro', value: `"${termo}"` }] : []),
     ...(categoria ? [{ label: 'Categoria', value: categoria }] : []),
+    ...(subcategoria ? [{ label: 'Subcategoria', value: subcategoria }] : []),
     ...(targets.length > 0 ? [{
       label: 'Itens',
       value: targets.slice(0, 3).map((t) => `${t.description} (${money(t.totalAmount)})`).join(', ') + (targets.length > 3 ? ` (+${targets.length - 3})` : '')
@@ -1695,6 +1733,7 @@ async function relatorio(env: AgentEnv): Promise<ToolResult> {
       diasRestantes: s.daysRemaining,
       limiteDiarioSeguro: s.dailyLimit,
       gastosPorCategoria: s.byCategory,
+      gastosPorSubcategoria: s.bySubcategory || [],
       contasEmAberto: open,
       reservasDeCartao: reserves,
       aReceberTotal: s.receivableTotal,
@@ -1839,7 +1878,11 @@ async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, un
     const desc = String(args.descricao || '')
     const valor = Number(args.valor || 0)
     if (!desc || valor <= 0) return { response: { ok: false, erro: 'Descrição e valor são obrigatórios.' } }
-    const cat = (args.categoria as Category) || 'Outros'
+    const guessed = guessCategoryAndSubcategory(desc, valor)
+    const cat = (args.categoria as Category) || guessed.category || 'Outros'
+    const subcat = typeof args.subcategoria === 'string' && args.subcategoria.trim()
+      ? args.subcategoria.trim()
+      : (cat === guessed.category ? guessed.subcategory : null)
     const dueDay = Number(args.diaVencimento || 10)
 
     const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
@@ -1849,7 +1892,7 @@ async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, un
         { label: 'Descrição', value: desc },
         { label: 'Valor Mensal', value: money(valor) },
         { label: 'Dia de Vencimento', value: `Todo dia ${dueDay}` },
-        { label: 'Categoria', value: cat },
+        { label: 'Categoria', value: subcat ? `${cat} › ${subcat}` : cat },
       ]
       return {
         response: {
@@ -1878,6 +1921,7 @@ async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, un
       defaultAmount: valor,
       dueDay,
       category: cat,
+      subcategory: subcat,
       active: true,
       ownerUid: env.me.uid,
       estimationRule: 'fixed',

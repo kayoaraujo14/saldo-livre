@@ -474,6 +474,7 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
   let receivableFromFriends = 0
   let payableToOthers = 0
   const cat = new Map<string, number>()
+  const subcat = new Map<string, { category: string; subcategory: string; amount: number; count: number }>()
 
   for (const tx of monthTxs) {
     const impact = impactFor(tx, uid, all)
@@ -485,7 +486,24 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
     else if (tx.status === 'estimated') committedEstimated += impact
     else committedPending += impact
 
-    if (impact > 0) cat.set(tx.category, (cat.get(tx.category) ?? 0) + impact)
+    if (impact > 0) {
+      cat.set(tx.category, (cat.get(tx.category) ?? 0) + impact)
+      if (tx.subcategory) {
+        const subKey = `${tx.category} › ${tx.subcategory}`
+        const existing = subcat.get(subKey)
+        if (existing) {
+          existing.amount += impact
+          existing.count += 1
+        } else {
+          subcat.set(subKey, {
+            category: tx.category,
+            subcategory: tx.subcategory,
+            amount: impact,
+            count: 1,
+          })
+        }
+      }
+    }
 
     const friendAlloc = tx.assignedFriendUid ? tx.allocations.find((a) => a.uid === tx.assignedFriendUid) : undefined
     const friendOpen = tx.acceptanceStatus === 'accepted' && !(friendAlloc?.reimbursed ?? false)
@@ -531,6 +549,9 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
     payableToOthers: round2(payableToOthers),
     byCategory: [...cat.entries()]
       .map(([category, amount]) => ({ category, amount: round2(amount) }))
+      .sort((a, b) => b.amount - a.amount),
+    bySubcategory: [...subcat.values()]
+      .map((item) => ({ ...item, amount: round2(item.amount) }))
       .sort((a, b) => b.amount - a.amount),
   }
 }
@@ -864,21 +885,95 @@ export function pickCard(meUid: string, cards: Card[], splitType: SplitType, hin
 }
 
 // ------------------------------------------------------------------
-// Heurística de categoria
+// Heurística de categoria & subcategoria inteligente
 // ------------------------------------------------------------------
-const CATEGORY_HINTS: [Category, RegExp][] = [
-  ['Estorno', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|credito na fatura|credit voucher|cashback/],
-  ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|financiamento|iptu|casa|apartamento/],
-  ['Alimentação', /jantar|almoco|cafe|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira/],
-  ['Transporte', /uber|99|gasolina|combustivel|onibus|metro|estacionamento|carro|pedagio/],
-  ['Saúde', /farmacia|remedio|medic|consulta|exame|dentista|academia|plano de saude|drogaria/],
-  ['Lazer', /cinema|show|viagem|bar|festa|passeio|jogo|livro|teatro/],
-  ['Assinaturas', /netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one/],
+export interface CategoryGuess {
+  category: Category
+  subcategory?: string
+}
+
+const SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
+  // Alimentação
+  ['Alimentação', 'Supermercado', /mercado|supermercado|assai|assaí|carrefour|pao de acucar|pão de açúcar|extra|atacadao|atacadão|dia%|hortifruti|feira|sacolao|sacolão/i],
+  ['Alimentação', 'Delivery & Lanches', /ifood|rappi|uber eats|lanche|burger|hamburguer|mc donalds|mcdonalds|burguer king|bk |subway|habib|delivery|habbib/i],
+  ['Alimentação', 'Restaurante', /restaurante|outback|madero|churrascaria|coco bambu|fogao|fogão|parrilla|cantina|pizzaria|sushi|almoço|almoco|jantar/i],
+  ['Alimentação', 'Padaria & Café', /padaria|panificadora|cafe|café|starbucks|confeitaria|doceria|doce/i],
+  ['Alimentação', 'Bares & Bebidas', /bar|cerveja|chopp|adega|pub|bebidas|vinho/i],
+
+  // Transporte
+  ['Transporte', 'Combustível', /gasolina|combustivel|combustível|etanol|posto|ipiranga|shell|br distribuidora|abastec/i],
+  ['Transporte', 'Aplicativos (Uber/99)', /uber|99|indrive|cabify|pop|corrida/i],
+  ['Transporte', 'Estacionamento & Pedágio', /estacionamento|pedagio|pedágio|sem parar|veloe|conectcar|taggy|estapar/i],
+  ['Transporte', 'Transporte Público (Metrô/Ônibus)', /onibus|ônibus|metro|metrô|bilhete unico|cptm|sptrans/i],
+
+  // Moradia
+  ['Moradia', 'Aluguel & Condomínio', /aluguel|condominio|condomínio|locacao|locação|imobiliaria/i],
+  ['Moradia', 'Energia Elétrica', /luz|energia|enel|cpfl|cemig|coelba|light|eletropaulo|energisa/i],
+  ['Moradia', 'Água & Saneamento', /agua|água|sabesp|sanepar|copasa|cedae|caesb/i],
+  ['Moradia', 'Internet & TV a Cabo', /internet|fibra|claro|vivo|oi |tim fibra|brisanet|net virtua/i],
+  ['Moradia', 'Gás', /gas|gás|ultragaz|liquigas|comgas/i],
+
+  // Saúde
+  ['Saúde', 'Farmácia & Remédios', /farmacia|farmácia|drogaria|drogasil|droga raia|pacheco|sao paulo|são paulo|panvel|remedio|remédio|medicamento/i],
+  ['Saúde', 'Consultas & Exames', /consulta|exame|laboratorio|laboratório|dentista|oftalmo|medico|médico|clinica|clínica/i],
+  ['Saúde', 'Academia & Treinos', /academia|smartfit|smart fit|bluefit|bio ritmo|musculacao|musculação|pilates|crossfit|natacao|natação/i],
+
+  // Assinaturas
+  ['Assinaturas', 'Streaming de Vídeo (Netflix/Max/Disney)', /netflix|disney|hbo|max|prime video|amazon prime|youtube premium|globoplay|telecine/i],
+  ['Assinaturas', 'Streaming de Música (Spotify/Apple)', /spotify|deezer|apple music|tidal|amazon music/i],
+  ['Assinaturas', 'Softwares, IA & Cloud (iCloud/ChatGPT)', /chatgpt|openai|icloud|google one|google storage|github|adobe|canva|microsoft|dropbox/i],
+
+  // Pets
+  ['Pets', 'Ração & Petiscos', /pet|petz|cobasi|racao|ração|petisco/i],
+  ['Pets', 'Veterinário & Medicamentos', /veterinario|veterinário|vacina pet/i],
+
+  // Compras
+  ['Compras', 'Roupas & Acessórios', /zara|renner|riachuelo|c&a|shein|roupa|calcado|calçado|tenis|tênis|nike|adidas/i],
+  ['Compras', 'Eletrônicos & Informática', /kabum|pichau|terabyte|apple|samsung|dell|mercado livre|amazon|shopee|magalu/i],
+
+  // Educação
+  ['Educação', 'Cursos Online & Certificações', /curso|udemy|alura|hotmart/i],
+  ['Educação', 'Livros & E-books', /livro|livraria|saraiva|leitura|kindle/i],
+
+  // Lazer
+  ['Lazer', 'Cinema, Teatro & Shows', /cinema|cinemark|ingresso|sympla|eventim|show|teatro/i],
+  ['Lazer', 'Viagens & Hospedagem', /viagem|hotel|airbnb|booking|decolar|passagem aerea|latam|gol|azul/i],
+
+  // Receita
+  ['Receita', 'Salário Principal', /salario|salário|folha|pro-?labore|empresa/i],
+  ['Receita', 'Pix Recebido', /pix recebido|ted recebida|deposito|depósito/i],
+
+  // Estorno
+  ['Estorno', 'Crédito na Fatura', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|cashback/i],
 ]
 
-export function guessCategory(text: string, amount?: number): Category {
-  if (typeof amount === 'number' && amount < 0) return 'Estorno'
+const CATEGORY_HINTS: [Category, RegExp][] = [
+  ['Estorno', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|credito na fatura|credit voucher|cashback/i],
+  ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|financiamento|iptu|casa|apartamento/i],
+  ['Alimentação', /jantar|almoco|cafe|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira/i],
+  ['Transporte', /uber|99|gasolina|combustivel|onibus|metro|estacionamento|carro|pedagio/i],
+  ['Saúde', /farmacia|remedio|medic|consulta|exame|dentista|academia|plano de saude|drogaria/i],
+  ['Lazer', /cinema|show|viagem|bar|festa|passeio|jogo|livro|teatro/i],
+  ['Assinaturas', /netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one/i],
+  ['Educação', /curso|faculdade|escola|livro|udemy|alura/i],
+  ['Compras', /roupa|tenis|shopping|eletronico|celular|magazine/i],
+  ['Pets', /pet|racao|veterinario|cobasi/i],
+]
+
+export function guessCategoryAndSubcategory(text: string, amount?: number): CategoryGuess {
+  if (typeof amount === 'number' && amount < 0) {
+    return { category: 'Estorno', subcategory: 'Crédito na Fatura' }
+  }
   const n = normalize(text)
-  for (const [c, re] of CATEGORY_HINTS) if (re.test(n)) return c
-  return 'Outros'
+  for (const [cat, sub, re] of SUBCATEGORY_HINTS) {
+    if (re.test(n)) return { category: cat, subcategory: sub }
+  }
+  for (const [cat, re] of CATEGORY_HINTS) {
+    if (re.test(n)) return { category: cat }
+  }
+  return { category: 'Outros' }
+}
+
+export function guessCategory(text: string, amount?: number): Category {
+  return guessCategoryAndSubcategory(text, amount).category
 }
