@@ -4,7 +4,7 @@
  * `ToolExecutor` injetado pelo FinanceContext.
  */
 import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } from '@google/genai'
-import type { ActionCardData, ChatMessage } from '@/types'
+import type { ActionCardData, ChatMessage, ChatAttachment } from '@/types'
 import { CATEGORIES } from '@/types'
 
 export const GEMINI_MODEL = 'gemini-3.5-flash-lite'
@@ -157,12 +157,15 @@ export type ToolName =
   | 'registrarTransacoesLote'
   | 'editarTransacoes'
   | 'excluirTransacoes'
+  | 'consultarTransacoes'
   | 'expandirParcelamentos'
   | 'atualizarContaPrevista'
   | 'obterRelatorioEProjecaoMensal'
   | 'gerenciarCartoes'
   | 'gerenciarContasRecorrentes'
   | 'gerenciarAmizades'
+  | 'gerenciarRegrasEMemoria'
+
 
 export interface ToolResult {
   response: Record<string, unknown>
@@ -233,22 +236,62 @@ export const functionDeclarations: FunctionDeclaration[] = [
   {
     name: 'registrarTransacoesLote',
     description:
-      'Registra múltiplas despesas/receitas em lote (de uma única vez). Ideal quando o usuário cola uma lista com vários gastos de fatura de cartão de crédito.',
+      'Registra múltiplas despesas ou receitas/entradas em lote de faturas de cartão de crédito ou extratos de conta corrente.',
     parameters: {
       type: Type.OBJECT,
       properties: {
-        mesFaturaPadrao: { type: Type.STRING, description: 'Mês de competência padrão para todas as despesas do lote (YYYY-MM). Ex: "2026-11".' },
-        dataVencimentoPadrao: { type: Type.STRING, description: 'Data de vencimento padrão da fatura para todas as despesas (YYYY-MM-DD). Ex: "2026-11-14".' },
-        cartaoPadrao: { type: Type.STRING, description: 'Nome do cartão padrão para o lote.' },
+        origemDocumento: {
+          type: Type.STRING,
+          enum: ['extrato_conta', 'fatura_cartao'],
+          description:
+            'OBRIGATÓRIO: "extrato_conta" se for extrato bancário de conta corrente/poupança (Pix, débitos, salários, etc.); "fatura_cartao" se for fatura de cartão de crédito.',
+        },
+        mesFaturaPadrao: {
+          type: Type.STRING,
+          description:
+            'Mês de competência padrão (YYYY-MM). Para fatura de cartão: mês de vencimento (ex: "2026-11"). Para extrato de conta corrente: mês de ocorrência das transações (ex: "2026-10").',
+        },
+        dataVencimentoPadrao: {
+          type: Type.STRING,
+          description: 'Data de vencimento padrão (YYYY-MM-DD). Para fatura: vencimento da fatura.',
+        },
+        metodoPagamentoPadrao: {
+          type: Type.STRING,
+          enum: ['pix', 'credit_card', 'debit', 'bill'],
+          description:
+            'Método de pagamento padrão para o lote. "pix" ou "debit" para extratos bancários de conta corrente. "credit_card" SOMENTE para faturas de cartão de crédito.',
+        },
+        cartaoPadrao: {
+          type: Type.STRING,
+          description: 'Nome do cartão de crédito (se for fatura de cartão de crédito). Não preencher para extrato de conta!',
+        },
         transacoes: {
           type: Type.ARRAY,
-          description: 'Lista de despesas a serem cadastradas.',
+          description: 'Lista de despesas e receitas a serem cadastradas.',
           items: {
             type: Type.OBJECT,
             properties: {
-              descricao: { type: Type.STRING, description: 'Nome/descrição do gasto.' },
-              valorTotal: { type: Type.NUMBER, description: 'Valor em reais (negativo se for estorno/crédito).' },
-              categoria: { type: Type.STRING, enum: [...CATEGORIES] },
+              descricao: { type: Type.STRING, description: 'Nome/descrição do lançamento (ex: "Salário Empresa", "iFood", "Supermercado").' },
+              valorTotal: { type: Type.NUMBER, description: 'Valor positivo em reais (se for estorno na fatura, use valor negativo).' },
+              tipo: {
+                type: Type.STRING,
+                enum: ['expense', 'income'],
+                description:
+                  'CRÍTICO: "income" para RECEITAS/ENTRADAS/SALÁRIOS/PIX RECEBIDOS/DEPÓSITOS/RENDIMENTOS; "expense" para gastos/saídas/compras.',
+              },
+              metodoPagamento: {
+                type: Type.STRING,
+                enum: ['pix', 'credit_card', 'debit', 'bill'],
+                description:
+                  '"pix" para Pix enviado ou recebido; "debit" para débito em conta corrente; "bill" para boletos; "credit_card" SOMENTE se for compra no cartão de crédito.',
+              },
+              status: {
+                type: Type.STRING,
+                enum: ['paid', 'pending', 'estimated'],
+                description:
+                  '"paid" para extrato de conta corrente (já liquidado na conta); "pending" para compras no cartão na fatura a vencer.',
+              },
+              categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria. Para entradas e salários use "Receita".' },
               tipoDivisao: { type: Type.STRING, enum: ['MEU', 'CASAL_50_50', 'PARCEIRO', 'AMIGO', 'TERCEIRO', 'PERSONALIZADA'] },
               nomeAmigo: { type: Type.STRING },
               emailAmigo: { type: Type.STRING },
@@ -272,15 +315,16 @@ export const functionDeclarations: FunctionDeclaration[] = [
               },
               parcelaAtual: { type: Type.NUMBER },
               totalParcelas: { type: Type.NUMBER },
-              data: { type: Type.STRING },
+              data: { type: Type.STRING, description: 'Data da transação (YYYY-MM-DD).' },
               mesFatura: { type: Type.STRING },
               dataVencimento: { type: Type.STRING },
+              cartao: { type: Type.STRING },
             },
-            required: ['descricao', 'valorTotal', 'tipoDivisao'],
+            required: ['descricao', 'valorTotal', 'tipoDivisao', 'tipo'],
           },
         },
       },
-      required: ['transacoes'],
+      required: ['transacoes', 'origemDocumento'],
     },
   },
   {
@@ -298,6 +342,8 @@ export const functionDeclarations: FunctionDeclaration[] = [
         novoValor: { type: Type.NUMBER, description: 'Novo valor corrigido da compra.' },
         novaDescricao: { type: Type.STRING, description: 'Nova descrição.' },
         novaCategoria: { type: Type.STRING, enum: [...CATEGORIES] },
+        novoTipo: { type: Type.STRING, enum: ['expense', 'income'], description: 'Altera o tipo da transação para receita ("income") ou despesa ("expense").' },
+        novoMetodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Altera o método de pagamento (ex: para "pix", "debit" ou "credit_card").' },
         novoStatus: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'] },
         novoTipoDivisao: { type: Type.STRING, enum: ['MEU', 'CASAL_50_50', 'PARCEIRO', 'AMIGO', 'TERCEIRO'] },
         novoAmigoEmail: { type: Type.STRING, description: 'Atribui a despesa a um amigo pelo email na plataforma. Ex: "kayoaraujo2002@gmail.com".' },
@@ -309,16 +355,33 @@ export const functionDeclarations: FunctionDeclaration[] = [
   {
     name: 'excluirTransacoes',
     description:
-      'Exclui uma ou múltiplas transações, permitindo exclusão individual por ID ou em lote por termo de busca, mês ou lote recente.',
+      'Exclui transações com precisão cirúrgica. Para excluir um item específico pedido pelo usuário, localize o ID correspondente nos LANÇAMENTOS REAIS e passe "ids: [id]". Se não tiver o ID, passe "termoBusca" e o "valor" em reais para desambiguação precisa. NUNCA exclua em lote a menos que o usuário peça expressamente!',
     parameters: {
       type: Type.OBJECT,
       properties: {
-        ids: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Lista de IDs específicos a excluir.' },
-        termoBusca: { type: Type.STRING, description: 'Exclui transações cuja descrição corresponda à busca (ex: "99FOOD", "DECOLAR").' },
+        ids: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Lista de IDs específicos a excluir (PRIORITÁRIO: use sempre que disponível nos lançamentos reais).' },
+        termoBusca: { type: Type.STRING, description: 'Nome exato do estabelecimento a excluir (ex: "Supermercado Pão de Açúcar"). NÃO use palavras genéricas como "compra" ou "despesa".' },
+        valor: { type: Type.NUMBER, description: 'Valor exato da transação a excluir em reais (ex: 342.80) para desambiguação sem erros.' },
         mes: { type: Type.STRING, description: 'Filtra pelo mês de competência (YYYY-MM). Ex: "2026-10".' },
-        tudoDoMes: { type: Type.BOOLEAN, description: 'Se true, exclui todas as transações do mês informado.' },
-        apenasRecentes: { type: Type.BOOLEAN, description: 'Se true, exclui as últimas transações cadastradas recentemente.' },
-        limiteQuantidade: { type: Type.NUMBER, description: 'Quantidade máxima de itens a excluir (padrão: 50).' },
+        emLote: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir para excluir múltiplos itens ou "todas as compras de X".' },
+        tudoDoMes: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir para limpar ou apagar o mês inteiro.' },
+        apenasRecentes: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir expressamente "desfazer último lote" ou "apagar os últimos cadastrados".' },
+        limiteQuantidade: { type: Type.NUMBER, description: 'Quantidade máxima a excluir (padrão 1 para exclusão de item único).' },
+      },
+    },
+  },
+  {
+    name: 'consultarTransacoes',
+    description:
+      'Consulta, filtra e pesquisa lançamentos e transações cadastradas no sistema. Use SEMPRE que o usuário perguntar sobre compras passadas, gastos com determinado estabelecimento, histórico do mês ou verificar se algo já foi lançado.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        termoBusca: { type: Type.STRING, description: 'Termo de busca na descrição (ex: "Uber", "Mercado", "iFood").' },
+        categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Filtra por categoria.' },
+        mes: { type: Type.STRING, description: 'Mês de competência (YYYY-MM). Padrão: mês atual.' },
+        status: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'], description: 'Filtra por status.' },
+        limite: { type: Type.NUMBER, description: 'Quantidade máxima de resultados (padrão: 15).' },
       },
     },
   },
@@ -402,6 +465,30 @@ export const functionDeclarations: FunctionDeclaration[] = [
       required: ['acao'],
     },
   },
+  {
+    name: 'gerenciarRegrasEMemoria',
+    description:
+      'Aprende, memoriza, consulta ou remove regras e preferências personalizadas de comportamento do usuário (ex: "Sempre que eu falar iFood é Alimentação 50% com Mari", "Todo gasto no Zé Delivery é Lazer e 100% meu", "Cartão Black fecha dia 2"). Use quando o usuário pedir para você memorizar/aprender algo ("Aprenda que...", "Lembre-se que...", "Sempre faça..."), listar suas regras aprendidas ou esquecer uma regra antiga.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        acao: {
+          type: Type.STRING,
+          enum: ['aprender', 'listar', 'remover'],
+          description: 'aprender = memorizar nova regra; listar = consultar regras aprendidas; remover = esquecer uma regra por ID ou termo.',
+        },
+        regra: {
+          type: Type.STRING,
+          description: 'Texto descritivo claro da regra ou padrão aprendido. Ex: "Sempre que eu disser iFood, classificar como Alimentação e dividir 50/50 com a Mari".',
+        },
+        id: {
+          type: Type.STRING,
+          description: 'ID ou trecho da regra a ser removida.',
+        },
+      },
+      required: ['acao'],
+    },
+  },
 ]
 
 export function buildSystemInstruction(ctx: {
@@ -412,6 +499,26 @@ export function buildSystemInstruction(ctx: {
   monthKey: string
   cards: Array<{ id: string; name: string; owner: string; closingDay: number; dueDay: number }>
   friends: Array<{ uid: string; name: string; email: string }>
+  learnedRules?: string[]
+  summary?: {
+    income: number
+    paid: number
+    committed: number
+    freeBalance: number
+    dailyLimit: number | null
+    daysRemaining: number
+    receivableTotal: number
+    byCategory: Array<{ category: string; amount: number }>
+  } | null
+  recentTransactions?: Array<{
+    id?: string
+    date: string
+    description: string
+    amount: number
+    category: string
+    status: string
+    split?: string
+  }>
 }) {
   const cardsDesc = ctx.cards
     .map((c) => `${c.name} (titular: ${c.owner}, fecha dia ${c.closingDay}, vence dia ${c.dueDay})`)
@@ -420,6 +527,28 @@ export function buildSystemInstruction(ctx: {
   const friendsDesc = ctx.friends
     .map((f) => `${f.name} (email: ${f.email}, uid: ${f.uid})`)
     .join('; ') || 'nenhum'
+
+  const learnedRulesDesc =
+    ctx.learnedRules && ctx.learnedRules.length > 0
+      ? ctx.learnedRules.map((r, i) => `${i + 1}. ${r}`).join('\n')
+      : 'Nenhuma regra personalizada memorizada ainda. Você pode aprender novas regras sempre que o usuário pedir ("Aprenda que...", "Lembre-se que...", "Sempre que eu falar X faça Y").'
+
+  const summaryDesc = ctx.summary
+    ? `DADOS FINANCEIROS REAIS DO USUÁRIO EM ${ctx.monthLabel.toUpperCase()} (${ctx.monthKey}):
+- Saldo Livre Real: R$ ${ctx.summary.freeBalance.toFixed(2)}
+- Limite Diário Seguro: ${ctx.summary.dailyLimit != null ? `R$ ${ctx.summary.dailyLimit.toFixed(2)}/dia` : 'Mês encerrado'} (${ctx.summary.daysRemaining} dias restantes)
+- Total de Receitas: R$ ${ctx.summary.income.toFixed(2)}
+- Total Comprometido: R$ ${ctx.summary.committed.toFixed(2)} (Já Pago: R$ ${ctx.summary.paid.toFixed(2)}, A Pagar/Pendente: R$ ${(ctx.summary.committed - ctx.summary.paid).toFixed(2)})
+- Valores a Receber: R$ ${ctx.summary.receivableTotal.toFixed(2)}
+- Gastos por Categoria neste mês:
+  ${ctx.summary.byCategory.length > 0 ? ctx.summary.byCategory.map((c) => `* ${c.category}: R$ ${c.amount.toFixed(2)}`).join('\n  ') : '* Nenhuma despesa computada ainda'}`
+    : `DADOS FINANCEIROS: Mês ${ctx.monthLabel} (${ctx.monthKey})`
+
+  const recentTxsDesc =
+    ctx.recentTransactions && ctx.recentTransactions.length > 0
+      ? `LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS (${ctx.recentTransactions.length} itens):
+${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.category} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
+      : 'LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento.'
 
   return `Você é o "Copiloto Saldo Livre", um agente financeiro pessoal brasileiro, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
 
@@ -430,6 +559,16 @@ CONTEXTO ATUAL:
 - Mês em análise na tela: ${ctx.monthLabel} (${ctx.monthKey}).
 - Cartões cadastrados: ${cardsDesc}.
 - Amigos na plataforma: ${friendsDesc}.
+
+${summaryDesc}
+
+${recentTxsDesc}
+
+REGRAS E PREFERÊNCIAS APRENDIDAS DO USUÁRIO (MEMÓRIA VIVA):
+${learnedRulesDesc}
+
+ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
+Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, chame OBRIGATORIAMENTE a ferramenta "gerenciarRegrasEMemoria"!
 
 REGRAS DE FUNCIONAMENTO:
 
@@ -463,20 +602,155 @@ REGRAS DE FUNCIONAMENTO:
 5. REGISTRO EM LOTE:
 - Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE a ferramenta "registrarTransacoesLote". Isso processa todas as despesas em uma única chamada rápida!
 
-6. EDIÇÃO E EXCLUSÃO (INCLUSIVE EM LOTE):
-- O usuário pode pedir para alterar ou excluir despesas já cadastradas a qualquer momento.
-- Se o usuário pedir para mover despesas cadastradas por engano em outubro para a fatura de novembro:
-  Chame "editarTransacoes" com mesOrigem: "2026-10", novoMesFatura: "2026-11" e novaDataVencimento: "2026-11-14"!
-- Se o usuário pedir para reatribuir gastos para o Kayo:
-  Chame "editarTransacoes" com termoBusca: "KAYO", novoTipoDivisao: "AMIGO", novoAmigoEmail: "kayoaraujo2002@gmail.com".
-- Se o usuário pedir para excluir despesas duplicadas ou incorretas:
-  Chame "excluirTransacoes" com termoBusca, mes ou apenasRecentes!
+6. EXCLUSÃO CIRÚRGICA DE TRANSAÇÕES (NUNCA EXCLUA EM LOTE SEM PEDIDO EXPLÍCITO):
+- Para excluir um lançamento específico que o usuário pediu (ex: "exclua o almoço de R$ 30", "apague o Supermercado", "delete a compra X"):
+  * Consulte os "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS" listados acima no contexto.
+  * Localize a transação correspondente e passe SEMPRE o ID específico em ids: ["id_da_transacao"]!
+  * Se não tiver o ID, passe o termoBusca COM O NOME EXATO DO ESTABELECIMENTO e o valor: XX.XX em reais para desambiguação sem erros!
+  * Defina SEMPRE limiteQuantidade: 1 para exclusão de item individual.
+  * NUNCA use palavras genéricas como "compra", "despesa" ou "gasto" em termoBusca!
+  * NUNCA defina apenasRecentes: true ou tudoDoMes: true a menos que o usuário peça expressamente com palavras como: "desfazer último lote", "limpar todos os recentes" ou "apagar tudo do mês"!
+- Se o usuário pedir para mover despesas cadastradas por engano para outro mês/fatura:
+  Chame "editarTransacoes" com mesOrigem, novoMesFatura e novaDataVencimento!
+- Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas:
+  Chame "consultarTransacoes" para obter a lista exata!
 
-7. POSTURA DE CONSULTOR FINANCEIRO E ANÁLISE PROATIVA:
-- Você é a coisa mais inteligente possível. Além de executar as ações que o usuário pedir (como registrar ou excluir transações), observe ativamente o saldo livre e os dados que o relatório lhe retorna.
-- Se você perceber que o limite diário está negativo, que as despesas são maiores que as receitas, ou que o usuário vai estourar o orçamento do mês, AJA como um consultor financeiro. Avise o usuário e DÊ DICAS personalizadas (ex: onde ele pode cortar gastos com base nas categorias mais caras cadastradas).
-- Se o usuário pedir planejamento, projeções para meses futuros ou conselhos financeiros de investimentos, não hesite em dar análises aprofundadas e gerar o relatório do mês seguinte para avaliá-lo.
-- Não gere previsões gigantes ao final de cada mensagem simples de lançamento de transação (seja sucinto e direto na confirmação da ação). Mas, se a situação exigir um alerta crítico ou se o usuário PERGUNTAR algo, faça análises e traga planos de redução de custo com tom acolhedor e estratégico.`
+7. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO:
+- NUNCA invente, deduza ou presuma números, lançamentos, compras, dívidas, faturas ou saldos que não constem nos dados reais informados acima ou que não sejam retornados pelas ferramentas.
+- NUNCA afirme que o usuário comprou algo ou gastou determinado valor a menos que conste nos LANÇAMENTOS REAIS acima ou seja retornado pela ferramenta "consultarTransacoes".
+- Se o usuário perguntar algo sobre seu extrato, compras passadas ou se um pagamento foi feito, consulte os LANÇAMENTOS REAIS acima ou chame "consultarTransacoes". Se não encontrar, diga com sinceridade e exatidão: "Não encontrei nenhum lançamento de [X] registrado no mês de ${ctx.monthLabel}."
+- Seja extremamente DIRETO, OBJETIVO e SUCINTO. Elimine rodeios, introduções prolixas, encerramentos repetitivos e sermões não solicitados.
+- Ao registrar, editar ou excluir despesas, confirme a operação em NO MÁXIMO 2 a 3 linhas objetivas.
+- NÃO dê sermões ou lições financeiras a menos que o usuário explicitamente peça conselhos ("Como posso economizar?", "Analise meu mês", "Quanto posso gastar?").
+- NUNCA responda repetindo a pergunta do usuário ou inventando historinhas fictícias.
+- Use SEMPRE os valores exatos em Reais (R$). Seus números de Saldo Livre e Limite Diário devem ser SEMPRE os valores exatos informados nos DADOS FINANCEIROS REAIS acima.
+
+8. IMPORTAÇÃO DE FATURAS E EXTRATOS BANCÁRIOS EM PDF (ONBOARDING & GASTOS ANTERIORES):
+- Se o usuário anexar um arquivo PDF (fatura de cartão ou extrato de conta bancária) ou colar dados de lançamentos:
+  1. IDENTIFIQUE COM PRECISÃO O TIPO DE DOCUMENTO:
+     A) SE FOR EXTRATO DE CONTA BANCÁRIA (CONTA CORRENTE / POUPANÇA / NUCONTA / INTER CONTA / ITAÚ EXTRATO / BRADESCO):
+        - Defina obrigatoriamente: origemDocumento = "extrato_conta" e metodoPagamentoPadrao = "pix" ou "debit"!
+        - TODAS as ENTRADAS / CRÉDITOS / VALORES POSITIVOS (identificados com +, C, Crédito, Pix Recebido, Salário, Depósito, TED Recebida, Transferência Recebida, Rendimento):
+          * tipo: "income"
+          * categoria: "Receita"
+          * metodoPagamento: "pix" (ou "debit")
+          * status: "paid"
+          * NUNCA marque como despesa de cartão de crédito! Entradas AUMENTAM o Saldo Livre!
+        - TODAS as SAÍDAS / DÉBITOS / GASTOS DE CONTA (identificados com -, D, Débito, Pix Enviado, Transferência Enviada, Compra Débito, Pagamento de Boleto):
+          * tipo: "expense"
+          * metodoPagamento: "pix" (para Pix), "debit" (para débito) ou "bill" (para boletos)
+          * status: "paid"
+          * NUNCA marque como cartão de crédito (credit_card) a menos que a linha do extrato diga expressamente "Compra Cartão de Crédito"!
+        - mesFaturaPadrao: mês em que as transações ocorreram (ex: "2026-10").
+        - dataVencimentoPadrao: a data de cada movimentação.
+
+     B) SE FOR FATURA DE CARTÃO DE CRÉDITO (FATURA NUBANK, FATURA ITAÚ CARTÕES, C6, SANTANDER, BRADESCO, ETC.):
+        - Defina obrigatoriamente: origemDocumento = "fatura_cartao" e metodoPagamentoPadrao = "credit_card"!
+        - As compras no cartão: tipo = "expense", metodoPagamento = "credit_card", status = "pending".
+        - Estornos/créditos de devolução: valorTotal negativo (ex: -15.20) e categoria = "Estorno".
+        - ATENÇÃO: IGNORE linhas de "Pagamento de fatura recebido", "Pagamento efetuado" ou "Saldo anterior" para NÃO duplicar lançamentos nem somar como novo gasto de cartão!
+        - mesFaturaPadrao: mês de vencimento da fatura (ex: "2026-11").
+
+  2. EXECUÇÃO EM LOTE:
+     - Chame SEMPRE a ferramenta "registrarTransacoesLote" preenchendo origemDocumento, metodoPagamentoPadrao e a lista de transacoes com cada campo tipo ("income" ou "expense"), metodoPagamento e categoria preenchidos individualmente!
+
+  3. RESPOSTA AO USUÁRIO:
+     - Destaque com clareza quantas receitas (entradas) e quantas despesas (saídas) foram cadastradas, com os respectivos valores totais e o novo Saldo Livre!
+
+9. OPEN FINANCE BRASIL (INTEGRAÇÃO AUTOMÁTICA DE CONTAS):
+- Se o usuário perguntar sobre Open Finance ou como conectar seus bancos automaticamente:
+  - Explique que o Saldo Livre conta com suporte a conexão Open Finance (Pluggy.ai sob regulamentação do Banco Central).
+  - Oriente o usuário a clicar no botão "🏦 Open Finance" no topo do app para conectar contas do Nubank, Itaú, Inter, Bradesco e sincronizar extratos de forma 100% automática e contínua sem depender de arquivos PDF manuais.
+
+10. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER EXECUÇÃO NO SISTEMA:
+- Antes de efetivar alterações no banco de dados (criar despesas/receitas, importar faturas/extratos em lote, excluir gastos, editar transações, atualizar contas previstas ou gerenciar cartões), as ferramentas SEMPRE retornam "aguardandoConfirmacao: true" junto com um cartão interativo de confirmação.
+- QUANDO A FERRAMENTA RETORNAR "aguardandoConfirmacao: true":
+  * O seu papel é demonstrar com total clareza e acolhimento que você ENTENDEU a solicitação do usuário.
+  * Resuma o que você entendeu de forma direta e acolhedora:
+    - Exemplo de despesa: "Entendi que você deseja registrar uma despesa de **R$ 45,00** na **Padaria** no débito para o mês de **Outubro 2026**."
+    - Exemplo de exclusão: "Entendi que você deseja excluir o lançamento **Supermercado Pão de Açúcar** no valor de **R$ 342,80**."
+    - Exemplo de lote/PDF: "Entendi que você deseja importar **12 lançamentos** da fatura (totalizando **R$ 2.450,00**) para vencer em **Novembro 2026**."
+  * Convide o usuário a revisar os detalhes no cartão abaixo e confirmar clicando no botão **🟢 Confirmar e Executar** ou respondendo **'Sim' / 'Pode lançar'** no chat.
+  * NUNCA afirme que a ação já foi salva ou gravada! Diga que ela está preparada e aguardando a confirmação dele para ser executada.
+
+EXEMPLOS PRÁTICOS E PADRÕES BANCÁRIOS BRASIL (FEW-SHOT):
+
+Exemplo A1 — Extrato bancário de Conta Corrente (com Entradas e Saídas via Pix/Débito):
+Entrada:
+"Extrato Conta Nubank - Outubro 2026:
+05 OUT - Transferência Recebida de Empresa XPTO R$ 5.200,00
+06 OUT - Pix enviado para João da Silva R$ 150,00
+08 OUT - Compra no Débito Padaria Pão Quente R$ 28,50
+10 OUT - Pagamento de Boleto Enel Luz R$ 210,00"
+Ação da IA:
+Chamar "registrarTransacoesLote" com:
+- origemDocumento: "extrato_conta"
+- metodoPagamentoPadrao: "pix"
+- mesFaturaPadrao: "2026-10"
+- transacoes:
+  * { descricao: "Salário Empresa XPTO", valorTotal: 5200.00, tipo: "income", categoria: "Receita", metodoPagamento: "pix", status: "paid", tipoDivisao: "MEU" }
+  * { descricao: "Pix para João da Silva", valorTotal: 150.00, tipo: "expense", categoria: "Outros", metodoPagamento: "pix", status: "paid", tipoDivisao: "MEU" }
+  * { descricao: "Padaria Pão Quente", valorTotal: 28.50, tipo: "expense", categoria: "Alimentação", metodoPagamento: "debit", status: "paid", tipoDivisao: "MEU" }
+  * { descricao: "Enel Luz", valorTotal: 210.00, tipo: "expense", categoria: "Moradia", metodoPagamento: "bill", status: "paid", tipoDivisao: "MEU" }
+
+Exemplo A2 — Fatura de Cartão de Crédito (Gastos e Estornos):
+Entrada:
+"Fatura Cartão Nubank Vencimento 14/11:
+04 OUT - IFOOD *RESTAURANTE R$ 78,50 50/50 com a Mari
+05 OUT - POSTO IPIRANGA R$ 180,00
+08 OUT - ESTORNO UBER -R$ 15,20
+11 OUT - FARMACIA RAIA R$ 52,90
+12 OUT - PAGAMENTO DE FATURA RECEBIDO -R$ 2.450,00"
+Ação da IA:
+Chamar "registrarTransacoesLote" com:
+- origemDocumento: "fatura_cartao"
+- cartaoPadrao: "Nubank"
+- mesFaturaPadrao: "2026-11"
+- dataVencimentoPadrao: "2026-11-14"
+- transacoes (ignora a linha de pagamento de fatura recebido):
+  * { descricao: "iFood Restaurante", valorTotal: 78.50, tipo: "expense", categoria: "Alimentação", metodoPagamento: "credit_card", tipoDivisao: "CASAL_50_50" }
+  * { descricao: "Posto Ipiranga", valorTotal: 180.00, tipo: "expense", categoria: "Transporte", metodoPagamento: "credit_card", tipoDivisao: "MEU" }
+  * { descricao: "Estorno Uber", valorTotal: -15.20, tipo: "expense", categoria: "Estorno", metodoPagamento: "credit_card", tipoDivisao: "MEU" }
+  * { descricao: "Farmacia Raia", valorTotal: 52.90, tipo: "expense", categoria: "Saúde", metodoPagamento: "credit_card", tipoDivisao: "MEU" }
+
+Exemplo B — Compra parcelada com notação brasileira XX/YY:
+Entrada: "Lança Magazine Luiza 03/10 R$ 189,90 na fatura de novembro"
+Ação da IA:
+Chamar "registrarTransacao" com:
+- descricao: "Magazine Luiza (3/10)"
+- valorTotal: 189.90
+- parcelaAtual: 3, totalParcelas: 10
+- mesFatura: "2026-11"
+- tipoDivisao: "MEU"
+
+Exemplo C — Divisão com amigos ("rachar", "minha cota", "cota do amigo"):
+Entrada: "Rachei a conta do bar de R$ 120 com o Kayo, ele paga 40 e eu o resto"
+Ação da IA:
+Chamar "registrarTransacao" com:
+- descricao: "Conta do Bar"
+- valorTotal: 120.00
+- tipoDivisao: "AMIGO", nomeAmigo: "Kayo", emailAmigo: "kayoaraujo2002@gmail.com"
+- valorAmigo: 40.00, valorMeu: 80.00 (ou porcentagens equivalentes)
+- categoria: "Lazer"
+
+Exemplo D — Empréstimo de cartão para terceiro ("Mãe", "Pai", parente):
+Entrada: "Passei uma compra de R$ 340 no meu cartão pra minha mãe, ela vai me fazer um Pix"
+Ação da IA:
+Chamar "registrarTransacao" com:
+- descricao: "Compra Mãe"
+- valorTotal: 340.00
+- tipoDivisao: "TERCEIRO", nomeTerceiro: "Mãe"
+- categoria: "Cartão Terceiros"
+- status: "pending", metodoPagamento: "credit_card"
+
+Exemplo E — Comando de aprendizado de regras:
+Entrada: "Aprenda que todo gasto no Zé Delivery é Lazer e 100% meu"
+Ação da IA:
+Chamar "gerenciarRegrasEMemoria" com:
+- acao: "aprender"
+- regra: "Todo gasto no Zé Delivery pertence à categoria Lazer e é 100% MEU (sem divisão)."
+Respostas da IA:
+"🧠 Perfeito! Já memorizei essa regra. A partir de agora, qualquer compra no Zé Delivery será lançada automaticamente como Lazer e 100% sua!"`
 }
 
 
@@ -486,7 +760,11 @@ REGRAS DE FUNCIONAMENTO:
  * 2. Os turnos devem alternar rigorosamente entre 'user' e 'model'.
  * 3. A mensagem atual do usuário é incluída como o turno final de 'user'.
  */
-export function buildChatContents(history: ChatMessage[], newUserText: string): Content[] {
+export function buildChatContents(
+  history: ChatMessage[],
+  newUserText: string,
+  newAttachment?: ChatAttachment,
+): Content[] {
   const filtered = history.filter(
     (m) => m.id !== 'msg_welcome' && !m.pending && !m.error && m.content && m.content.trim(),
   )
@@ -496,21 +774,50 @@ export function buildChatContents(history: ChatMessage[], newUserText: string): 
     const role: 'user' | 'model' = m.role === 'user' ? 'user' : 'model'
     if (turns.length === 0 && role !== 'user') continue
 
+    const actionDetails =
+      m.actions && m.actions.length > 0
+        ? '\n' +
+          m.actions
+            .map(
+              (a) =>
+                `[Ação executada: ${a.title} - ${a.lines.map((l) => `${l.label}: ${l.value}`).join(', ')}]`,
+            )
+            .join('\n')
+        : ''
+    const attachmentNote = m.attachment ? `\n[Arquivo PDF anexado: ${m.attachment.name}]` : ''
+    const text = m.content + attachmentNote + actionDetails
+
     const lastTurn = turns[turns.length - 1]
     if (lastTurn && lastTurn.role === role) {
       if (!lastTurn.parts) lastTurn.parts = []
-      lastTurn.parts.push({ text: m.content })
+      lastTurn.parts.push({ text })
     } else {
-      turns.push({ role, parts: [{ text: m.content }] })
+      turns.push({ role, parts: [{ text }] })
     }
+  }
+
+  // Preparar partes do turno atual do usuário
+  let promptText = newUserText
+  if (newAttachment?.extractedText && newAttachment.extractedText.trim().length > 0) {
+    promptText += `\n\n--- TEXTO EXATO E VERBATIM EXTRAÍDO DO ARQUIVO PDF (${newAttachment.name}) ---\nUtilize rigorosamente as linhas, datas, nomes de estabelecimentos e valores abaixo para cadastrar com precisão milimétrica sem alucinar nenhum valor ou dado que não conste aqui:\n"""\n${newAttachment.extractedText.slice(0, 35000)}\n"""\n--- FIM DO TEXTO EXTRAÍDO DO PDF ---`
+  }
+
+  const userParts: Part[] = [{ text: promptText }]
+  if (newAttachment?.base64) {
+    userParts.push({
+      inlineData: {
+        mimeType: newAttachment.type || 'application/pdf',
+        data: newAttachment.base64,
+      },
+    })
   }
 
   const lastTurn = turns[turns.length - 1]
   if (lastTurn && lastTurn.role === 'user') {
     if (!lastTurn.parts) lastTurn.parts = []
-    lastTurn.parts.push({ text: newUserText })
+    lastTurn.parts.push(...userParts)
   } else {
-    turns.push({ role: 'user', parts: [{ text: newUserText }] })
+    turns.push({ role: 'user', parts: userParts })
   }
 
   return turns
@@ -552,7 +859,7 @@ async function callGeminiWithResilience(params: {
           config: {
             systemInstruction,
             tools,
-            temperature: 0.3,
+            temperature: 0.1,
           },
         })
 
@@ -598,13 +905,14 @@ export async function runGeminiAgent(opts: {
   apiKey: string
   history: ChatMessage[]
   userMessage: string
+  attachment?: ChatAttachment
   systemInstruction: string
   execute: ToolExecutor
   model?: string
   onModelChanged?: (newModel: string) => void
 }): Promise<{ text: string; actions: ActionCardData[] }> {
   const ai = new GoogleGenAI({ apiKey: opts.apiKey })
-  const contents: Content[] = buildChatContents(opts.history, opts.userMessage)
+  const contents: Content[] = buildChatContents(opts.history, opts.userMessage, opts.attachment)
   const actions: ActionCardData[] = []
   let activeModel = opts.model || getSelectedGeminiModel() || GEMINI_MODEL
 

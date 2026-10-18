@@ -188,6 +188,7 @@ interface FinanceContextValue {
   clearDemoData: () => void
   // transações
   addTransaction: (tx: NewTransaction) => Promise<string>
+  addMany: (txs: NewTransaction[]) => Promise<void>
   createManual: (input: ManualTransactionInput) => Promise<string>
   updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<void>
   deleteTransaction: (id: string) => Promise<void>
@@ -1243,6 +1244,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     resetDemo,
     clearDemoData,
     addTransaction,
+    addMany,
     createManual,
     updateTransaction,
     deleteTransaction,

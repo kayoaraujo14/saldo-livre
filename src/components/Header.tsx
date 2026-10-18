@@ -23,8 +23,8 @@ import {
   LogOut,
   CalendarRange,
   Users2,
-  Plus,
   SlidersHorizontal,
+  Landmark,
 } from 'lucide-react'
 
 interface HeaderProps {
@@ -33,7 +33,7 @@ interface HeaderProps {
   onOpenApiKey: () => void
   onOpenProjection: () => void
   onOpenFriends: () => void
-  onOpenNewTx?: () => void
+  onOpenOpenFinance: () => void
 }
 
 export function Header({
@@ -42,7 +42,7 @@ export function Header({
   onOpenApiKey,
   onOpenProjection,
   onOpenFriends,
-  onOpenNewTx,
+  onOpenOpenFinance,
 }: HeaderProps) {
   const {
     mode,
@@ -151,17 +151,8 @@ export function Header({
 
           {/* 2. Right: Action Buttons & Menus */}
           <div className="flex items-center gap-2">
-            {/* Primary CTA on Desktop: Nova Transação */}
-            {onOpenNewTx && (
-              <Button
-                size="sm"
-                onClick={onOpenNewTx}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-3.5 gap-1.5 shadow-md shadow-emerald-950 cursor-pointer hidden lg:flex rounded-xl"
-              >
-                <Plus className="size-3.5 stroke-[2.5]" />
-                <span>Nova Transação</span>
-              </Button>
-            )}
+
+
 
             {/* Friends Button (Desktop: visible with badge; Mobile: accessible via Menu & top alert banner) */}
             <Button
@@ -224,6 +215,17 @@ export function Header({
                   <div className="flex flex-col">
                     <span className="font-medium">Projeção de Fluxo (6m)</span>
                     <span className="text-[10px] text-slate-500">Previsão dos próximos meses</span>
+                  </div>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={onOpenOpenFinance}
+                  className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
+                >
+                  <Landmark className="size-3.5 text-emerald-400" />
+                  <div className="flex flex-col">
+                    <span className="font-medium">Open Finance Brasil</span>
+                    <span className="text-[10px] text-slate-500">Conectar contas bancárias e faturas</span>
                   </div>
                 </DropdownMenuItem>
 

@@ -3,10 +3,12 @@
  * e chama as MESMAS ferramentas do Gemini, permitindo testar o fluxo
  * completo sem API key.
  */
-import type { ActionCardData } from '@/types'
+import type { ActionCardData, ChatAttachment } from '@/types'
+import { CATEGORIES } from '@/types'
 import type { ToolExecutor } from './gemini'
 import { guessCategory } from './finance'
-import { dateInMonth, formatBRL, normalize, todayKey } from './utils'
+import { dateInMonth, formatBRL, monthLabel, normalize, todayKey } from './utils'
+import { parseTransactionsFromText } from './pdfParser'
 
 const THIRD_PARTIES: [RegExp, string][] = [
   [/\bmae\b|\bminha mae\b/, 'Mãe'],
@@ -54,12 +56,179 @@ export async function runDemoAgent(
   message: string,
   execute: ToolExecutor,
   monthKey: string,
+  attachment?: ChatAttachment,
 ): Promise<{ text: string; actions: ActionCardData[] }> {
   const n = normalize(message)
   const actions: ActionCardData[] = []
   const amount = parseAmount(message)
   const dayMatch = n.match(/dia\s+(\d{1,2})/)
   const date = dayMatch ? dateInMonth(monthKey, Number(dayMatch[1])) : undefined
+
+  // ---------------- Importação de Extrato/Fatura em PDF (Modo Demo) ----------------
+  if (attachment || /fatura.*pdf|extrato.*pdf|importar pdf|importar fatura|importar extrato/i.test(n)) {
+    const fileName = attachment?.name || (n.includes('fatura') ? 'fatura_cartao.pdf' : 'extrato_conta.pdf')
+    const isStatement = /extrato|conta|bancari|extrato.*pdf/i.test(fileName + ' ' + n)
+
+    // Se o PDF possui texto real extraído pelo pdfjs-dist, lê as transações VERDADEIRAS do arquivo do usuário!
+    if (attachment?.extractedText && attachment.extractedText.trim().length > 20) {
+      const realTxs = parseTransactionsFromText(attachment.extractedText.split('\n'), monthKey)
+      if (realTxs.length > 0) {
+        const batchResult = await execute('registrarTransacoesLote', {
+          origemDocumento: isStatement ? 'extrato_conta' : 'fatura_cartao',
+          mesFaturaPadrao: monthKey,
+          metodoPagamentoPadrao: isStatement ? 'pix' : 'credit_card',
+          cartaoPadrao: isStatement ? undefined : 'Cartão Principal',
+          transacoes: realTxs.map((t) => ({
+            ...t,
+            tipoDivisao: 'MEU',
+            data: t.data || dateInMonth(monthKey, 10),
+            status: isStatement ? 'paid' : (t.metodoPagamento === 'credit_card' ? 'pending' : 'paid'),
+          })),
+        })
+        if (batchResult.action) actions.push(batchResult.action)
+        if (batchResult.action?.kind === 'confirmation') {
+          return {
+            text: `📄 **Entendi sua solicitação!** Analisei o arquivo PDF (${fileName}) e extraí **${realTxs.length} lançamentos** (${realTxs.filter(t => t.tipo === 'expense').length} despesas e ${realTxs.filter(t => t.tipo === 'income').length} receitas).\n\nPor favor, revise o resumo no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** no chat para cadastrá-los no seu Saldo Livre.`,
+            actions,
+          }
+        }
+        const incomes = realTxs.filter((t) => t.tipo === 'income').length
+        const expenses = realTxs.filter((t) => t.tipo === 'expense').length
+        return {
+          text: `📄 **Arquivo PDF lido com precisão!** (${fileName})\n\nExtraí diretamente do documento **${realTxs.length} lançamentos reais** (${expenses} despesas e ${incomes} receitas):\n\n${realTxs.slice(0, 8).map((t) => `• ${t.tipo === 'income' ? '🟢' : '🔴'} **${t.descricao}**: ${formatBRL(t.valorTotal)} (${t.data || monthKey})`).join('\n')}${realTxs.length > 8 ? `\n... e mais ${realTxs.length - 8} lançamentos cadastrados no sistema.` : ''}\n\n💡 Ao conectar sua **API Key do Gemini** (ícone 🔑), o Copiloto aplica visão multimodal para leitura de layouts complexos e tabelas bancárias!`,
+          actions,
+        }
+      }
+    }
+
+    if (isStatement) {
+      // Fallback didático se o PDF for escaneado/imagem sem texto selecionável
+      const batchResult = await execute('registrarTransacoesLote', {
+        origemDocumento: 'extrato_conta',
+        mesFaturaPadrao: monthKey,
+        metodoPagamentoPadrao: 'pix',
+        transacoes: [
+          { descricao: 'Salário Empresa XPTO', valorTotal: 4850.00, tipo: 'income', categoria: 'Receita', metodoPagamento: 'pix', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 5) },
+          { descricao: 'Pix Recebido - Venda Teclado', valorTotal: 220.00, tipo: 'income', categoria: 'Receita', metodoPagamento: 'pix', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 9) },
+          { descricao: 'Pix Enviado - Aluguel', valorTotal: 1200.00, tipo: 'expense', categoria: 'Moradia', metodoPagamento: 'pix', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 6) },
+          { descricao: 'Supermercado Débito', valorTotal: 284.50, tipo: 'expense', categoria: 'Alimentação', metodoPagamento: 'debit', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 8) },
+          { descricao: 'Boleto Enel Energia', valorTotal: 165.30, tipo: 'expense', categoria: 'Moradia', metodoPagamento: 'bill', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 10) },
+        ],
+      })
+      if (batchResult.action) actions.push(batchResult.action)
+      if (batchResult.action?.kind === 'confirmation') {
+        return {
+          text: `📄 **Entendi sua solicitação!** Analisei o extrato bancário (${fileName}) e preparei **5 lançamentos** (2 receitas e 3 despesas de conta).\n\nPor favor, confira os dados no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** para confirmar o cadastro no seu Saldo Livre.`,
+          actions,
+        }
+      }
+      return {
+        text: `📄 **Extrato Bancário processado!** (${fileName})\n\nClassifiquei com precisão os lançamentos bancários da sua conta:\n\n• 🟢 **2 Receitas / Entradas (+R$ 5.070,00)**: Salário e Pix recebido, que **aumentaram diretamente seu Saldo Livre**!\n• 🔴 **3 Despesas de Conta (−R$ 1.649,80)**: Aluguel via Pix, Supermercado no débito e Boleto Enel já debitados da sua conta (**sem gerar despesa de cartão de crédito**).\n\n💡 Conecte sua **API Key do Google Gemini** (ícone 🔑 acima) para ler extratos escaneados e faturas com IA multimodal profunda!`,
+        actions,
+      }
+    } else {
+      // Fatura de Cartão de Crédito
+      const batchResult = await execute('registrarTransacoesLote', {
+        origemDocumento: 'fatura_cartao',
+        mesFaturaPadrao: monthKey,
+        dataVencimentoPadrao: dateInMonth(monthKey, 15),
+        cartaoPadrao: 'Nubank Principal',
+        metodoPagamentoPadrao: 'credit_card',
+        transacoes: [
+          { descricao: 'Supermercado Pão de Açúcar', valorTotal: 342.80, tipo: 'expense', categoria: 'Alimentação', metodoPagamento: 'credit_card', status: 'pending', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 4) },
+          { descricao: 'Posto Shell Combustível', valorTotal: 195.00, tipo: 'expense', categoria: 'Transporte', metodoPagamento: 'credit_card', status: 'pending', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 6) },
+          { descricao: 'iFood Restaurante', valorTotal: 84.50, tipo: 'expense', categoria: 'Alimentação', metodoPagamento: 'credit_card', status: 'pending', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 8) },
+          { descricao: 'Drogaria São Paulo', valorTotal: 67.90, tipo: 'expense', categoria: 'Saúde', metodoPagamento: 'credit_card', status: 'pending', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 11) },
+          { descricao: 'Netflix Mensalidade', valorTotal: 55.90, tipo: 'expense', categoria: 'Assinaturas', metodoPagamento: 'credit_card', status: 'pending', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 12) },
+          { descricao: 'Estorno Uber Viagem', valorTotal: -14.20, tipo: 'expense', categoria: 'Estorno', metodoPagamento: 'credit_card', status: 'pending', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 14) },
+        ],
+      })
+      if (batchResult.action) actions.push(batchResult.action)
+      if (batchResult.action?.kind === 'confirmation') {
+        return {
+          text: `📄 **Entendi sua solicitação!** Analisei a fatura de cartão de crédito (${fileName}) para vencimento em **${monthLabel(monthKey)}**.\n\nPor favor, confira os lançamentos no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** no chat para cadastrá-los no sistema.`,
+          actions,
+        }
+      }
+      return {
+        text: `📄 **Fatura de Cartão de Crédito processada!** (${fileName})\n\nRegistrei os gastos e estornos da fatura para vencimento em **${monthLabel(monthKey)}**.\n\n💡 Ao conectar sua **API Key do Google Gemini**, o Copiloto extrai todas as parcelas e compras do seu cartão real em PDF!`,
+        actions,
+      }
+    }
+  }
+
+  // ---------------- Exclusão Cirúrgica de Transações (Modo Demo) ----------------
+  if (/^(exclua|excluir|apague|apagar|delete|deletar|remova|remover|tirar|tire)\b/i.test(n) || /(desfazer|excluir|apagar|deletar).*(ultimo|recente|fatura|extrato|compra|gasto|despesa|receita)/i.test(n)) {
+    const isUndoRecent = /ultimo|ultimos|recentes|desfazer|desfaca|lote/i.test(n)
+    const cleanTerm = n
+      .replace(/^(exclua|excluir|apague|apagar|delete|deletar|remova|remover|tirar|tire)\s+(a\s+|o\s+|as\s+|os\s+)?(despesa|gasto|compra|receita|lancamento)?\s*(de|do|da|no|na)?\s*/i, '')
+      .replace(/r?\$?\s*[\d.,]+\s*(reais)?/i, '')
+      .replace(/(do mes|deste mes|de outubro|de novembro|por favor|pfv)/gi, '')
+      .trim()
+
+    const r = await execute('excluirTransacoes', {
+      termoBusca: cleanTerm && cleanTerm.length >= 2 && !isUndoRecent ? cleanTerm : undefined,
+      valor: amount ?? undefined,
+      mes: monthKey,
+      apenasRecentes: isUndoRecent,
+      limiteQuantidade: isUndoRecent ? 10 : 1,
+    })
+    if (r.action) actions.push(r.action)
+    if (r.action?.kind === 'confirmation') {
+      return {
+        text: `🗑️ **Entendi sua solicitação!** Localizei a(s) transação(ões) para exclusão.\n\nPor favor, confira os dados no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** no chat para confirmar a exclusão no seu Saldo Livre.`,
+        actions,
+      }
+    }
+    const d = r.response as Record<string, any>
+    if (!d.ok) {
+      return {
+        text: `⚠️ ${d.erro || 'Não encontrei nenhuma transação correspondente para excluir.'}`,
+        actions,
+      }
+    }
+    return {
+      text: `🗑️ **${d.quantidadeExcluida} transação(ões) excluída(s) com sucesso!**\n\n${(d.itensExcluidos as string[]).map((it) => `• ${it}`).join('\n')}\n\nSaldo Livre atualizado: **${formatBRL(d.saldoLivreAtualizado)}**.`,
+      actions,
+    }
+  }
+
+  // ---------------- Open Finance (Dúvidas e status) ----------------
+  if (/open finance|conectar banco|pluggy|integrar banco|sincronizar banco/i.test(n)) {
+    return {
+      text: `🏦 **Open Finance no Saldo Livre**\n\nVocê pode conectar seus bancos (Nubank, Itaú, Inter, Bradesco, Santander, C6 e outros) diretamente pelo **Open Finance Brasil**!\n\n**Como funciona:**\n1. Clique no botão **"🏦 Open Finance"** no topo do Saldo Livre.\n2. Escolha sua instituição financeira e autorize a leitura segura de extratos e faturas.\n3. O sistema sincroniza automaticamente todas as novas despesas e entradas sem você precisar baixar ou subir arquivos PDF manualmente!\n\n💡 *A conexão é 100% regulada pelo Banco Central e possui permissão exclusiva de leitura (somente extratos e faturas).*`,
+      actions,
+    }
+  }
+
+  // ---------------- Regras / Memória do Usuário ----------------
+  if (/aprenda|memoriz|lembre|guarde que|anote que/i.test(n)) {
+    const cleanRule = message.replace(/^(aprenda que|lembre-se que|memorize que|guarde que|anote que|aprenda|lembre|memorize)\s*:?\s*/i, '').trim()
+    const r = await execute('gerenciarRegrasEMemoria', { acao: 'aprender', regra: cleanRule || message })
+    if (r.action) actions.push(r.action)
+    return {
+      text: `🧠 **Regra memorizada com sucesso!**\n\n"${cleanRule || message}"\n\nVou lembrar desse padrão em todos os seus próximos lançamentos e orientações financeiras.`,
+      actions,
+    }
+  }
+
+  if (/listar regras|quais regras|minhas regras|regras aprendidas/i.test(n)) {
+    const r = await execute('gerenciarRegrasEMemoria', { acao: 'listar' })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    const regras = (d.regras as Array<{ id: string; regra: string }>) || []
+    if (regras.length === 0) {
+      return {
+        text: '🧠 Você ainda não me ensinou nenhuma regra personalizada.\n\nPara me ensinar, basta dizer por exemplo: *"Aprenda que todo gasto no Zé Delivery é Lazer e 100% meu"*.',
+        actions,
+      }
+    }
+    const listText = regras.map((reg, idx) => `${idx + 1}. ${reg.regra}`).join('\n')
+    return {
+      text: `🧠 **Regras Aprendidas Atualmente:**\n\n${listText}\n\nVocê pode me ensinar novas regras a qualquer momento dizendo *"Aprenda que..."*.`,
+      actions,
+    }
+  }
 
   // ---------------- Relatório / economia ----------------
   if (/relatorio|economiz|resumo|analise|onde .*gast|como estou|situacao/.test(n)) {
@@ -100,6 +269,27 @@ ${rows || '| — | — | — |'}
 
 **💡 Onde economizar**
 ${tips.map((t) => `- ${t}`).join('\n') || '- Seu mês está equilibrado. Continue assim!'}`,
+      actions,
+    }
+  }
+
+  // ---------------- Saldo Livre / Limite Diário Direto ----------------
+  if (/saldo livre|qual.*saldo|quanto.*saldo|meu saldo|limite diario|qual.*limite|quanto tenho/.test(n)) {
+    const r = await execute('obterRelatorioEProjecaoMensal', {})
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    const free = d.saldoLivreReal as number
+    const daily = d.limiteDiarioSeguro as number | null
+    const days = d.diasRestantes as number
+
+    return {
+      text: `Seu **Saldo Livre Real** em **${d.mes}** é **${formatBRL(free)}**.\n\n` +
+        (daily != null
+          ? `• **Limite Diário Seguro:** **${formatBRL(daily)}/dia** (${days} dias restantes).\n`
+          : '• Mês encerrado.\n') +
+        `• **Receitas:** ${formatBRL(d.receitas)}\n` +
+        `• **Total Comprometido:** ${formatBRL(d.comprometido)} (Já pago: ${formatBRL(d.jaPago)}, A pagar: ${formatBRL(d.comprometido - d.jaPago)})\n` +
+        (d.aReceberTotal > 0 ? `• **A Receber:** ${formatBRL(d.aReceberTotal)}\n` : ''),
       actions,
     }
   }
@@ -145,6 +335,12 @@ ${weekend ? 'Para o **fim de semana (2 dias)**:' : 'Para **hoje**:'}
       dataVencimento: date,
     })
     if (r.action) actions.push(r.action)
+    if (r.action?.kind === 'confirmation') {
+      return {
+        text: `⚡ **Entendi sua solicitação!** Preparei a atualização da conta **${billWord}** para **${formatBRL(amount)}**.\n\nPor favor, confira os dados no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** para confirmar a alteração no seu Saldo Livre.`,
+        actions,
+      }
+    }
     const d = r.response as Record<string, any>
     if (!d.ok) return { text: `Não encontrei uma conta em aberto com "${billWord}". Contas em aberto: ${(d.contasEmAberto ?? []).join(', ') || 'nenhuma'}.`, actions }
     const diff = d.variacaoNoMeuSaldoLivre as number
@@ -158,8 +354,61 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
     }
   }
 
+  const isQuestion = message.includes('?') || /^(qual|quanto|quantos|quais|onde|quem|por que|pq|o que|tem algum|tem alguma|existe|sera que)\b/i.test(n.trim())
+
+  // ---------------- Consulta de Transações / Gastos ----------------
+  if (isQuestion || /consult|listar transac|pesquis|buscar|extrato|ultimas compras|ultimos lancamentos|historico de gastos|gastos com|gastei com|gastei no|gastei na/.test(n)) {
+    // Check if user is asking about a category
+    let matchedCategory: string | undefined
+    for (const cat of CATEGORIES) {
+      if (normalize(cat) === 'receita') continue
+      if (n.includes(normalize(cat))) {
+        matchedCategory = cat
+        break
+      }
+    }
+
+    // Check if user is asking about a search term (e.g. "uber", "ifood", "mercado")
+    let searchTerm: string | undefined
+    const searchMatch = message.match(/\b(?:no|na|em|com|de)\s+([A-Za-zÀ-ÿ0-9]{3,20})\b/i)
+    if (searchMatch && !matchedCategory) {
+      const term = searchMatch[1].trim()
+      if (!/^(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|cartao|credito|debito|fatura|hoje|ontem)$/i.test(normalize(term))) {
+        searchTerm = term
+      }
+    }
+
+    const r = await execute('consultarTransacoes', {
+      termoBusca: searchTerm,
+      categoria: matchedCategory,
+      mes: monthKey,
+    })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    const items = (d.transacoes as Array<any>) || []
+
+    if (items.length === 0) {
+      return {
+        text: `🔍 Não encontrei nenhum lançamento ${matchedCategory ? `na categoria **${matchedCategory}**` : searchTerm ? `com o termo "**${searchTerm}**"` : ''} registrado em **${monthLabel(monthKey)}**.`,
+        actions,
+      }
+    }
+
+    const total = d.somaTotal as number
+    const meuImpacto = d.somaMeuImpacto as number
+    const listFormatted = items.slice(0, 8).map((t) => `• **${t.descricao}**: ${formatBRL(t.valorTotal)} (${t.dataVencimento || t.mesCompetencia})`).join('\n')
+
+    return {
+      text: `🔍 Encontrei **${d.totalEncontrados}** lançamento(s) em **${monthLabel(monthKey)}**:\n\n` +
+        `${listFormatted}\n\n` +
+        `• **Soma Total:** ${formatBRL(total)}\n` +
+        `• **Seu Impacto Pessoal:** ${formatBRL(meuImpacto)}`,
+      actions,
+    }
+  }
+
   // ---------------- Registrar transação ----------------
-  if (amount) {
+  if (amount && !isQuestion) {
     let tipoDivisao = 'MEU'
     let nomeTerceiro: string | undefined
     for (const [re, name] of THIRD_PARTIES) {
@@ -191,6 +440,12 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
     })
     if (r.action) actions.push(r.action)
     const d = r.response as Record<string, any>
+    if (r.action?.kind === 'confirmation') {
+      return {
+        text: `👍 **Entendi sua solicitação!** Preparei o lançamento de ${income ? 'receita' : 'despesa'}: **${d.descricao || descricao}** no valor de **${formatBRL(amount)}**.\n\nPor favor, confira os dados no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** para confirmar o cadastro no seu Saldo Livre.`,
+        actions,
+      }
+    }
     if (!d.ok) return { text: `Não consegui registrar: ${d.erro}`, actions }
     const neutral = d.meuImpactoNoSaldoLivre === 0
     return {

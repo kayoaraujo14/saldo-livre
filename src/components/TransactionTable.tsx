@@ -18,10 +18,9 @@ import {
   friendPctOf,
   friendShareOf,
 } from '@/lib/finance'
-import { formatBRL, formatShortDate, todayKey } from '@/lib/utils'
+import { formatBRL, formatShortDate } from '@/lib/utils'
 import {
   Search,
-  Plus,
   RefreshCw,
   CreditCard,
   Shield,
@@ -35,8 +34,8 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  ChevronLeft,
-  ChevronRight,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 import { MobileTransactionCard } from './mobile/MobileTransactionCard'
@@ -44,11 +43,12 @@ import { MobileTransactionCard } from './mobile/MobileTransactionCard'
 type TabFilter = 'all' | 'income' | 'expense' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
 
 interface TransactionTableProps {
-  onOpenNewTx?: () => void
   onEditTx: (tx: Transaction) => void
+  onToggleExpand?: () => void
+  isExpanded?: boolean
 }
 
-export function TransactionTable({ onEditTx }: TransactionTableProps) {
+export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: TransactionTableProps) {
   const {
     monthTransactions,
     cards,
@@ -59,27 +59,17 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
     changeAmount,
     updateTransaction,
     deleteTransaction,
-    createManual,
     respondChargeRequest,
   } = useFinance()
 
   const [activeTab, setActiveTab] = useState<TabFilter>('all')
   const [search, setSearch] = useState('')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
-  const [pageSize, setPageSize] = useState<number>(30)
-  const [currentPage, setCurrentPage] = useState<number>(1)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDesc, setEditDesc] = useState('')
   const [editDate, setEditDate] = useState('')
   const [editAmount, setEditAmount] = useState('')
   const [deleteGroupTx, setDeleteGroupTx] = useState<Transaction | null>(null)
-
-  // Quick inline add state
-  const [quickType, setQuickType] = useState<'expense' | 'income'>('expense')
-  const [quickDesc, setQuickDesc] = useState('')
-  const [quickAmount, setQuickAmount] = useState('')
-  const [quickCat, setQuickCat] = useState<Category>('Alimentação')
-  const [quickSplit, setQuickSplit] = useState<SplitType>('mine')
 
   const currentUid = me?.uid ?? ''
 
@@ -139,13 +129,7 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
     })
   }, [monthTransactions, activeTab, search, cards, sortOrder])
 
-  // Pagination calculation
-  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filteredTxs.length / pageSize))
-  const startIdx = pageSize === 0 ? 0 : (currentPage - 1) * pageSize
-  const endIdx = pageSize === 0 ? filteredTxs.length : startIdx + pageSize
-  const pagedTxs = useMemo(() => {
-    return pageSize === 0 ? filteredTxs : filteredTxs.slice(startIdx, endIdx)
-  }, [filteredTxs, startIdx, endIdx, pageSize])
+
 
   // Count badges
   const counts = useMemo(() => {
@@ -194,28 +178,7 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
     setEditingId(null)
   }
 
-  const handleQuickAdd = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const num = parseFloat(quickAmount.replace(',', '.'))
-    if (!quickDesc.trim() || isNaN(num) || num <= 0) return
 
-    const isRefund = quickCat === 'Estorno'
-    const finalAmount = isRefund ? -Math.abs(num) : num
-
-    await createManual({
-      description: quickDesc.trim(),
-      amount: finalAmount,
-      category: quickType === 'income' ? 'Receita' : quickCat,
-      date: todayKey(),
-      type: quickType,
-      status: quickType === 'income' ? 'paid' : 'pending',
-      splitType: quickType === 'income' ? 'mine' : quickSplit,
-      paymentMethod: quickType === 'income' ? 'pix' : 'credit_card',
-    })
-
-    setQuickDesc('')
-    setQuickAmount('')
-  }
 
   return (
     <div className="glass-card rounded-2xl border border-white/[0.08] flex flex-col h-full overflow-hidden shadow-xl">
@@ -252,6 +215,22 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
                 className="h-8 pl-8 text-xs bg-slate-950/70 border-slate-800 focus-visible:ring-emerald-500/40"
               />
             </div>
+
+            {onToggleExpand && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={onToggleExpand}
+                className={`size-8 text-slate-400 hover:text-white cursor-pointer hidden lg:flex rounded-lg border shrink-0 items-center justify-center transition-all ${
+                  isExpanded
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25 shadow-xs'
+                    : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60'
+                }`}
+                title={isExpanded ? 'Restaurar divisão da tela' : 'Maximizar tabela (tela cheia)'}
+              >
+                {isExpanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -390,7 +369,7 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
             <p className="text-[11px] text-slate-500 mt-1">Tente ajustar os filtros ou adicione uma nova transação.</p>
           </div>
         ) : (
-          pagedTxs.map((tx: Transaction) => (
+          filteredTxs.map((tx: Transaction) => (
             <MobileTransactionCard
               key={tx.id}
               tx={tx}
@@ -416,13 +395,13 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
         <table className="w-full text-left text-xs border-collapse">
           <thead className="sticky top-0 bg-[#0f172a] text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-white/[0.06] z-10">
             <tr>
-              <th className="py-2.5 px-3 w-28">Status</th>
+              <th className="py-2 px-2.5 w-24">Status</th>
               <th
                 onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
-                className="py-2.5 px-3 w-28 cursor-pointer select-none hover:text-white transition-colors group"
+                className="py-2 px-2.5 w-24 cursor-pointer select-none hover:text-white transition-colors group"
                 title="Clique para alternar ordem cronológica (1→31 ou 31→1)"
               >
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1">
                   <span>Data</span>
                   {sortOrder === 'asc' ? (
                     <ArrowUp className="size-3 text-emerald-400 shrink-0" />
@@ -434,11 +413,11 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
                   </span>
                 </div>
               </th>
-              <th className="py-2.5 px-3 min-w-[200px]">Descrição</th>
-              <th className="py-2.5 px-3 w-32">Categoria</th>
-              <th className="py-2.5 px-3 w-40">Divisão / Pagador</th>
-              <th className="py-2.5 px-3 w-44 text-right">Valor & Meu Impacto</th>
-              <th className="py-2.5 px-2 w-16 text-center">Ações</th>
+              <th className="py-2 px-2.5 min-w-[150px]">Descrição</th>
+              <th className="py-2 px-2.5 w-28">Categoria</th>
+              <th className="py-2 px-2.5 w-32">Divisão / Pagador</th>
+              <th className="py-2 px-2.5 w-36 text-right">Valor & Meu Impacto</th>
+              <th className="py-2 px-1.5 w-14 text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.04]">
@@ -451,7 +430,7 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
                 </td>
               </tr>
             ) : (
-              pagedTxs.map((tx: Transaction) => {
+              filteredTxs.map((tx: Transaction) => {
                 const isEditing = editingId === tx.id
                 const effAmount = effectiveAmount(tx)
                 const myImpact = impactFor(tx, currentUid, monthTransactions)
@@ -950,168 +929,7 @@ export function TransactionTable({ onEditTx }: TransactionTableProps) {
         </table>
       </div>
 
-      {/* Pagination & Count Toolbar */}
-      {filteredTxs.length > 0 && (
-        <div className="px-3.5 py-1.5 border-t border-white/[0.04] bg-slate-950/60 flex items-center justify-between text-xs text-slate-400 shrink-0">
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span>
-              Mostrando <strong className="text-slate-200">{startIdx + 1}–{Math.min(endIdx, filteredTxs.length)}</strong> de{' '}
-              <strong className="text-slate-200">{filteredTxs.length}</strong>
-            </span>
-          </div>
 
-          <div className="flex items-center gap-3">
-            {totalPages > 1 && (
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  className="size-5 text-slate-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                  title="Página anterior"
-                >
-                  <ChevronLeft className="size-3" />
-                </Button>
-                <span className="text-[10px] font-mono text-slate-300 px-1">
-                  {currentPage} / {totalPages}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  className="size-5 text-slate-400 hover:text-white disabled:opacity-30 cursor-pointer"
-                  title="Próxima página"
-                >
-                  <ChevronRight className="size-3" />
-                </Button>
-              </div>
-            )}
-
-            {filteredTxs.length > 30 && (
-              <div className="flex items-center gap-1 border-l border-slate-800/80 pl-2">
-                <span className="text-[10px] text-slate-500">Por pág:</span>
-                {[30, 60, 0].map((size) => (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => {
-                      setPageSize(size)
-                      setCurrentPage(1)
-                    }}
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer ${
-                      pageSize === size
-                        ? 'bg-slate-800 text-emerald-400 font-bold border border-slate-700'
-                        : 'text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    {size === 0 ? 'Tudo' : size}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Footer: Quick Add Row (Desktop) */}
-      <div className="hidden sm:block p-3 border-t border-white/[0.06] bg-slate-900/60">
-        <form onSubmit={handleQuickAdd} className="flex items-center gap-2">
-          {/* Quick type toggle */}
-          <div className="flex items-center rounded-lg bg-slate-950 p-0.5 border border-slate-800 shrink-0">
-            <button
-              type="button"
-              onClick={() => setQuickType('expense')}
-              className={`px-2 py-1 rounded text-xs font-medium cursor-pointer transition-colors ${
-                quickType === 'expense'
-                  ? 'bg-rose-500/20 text-rose-300 font-semibold shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              💸 Despesa
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setQuickType('income')
-                setQuickCat('Receita')
-                setQuickSplit('mine')
-              }}
-              className={`px-2 py-1 rounded text-xs font-medium cursor-pointer transition-colors ${
-                quickType === 'income'
-                  ? 'bg-emerald-500/20 text-emerald-300 font-semibold shadow-xs'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              💰 Entrada
-            </button>
-          </div>
-
-          <Input
-            value={quickDesc}
-            onChange={(e) => setQuickDesc(e.target.value)}
-            placeholder={
-              quickType === 'income'
-                ? '+ Nova receita (ex: Pix recebido, Freela, Bônus)...'
-                : '+ Nova despesa rápida (ex: Farmácia, Almoço)...'
-            }
-            className="h-8 text-xs bg-slate-950/70 border-slate-800 flex-1"
-          />
-
-          <Input
-            type="number"
-            step="0.01"
-            min={0.01}
-            value={quickAmount}
-            onChange={(e) => setQuickAmount(e.target.value)}
-            placeholder="R$ 0,00"
-            className="h-8 text-xs bg-slate-950/70 border-slate-800 w-24 font-mono shrink-0"
-          />
-
-          {quickType === 'expense' ? (
-            <>
-              <Select value={quickCat} onValueChange={(c) => setQuickCat(c as Category)}>
-                <SelectTrigger className="h-8 text-xs bg-slate-950/70 border-slate-800 w-28 shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CATEGORIES.filter((c) => c !== 'Receita').map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={quickSplit} onValueChange={(s) => setQuickSplit(s as SplitType)}>
-                <SelectTrigger className="h-8 text-xs bg-slate-950/70 border-slate-800 w-28 shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="mine">👤 Meu</SelectItem>
-                  {partner && <SelectItem value="split_50">🤝 50/50</SelectItem>}
-                  <SelectItem value="external">🏷️ Terceiro</SelectItem>
-                </SelectContent>
-              </Select>
-            </>
-          ) : (
-            <Badge variant="outline" className="h-8 px-2.5 text-xs bg-emerald-500/10 text-emerald-300 border-emerald-500/30 flex items-center gap-1 font-mono shrink-0">
-              💰 Receita (+Saldo)
-            </Badge>
-          )}
-
-          <Button
-            type="submit"
-            size="sm"
-            className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium gap-1 px-3 shrink-0 cursor-pointer"
-          >
-            <Plus className="size-3.5" /> Adicionar
-          </Button>
-        </form>
-      </div>
 
       {/* Modal para confirmação de exclusão individual ou de todo o grupo de parcelas */}
       <DeleteInstallmentDialog

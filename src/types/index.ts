@@ -221,17 +221,80 @@ export interface ReceivableItem {
   friendSharePct?: number | null
 }
 
+export interface PendingAction {
+  id: string
+  toolName: string
+  args: Record<string, unknown>
+  title: string
+  status: 'pending' | 'confirmed' | 'cancelled'
+  createdAt: number
+  lines: { label: string; value: string; tone?: 'positive' | 'negative' | 'neutral' }[]
+}
+
 export interface ActionCardData {
-  kind: 'created' | 'updated' | 'report' | 'error'
+  kind: 'created' | 'updated' | 'report' | 'error' | 'confirmation'
   title: string
   lines: { label: string; value: string; tone?: 'positive' | 'negative' | 'neutral' }[]
+  pendingAction?: PendingAction
+}
+
+export interface ChatAttachment {
+  name: string
+  size: number
+  type: string
+  base64?: string
+  extractedText?: string
 }
 
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  attachment?: ChatAttachment
   actions?: ActionCardData[]
   pending?: boolean
   error?: boolean
 }
+
+export interface ChatSession {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messages: ChatMessage[]
+}
+
+export interface UserLearnedRule {
+  id: string
+  rule: string
+  category?: string
+  createdAt: number
+}
+
+export interface OpenFinanceAccount {
+  id: string
+  institutionName: string
+  institutionCode: string
+  institutionColor?: string
+  type: 'checking' | 'credit_card' | 'savings' | 'investment'
+  accountNumber?: string
+  lastSyncAt: number
+  status: 'active' | 'syncing' | 'error' | 'disconnected'
+  balance?: number
+  currentInvoice?: number
+  invoiceDueDate?: string
+}
+
+export interface OpenFinanceConnection {
+  id: string
+  provider: 'pluggy' | 'belvo' | 'manual'
+  institutionName: string
+  institutionCode: string
+  institutionColor: string
+  status: 'connected' | 'syncing' | 'needs_reauth' | 'error'
+  connectedAt: number
+  lastSyncAt: number
+  accounts: OpenFinanceAccount[]
+}
+
+

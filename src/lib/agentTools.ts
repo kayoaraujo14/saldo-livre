@@ -44,6 +44,7 @@ export interface AgentEnv {
   me: Party
   partner: Party | null
   monthKey: string
+  requireConfirmation?: boolean
   addTransaction: (tx: NewTransaction) => Promise<string>
   addMany?: (txs: NewTransaction[]) => Promise<void>
   updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<void>
@@ -75,6 +76,9 @@ const SYNONYMS: Record<string, string[]> = {
   internet: ['internet', 'fibra', 'wifi'],
   aluguel: ['aluguel'],
 }
+
+export const INCOME_KEYWORDS_REGEX =
+  /(salario|salário|folha|remunera|pro-?labore|recebido|recebimento|pix recebido|ted recebida|doc recebido|transf(erência|erencia|\.)? recebida|ted de |pix de |deposito|depósito|rendimento|rend\s*aplic|juros|provento|dividendo|jcp|restitui|cashback|credito|crédito|cred\s+em\s+conta|cred\s+tef|cred\s+pix|entrada|ted\s+remet|dep\s+dinheiro|\+)/i
 
 function matchesSearch(description: string, search: string) {
   const d = normalize(description)
@@ -118,6 +122,10 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
         return gerenciarContasRecorrentes(env, args)
       case 'gerenciarAmizades':
         return gerenciarAmizades(env, args)
+      case 'gerenciarRegrasEMemoria':
+        return gerenciarRegras(env, args)
+      case 'consultarTransacoes':
+        return consultar(env, args)
       default:
         return { response: { ok: false, erro: `Ferramenta desconhecida: ${name}` } }
     }
@@ -129,14 +137,46 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
   if (isNaN(rawTotal) || rawTotal === 0) return { response: { ok: false, erro: 'valorTotal inválido' } }
   const total = round2(rawTotal)
 
-  const type = args.tipo === 'income' ? 'income' : 'expense'
+  const description = String(args.descricao ?? 'Lançamento').trim()
+
+  // Reconhecimento inteligente de receitas/entradas
+  const isBankStatementDoc = args.origemDocumento === 'extrato_conta' || args.ehExtrato === true
+  const isExplicitIncome = args.tipo === 'income' || args.categoria === 'Receita'
+  const isIncome =
+    isExplicitIncome ||
+    INCOME_KEYWORDS_REGEX.test(description)
+
+  const type = isIncome ? 'income' : (args.tipo === 'income' ? 'income' : 'expense')
   let splitType: SplitType = SPLIT_MAP[String(args.tipoDivisao ?? 'MEU')] ?? 'mine'
   if (type === 'income') splitType = 'mine'
-  const method = (['pix', 'credit_card', 'debit', 'bill'].includes(String(args.metodoPagamento))
-    ? args.metodoPagamento
-    : 'credit_card') as PaymentMethod
 
-  const description = String(args.descricao ?? 'Lançamento').trim()
+  let method: PaymentMethod
+  if (type === 'income') {
+    method = 'pix'
+  } else if (isBankStatementDoc) {
+    if (/pix/i.test(description)) method = 'pix'
+    else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(description)) method = 'bill'
+    else method = 'debit'
+  } else if (['pix', 'credit_card', 'debit', 'bill'].includes(String(args.metodoPagamento))) {
+    method = args.metodoPagamento as PaymentMethod
+  } else if (/pix/i.test(description)) {
+    method = 'pix'
+  } else if (/debito|débito/i.test(description)) {
+    method = 'debit'
+  } else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(description)) {
+    method = 'bill'
+  } else {
+    method = 'credit_card'
+  }
+
+  // Receitas ou transações de extrato bancário NUNCA devem ser vinculadas a cartão de crédito
+  if (type === 'income' && method === 'credit_card') {
+    method = 'pix'
+  }
+  if (isBankStatementDoc && method === 'credit_card') {
+    method = 'debit'
+  }
+
   let category = (CATEGORIES as readonly string[]).includes(String(args.categoria))
     ? (args.categoria as Category)
     : guessCategory(description, total)
@@ -326,9 +366,108 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
   }
 
   const before = computeSummary(env.getTransactions(), env.me.uid, competenceMonth)
+  const finalDescription = isInstallment
+    ? formatInstallmentDesc(cleanBaseDesc, parcelaAtual, totalParcelas)
+    : (cleanBaseDesc || description)
+
+  // Split para cálculo do impacto e divisão
+  const splitForCurrent = buildSplit({
+    splitType,
+    total,
+    me: env.me,
+    partner: env.partner,
+    payerUid,
+    createdByUid: env.me.uid,
+    externalName: args.nomeTerceiro as string | undefined,
+    assignedFriend,
+    friendSharePct: assignedFriend ? friendSharePct : 100,
+    customAllocations,
+  })
+
+  const myImpact = splitForCurrent.userImpact[env.me.uid] ?? 0
+  const receivable = payerUid === env.me.uid ? round2(total - myImpact) : 0
+  const label = SPLIT_LABELS[splitForCurrent.splitType]
+
+  const firstMonth = isInstallment ? shiftMonth(competenceMonth, 1 - parcelaAtual) : competenceMonth
+  const lastMonth = isInstallment ? shiftMonth(competenceMonth, totalParcelas - parcelaAtual) : competenceMonth
+  const pastCount = isInstallment ? parcelaAtual - 1 : 0
+  const futureCount = isInstallment ? totalParcelas - parcelaAtual : 0
+
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+
+  // Se ainda não foi confirmado pelo usuário, gera pedido de confirmação sem alterar o banco de dados
+  if (isPendingConfirmation) {
+    const netDiff = type === 'income' ? total : -myImpact
+    const estimatedAfter = round2(before.freeBalance + netDiff)
+    const actionTitle = `${type === 'income' ? 'Receita' : 'Despesa'}: ${finalDescription}`
+
+    const confirmationLines = [
+      { label: 'Valor da parcela', value: money(total) },
+      ...(isInstallment
+        ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
+        : []),
+      { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
+      { label: 'Vencimento', value: formatShortDate(finalDueDate) },
+      {
+        label: 'Divisão',
+        value: assignedFriend
+          ? friendSharePct < 100
+            ? `🧑‍🤝‍🧑 ${assignedFriend.name} (${friendSharePct}%) / Você (${100 - friendSharePct}%)`
+            : `🧑‍🤝‍🧑 100% Amigo (${assignedFriend.name})`
+          : splitForCurrent.splitType === 'custom' && customAllocations
+            ? `👥 Multi-pessoas (${customAllocations.length}x)`
+            : splitForCurrent.splitType === 'external'
+              ? `🏷️ ${splitForCurrent.allocations[0]?.name || 'Terceiro'}`
+              : `${label?.emoji ?? '👤'} ${label?.label ?? 'Meu'}`,
+      },
+      ...(card ? [{ label: 'Cartão', value: card.cardName }] : []),
+      {
+        label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
+        value: type === 'income' ? `+${money(total)}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
+        tone: type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
+      },
+      ...(receivable > 0 ? [{ label: assignedFriend ? `A receber (${assignedFriend.name})` : 'A receber', value: money(receivable), tone: 'positive' as const }] : []),
+      { label: 'Saldo Livre em ' + monthLabel(competenceMonth), value: `${money(before.freeBalance)} → ${money(estimatedAfter)}` },
+    ]
+
+    return {
+      response: {
+        ok: true,
+        aguardandoConfirmacao: true,
+        mensagem: `Entendi que você deseja cadastrar uma ${type === 'income' ? 'receita' : 'despesa'}: "${finalDescription}" no valor de ${money(total)}${card ? ` no cartão ${card.cardName}` : ''} para ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
+        descricao: finalDescription,
+        valorParcela: total,
+        tipo: type,
+        categoria: category,
+        ehParcelamento: isInstallment,
+        parcelaAtual: isInstallment ? parcelaAtual : 1,
+        totalParcelas: isInstallment ? totalParcelas : 1,
+        mesCompetenciaFatura: competenceMonth,
+        dataVencimento: finalDueDate,
+        cartao: card ? `${card.cardName} (titular: ${card.ownerName})` : null,
+        divisao: label?.label ?? splitForCurrent.splitType,
+        meuImpactoNoSaldoLivre: myImpact,
+        aReceberGerado: receivable,
+        saldoLivreAtual: before.freeBalance,
+      },
+      action: {
+        kind: 'confirmation',
+        title: `Confirmar ${actionTitle}`,
+        lines: confirmationLines,
+        pendingAction: {
+          id: uid('act'),
+          toolName: 'registrarTransacao',
+          args: { ...args, __confirmed: true },
+          title: actionTitle,
+          status: 'pending',
+          createdAt: Date.now(),
+          lines: confirmationLines,
+        },
+      },
+    }
+  }
 
   let id = ''
-  let finalDescription = cleanBaseDesc
 
   if (isInstallment) {
     // Aloca a série completa de parcelas (anteriores como pagas, atual e futuras como a pagar/pending)
@@ -397,7 +536,6 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     }
 
     id = installmentGroupId
-    finalDescription = formatInstallmentDesc(cleanBaseDesc, parcelaAtual, totalParcelas)
   } else {
     // Transação individual comum (à vista / parcela única)
     const split = buildSplit({
@@ -444,33 +582,9 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     }
 
     id = await env.addTransaction(tx)
-    finalDescription = cleanBaseDesc || description
   }
 
   const after = computeSummary(env.getTransactions(), env.me.uid, competenceMonth)
-
-  // Split para relatório da parcela atual
-  const splitForCurrent = buildSplit({
-    splitType,
-    total,
-    me: env.me,
-    partner: env.partner,
-    payerUid,
-    createdByUid: env.me.uid,
-    externalName: args.nomeTerceiro as string | undefined,
-    assignedFriend,
-    friendSharePct: assignedFriend ? friendSharePct : 100,
-    customAllocations,
-  })
-
-  const myImpact = splitForCurrent.userImpact[env.me.uid] ?? 0
-  const receivable = payerUid === env.me.uid ? round2(total - myImpact) : 0
-  const label = SPLIT_LABELS[splitForCurrent.splitType]
-
-  const firstMonth = isInstallment ? shiftMonth(competenceMonth, 1 - parcelaAtual) : competenceMonth
-  const lastMonth = isInstallment ? shiftMonth(competenceMonth, totalParcelas - parcelaAtual) : competenceMonth
-  const pastCount = isInstallment ? parcelaAtual - 1 : 0
-  const futureCount = isInstallment ? totalParcelas - parcelaAtual : 0
 
   return {
     response: {
@@ -521,9 +635,9 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
         },
         ...(card ? [{ label: 'Cartão', value: card.cardName }] : []),
         {
-          label: 'Meu impacto',
-          value: myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
-          tone: myImpact > 0 ? 'negative' : myImpact < 0 ? 'positive' : 'neutral',
+          label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
+          value: type === 'income' ? `+${money(total)}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
+          tone: type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
         },
         ...(receivable > 0 ? [{ label: assignedFriend ? `A receber (${assignedFriend.name})` : 'A receber', value: money(receivable), tone: 'positive' as const }] : []),
         { label: 'Saldo Livre em ' + monthLabel(competenceMonth), value: `${money(before.freeBalance)} → ${money(after.freeBalance)}` },
@@ -538,31 +652,200 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     return { response: { ok: false, erro: 'Nenhuma transação informada para registro em lote.' } }
   }
 
+  const origemDoc = typeof args.origemDocumento === 'string' ? args.origemDocumento : undefined
   const defaultMes = typeof args.mesFaturaPadrao === 'string' ? args.mesFaturaPadrao : undefined
   const defaultVenc = typeof args.dataVencimentoPadrao === 'string' ? args.dataVencimentoPadrao : undefined
   const defaultCartao = typeof args.cartaoPadrao === 'string' ? args.cartaoPadrao : undefined
+  const defaultMetodo = typeof args.metodoPagamentoPadrao === 'string'
+    ? args.metodoPagamentoPadrao
+    : origemDoc === 'extrato_conta'
+      ? 'pix'
+      : origemDoc === 'fatura_cartao'
+        ? 'credit_card'
+        : undefined
+
+  const isBankStatement =
+    origemDoc === 'extrato_conta' ||
+    (!defaultCartao && (
+      transacoesRaw.some((t) => t.tipo === 'income' || INCOME_KEYWORDS_REGEX.test(String(t.descricao || '')))
+    ))
+
+  let targetMonth = defaultMes || env.monthKey
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+
+  if (isPendingConfirmation) {
+    let previewReceitas = 0
+    let previewDespesas = 0
+    let countReceitas = 0
+    let countDespesas = 0
+    let previewImpacto = 0
+    const sampleItems: string[] = []
+
+    for (const item of transacoesRaw) {
+      const desc = String(item.descricao ?? 'Item')
+      const val = Math.abs(Number(item.valorTotal ?? 0))
+      const isExplicitIncome = item.tipo === 'income' || item.categoria === 'Receita'
+      const looksLikeIncome = isExplicitIncome || INCOME_KEYWORDS_REGEX.test(desc)
+      const resolvedTipo = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
+
+      if (resolvedTipo === 'income') {
+        previewReceitas += val
+        countReceitas++
+        previewImpacto += val
+      } else {
+        previewDespesas += val
+        countDespesas++
+        previewImpacto -= val
+      }
+
+      if (sampleItems.length < 4) {
+        sampleItems.push(`${desc} (${money(val)})`)
+      }
+    }
+
+    const summaryBefore = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
+    const isAllIncome = countReceitas > 0 && countDespesas === 0
+    const isMixed = countReceitas > 0 && countDespesas > 0
+
+    const previewTitle = isAllIncome
+      ? `Lote de ${countReceitas} receita${countReceitas > 1 ? 's' : ''}`
+      : isMixed
+        ? `Lote de ${transacoesRaw.length} lançamentos (${countDespesas} despesas e ${countReceitas} receitas)`
+        : `Lote de ${transacoesRaw.length} despesa${transacoesRaw.length > 1 ? 's' : ''}`
+
+    const confirmationLines = [
+      {
+        label: 'Qtd. Lançamentos',
+        value: isMixed
+          ? `${transacoesRaw.length} itens (${countDespesas} despesas, ${countReceitas} receitas)`
+          : `${transacoesRaw.length} itens`,
+      },
+      ...(previewReceitas > 0 ? [{ label: 'Total de Receitas (Entradas)', value: money(previewReceitas), tone: 'positive' as const }] : []),
+      ...(previewDespesas > 0 ? [{ label: isBankStatement ? 'Total de Despesas (Saídas)' : 'Total da Fatura (Cartão)', value: money(previewDespesas), tone: 'negative' as const }] : []),
+      {
+        label: 'Impacto Líquido Previsto',
+        value: previewImpacto > 0 ? `+${money(previewImpacto)}` : previewImpacto < 0 ? `−${money(Math.abs(previewImpacto))}` : 'R$ 0,00 (Neutro)',
+        tone: previewImpacto > 0 ? ('positive' as const) : previewImpacto < 0 ? ('negative' as const) : ('neutral' as const),
+      },
+      { label: 'Mês de Competência', value: monthLabel(targetMonth) },
+      { label: 'Exemplos de Itens', value: sampleItems.join(', ') + (transacoesRaw.length > 4 ? ` (+${transacoesRaw.length - 4})` : '') },
+      { label: 'Saldo Livre Atual em ' + monthLabel(targetMonth), value: money(summaryBefore.freeBalance) },
+    ]
+
+    return {
+      response: {
+        ok: true,
+        aguardandoConfirmacao: true,
+        mensagem: `Entendi que você deseja importar um lote de ${transacoesRaw.length} lançamentos (${countReceitas} receitas e ${countDespesas} despesas) para ${monthLabel(targetMonth)}. Por favor, confirme no botão abaixo se está correto para cadastrá-los no seu Saldo Livre.`,
+        quantidadeTotal: transacoesRaw.length,
+        quantidadeReceitas: countReceitas,
+        quantidadeDespesas: countDespesas,
+        totalReceitas: round2(previewReceitas),
+        totalDespesas: round2(previewDespesas),
+        meuImpactoTotal: round2(previewImpacto),
+        mesCompetencia: targetMonth,
+      },
+      action: {
+        kind: 'confirmation',
+        title: `Confirmar ${previewTitle}`,
+        lines: confirmationLines,
+        pendingAction: {
+          id: uid('act'),
+          toolName: 'registrarTransacoesLote',
+          args: { ...args, __confirmed: true },
+          title: previewTitle,
+          status: 'pending',
+          createdAt: Date.now(),
+          lines: confirmationLines,
+        },
+      },
+    }
+  }
 
   const results: any[] = []
-  let totalValor = 0
+  let totalReceitas = 0
+  let totalDespesas = 0
+  let receitasCount = 0
+  let despesasCount = 0
   let meuImpactoTotal = 0
   let aReceberTotal = 0
   let totalParcelasGeradas = 0
-  let targetMonth = defaultMes || env.monthKey
 
   for (const item of transacoesRaw) {
-    const merged = {
-      metodoPagamento: 'credit_card',
-      ...item,
-      mesFatura: item.mesFatura || defaultMes,
-      dataVencimento: item.dataVencimento || defaultVenc,
-      cartao: item.cartao || defaultCartao,
+    const desc = String(item.descricao ?? '')
+    const itemValor = Math.abs(Number(item.valorTotal ?? 0))
+
+    // Detecção inteligente de receitas/entradas
+    const isExplicitIncome = item.tipo === 'income' || item.categoria === 'Receita'
+    const looksLikeIncome =
+      isExplicitIncome ||
+      INCOME_KEYWORDS_REGEX.test(desc)
+
+    const resolvedTipo = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
+
+    // Detecção de forma de pagamento
+    let resolvedMetodo: PaymentMethod
+    if (resolvedTipo === 'income') {
+      resolvedMetodo = 'pix'
+    } else if (isBankStatement) {
+      if (/pix/i.test(desc)) resolvedMetodo = 'pix'
+      else if (/debito|débito/i.test(desc)) resolvedMetodo = 'debit'
+      else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(desc)) resolvedMetodo = 'bill'
+      else resolvedMetodo = (item.metodoPagamento && ['pix', 'debit', 'bill'].includes(item.metodoPagamento)) ? item.metodoPagamento : 'debit'
+    } else if (item.metodoPagamento && ['pix', 'credit_card', 'debit', 'bill'].includes(item.metodoPagamento)) {
+      resolvedMetodo = item.metodoPagamento
+    } else if (defaultMetodo && ['pix', 'credit_card', 'debit', 'bill'].includes(defaultMetodo)) {
+      resolvedMetodo = defaultMetodo as PaymentMethod
+    } else if (defaultCartao || item.cartao) {
+      resolvedMetodo = 'credit_card'
+    } else if (/pix/i.test(desc)) {
+      resolvedMetodo = 'pix'
+    } else if (/debito|débito/i.test(desc)) {
+      resolvedMetodo = 'debit'
+    } else if (/boleto/i.test(desc)) {
+      resolvedMetodo = 'bill'
+    } else {
+      resolvedMetodo = 'credit_card'
     }
+
+    // Se for extrato de conta corrente, NUNCA permite cartão de crédito!
+    if (isBankStatement && resolvedMetodo === 'credit_card') {
+      resolvedMetodo = 'debit'
+    }
+
+    // Status: se não for cartão de crédito, status padrão é 'paid' (já debitado/creditado na conta)
+    const resolvedStatus = resolvedMetodo === 'credit_card' ? (item.status || 'pending') : 'paid'
+
+    // Cartão só existe se o método for cartão de crédito E não for extrato bancário
+    const resolvedCartao = (!isBankStatement && resolvedMetodo === 'credit_card') ? (item.cartao || defaultCartao) : undefined
+
+    const merged = {
+      ...item,
+      tipo: resolvedTipo,
+      metodoPagamento: resolvedMetodo,
+      status: resolvedStatus,
+      cartao: resolvedCartao,
+      mesFatura: item.mesFatura || defaultMes,
+      dataVencimento: item.dataVencimento || (resolvedMetodo === 'credit_card' ? defaultVenc : item.data),
+      __confirmed: true,
+    }
+
     const single = await registrar(env, merged)
     if (single.response.ok) {
       const resp = single.response as any
       results.push(resp)
-      totalValor += resp.valorParcela || resp.valorTotal || 0
-      meuImpactoTotal += resp.meuImpactoNoSaldoLivre || 0
+      const val = Math.abs(resp.valorParcela || resp.valorTotal || itemValor || 0)
+
+      if (resolvedTipo === 'income') {
+        totalReceitas += val
+        receitasCount++
+        meuImpactoTotal += (resp.meuImpactoNoSaldoLivre || val)
+      } else {
+        totalDespesas += val
+        despesasCount++
+        meuImpactoTotal -= (resp.meuImpactoNoSaldoLivre || val)
+      }
+
       aReceberTotal += resp.aReceberGerado || 0
       totalParcelasGeradas += (resp.totalParcelas || 1)
       if (resp.mesCompetenciaFatura) targetMonth = resp.mesCompetenciaFatura
@@ -571,12 +854,25 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
 
   const summaryAfter = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
 
+  const isAllIncome = receitasCount > 0 && despesasCount === 0
+  const isMixed = receitasCount > 0 && despesasCount > 0
+
+  const title = isAllIncome
+    ? `Lote de ${receitasCount} receita${receitasCount > 1 ? 's' : ''} registrado com sucesso!`
+    : isMixed
+      ? `Lote de ${results.length} lançamentos (${despesasCount} despesa${despesasCount > 1 ? 's' : ''} e ${receitasCount} receita${receitasCount > 1 ? 's' : ''}) registrado com sucesso!`
+      : `Lote de ${results.length} despesa${results.length > 1 ? 's' : ''} registrado com sucesso!`
+
   return {
     response: {
       ok: true,
       quantidadeRegistrada: results.length,
+      quantidadeReceitas: receitasCount,
+      quantidadeDespesas: despesasCount,
+      totalReceitas: round2(totalReceitas),
+      totalDespesas: round2(totalDespesas),
       totalParcelasCriadas: totalParcelasGeradas,
-      totalValorFaturaAtual: round2(totalValor),
+      totalValor: round2(totalReceitas + totalDespesas),
       meuImpactoTotal: round2(meuImpactoTotal),
       aReceberTotal: round2(aReceberTotal),
       mesCompetencia: targetMonth,
@@ -585,13 +881,23 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     },
     action: {
       kind: 'created',
-      title: `Lote de ${results.length} despesas registrado com sucesso!`,
+      title,
       lines: [
-        { label: 'Qtd. Lançamentos', value: `${results.length} itens (${totalParcelasGeradas} parcelas geradas)` },
-        { label: 'Total da Fatura', value: money(totalValor) },
-        { label: 'Meu Impacto Pessoal', value: money(meuImpactoTotal), tone: meuImpactoTotal > 0 ? 'negative' : 'neutral' },
-        ...(aReceberTotal > 0 ? [{ label: 'A Receber (Kayo/Mãe)', value: money(aReceberTotal), tone: 'positive' as const }] : []),
-        { label: 'Mês da Fatura', value: monthLabel(targetMonth) },
+        {
+          label: 'Qtd. Lançamentos',
+          value: isMixed
+            ? `${results.length} itens (${despesasCount} despesas, ${receitasCount} receitas)`
+            : `${results.length} itens`,
+        },
+        ...(totalReceitas > 0 ? [{ label: 'Total de Receitas (Entradas)', value: money(totalReceitas), tone: 'positive' as const }] : []),
+        ...(totalDespesas > 0 ? [{ label: isBankStatement ? 'Total de Despesas (Saídas)' : 'Total da Fatura (Cartão)', value: money(totalDespesas), tone: 'negative' as const }] : []),
+        {
+          label: 'Impacto Líquido no Saldo Livre',
+          value: meuImpactoTotal > 0 ? `+${money(meuImpactoTotal)}` : meuImpactoTotal < 0 ? `−${money(Math.abs(meuImpactoTotal))}` : 'R$ 0,00 (Neutro)',
+          tone: meuImpactoTotal > 0 ? 'positive' : meuImpactoTotal < 0 ? 'negative' : 'neutral',
+        },
+        ...(aReceberTotal > 0 ? [{ label: 'A Receber', value: money(aReceberTotal), tone: 'positive' as const }] : []),
+        { label: 'Mês de Competência', value: monthLabel(targetMonth) },
         { label: 'Saldo Livre em ' + monthLabel(targetMonth), value: money(summaryAfter.freeBalance) },
       ],
     },
@@ -713,6 +1019,42 @@ async function expandirParcelamentos(env: AgentEnv, args: Record<string, unknown
     }
   }
 
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+  if (isPendingConfirmation) {
+    const title = `Expandir ${expandedSummary.length} compra(s) parcelada(s)`
+    const confirmationLines = [
+      { label: 'Parcelas a criar', value: `${countCreated} novas parcelas` },
+      { label: 'Compras encontradas', value: `${expandedSummary.length} série(s) completa(s)` },
+      { label: 'Mês de Referência', value: monthLabel(targetMonth) },
+      { label: 'Histórico', value: 'Aloca parcelas anteriores como pagas e futuras como pendentes' },
+      { label: 'Saldo Livre em ' + monthLabel(targetMonth), value: money(computeSummary(env.getTransactions(), env.me.uid, targetMonth).freeBalance) },
+    ]
+
+    return {
+      response: {
+        ok: true,
+        aguardandoConfirmacao: true,
+        mensagem: `Entendi que você deseja expandir ${expandedSummary.length} série(s) de compras parceladas, gerando ${countCreated} parcelas passadas e futuras para ${monthLabel(targetMonth)}. Por favor, confirme no botão abaixo se está correto.`,
+        quantidadeParcelas: countCreated,
+        compras: expandedSummary,
+      },
+      action: {
+        kind: 'confirmation',
+        title: `Confirmar ${title}`,
+        lines: confirmationLines,
+        pendingAction: {
+          id: uid('act'),
+          toolName: 'expandirParcelamentos',
+          args: { ...args, __confirmed: true },
+          title,
+          status: 'pending',
+          createdAt: Date.now(),
+          lines: confirmationLines,
+        },
+      },
+    }
+  }
+
   if (txsToCreate.length > 0) {
     if (env.addMany) {
       await env.addMany(txsToCreate)
@@ -746,28 +1088,59 @@ async function expandirParcelamentos(env: AgentEnv, args: Record<string, unknown
 
 async function excluir(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
   const all = env.getTransactions()
-  const ids = Array.isArray(args.ids) ? args.ids.map(String) : []
+  const ids = Array.isArray(args.ids) ? args.ids.map(String).filter(Boolean) : []
   const termo = typeof args.termoBusca === 'string' ? args.termoBusca.trim() : ''
+  const valor = typeof args.valor === 'number' && !isNaN(args.valor) ? Math.abs(args.valor) : undefined
   const mes = typeof args.mes === 'string' && /^\d{4}-\d{2}$/.test(args.mes) ? args.mes : ''
   const apenasRecentes = Boolean(args.apenasRecentes)
-  const limite = typeof args.limiteQuantidade === 'number' ? args.limiteQuantidade : 50
   const tudoDoMes = Boolean(args.tudoDoMes)
+  const emLote = Boolean(args.emLote) || Boolean(args.todas)
+
+  // SEGURANÇA: Se não for exclusão em lote explicitada pelo usuário, o limite padrão é SEMPRE 1!
+  // Isso impede que um comando como "exclua a compra do mercado" apague 50 itens em lote!
+  const limite = typeof args.limiteQuantidade === 'number'
+    ? args.limiteQuantidade
+    : (tudoDoMes || apenasRecentes || emLote) ? 50 : 1
 
   let targets: Transaction[] = []
 
   if (ids.length > 0) {
-    targets = all.filter((t) => ids.includes(t.id))
+    targets = all.filter((t) => ids.includes(t.id)).slice(0, limite)
+  } else if (tudoDoMes && mes) {
+    targets = all.filter((t) => t.competenceMonth === mes).slice(0, limite)
   } else if (apenasRecentes) {
     const sorted = [...all].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     targets = sorted.slice(0, limite)
-  } else if (tudoDoMes && mes) {
-    targets = all.filter((t) => t.competenceMonth === mes)
-  } else if (termo || mes) {
-    targets = all.filter((t) => {
+  } else if (termo || valor !== undefined || mes) {
+    // Busca cirúrgica com verificação de valor e eliminação de stop words
+    const candidates = all.filter((t) => {
       if (mes && t.competenceMonth !== mes) return false
-      if (termo && !matchesSearch(t.description, termo)) return false
+
+      if (valor !== undefined) {
+        const tVal = Math.abs(effectiveAmount(t))
+        if (Math.abs(tVal - valor) > 0.05) return false
+      }
+
+      if (termo) {
+        const normDesc = normalize(t.description)
+        const normTerm = normalize(termo)
+        if (normDesc.includes(normTerm)) return true
+
+        const stopWords = new Set(['compra', 'compras', 'despesa', 'despesas', 'gasto', 'gastos', 'lancamento', 'lancamentos', 'valor', 'reais', 'de', 'do', 'da', 'no', 'na', 'em', 'para', 'com', 'o', 'a', 'os', 'as', 'pago', 'pix'])
+        const words = normTerm.split(/\s+/).filter((w) => w.length >= 3 && !stopWords.has(w))
+        if (words.length > 0) {
+          // TODAS as palavras significativas precisam bater (não apenas uma)
+          return words.every((w) => normDesc.includes(w))
+        }
+        return false
+      }
+
       return true
-    }).slice(0, limite)
+    })
+
+    // Ordena pelo mais recente para que limite 1 afete a última transação correspondente
+    candidates.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    targets = candidates.slice(0, limite)
   }
 
   if (targets.length === 0) {
@@ -776,16 +1149,52 @@ async function excluir(env: AgentEnv, args: Record<string, unknown>): Promise<To
     }
   }
 
-  let totalDeletedValue = 0
-  const deletedDescriptions: string[] = []
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+  const totalDeletedValue = targets.reduce((sum, t) => sum + effectiveAmount(t), 0)
+  const deletedDescriptions = targets.map((t) => t.description)
+  const affectedMonth = targets[0]?.competenceMonth || env.monthKey
+
+  if (isPendingConfirmation) {
+    const title = `Excluir: ${targets.length === 1 ? targets[0].description : `${targets.length} lançamentos`}`
+    const confirmationLines = [
+      { label: 'Ação', value: 'Exclusão de Lançamento(s)' },
+      { label: 'Quantidade', value: `${targets.length} item(ns)` },
+      { label: 'Itens a Excluir', value: deletedDescriptions.slice(0, 4).join(', ') + (deletedDescriptions.length > 4 ? ` (+${deletedDescriptions.length - 4})` : '') },
+      { label: 'Valor a Remover', value: money(totalDeletedValue), tone: 'positive' as const },
+      { label: 'Mês Afetado', value: monthLabel(affectedMonth) },
+      { label: 'Saldo Livre Atual', value: money(computeSummary(all, env.me.uid, affectedMonth).freeBalance) },
+    ]
+
+    return {
+      response: {
+        ok: true,
+        aguardandoConfirmacao: true,
+        mensagem: `Entendi que você deseja excluir ${targets.length === 1 ? `o lançamento "${targets[0].description}" no valor de ${money(totalDeletedValue)}` : `${targets.length} lançamentos totalizando ${money(totalDeletedValue)}`}. Por favor, confirme no botão abaixo se está correto para excluir do sistema.`,
+        quantidadeExcluir: targets.length,
+        valorTotal: round2(totalDeletedValue),
+        itens: deletedDescriptions,
+      },
+      action: {
+        kind: 'confirmation',
+        title: `Confirmar ${title}`,
+        lines: confirmationLines,
+        pendingAction: {
+          id: uid('act'),
+          toolName: 'excluirTransacoes',
+          args: { ...args, ids: targets.map((t) => t.id), __confirmed: true },
+          title,
+          status: 'pending',
+          createdAt: Date.now(),
+          lines: confirmationLines,
+        },
+      },
+    }
+  }
 
   for (const t of targets) {
     await env.deleteTransaction(t.id)
-    totalDeletedValue += effectiveAmount(t)
-    deletedDescriptions.push(t.description)
   }
 
-  const affectedMonth = targets[0]?.competenceMonth || env.monthKey
   const nextAll = env.getTransactions().filter((t) => !targets.some((x) => x.id === t.id))
   const after = computeSummary(nextAll, env.me.uid, affectedMonth)
 
@@ -849,10 +1258,52 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
   const novoStatus = (['estimated', 'pending', 'paid'].includes(String(args.novoStatus))
     ? args.novoStatus
     : undefined) as TransactionStatus | undefined
+  const novoTipo = args.novoTipo === 'income' ? 'income' : args.novoTipo === 'expense' ? 'expense' : undefined
+  const novoMetodoPagamento = ['pix', 'credit_card', 'debit', 'bill'].includes(String(args.novoMetodoPagamento))
+    ? (args.novoMetodoPagamento as PaymentMethod)
+    : undefined
 
   const novoTipoDivisao = SPLIT_MAP[String(args.novoTipoDivisao)]
   const novoAmigoEmail = typeof args.novoAmigoEmail === 'string' ? args.novoAmigoEmail.trim().toLowerCase() : ''
   const novoNomeTerceiro = typeof args.novoNomeTerceiro === 'string' ? args.novoNomeTerceiro.trim() : ''
+
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+  if (isPendingConfirmation) {
+    const title = `Editar: ${targets.length === 1 ? targets[0].description : `${targets.length} lançamentos`}`
+    const confirmationLines = [
+      { label: 'Quantidade', value: `${targets.length} item(ns)` },
+      { label: 'Itens a Alterar', value: targets.map((t) => t.description).slice(0, 3).join(', ') + (targets.length > 3 ? ` (+${targets.length - 3})` : '') },
+      ...(novoMesFatura ? [{ label: 'Novo Mês da Fatura', value: monthLabel(novoMesFatura) }] : []),
+      ...(novaDataVencimento ? [{ label: 'Novo Vencimento', value: formatShortDate(novaDataVencimento) }] : []),
+      ...(novaDescricao ? [{ label: 'Nova Descrição', value: novaDescricao }] : []),
+      ...(novoValor !== undefined ? [{ label: 'Novo Valor', value: money(novoValor) }] : []),
+      ...(novaCategoria ? [{ label: 'Nova Categoria', value: novaCategoria }] : []),
+      ...(novoStatus ? [{ label: 'Novo Status', value: novoStatus === 'paid' ? 'Pago' : 'Pendente' }] : []),
+    ]
+
+    return {
+      response: {
+        ok: true,
+        aguardandoConfirmacao: true,
+        mensagem: `Entendi que você deseja alterar ${targets.length === 1 ? `a transação "${targets[0].description}"` : `${targets.length} transações`}. Por favor, confirme no botão abaixo se está correto para salvar as edições.`,
+        quantidadeAlterar: targets.length,
+      },
+      action: {
+        kind: 'confirmation',
+        title: `Confirmar ${title}`,
+        lines: confirmationLines,
+        pendingAction: {
+          id: uid('act'),
+          toolName: 'editarTransacoes',
+          args: { ...args, ids: targets.map((t) => t.id), __confirmed: true },
+          title,
+          status: 'pending',
+          createdAt: Date.now(),
+          lines: confirmationLines,
+        },
+      },
+    }
+  }
 
   const updatedIds: string[] = []
 
@@ -871,6 +1322,21 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
     }
     if (novaCategoria) {
       patch.category = novaCategoria
+    }
+    if (novoTipo) {
+      patch.type = novoTipo
+      if (novoTipo === 'income') {
+        patch.category = 'Receita'
+        patch.paymentMethod = 'pix'
+        patch.cardId = null
+        patch.status = 'paid'
+      }
+    }
+    if (novoMetodoPagamento) {
+      patch.paymentMethod = novoMetodoPagamento
+      if (novoMetodoPagamento !== 'credit_card') {
+        patch.cardId = null
+      }
     }
     if (novoStatus) {
       patch.status = novoStatus
@@ -991,6 +1457,50 @@ async function atualizar(env: AgentEnv, args: Record<string, unknown>): Promise<
   }
 
   const before = computeSummary(all, env.me.uid, tx.competenceMonth)
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+
+  if (isPendingConfirmation) {
+    const title = `Atualizar Conta: ${tx.description}`
+    const fakeUpdated: Transaction = { ...tx, ...patch }
+    const fakeNextAll = all.map((t) => (t.id === tx.id ? fakeUpdated : t))
+    const fakeAfter = computeSummary(fakeNextAll, env.me.uid, tx.competenceMonth)
+    const diffSaldo = round2(fakeAfter.freeBalance - before.freeBalance)
+
+    const confirmationLines = [
+      { label: 'Conta', value: tx.description },
+      { label: 'Valor Atual → Novo Valor', value: `${money(effectiveAmount(tx))} → ${money(value)}` },
+      { label: 'Impacto Previsto no Saldo', value: diffSaldo >= 0 ? `+${money(diffSaldo)}` : `−${money(Math.abs(diffSaldo))}`, tone: diffSaldo >= 0 ? ('positive' as const) : ('negative' as const) },
+      { label: 'Novo Status', value: newStatus === 'paid' ? 'Pago' : 'A Pagar' },
+      ...(newDueDate ? [{ label: 'Novo Vencimento', value: formatShortDate(newDueDate) }] : []),
+      { label: 'Saldo Livre em ' + monthLabel(tx.competenceMonth), value: `${money(before.freeBalance)} → ${money(fakeAfter.freeBalance)}` },
+    ]
+
+    return {
+      response: {
+        ok: true,
+        aguardandoConfirmacao: true,
+        mensagem: `Entendi que você deseja atualizar a conta "${tx.description}" para o valor real de ${money(value)} (${newStatus === 'paid' ? 'Pago' : 'A Pagar'}). Por favor, confirme no botão abaixo se está correto para atualizar no seu Saldo Livre.`,
+        conta: tx.description,
+        valorReal: value,
+        status: newStatus,
+      },
+      action: {
+        kind: 'confirmation',
+        title: `Confirmar ${title}`,
+        lines: confirmationLines,
+        pendingAction: {
+          id: uid('act'),
+          toolName: 'atualizarContaPrevista',
+          args: { ...args, __confirmed: true },
+          title,
+          status: 'pending',
+          createdAt: Date.now(),
+          lines: confirmationLines,
+        },
+      },
+    }
+  }
+
   await env.updateTransaction(tx.id, patch)
 
   const updated: Transaction = { ...tx, ...patch }
@@ -1026,6 +1536,73 @@ async function atualizar(env: AgentEnv, args: Record<string, unknown>): Promise<
           tone: diffSaldo < 0 ? 'negative' : diffSaldo > 0 ? 'positive' : 'neutral',
         },
       ],
+    },
+  }
+}
+
+async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const all = env.getTransactions()
+  const termo = typeof args.termoBusca === 'string' ? args.termoBusca.trim() : ''
+  const categoria = typeof args.categoria === 'string' ? args.categoria.trim() : ''
+  const mes = typeof args.mes === 'string' && /^\d{4}-\d{2}$/.test(args.mes) ? args.mes : ''
+  const status = typeof args.status === 'string' ? args.status : ''
+  const limite = typeof args.limite === 'number' && args.limite > 0 ? args.limite : 20
+
+  const filtered = all.filter((t) => {
+    if (mes && t.competenceMonth !== mes) return false
+    if (categoria && t.category !== categoria) return false
+    if (status && t.status !== status) return false
+    if (termo && !matchesSearch(t.description, termo)) return false
+    return true
+  })
+
+  // Ordena por data de vencimento / createdAt mais recente primeiro
+  filtered.sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '') || (b.createdAt || 0) - (a.createdAt || 0))
+
+  const targets = filtered.slice(0, limite)
+  const somaTotal = filtered.reduce((acc, t) => acc + (t.totalAmount || 0), 0)
+  const somaMeuImpacto = filtered.reduce((acc, t) => acc + impactFor(t, env.me.uid, all), 0)
+
+  const items = targets.map((t) => ({
+    id: t.id,
+    descricao: t.description,
+    valorTotal: t.totalAmount,
+    meuImpacto: round2(impactFor(t, env.me.uid, all)),
+    dataVencimento: t.dueDate,
+    mesCompetencia: t.competenceMonth,
+    categoria: t.category,
+    status: t.status,
+    tipo: t.type,
+    divisao: t.splitType || 'mine',
+    nomeAmigo: t.assignedFriendName || null,
+  }))
+
+  const lines = [
+    { label: 'Lançamentos', value: `${filtered.length} encontrado(s)` },
+    { label: 'Soma Total', value: money(somaTotal) },
+    { label: 'Meu Impacto', value: money(somaMeuImpacto), tone: somaMeuImpacto > 0 ? 'negative' as const : 'neutral' as const },
+    ...(mes ? [{ label: 'Mês', value: monthLabel(mes) }] : []),
+    ...(termo ? [{ label: 'Filtro', value: `"${termo}"` }] : []),
+    ...(categoria ? [{ label: 'Categoria', value: categoria }] : []),
+    ...(targets.length > 0 ? [{
+      label: 'Itens',
+      value: targets.slice(0, 3).map((t) => `${t.description} (${money(t.totalAmount)})`).join(', ') + (targets.length > 3 ? ` (+${targets.length - 3})` : '')
+    }] : []),
+  ]
+
+  return {
+    response: {
+      ok: true,
+      totalEncontrados: filtered.length,
+      somaTotal: round2(somaTotal),
+      somaMeuImpacto: round2(somaMeuImpacto),
+      exibindoQuantidade: items.length,
+      transacoes: items,
+    },
+    action: {
+      kind: 'report',
+      title: `Consulta: ${filtered.length} lançamento(s) encontrado(s)`,
+      lines,
     },
   }
 }
@@ -1111,6 +1688,38 @@ async function gerenciarCartoes(env: AgentEnv, args: Record<string, unknown>): P
     const f = Number(args.fechamento || 1)
     const v = Number(args.vencimento || 10)
     if (!nome) return { response: { ok: false, erro: 'Nome é obrigatório para adicionar' } }
+
+    const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+    if (isPendingConfirmation) {
+      const title = `Adicionar Cartão: ${nome}`
+      const confirmationLines = [
+        { label: 'Nome do Cartão', value: nome },
+        { label: 'Dia de Fechamento', value: `Dia ${f}` },
+        { label: 'Dia de Vencimento', value: `Dia ${v}` },
+      ]
+      return {
+        response: {
+          ok: true,
+          aguardandoConfirmacao: true,
+          mensagem: `Entendi que você deseja adicionar o cartão "${nome}" (fecha dia ${f}, vence dia ${v}). Por favor, confirme no botão abaixo.`,
+        },
+        action: {
+          kind: 'confirmation',
+          title: `Confirmar ${title}`,
+          lines: confirmationLines,
+          pendingAction: {
+            id: uid('act'),
+            toolName: 'gerenciarCartoes',
+            args: { ...args, __confirmed: true },
+            title,
+            status: 'pending',
+            createdAt: Date.now(),
+            lines: confirmationLines,
+          },
+        },
+      }
+    }
+
     const id = await env.addCard({ cardName: nome, closingDay: f, dueDay: v, ownerName: env.me.name, ownerUid: env.me.uid, sharedWithUids: [], sharedWithUsers: [], frequentThirdParties: [] })
     return {
       response: { ok: true, id },
@@ -1174,6 +1783,38 @@ async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, un
     if (!desc || valor <= 0) return { response: { ok: false, erro: 'Descrição e valor são obrigatórios.' } }
     const cat = (args.categoria as Category) || 'Outros'
     const dueDay = Number(args.diaVencimento || 10)
+
+    const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+    if (isPendingConfirmation) {
+      const title = `Adicionar Assinatura: ${desc}`
+      const confirmationLines = [
+        { label: 'Descrição', value: desc },
+        { label: 'Valor Mensal', value: money(valor) },
+        { label: 'Dia de Vencimento', value: `Todo dia ${dueDay}` },
+        { label: 'Categoria', value: cat },
+      ]
+      return {
+        response: {
+          ok: true,
+          aguardandoConfirmacao: true,
+          mensagem: `Entendi que você deseja cadastrar a assinatura/conta recorrente "${desc}" no valor de ${money(valor)} (vencimento todo dia ${dueDay}). Por favor, confirme no botão abaixo.`,
+        },
+        action: {
+          kind: 'confirmation',
+          title: `Confirmar ${title}`,
+          lines: confirmationLines,
+          pendingAction: {
+            id: uid('act'),
+            toolName: 'gerenciarContasRecorrentes',
+            args: { ...args, __confirmed: true },
+            title,
+            status: 'pending',
+            createdAt: Date.now(),
+            lines: confirmationLines,
+          },
+        },
+      }
+    }
     const id = await env.addRecurring({
       description: desc,
       defaultAmount: valor,
@@ -1254,3 +1895,119 @@ async function gerenciarAmizades(env: AgentEnv, args: Record<string, unknown>): 
 
   return { response: { ok: false, erro: 'Ação inválida' } }
 }
+
+export interface UserRule {
+  id: string
+  rule: string
+  category?: string
+  createdAt: number
+}
+
+const USER_RULES_KEY_PREFIX = 'saldo_livre_user_rules_'
+
+export function getLearnedRules(uid: string): UserRule[] {
+  try {
+    const key = `${USER_RULES_KEY_PREFIX}${uid || 'guest'}`
+    const raw = localStorage.getItem(key)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export function saveLearnedRules(uid: string, rules: UserRule[]) {
+  try {
+    const key = `${USER_RULES_KEY_PREFIX}${uid || 'guest'}`
+    localStorage.setItem(key, JSON.stringify(rules))
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('saldo_livre_rules_updated', { detail: { uid } }))
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function addLearnedRule(uid: string, ruleText: string, category = 'Geral'): UserRule {
+  const existing = getLearnedRules(uid)
+  const trimmed = ruleText.trim()
+  const newRule: UserRule = {
+    id: `rule_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    rule: trimmed,
+    category,
+    createdAt: Date.now(),
+  }
+  const updated = [newRule, ...existing.filter((r) => r.rule.toLowerCase() !== trimmed.toLowerCase())]
+  saveLearnedRules(uid, updated)
+  return newRule
+}
+
+export function removeLearnedRule(uid: string, idOrSearch: string): boolean {
+  const existing = getLearnedRules(uid)
+  const target = idOrSearch.trim().toLowerCase()
+  const filtered = existing.filter((r) => r.id !== idOrSearch && !r.rule.toLowerCase().includes(target))
+  if (filtered.length !== existing.length) {
+    saveLearnedRules(uid, filtered)
+    return true
+  }
+  return false
+}
+
+async function gerenciarRegras(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const acao = String(args.acao || 'listar')
+  const userUid = env.me?.uid || 'guest'
+
+  if (acao === 'listar') {
+    const regras = getLearnedRules(userUid)
+    return {
+      response: { ok: true, regras: regras.map((r) => ({ id: r.id, regra: r.rule, categoria: r.category })) },
+      action: {
+        kind: 'report',
+        title: 'Regras Aprendidas do Usuário',
+        lines: [
+          { label: 'Total de Regras', value: regras.length.toString() },
+          ...(regras.slice(0, 3).map((r, i) => ({ label: `Regra ${i + 1}`, value: r.rule }))),
+        ],
+      },
+    }
+  }
+
+  if (acao === 'aprender') {
+    const texto = String(args.regra || '').trim()
+    if (!texto) {
+      return { response: { ok: false, erro: 'Texto da regra não informado.' } }
+    }
+    const novaRegra = addLearnedRule(userUid, texto)
+    return {
+      response: { ok: true, id: novaRegra.id, regra: novaRegra.rule },
+      action: {
+        kind: 'created',
+        title: '🧠 Nova Regra Memorizada!',
+        lines: [
+          { label: 'Regra Fixada', value: novaRegra.rule },
+          { label: 'Status', value: 'Ativa em futuros cálculos e lançamentos' },
+        ],
+      },
+    }
+  }
+
+  if (acao === 'remover') {
+    const termoOuId = String(args.id || args.regra || '').trim()
+    if (!termoOuId) {
+      return { response: { ok: false, erro: 'Informe o ID ou trecho da regra a ser removida.' } }
+    }
+    const ok = removeLearnedRule(userUid, termoOuId)
+    return {
+      response: { ok, mensagem: ok ? 'Regra esquecida com sucesso.' : 'Regra não encontrada.' },
+      action: {
+        kind: 'updated',
+        title: ok ? 'Regra Removida da Memória' : 'Regra Não Encontrada',
+        lines: [{ label: 'Referência', value: termoOuId }],
+      },
+    }
+  }
+
+  return { response: { ok: false, erro: 'Ação inválida para gerenciarRegrasEMemoria.' } }
+}
+

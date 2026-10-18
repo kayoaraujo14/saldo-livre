@@ -13,14 +13,17 @@ import { TransactionModal } from '@/components/modals/TransactionModal'
 import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal'
 import { FriendsModal } from '@/components/modals/FriendsModal'
 import { InstallAppModal } from '@/components/modals/InstallAppModal'
+import { OpenFinanceModal } from '@/components/modals/OpenFinanceModal'
 import { ScrollToTop } from '@/components/ui/ScrollToTop'
 import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
 import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
 import { usePwaInstall } from '@/hooks/usePwaInstall'
 import { Button } from '@/components/ui/button'
-import { Clock, ArrowRight, ReceiptText, Smartphone } from 'lucide-react'
+import { Clock, ArrowRight, ReceiptText } from 'lucide-react'
 import type { Transaction } from '@/types'
+
+type DesktopViewMode = 'chat_focus' | 'chat_full' | 'table_full'
 
 function MainDashboard() {
   const {
@@ -45,12 +48,15 @@ function MainDashboard() {
   const [projectionModalOpen, setProjectionModalOpen] = useState(false)
   const [friendsModalOpen, setFriendsModalOpen] = useState(false)
   const [installModalOpen, setInstallModalOpen] = useState(false)
-  const [installDismissed, setInstallDismissed] = useState(false)
+  const [openFinanceModalOpen, setOpenFinanceModalOpen] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [generatingBills, setGeneratingBills] = useState(false)
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
   const [mobileTab, setMobileTab] = useState<MobileTab>('home')
+
+  // Desktop view layout mode: 'chat_focus' (60/40) | 'equal' (50/50) | 'chat_full' (100%) | 'table_full' (100%)
+  const [desktopView, setDesktopView] = useState<DesktopViewMode>('chat_focus')
 
   const handleSelectMobileTab = (tab: MobileTab) => {
     setMobileTab(tab)
@@ -91,7 +97,7 @@ function MainDashboard() {
         onOpenApiKey={() => setApiKeyModalOpen(true)}
         onOpenProjection={() => setProjectionModalOpen(true)}
         onOpenFriends={() => setFriendsModalOpen(true)}
-        onOpenNewTx={handleOpenNewTx}
+        onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
       />
 
       {/* 2. Main Content Area */}
@@ -127,26 +133,52 @@ function MainDashboard() {
         {/* ============================================================== */}
         {/* DESKTOP LAYOUT (Screen >= 1024px / lg)                          */}
         {/* ============================================================== */}
-        <div className="hidden lg:block space-y-4">
-          {/* KPI Dashboard (Refactored Hero + Secondary Cards) */}
+        <div className="hidden lg:block space-y-3">
+          {/* KPI Dashboard (Compact Metric Ribbon) */}
           <KpiGrid
             onOpenReceivables={() => setReceivablesModalOpen(true)}
           />
 
-          {/* Spacious Split-Screen: 65% Table / 35% Gemini Chat */}
-          <div className="grid grid-cols-12 gap-4 h-[calc(100vh-290px)] max-h-[calc(100vh-290px)] min-h-[520px]">
-            {/* Left Panel: Financial Table (65% width) */}
-            <section className="col-span-7 xl:col-span-8 h-full min-h-0 flex flex-col">
-              <TransactionTable
-                onOpenNewTx={handleOpenNewTx}
-                onEditTx={handleEditTx}
-              />
-            </section>
+          {/* Flexible Main Workspace Grid (Height optimized with compact KPIs) */}
+          <div className="grid grid-cols-12 gap-3.5 h-[calc(100vh-160px)] max-h-[calc(100vh-160px)] min-h-[540px]">
+            {/* Left Panel: Financial Table */}
+            {desktopView !== 'chat_full' && (
+              <section
+                className={`${
+                  desktopView === 'table_full'
+                    ? 'col-span-12'
+                    : 'col-span-5 xl:col-span-5'
+                } h-full min-h-0 flex flex-col transition-all duration-200`}
+              >
+                <TransactionTable
+                  onEditTx={handleEditTx}
+                  onToggleExpand={() =>
+                    setDesktopView((prev) => (prev === 'table_full' ? 'chat_focus' : 'table_full'))
+                  }
+                  isExpanded={desktopView === 'table_full'}
+                />
+              </section>
+            )}
 
-            {/* Right Panel: Gemini AI Agent Chat (35% width) */}
-            <section className="col-span-5 xl:col-span-4 h-full min-h-0 flex flex-col">
-              <GeminiChat onOpenApiKey={() => setApiKeyModalOpen(true)} />
-            </section>
+            {/* Right Panel: Gemini AI Agent Chat */}
+            {desktopView !== 'table_full' && (
+              <section
+                className={`${
+                  desktopView === 'chat_full'
+                    ? 'col-span-12'
+                    : 'col-span-7 xl:col-span-7'
+                } h-full min-h-0 flex flex-col transition-all duration-200`}
+              >
+                <GeminiChat
+                  onOpenApiKey={() => setApiKeyModalOpen(true)}
+                  onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
+                  onToggleExpand={() =>
+                    setDesktopView((prev) => (prev === 'chat_full' ? 'chat_focus' : 'chat_full'))
+                  }
+                  isExpanded={desktopView === 'chat_full'}
+                />
+              </section>
+            )}
           </div>
         </div>
 
@@ -157,43 +189,7 @@ function MainDashboard() {
           {/* View 1: Mobile INÍCIO (Dashboard Hero, KPIs & Quick Preview) */}
           {mobileTab === 'home' && (
             <div className="space-y-3.5 animate-in fade-in duration-200">
-              {/* Native PWA Install Banner (Dismissible & Discreet) */}
-              {!isInstalled && !installDismissed && (
-                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900/80 to-teal-950/30 border border-emerald-500/35 flex items-center justify-between gap-3 shadow-md">
-                  <div
-                    onClick={() => setInstallModalOpen(true)}
-                    className="flex items-center gap-3 cursor-pointer flex-1"
-                  >
-                    <div className="size-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                      <Smartphone className="size-5" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-white block">Instalar Saldo Livre</span>
-                      <span className="text-[11px] text-slate-400">Acesse em tela cheia com 1 toque</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <Button
-                      size="sm"
-                      onClick={() => setInstallModalOpen(true)}
-                      className="h-7 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] rounded-lg shadow-sm cursor-pointer"
-                    >
-                      Instalar
-                    </Button>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setInstallDismissed(true)
-                      }}
-                      className="size-7 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center cursor-pointer text-xs"
-                      title="Dispensar aviso"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              )}
+
 
               {/* KPI Grid */}
               <KpiGrid
@@ -244,7 +240,6 @@ function MainDashboard() {
           {mobileTab === 'transactions' && (
             <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <TransactionTable
-                onOpenNewTx={handleOpenNewTx}
                 onEditTx={handleEditTx}
               />
             </div>
@@ -253,7 +248,10 @@ function MainDashboard() {
           {/* View 3: Mobile COPILOTO IA (Full-Height Conversational Assistant) */}
           {mobileTab === 'chat' && (
             <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
-              <GeminiChat onOpenApiKey={() => setApiKeyModalOpen(true)} />
+              <GeminiChat
+                onOpenApiKey={() => setApiKeyModalOpen(true)}
+                onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
+              />
             </div>
           )}
 
@@ -265,6 +263,7 @@ function MainDashboard() {
               onOpenApiKey={() => setApiKeyModalOpen(true)}
               onOpenProjection={() => setProjectionModalOpen(true)}
               onOpenFriends={() => setFriendsModalOpen(true)}
+              onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
               onGenerateBills={handleGenerate}
               onOpenInstall={() => setInstallModalOpen(true)}
               isInstalled={isInstalled}
@@ -312,6 +311,10 @@ function MainDashboard() {
         isIOS={isIOS}
         isInstalled={isInstalled}
         onPromptInstall={promptInstall}
+      />
+      <OpenFinanceModal
+        open={openFinanceModalOpen}
+        onOpenChange={setOpenFinanceModalOpen}
       />
     </div>
   )

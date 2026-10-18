@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
-import type { ActionCardData, ChatMessage } from '@/types'
+import type { ActionCardData, ChatMessage, ChatSession, ChatAttachment, PendingAction } from '@/types'
 import {
   getGeminiApiKey,
   setGeminiApiKey,
@@ -14,10 +14,13 @@ import {
   getSelectedGeminiModel,
   testGeminiConnection,
   formatGeminiErrorMessage,
+  type ToolName,
 } from '@/lib/gemini'
 import { runDemoAgent } from '@/lib/demoAgent'
-import { effectiveAmount } from '@/lib/finance'
-import { monthLabel, todayKey } from '@/lib/utils'
+import { effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
+import { formatShortDate, monthLabel, todayKey } from '@/lib/utils'
+import { getLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
+import { extractTextFromPdf } from '@/lib/pdfParser'
 import {
   Bot,
   User,
@@ -27,10 +30,28 @@ import {
   Trash2,
   CheckCircle2,
   RefreshCw,
+  Maximize2,
+  Minimize2,
+  History,
+  Plus,
+  MessageSquare,
+  X,
+  ChevronRight,
+  Brain,
+  Lightbulb,
+  Paperclip,
+  FileText,
+  UploadCloud,
+  Check,
+  XCircle,
 } from 'lucide-react'
+
 
 interface GeminiChatProps {
   onOpenApiKey: () => void
+  onToggleExpand?: () => void
+  isExpanded?: boolean
+  onOpenOpenFinance?: () => void
 }
 
 const INITIAL_MESSAGE: ChatMessage = {
@@ -39,12 +60,12 @@ const INITIAL_MESSAGE: ChatMessage = {
   content: `Olá! Sou o **Copiloto Saldo Livre** 🤖
 
 Estou conectado aos seus lançamentos em tempo real. Você pode falar comigo em linguagem natural para:
-- Atualizar contas que chegaram ou foram pagas (ex: *"A conta de luz veio R$ 245 para o dia 22"*)
-- Lançar compras individuais ou divididas no cartão (ex: *"Jantar de R$ 160 50/50"*)
-- Analisar ativamente suas finanças e sugerir cortes de custos.
-- Consultar seu limite diário, gerenciar cartões, amizades, assinaturas e pedir projeções (ex: *"Quanto ainda posso gastar no fim de semana?"*)
+- 📄 **Importar faturas e extratos em PDF**: arraste ou anexe o arquivo PDF do seu banco (Nubank, Itaú, Inter, Bradesco, etc.) e eu cadastro todos os gastos anteriores de uma só vez!
+- 🏦 **Open Finance**: consulte ou sincronize seus bancos conectados automaticamente.
+- ⚡ **Lançamentos rápidos**: contas que chegaram ou compras parceladas (ex: *"A conta de luz veio R$ 245 para o dia 22"* ou *"Jantar R$ 160 50/50"*).
+- 📊 **Consultor ativo**: pergunte seu limite diário, projeções futuras e sugestões de corte de custos.
 
-Sou o seu consultor financeiro. Como posso ajudar hoje?`,
+Como posso ajudar você hoje?`,
 }
 
 const PROMPT_HISTORY_KEY = 'saldo_livre_user_prompt_history'
@@ -70,13 +91,227 @@ function saveLearnedPrompt(prompt: string) {
   }
 }
 
-export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
-  const { me, partner, month, cards, friends, executeTool, monthTransactions } = useFinance()
-  const [messages, setMessages] = useState<ChatMessage[]>([INITIAL_MESSAGE])
+const SESSIONS_STORAGE_KEY_PREFIX = 'saldo_livre_chat_sessions_'
+
+function getStoredSessions(uid: string): ChatSession[] {
+  try {
+    const key = `${SESSIONS_STORAGE_KEY_PREFIX}${uid || 'guest'}`
+    const raw = localStorage.getItem(key)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function saveStoredSessions(uid: string, sessions: ChatSession[]) {
+  try {
+    const key = `${SESSIONS_STORAGE_KEY_PREFIX}${uid || 'guest'}`
+    localStorage.setItem(key, JSON.stringify(sessions))
+  } catch {
+    // ignore
+  }
+}
+
+export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpenFinance }: GeminiChatProps) {
+  const { me, partner, month, cards, friends, executeTool, monthTransactions, summary } = useFinance()
+  const currentUid = me?.uid ?? 'guest'
+
+  const [sessions, setSessions] = useState<ChatSession[]>(() => {
+    const loaded = getStoredSessions(currentUid)
+    if (loaded.length > 0) return loaded
+    return [
+      {
+        id: `sess_${Date.now()}`,
+        title: 'Nova Conversa',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: [INITIAL_MESSAGE],
+      },
+    ]
+  })
+
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
+    return sessions[0]?.id || `sess_${Date.now()}`
+  })
+
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [rulesOpen, setRulesOpen] = useState(false)
+  const [rules, setRules] = useState<UserRule[]>(() => getLearnedRules(currentUid))
+  const [newRuleInput, setNewRuleInput] = useState('')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [suggestionOffset, setSuggestionOffset] = useState(0)
+  const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const handleFileSelect = (file: File) => {
+    if (!file) return
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Por favor, selecione um arquivo no formato PDF (extrato bancário ou fatura de cartão).')
+      return
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      alert('O arquivo PDF selecionado ultrapassa o limite de 25MB.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const result = reader.result as string
+      const base64Clean = result.includes(',') ? result.split(',')[1] : result
+      let extractedText = ''
+      try {
+        const parsed = await extractTextFromPdf(file)
+        extractedText = parsed.text
+      } catch (err) {
+        console.warn('Extração direta de texto do PDF indisponível, usando fallback multimodal:', err)
+      }
+
+      setPendingAttachment({
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/pdf',
+        base64: base64Clean,
+        extractedText,
+      })
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // Current session & messages
+  const currentSession = sessions.find((s) => s.id === currentSessionId) || sessions[0]
+  const messages = currentSession?.messages || [INITIAL_MESSAGE]
+
+  // Persist sessions to LocalStorage
+  useEffect(() => {
+    saveStoredSessions(currentUid, sessions)
+  }, [sessions, currentUid])
+
+  // Reload sessions & rules if user profile changes
+  useEffect(() => {
+    const loaded = getStoredSessions(currentUid)
+    if (loaded.length > 0) {
+      setSessions(loaded)
+      setCurrentSessionId(loaded[0].id)
+    } else {
+      const fresh: ChatSession = {
+        id: `sess_${Date.now()}`,
+        title: 'Nova Conversa',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        messages: [INITIAL_MESSAGE],
+      }
+      setSessions([fresh])
+      setCurrentSessionId(fresh.id)
+    }
+    setRules(getLearnedRules(currentUid))
+  }, [currentUid])
+
+  // Listen to automatic rules updates from agent tools
+  useEffect(() => {
+    const handleRulesUpdated = (e: Event) => {
+      const custom = e as CustomEvent<{ uid?: string }>
+      if (!custom.detail?.uid || custom.detail.uid === currentUid) {
+        setRules(getLearnedRules(currentUid))
+      }
+    }
+    window.addEventListener('saldo_livre_rules_updated', handleRulesUpdated)
+    return () => window.removeEventListener('saldo_livre_rules_updated', handleRulesUpdated)
+  }, [currentUid])
+
+  const handleAddRule = (text?: string) => {
+    const ruleText = (text ?? newRuleInput).trim()
+    if (!ruleText) return
+    addLearnedRule(currentUid, ruleText)
+    setRules(getLearnedRules(currentUid))
+    setNewRuleInput('')
+  }
+
+  const handleDeleteRule = (id: string) => {
+    removeLearnedRule(currentUid, id)
+    setRules(getLearnedRules(currentUid))
+  }
+
+
+  const updateSessionMessages = (
+    newMessagesOrUpdater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
+    userPromptForTitle?: string,
+  ) => {
+    setSessions((prevSessions) => {
+      return prevSessions.map((s) => {
+        if (s.id !== currentSessionId) return s
+        const nextMessages =
+          typeof newMessagesOrUpdater === 'function'
+            ? newMessagesOrUpdater(s.messages)
+            : newMessagesOrUpdater
+
+        let title = s.title
+        if (
+          (title === 'Nova Conversa' || title === 'Conversa') &&
+          userPromptForTitle &&
+          userPromptForTitle.trim()
+        ) {
+          const clean = userPromptForTitle.trim().replace(/^([a-z])/i, (m) => m.toUpperCase())
+          title = clean.length > 30 ? clean.slice(0, 30) + '...' : clean
+        }
+
+        return {
+          ...s,
+          title,
+          updatedAt: Date.now(),
+          messages: nextMessages,
+        }
+      })
+    })
+  }
+
+  const handleNewChat = () => {
+    const newSession: ChatSession = {
+      id: `sess_${Date.now()}`,
+      title: 'Nova Conversa',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [INITIAL_MESSAGE],
+    }
+    setSessions((prev) => [newSession, ...prev])
+    setCurrentSessionId(newSession.id)
+    setHistoryOpen(false)
+  }
+
+  const handleSelectSession = (sessionId: string) => {
+    setCurrentSessionId(sessionId)
+    setHistoryOpen(false)
+  }
+
+  const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSessions((prev) => {
+      const filtered = prev.filter((s) => s.id !== sessionId)
+      if (filtered.length === 0) {
+        const fresh: ChatSession = {
+          id: `sess_${Date.now()}`,
+          title: 'Nova Conversa',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          messages: [INITIAL_MESSAGE],
+        }
+        setCurrentSessionId(fresh.id)
+        return [fresh]
+      }
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(filtered[0].id)
+      }
+      return filtered
+    })
+  }
+
+  const handleClearCurrentChat = () => {
+    updateSessionMessages([INITIAL_MESSAGE])
+  }
 
   const apiKey = getGeminiApiKey()
   const isLiveGemini = Boolean(apiKey)
@@ -129,14 +364,24 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
       list.push(`Adicionar despesa de R$ 45 em ${topCategory}`)
     }
 
-    // 6. Consultas de limite e planejamento
+    // 6. Regras Aprendidas e Exemplos Bancários Few-Shot
+    if (rules.length === 0) {
+      list.push('Aprenda que todo gasto no Zé Delivery é Lazer e 100% meu')
+      list.push('Aprenda que almoço no Da Vila custa R$ 35 e é Alimentação')
+    } else {
+      list.push('Quais regras você aprendeu sobre os meus gastos?')
+    }
+    list.push('Lançar compra parcelada: Magazine Luiza 03/10 R$ 189,90')
+
+    // 7. Consultas de limite e onboarding histórico
+    list.push('📄 Anexar fatura ou extrato em PDF')
+    list.push('🏦 Como funciona o Open Finance?')
     list.push('Quanto ainda posso gastar hoje sem furar o Saldo Livre?')
-    list.push('Quais contas ainda estão pendentes de pagamento este mês?')
     list.push('Quais compras parceladas estão ativas na minha fatura?')
 
     // Remove duplicatas
     return Array.from(new Set(list))
-  }, [monthTransactions, friends, partner, cards, month])
+  }, [monthTransactions, friends, partner, cards, month, rules])
 
   // Pega fatia rotacionada de 4-5 chips
   const displayedChips = useMemo(() => {
@@ -165,14 +410,135 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
     }
   })
 
+  const handleConfirmPendingAction = async (messageId: string, pendingAction: PendingAction) => {
+    updateSessionMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.id !== messageId || !msg.actions) return msg
+        return {
+          ...msg,
+          actions: msg.actions.map((act) => {
+            if (act.pendingAction?.id === pendingAction.id) {
+              return {
+                ...act,
+                pendingAction: { ...act.pendingAction, status: 'confirmed' as const },
+              }
+            }
+            return act
+          }),
+        }
+      }),
+    )
+
+    setLoading(true)
+    try {
+      const result = await executeTool(
+        pendingAction.toolName as ToolName,
+        { ...pendingAction.args, __confirmed: true },
+      )
+
+      const botMsg: ChatMessage = {
+        id: `bot_conf_${Date.now()}`,
+        role: 'assistant',
+        content: `✅ **Ação confirmada e executada com sucesso!**\n\nConcluí a operação **"${pendingAction.title}"** e atualizei os lançamentos e o cálculo do seu Saldo Livre.`,
+        actions: result.action ? [result.action] : undefined,
+      }
+      updateSessionMessages((prev) => [...prev, botMsg])
+    } catch (err) {
+      console.error(err)
+      const botErrMsg: ChatMessage = {
+        id: `bot_err_${Date.now()}`,
+        role: 'assistant',
+        content: `⚠️ Ocorreu um erro ao executar a ação: ${(err as Error).message}`,
+        error: true,
+      }
+      updateSessionMessages((prev) => [...prev, botErrMsg])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCancelPendingAction = (messageId: string, pendingAction: PendingAction) => {
+    updateSessionMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.id !== messageId || !msg.actions) return msg
+        return {
+          ...msg,
+          actions: msg.actions.map((act) => {
+            if (act.pendingAction?.id === pendingAction.id) {
+              return {
+                ...act,
+                pendingAction: { ...act.pendingAction, status: 'cancelled' as const },
+              }
+            }
+            return act
+          }),
+        }
+      }),
+    )
+
+    const cancelMsg: ChatMessage = {
+      id: `bot_cancel_${Date.now()}`,
+      role: 'assistant',
+      content: `❌ **Ação cancelada.** Nada foi gravado ou alterado no seu Saldo Livre. Se quiser ajustar algum detalhe, basta me avisar!`,
+    }
+    updateSessionMessages((prev) => [...prev, cancelMsg])
+  }
+
   const handleSend = async (textToSend?: string) => {
-    const text = (textToSend ?? input).trim()
-    if (!text || loading) return
+    let text = (textToSend ?? input).trim()
+    const currentAttachment = pendingAttachment
+
+    if ((!text && !currentAttachment) || loading) return
+
+    // Verifica se há alguma confirmação pendente aguardando resposta
+    const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant')
+    const activePendingAct = lastAssistantMsg?.actions?.find(
+      (a) => a.kind === 'confirmation' && a.pendingAction?.status === 'pending',
+    )?.pendingAction
+
+    if (activePendingAct && lastAssistantMsg && text && !currentAttachment) {
+      const isAffirmative = /^(sim|confirmo|confirmar|pode|pode lançar|pode lancar|pode salvar|ok|beleza|positivo|isso|correto|executar|pode cadastrar|pode excluir|pode sim|claro|com certeza)\b/i.test(text.trim())
+      const isNegative = /^(não|nao|cancela|cancelar|esquece|esqueça|deixa pra lá|deixa pra la|abortar|errado|não quero|nao quero)\b/i.test(text.trim())
+
+      if (isAffirmative) {
+        setInput('')
+        updateSessionMessages((prev) => [
+          ...prev,
+          { id: `usr_${Date.now()}`, role: 'user', content: text },
+        ])
+        await handleConfirmPendingAction(lastAssistantMsg.id, activePendingAct)
+        return
+      }
+
+      if (isNegative) {
+        setInput('')
+        updateSessionMessages((prev) => [
+          ...prev,
+          { id: `usr_${Date.now()}`, role: 'user', content: text },
+        ])
+        handleCancelPendingAction(lastAssistantMsg.id, activePendingAct)
+        return
+      }
+    }
+
+    // Se estiver enviando um arquivo PDF sem texto digitado, define instrução padrão inteligente de onboarding
+    if (!text && currentAttachment) {
+      const isStatement = /extrato|conta|bank|statement|saldo/i.test(currentAttachment.name)
+      if (isStatement) {
+        text = `Por favor, analise o extrato bancário de conta corrente em PDF anexado (${currentAttachment.name}).
+Atenção crítica:
+1. Identifique todas as RECEITAS / ENTRADAS (salários, Pix recebidos, TEDs recebidas, depósitos) e cadastre com tipo: "income", categoria: "Receita", método: "pix" e status: "paid" (elas AUMENTAM o Saldo Livre e NÃO são compras de cartão de crédito!).
+2. Identifique todas as DESPESAS / SAÍDAS da conta corrente (Pix enviados, compras no débito, boletos) e cadastre com tipo: "expense", status: "paid" e método "pix", "debit" ou "bill" (sem cartão de crédito).
+3. Chame a ferramenta "registrarTransacoesLote" com origemDocumento: "extrato_conta".`
+      } else {
+        text = `Por favor, analise o documento em PDF anexado (${currentAttachment.name}). Se for extrato bancário de conta corrente, separe rigorosamente receitas/entradas (tipo: "income", método "pix", aumentam o Saldo Livre) de saídas em conta (método "pix" ou "debit", status "paid"). Se for fatura de cartão de crédito, cadastre as compras a vencer no cartão correspondente. Utilize a ferramenta "registrarTransacoesLote".`
+      }
+    }
 
     // Detecção mágica: se o usuário colar uma chave do Google AI Studio no chat
     if (text.startsWith('AIzaSy') && text.length >= 35 && text.length <= 45 && !text.includes(' ')) {
       setInput('')
-      setMessages((prev) => [
+      updateSessionMessages((prev) => [
         ...prev,
         { id: `usr_${Date.now()}`, role: 'user', content: '🔑 *[Chave de API do Gemini inserida]*' },
       ])
@@ -182,16 +548,16 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
         if (test.ok) {
           setGeminiApiKey(text)
           if (test.modelUsed) setActiveModel(test.modelUsed)
-          setMessages((prev) => [
+          updateSessionMessages((prev) => [
             ...prev,
             {
               id: `bot_${Date.now()}`,
               role: 'assistant',
-              content: `🎉 **Chave da API do Google Gemini validada e conectada com sucesso!**\n\nAgora estou conectado diretamente à nuvem do Google usando o modelo **${test.modelUsed || activeModel}** com Function Calling em tempo real.\n\nVocê já pode me pedir para lançar despesas, registrar compras divididas ou atualizar contas!`,
+              content: `🎉 **Chave da API do Google Gemini validada e conectada com sucesso!**\n\nAgora estou conectado diretamente à nuvem do Google usando o modelo **${test.modelUsed || activeModel}** com Function Calling em tempo real.\n\nVocê já pode me pedir para lançar despesas, registrar compras divididas ou enviar extratos/faturas em PDF!`,
             },
           ])
         } else {
-          setMessages((prev) => [
+          updateSessionMessages((prev) => [
             ...prev,
             {
               id: `bot_${Date.now()}`,
@@ -213,10 +579,19 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
       id: `usr_${Date.now()}`,
       role: 'user',
       content: text,
+      attachment: currentAttachment
+        ? {
+            name: currentAttachment.name,
+            size: currentAttachment.size,
+            type: currentAttachment.type,
+            extractedText: currentAttachment.extractedText,
+          }
+        : undefined,
     }
 
-    setMessages((prev) => [...prev, userMsg])
+    updateSessionMessages((prev) => [...prev, userMsg], text)
     setInput('')
+    setPendingAttachment(null)
     setLoading(true)
 
     try {
@@ -242,12 +617,35 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
             name: f.name,
             email: f.email,
           })),
+          learnedRules: rules.map((r) => r.rule),
+          summary: summary
+            ? {
+                income: summary.income,
+                paid: summary.paid,
+                committed: summary.committed,
+                freeBalance: summary.freeBalance,
+                dailyLimit: summary.dailyLimit,
+                daysRemaining: summary.daysRemaining,
+                receivableTotal: summary.receivableTotal,
+                byCategory: summary.byCategory,
+              }
+            : null,
+          recentTransactions: (monthTransactions || []).slice(0, 40).map((t) => ({
+            id: t.id,
+            date: formatShortDate(t.dueDate),
+            description: t.description,
+            amount: effectiveAmount(t),
+            category: t.category,
+            status: t.status,
+            split: SPLIT_LABELS[t.splitType || 'mine']?.label || t.splitType || 'mine',
+          })),
         })
 
         result = await runGeminiAgent({
           apiKey,
           history: messages,
           userMessage: text,
+          attachment: currentAttachment || undefined,
           systemInstruction: sys,
           execute: executeTool,
           model: activeModel,
@@ -255,8 +653,10 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
         })
       } else {
         // Offline demo agent fallback with natural language heuristics
-        result = await runDemoAgent(text, executeTool, month)
+        result = await runDemoAgent(text, executeTool, month, currentAttachment || undefined)
       }
+
+      setRules(getLearnedRules(currentUid))
 
       const botMsg: ChatMessage = {
         id: `bot_${Date.now()}`,
@@ -265,7 +665,7 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
         actions: result.actions,
       }
 
-      setMessages((prev) => [...prev, botMsg])
+      updateSessionMessages((prev) => [...prev, botMsg])
     } catch (err) {
       console.error(err)
       const friendlyMessage = formatGeminiErrorMessage(err)
@@ -275,7 +675,7 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
         content: `⚠️ ${friendlyMessage}\n\nSe a instabilidade nos servidores do Google persistir, você pode aguardar alguns instantes ou alternar para o Gemini 3.8 Flash no botão 🔑 acima.`,
         error: true,
       }
-      setMessages((prev) => [...prev, errorMsg])
+      updateSessionMessages((prev) => [...prev, errorMsg])
     } finally {
       setLoading(false)
     }
@@ -289,27 +689,64 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
   }
 
   return (
-    <div className="glass-card rounded-2xl border border-white/[0.08] flex flex-col h-full overflow-hidden shadow-xl">
+    <div
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (!isDraggingOver) setIsDraggingOver(true)
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return
+        setIsDraggingOver(false)
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDraggingOver(false)
+        const file = e.dataTransfer.files?.[0]
+        if (file) handleFileSelect(file)
+      }}
+      className="glass-card rounded-2xl border border-white/[0.08] flex flex-col h-full overflow-hidden shadow-xl relative"
+    >
+      {/* Drag & Drop PDF Overlay */}
+      {isDraggingOver && (
+        <div className="absolute inset-0 z-50 bg-[#090d16]/95 border-2 border-dashed border-emerald-400 backdrop-blur-md rounded-2xl flex flex-col items-center justify-center gap-3 p-6 animate-in fade-in">
+          <div className="size-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center animate-bounce shadow-lg">
+            <UploadCloud className="size-8 stroke-[2.5]" />
+          </div>
+          <div className="text-center">
+            <h4 className="text-sm font-bold text-white">Solte seu extrato ou fatura em PDF aqui</h4>
+            <p className="text-xs text-slate-300 mt-1 max-w-xs">
+              O Copiloto lerá as páginas e lançará todas as despesas e receitas automaticamente no sistema.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Chat Top Header */}
       <div className="p-3.5 border-b border-white/[0.06] flex items-center justify-between bg-slate-900/60">
-        <div className="flex items-center gap-2">
-          <div className="size-7 rounded-lg bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="size-7 rounded-lg bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shrink-0">
             <div className="size-full bg-slate-950 rounded-[6px] flex items-center justify-center">
               <Bot className="size-4 text-emerald-400" />
             </div>
           </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h3 className="text-xs font-bold text-white tracking-tight m-0">Copiloto Saldo Livre</h3>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h3 className="text-xs font-bold text-white tracking-tight m-0 truncate">
+                {currentSession.title !== 'Nova Conversa' ? currentSession.title : 'Copiloto Saldo Livre'}
+              </h3>
               {isLiveGemini ? (
-                <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800 gap-1 font-mono">
+                <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800 gap-1 font-mono shrink-0">
                   <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   {activeModel}
                 </Badge>
               ) : (
                 <Badge
                   variant="outline"
-                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono"
+                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono shrink-0"
                 >
                   <span className="size-1.5 rounded-full bg-amber-400" />
                   demo offline
@@ -319,7 +756,64 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
+          {/* New Chat Button */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={handleNewChat}
+            className="size-7 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/60 cursor-pointer"
+            title="Iniciar nova conversa (+)"
+          >
+            <Plus className="size-3.5" />
+          </Button>
+
+          {/* History Drawer Toggle */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              setHistoryOpen((prev) => !prev)
+              setRulesOpen(false)
+            }}
+            className={`size-7 transition-colors cursor-pointer relative ${
+              historyOpen
+                ? 'bg-emerald-500/20 text-emerald-400'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+            title="Histórico de conversas salvas"
+          >
+            <History className="size-3.5" />
+            {sessions.length > 1 && (
+              <span className="absolute 1 top-0.5 right-0.5 size-1.5 rounded-full bg-emerald-400" />
+            )}
+          </Button>
+
+          {/* Memory & Rules Drawer Toggle */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              setRulesOpen((prev) => !prev)
+              setHistoryOpen(false)
+            }}
+            className={`size-7 transition-colors cursor-pointer relative ${
+              rulesOpen
+                ? 'bg-purple-500/20 text-purple-400'
+                : 'text-slate-400 hover:text-purple-300 hover:bg-slate-800/60'
+            }`}
+            title={`Regras & Memória do Agente (${rules.length} ativas)`}
+          >
+            <Brain className="size-3.5" />
+            {rules.length > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[13px] h-3 px-0.5 rounded-full bg-purple-500 text-[8px] font-bold text-white flex items-center justify-center">
+                {rules.length}
+              </span>
+            )}
+          </Button>
+
+
+          {/* API Key */}
           {isLiveGemini && (
             <Button
               variant="ghost"
@@ -331,17 +825,283 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
               <KeyRound className="size-3.5" />
             </Button>
           )}
+
+          {/* Clear Current Chat Messages */}
           <Button
             variant="ghost"
             size="icon-sm"
-            onClick={() => setMessages([INITIAL_MESSAGE])}
-            className="size-7 text-slate-400 hover:text-slate-200 cursor-pointer"
-            title="Limpar conversa"
+            onClick={handleClearCurrentChat}
+            className="size-7 text-slate-400 hover:text-rose-400 cursor-pointer"
+            title="Limpar mensagens desta conversa"
           >
             <Trash2 className="size-3.5" />
           </Button>
+
+          {/* Expand / Minimize */}
+          {onToggleExpand && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onToggleExpand}
+              className={`size-7 text-slate-400 hover:text-white cursor-pointer hidden lg:flex rounded-lg border shrink-0 items-center justify-center transition-all ${
+                isExpanded
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25 shadow-xs'
+                  : 'border-transparent hover:border-slate-700 hover:bg-slate-800/60'
+              }`}
+              title={isExpanded ? 'Restaurar divisão da tela' : 'Maximizar chat (tela cheia)'}
+            >
+              {isExpanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* History Slide-over / Modal Panel */}
+      {historyOpen && (
+        <div className="absolute inset-0 bg-[#0a0f1d]/95 backdrop-blur-2xl z-30 p-4 flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          {/* History Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+            <div className="flex items-center gap-2">
+              <div className="size-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
+                <History className="size-3.5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white tracking-tight">Histórico de Conversas</h4>
+                <p className="text-[10px] text-slate-400">
+                  {sessions.length} conversa{sessions.length > 1 ? 's' : ''} salva{sessions.length > 1 ? 's' : ''} neste perfil
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setHistoryOpen(false)}
+              className="size-7 text-slate-400 hover:text-white cursor-pointer"
+              title="Fechar histórico"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+
+          {/* Sessions List */}
+          <div className="flex-1 overflow-y-auto py-3 space-y-2">
+            {sessions.map((sess) => {
+              const isActive = sess.id === currentSessionId
+              const msgCount = sess.messages.filter((m) => m.role === 'user').length
+              const timeFormatted = new Date(sess.updatedAt).toLocaleDateString('pt-BR', {
+                day: '2-digit',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              })
+
+              return (
+                <div
+                  key={sess.id}
+                  onClick={() => handleSelectSession(sess.id)}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 group ${
+                    isActive
+                      ? 'bg-emerald-950/30 border-emerald-500/40 shadow-xs'
+                      : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <div
+                      className={`size-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        isActive
+                          ? 'bg-emerald-500/20 text-emerald-300'
+                          : 'bg-slate-800 text-slate-400 group-hover:text-slate-200'
+                      }`}
+                    >
+                      <MessageSquare className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-white truncate block">
+                          {sess.title}
+                        </span>
+                        {isActive && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] px-1 py-0 bg-emerald-500/20 text-emerald-300 border-emerald-500/30 font-medium shrink-0"
+                          >
+                            Ativo
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                        <span>{timeFormatted}</span>
+                        <span>·</span>
+                        <span>{msgCount} pergunta{msgCount === 1 ? '' : 's'}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteSession(sess.id, e)}
+                      className="size-7 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 flex items-center justify-center cursor-pointer transition-colors"
+                      title="Excluir esta conversa do histórico"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                    <ChevronRight className="size-4 text-slate-600 group-hover:text-slate-400 transition-colors" />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Footer Action: + Nova Conversa */}
+          <div className="pt-2 border-t border-white/[0.08]">
+            <Button
+              onClick={handleNewChat}
+              className="w-full h-9 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+            >
+              <Plus className="size-4 stroke-[2.5]" />
+              <span>+ Iniciar Nova Conversa</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Memory & Rules Slide-over / Modal Panel */}
+      {rulesOpen && (
+        <div className="absolute inset-0 bg-[#0a0f1d]/95 backdrop-blur-2xl z-30 p-4 flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          {/* Rules Header */}
+          <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+            <div className="flex items-center gap-2">
+              <div className="size-7 rounded-lg bg-purple-500/15 border border-purple-500/30 text-purple-400 flex items-center justify-center shrink-0">
+                <Brain className="size-3.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h4 className="text-xs font-bold text-white tracking-tight">Memória & Regras de Comportamento</h4>
+                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 bg-purple-500/20 text-purple-300 border-purple-500/30 font-medium">
+                    {rules.length} {rules.length === 1 ? 'regra' : 'regras'}
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-slate-400 truncate">
+                  Padrões memorizados que o agente aplica automaticamente
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setRulesOpen(false)}
+              className="size-7 text-slate-400 hover:text-white cursor-pointer shrink-0"
+              title="Fechar painel de memória"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </div>
+
+          {/* Quick Add Rule Form */}
+          <div className="pt-3 pb-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                handleAddRule()
+              }}
+              className="flex items-center gap-2"
+            >
+              <input
+                type="text"
+                value={newRuleInput}
+                onChange={(e) => setNewRuleInput(e.target.value)}
+                placeholder="Ex: Todo gasto no Zé Delivery é Lazer e 100% meu..."
+                className="flex-1 h-8 px-2.5 bg-slate-900/80 border border-white/[0.1] rounded-lg text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-purple-500/60"
+              />
+              <Button
+                type="submit"
+                disabled={!newRuleInput.trim()}
+                className="h-8 px-3 bg-purple-600 hover:bg-purple-500 text-white font-medium text-xs rounded-lg cursor-pointer shrink-0 disabled:opacity-40"
+              >
+                <Plus className="size-3 mr-1" />
+                Aprender
+              </Button>
+            </form>
+          </div>
+
+          {/* Rules List */}
+          <div className="flex-1 overflow-y-auto space-y-2 py-2 pr-1 custom-scrollbar">
+            {rules.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-4">
+                <div className="size-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center mb-2">
+                  <Brain className="size-5" />
+                </div>
+                <p className="text-xs font-semibold text-white">Nenhuma regra aprendida ainda</p>
+                <p className="text-[11px] text-slate-400 max-w-xs mt-1">
+                  Você pode ensinar padrões dizendo no chat: <br />
+                  <span className="text-purple-300 font-mono">"Aprenda que todo almoço de sexta é 50/50"</span> ou cadastrando no campo acima.
+                </p>
+              </div>
+            ) : (
+              rules.map((rule, idx) => (
+                <div
+                  key={rule.id}
+                  className="p-2.5 rounded-xl border border-white/[0.06] bg-slate-900/60 hover:border-purple-500/30 transition-all flex items-start justify-between gap-2.5 group"
+                >
+                  <div className="flex items-start gap-2 min-w-0">
+                    <span className="size-5 rounded-md bg-purple-500/20 text-purple-300 font-mono text-[10px] flex items-center justify-center shrink-0 mt-0.5">
+                      {idx + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs text-slate-200 font-medium leading-relaxed break-words">
+                        {rule.rule}
+                      </p>
+                      <span className="text-[9px] text-slate-500 block mt-1">
+                        Memorizado em {new Date(rule.createdAt).toLocaleDateString('pt-BR')}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteRule(rule.id)}
+                    className="size-6 rounded-md text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 flex items-center justify-center cursor-pointer transition-colors shrink-0"
+                    title="Esquecer / excluir esta regra"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Example Rules Bank */}
+          <div className="pt-2 border-t border-white/[0.08]">
+            <p className="text-[10px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1">
+              <Lightbulb className="size-3 text-amber-400 shrink-0" />
+              Sugestões de regras bancárias para ensinar:
+            </p>
+            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+              {[
+                'Sempre que eu falar iFood é Alimentação e 50% com a Mari',
+                'Posto de combustível é sempre pago no Débito',
+                'Meu cartão Black fecha dia 2 e vence dia 10',
+                'Todo gasto no Zé Delivery é Lazer e 100% meu',
+                'Aluguel é despesa fixa de R$ 1.800 para o dia 10',
+              ].map((ex, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => handleAddRule(ex)}
+                  className="text-[10px] py-1 px-2 rounded-lg bg-slate-800/80 hover:bg-purple-950/60 hover:text-purple-300 text-slate-300 border border-white/[0.06] transition-colors cursor-pointer text-left truncate max-w-full"
+                  title={`Clique para ensinar: "${ex}"`}
+                >
+                  + {ex}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Offline Alert Banner */}
       {!isLiveGemini && (
@@ -382,6 +1142,33 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
                     : 'bg-slate-900/80 border border-slate-800/80 text-slate-200 rounded-tl-xs shadow-sm'
               }`}
             >
+              {/* PDF Attachment Badge in Message */}
+              {msg.attachment && (
+                <div
+                  className={`mb-2.5 p-2 rounded-xl flex items-center gap-2 border ${
+                    msg.role === 'user'
+                      ? 'bg-emerald-700/60 border-emerald-400/40 text-white'
+                      : 'bg-slate-950/60 border-slate-700 text-slate-200'
+                  }`}
+                >
+                  <div className="size-7 rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-300 flex items-center justify-center shrink-0">
+                    <FileText className="size-3.5 text-rose-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[11px] font-semibold truncate block leading-tight">
+                      {msg.attachment.name}
+                    </span>
+                    <span
+                      className={`text-[9px] ${
+                        msg.role === 'user' ? 'text-emerald-200' : 'text-slate-400'
+                      }`}
+                    >
+                      {(msg.attachment.size / 1024).toFixed(0)} KB · Fatura / Extrato PDF
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Markdown Content */}
               <div className="chat-prose">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -392,35 +1179,163 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
               {/* Action Confirmation Cards */}
               {msg.actions && msg.actions.length > 0 && (
                 <div className="mt-3 space-y-2 pt-2 border-t border-white/[0.08]">
-                  {msg.actions.map((act, i) => (
-                    <div
-                      key={i}
-                      className="p-2.5 rounded-xl bg-slate-950/60 border border-emerald-500/30 space-y-1.5"
-                    >
-                      <div className="flex items-center gap-1.5 text-emerald-400 font-semibold text-[11px]">
-                        <CheckCircle2 className="size-3.5 text-emerald-400" />
-                        <span>{act.title}</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-300">
-                        {act.lines.map((l, j) => (
-                          <div key={j} className="flex flex-col">
-                            <span className="text-slate-500">{l.label}</span>
-                            <span
-                              className={`font-semibold ${
-                                l.tone === 'positive'
-                                  ? 'text-emerald-400'
-                                  : l.tone === 'negative'
-                                    ? 'text-rose-400'
-                                    : 'text-slate-200'
-                              }`}
-                            >
-                              {l.value}
-                            </span>
+                  {msg.actions.map((act, i) => {
+                    if (act.kind === 'confirmation' && act.pendingAction) {
+                      const pAct = act.pendingAction
+                      if (pAct.status === 'pending') {
+                        return (
+                          <div
+                            key={i}
+                            className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-950/40 via-slate-950/90 to-amber-900/20 border border-amber-500/50 space-y-3 shadow-xl shadow-amber-500/10 animate-in fade-in zoom-in-95 duration-200"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-amber-300 font-bold text-xs tracking-tight">
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                                </span>
+                                <span>Aguardando sua confirmação</span>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1.5 py-0 bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold"
+                              >
+                                Requer Aprovação
+                              </Badge>
+                            </div>
+
+                            <div className="text-xs font-bold text-white tracking-tight">
+                              {act.title}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[10px] bg-slate-900/90 rounded-xl p-2.5 border border-white/[0.08]">
+                              {act.lines.map((l, j) => (
+                                <div key={j} className="flex flex-col min-w-0">
+                                  <span className="text-slate-400 text-[9px]">{l.label}</span>
+                                  <span
+                                    className={`font-semibold truncate ${
+                                      l.tone === 'positive'
+                                        ? 'text-emerald-400'
+                                        : l.tone === 'negative'
+                                          ? 'text-rose-400'
+                                          : 'text-slate-200'
+                                    }`}
+                                  >
+                                    {l.value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+
+                            <p className="text-[11px] text-amber-200/90 leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 font-medium">
+                              👉 <strong>Entendi sua solicitação!</strong> Verifique se os dados acima estão corretos. Deseja aplicar essa alteração no seu Saldo Livre?
+                            </p>
+
+                            {/* Botoes de Acao */}
+                            <div className="flex items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                disabled={loading}
+                                onClick={() => handleConfirmPendingAction(msg.id, pAct)}
+                                className="flex-1 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                              >
+                                <Check className="size-4 stroke-[2.5]" />
+                                <span>Confirmar e Executar</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={loading}
+                                onClick={() => handleCancelPendingAction(msg.id, pAct)}
+                                className="h-9 px-3.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 hover:border-rose-500/40 border border-white/[0.08] font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                              >
+                                <X className="size-4" />
+                                <span>Cancelar</span>
+                              </button>
+                            </div>
                           </div>
-                        ))}
+                        )
+                      } else if (pAct.status === 'confirmed') {
+                        return (
+                          <div
+                            key={i}
+                            className="p-2.5 rounded-xl bg-emerald-950/30 border border-emerald-500/40 space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between text-emerald-400 font-semibold text-[11px]">
+                              <div className="flex items-center gap-1.5">
+                                <CheckCircle2 className="size-3.5 text-emerald-400" />
+                                <span>{act.title}</span>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1.5 py-0 bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                              >
+                                ✓ Confirmado e Realizado
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-300">
+                              {act.lines.map((l, j) => (
+                                <div key={j} className="flex flex-col">
+                                  <span className="text-slate-500">{l.label}</span>
+                                  <span className="font-semibold text-slate-200">{l.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      } else {
+                        return (
+                          <div
+                            key={i}
+                            className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1 opacity-80"
+                          >
+                            <div className="flex items-center gap-1.5 text-slate-400 font-semibold text-[11px]">
+                              <XCircle className="size-3.5 text-rose-400" />
+                              <span className="line-through">{act.title}</span>
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1.5 py-0 bg-slate-800 text-slate-400 border-slate-700 ml-auto"
+                              >
+                                ✕ Cancelado
+                              </Badge>
+                            </div>
+                            <p className="text-[10px] text-slate-500">
+                              Esta solicitação foi cancelada e nada foi alterado no seu Saldo Livre.
+                            </p>
+                          </div>
+                        )
+                      }
+                    }
+
+                    return (
+                      <div
+                        key={i}
+                        className="p-2.5 rounded-xl bg-slate-950/60 border border-emerald-500/30 space-y-1.5"
+                      >
+                        <div className="flex items-center gap-1.5 text-emerald-400 font-semibold text-[11px]">
+                          <CheckCircle2 className="size-3.5 text-emerald-400" />
+                          <span>{act.title}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-300">
+                          {act.lines.map((l, j) => (
+                            <div key={j} className="flex flex-col">
+                              <span className="text-slate-500">{l.label}</span>
+                              <span
+                                className={`font-semibold ${
+                                  l.tone === 'positive'
+                                    ? 'text-emerald-400'
+                                    : l.tone === 'negative'
+                                      ? 'text-rose-400'
+                                      : 'text-slate-200'
+                                }`}
+                              >
+                                {l.value}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -471,7 +1386,15 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
               key={idx}
               type="button"
               disabled={loading}
-              onClick={() => handleSend(chip)}
+              onClick={() => {
+                if (chip.includes('Anexar fatura')) {
+                  fileInputRef.current?.click()
+                } else if (chip.includes('Open Finance') && onOpenOpenFinance) {
+                  onOpenOpenFinance()
+                } else {
+                  handleSend(chip)
+                }
+              }}
               className="text-[10px] py-1 px-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-slate-300 hover:text-white whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 text-left shrink-0"
             >
               {chip}
@@ -482,27 +1405,91 @@ export function GeminiChat({ onOpenApiKey }: GeminiChatProps) {
 
       {/* Input Box */}
       <div className="p-3 border-t border-white/[0.06] bg-slate-900/60">
+        {/* Pending PDF Attachment Preview */}
+        {pendingAttachment && (
+          <div className="mb-2 p-2 rounded-xl bg-slate-950/90 border border-emerald-500/40 flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-2">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div className="size-8 rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+                <FileText className="size-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-white truncate block">
+                    {pendingAttachment.name}
+                  </span>
+                  <Badge variant="outline" className="text-[9px] py-0 px-1 bg-emerald-500/20 text-emerald-300 border-emerald-500/30 shrink-0">
+                    PDF Pronto
+                  </Badge>
+                </div>
+                <span className="text-[10px] text-slate-400 block truncate">
+                  {(pendingAttachment.size / 1024).toFixed(1)} KB · O Copiloto lerá e importará as despesas deste documento
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPendingAttachment(null)}
+              className="size-6 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              title="Remover anexo"
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="relative flex items-center gap-2">
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) handleFileSelect(file)
+              e.target.value = ''
+            }}
+          />
+
+          {/* Attachment Paperclip Button */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => fileInputRef.current?.click()}
+            className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer"
+            title="Anexar fatura ou extrato bancário em PDF"
+          >
+            <Paperclip className="size-4" />
+          </Button>
+
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Pergunte ao Gemini ou digite um lançamento..."
+            placeholder={
+              pendingAttachment
+                ? 'Instruções opcionais (ou pressione Enter para analisar o PDF)...'
+                : 'Pergunte, lance gastos ou anexe faturas/extratos em PDF...'
+            }
             className="min-h-[42px] max-h-24 pr-10 text-xs bg-slate-950/80 border-slate-800 resize-none focus-visible:ring-emerald-500/40"
             rows={1}
           />
+
           <Button
             size="icon-sm"
-            disabled={!input.trim() || loading}
+            disabled={(!input.trim() && !pendingAttachment) || loading}
             onClick={() => handleSend()}
             className="absolute right-2 top-1/2 -translate-y-1/2 size-7 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm cursor-pointer disabled:opacity-30"
+            title="Enviar mensagem ou analisar anexo"
           >
             <Send className="size-3.5" />
           </Button>
         </div>
-        <p className="text-[10px] text-slate-500 mt-1.5 text-center">
-          Pressione <kbd className="font-mono text-slate-400">Enter</kbd> para enviar · <kbd className="font-mono text-slate-400">Shift+Enter</kbd> para nova linha
-        </p>
+        <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5 px-1">
+          <span>Arraste e solte arquivos PDF no chat para importar faturas</span>
+          <span><kbd className="font-mono text-slate-400">Enter</kbd> envia</span>
+        </div>
       </div>
     </div>
   )

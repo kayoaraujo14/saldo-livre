@@ -13,6 +13,7 @@ import {
   Sparkles,
   Download,
   CheckCircle2,
+  Landmark,
 } from 'lucide-react'
 
 interface MobileMenuSheetProps {
@@ -23,6 +24,7 @@ interface MobileMenuSheetProps {
   onOpenFriends: () => void
   onGenerateBills: () => void
   onOpenInstall?: () => void
+  onOpenOpenFinance?: () => void
   isInstalled?: boolean
   canInstall?: boolean
   generating?: boolean
@@ -36,6 +38,7 @@ export function MobileMenuSheet({
   onOpenFriends,
   onGenerateBills,
   onOpenInstall,
+  onOpenOpenFinance,
   isInstalled,
   canInstall = true,
   generating,
@@ -182,6 +185,26 @@ export function MobileMenuSheet({
           </div>
           <ChevronRight className="size-4 text-slate-500" />
         </button>
+
+        {/* Open Finance Brasil */}
+        {onOpenOpenFinance && (
+          <button
+            type="button"
+            onClick={onOpenOpenFinance}
+            className="w-full p-4 flex items-center justify-between hover:bg-slate-800/40 transition-colors text-left cursor-pointer active:bg-slate-800/60"
+          >
+            <div className="flex items-center gap-3">
+              <div className="size-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center">
+                <Landmark className="size-4" />
+              </div>
+              <div>
+                <span className="text-sm font-semibold text-white block">Open Finance Brasil</span>
+                <span className="text-xs text-slate-400">Conectar contas bancárias e faturas</span>
+              </div>
+            </div>
+            <ChevronRight className="size-4 text-slate-500" />
+          </button>
+        )}
 
         {/* Cartões de Crédito */}
         <button
