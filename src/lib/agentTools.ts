@@ -2,8 +2,9 @@
  * Implementação das ferramentas do agente (usada tanto pelo Gemini real
  * quanto pelo agente offline do Modo Demo).
  */
-import type { Allocation, Card, Category, NewTransaction, PaymentMethod, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
+import type { Allocation, Card, Category, NewTransaction, PaymentMethod, PendingBatchTransaction, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
 import { CATEGORIES } from '@/types'
+import { extractCounterparty } from './pdfParser'
 import {
   amountPatch,
   buildSplit,
@@ -40,6 +41,8 @@ export interface AgentEnv {
   getCards: () => Card[]
   getRecurring?: () => RecurringBill[]
   getFriends?: () => Array<{ uid: string; name: string; email?: string }>
+  getPendingTransactions?: () => PendingBatchTransaction[] | undefined
+  setPendingTransactions?: (txs: PendingBatchTransaction[]) => void
   lookupUserByEmail?: (email: string) => Promise<UserProfile | null>
   me: Party
   partner: Party | null
@@ -674,34 +677,52 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
   const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
 
   if (isPendingConfirmation) {
-    let previewReceitas = 0
-    let previewDespesas = 0
-    let countReceitas = 0
-    let countDespesas = 0
-    let previewImpacto = 0
-    const sampleItems: string[] = []
+    const pendingTransactionsList: PendingBatchTransaction[] = []
 
     for (const item of transacoesRaw) {
-      const desc = String(item.descricao ?? 'Item')
-      const val = Math.abs(Number(item.valorTotal ?? 0))
+      const desc = String(item.descricao ?? 'Item').trim()
+      const val = Math.abs(Number(item.valorTotal ?? item.valor ?? 0))
       const isExplicitIncome = item.tipo === 'income' || item.categoria === 'Receita'
       const looksLikeIncome = isExplicitIncome || INCOME_KEYWORDS_REGEX.test(desc)
-      const resolvedTipo = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
+      const resolvedTipo: 'income' | 'expense' = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
 
-      if (resolvedTipo === 'income') {
-        previewReceitas += val
-        countReceitas++
-        previewImpacto += val
-      } else {
-        previewDespesas += val
-        countDespesas++
-        previewImpacto -= val
-      }
+      const isRdb = /\b(aplica[çc][ãa]o|resgate)\s+rdb\b/i.test(desc) || /\brdb\b/i.test(desc) || /\bguardar\s+dinheiro\b/i.test(desc)
+      const isInvoicePayment = /pagamento (recebido|de fatura|efetuado)/i.test(desc) || /saldo anterior/i.test(desc)
+      const filterCat: 'valida' | 'ignorada' = item.categoria_filtro === 'ignorada' || isRdb || isInvoicePayment ? 'ignorada' : 'valida'
+      const motivoIgn = item.motivoIgnorado || (isRdb ? 'Aplicação / Resgate RDB' : isInvoicePayment ? 'Pagamento de Fatura' : undefined)
 
-      if (sampleItems.length < 4) {
-        sampleItems.push(`${desc} (${money(val)})`)
-      }
+      const contraparte = typeof item.contraparte === 'string' && item.contraparte.trim()
+        ? item.contraparte.trim()
+        : extractCounterparty(desc)
+
+      const txDate = (typeof item.data === 'string' && item.data.trim()) || defaultVenc || `${targetMonth}-01`
+
+      pendingTransactionsList.push({
+        data: txDate,
+        tipo: resolvedTipo,
+        valor_exato: round2(val),
+        contraparte,
+        categoria_filtro: filterCat,
+        categoria: typeof item.categoria === 'string' ? item.categoria : resolvedTipo === 'income' ? 'Receita' : 'Outros',
+        metodoPagamento: (typeof item.metodoPagamento === 'string' ? item.metodoPagamento : defaultMetodo) as any,
+        motivoIgnorado: motivoIgn,
+      })
     }
+
+    env.setPendingTransactions?.(pendingTransactionsList)
+
+    const validTxs = pendingTransactionsList.filter((t) => t.categoria_filtro === 'valida')
+    const countReceitas = validTxs.filter((t) => t.tipo === 'income').length
+    const countDespesas = validTxs.filter((t) => t.tipo === 'expense').length
+    const previewReceitas = round2(validTxs.filter((t) => t.tipo === 'income').reduce((s, t) => s + t.valor_exato, 0))
+    const previewDespesas = round2(validTxs.filter((t) => t.tipo === 'expense').reduce((s, t) => s + t.valor_exato, 0))
+    const previewImpacto = round2(previewReceitas - previewDespesas)
+
+    const tabelaMarkdown = [
+      '| Data | Tipo | Descrição / Contraparte | Valor |',
+      '| :--- | :--- | :--- | :--- |',
+      ...validTxs.map((t) => `| ${formatShortDate(t.data)} | ${t.tipo === 'income' ? '🟢 Entrada' : '🔴 Saída'} | ${t.contraparte} | ${money(t.valor_exato)} |`),
+    ].join('\n')
 
     const summaryBefore = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
     const isAllIncome = countReceitas > 0 && countDespesas === 0
@@ -710,15 +731,15 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     const previewTitle = isAllIncome
       ? `Lote de ${countReceitas} receita${countReceitas > 1 ? 's' : ''}`
       : isMixed
-        ? `Lote de ${transacoesRaw.length} lançamentos (${countDespesas} despesas e ${countReceitas} receitas)`
-        : `Lote de ${transacoesRaw.length} despesa${transacoesRaw.length > 1 ? 's' : ''}`
+        ? `Lote de ${validTxs.length} lançamentos (${countDespesas} despesas e ${countReceitas} receitas)`
+        : `Lote de ${validTxs.length} despesa${validTxs.length > 1 ? 's' : ''}`
 
     const confirmationLines = [
       {
-        label: 'Qtd. Lançamentos',
+        label: 'Qtd. Lançamentos Válidos',
         value: isMixed
-          ? `${transacoesRaw.length} itens (${countDespesas} despesas, ${countReceitas} receitas)`
-          : `${transacoesRaw.length} itens`,
+          ? `${validTxs.length} itens (${countDespesas} despesas, ${countReceitas} receitas)`
+          : `${validTxs.length} itens`,
       },
       ...(previewReceitas > 0 ? [{ label: 'Total de Receitas (Entradas)', value: money(previewReceitas), tone: 'positive' as const }] : []),
       ...(previewDespesas > 0 ? [{ label: isBankStatement ? 'Total de Despesas (Saídas)' : 'Total da Fatura (Cartão)', value: money(previewDespesas), tone: 'negative' as const }] : []),
@@ -728,31 +749,36 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
         tone: previewImpacto > 0 ? ('positive' as const) : previewImpacto < 0 ? ('negative' as const) : ('neutral' as const),
       },
       { label: 'Mês de Competência', value: monthLabel(targetMonth) },
-      { label: 'Exemplos de Itens', value: sampleItems.join(', ') + (transacoesRaw.length > 4 ? ` (+${transacoesRaw.length - 4})` : '') },
       { label: 'Saldo Livre Atual em ' + monthLabel(targetMonth), value: money(summaryBefore.freeBalance) },
     ]
+
+    const mensagemConfirmacao = `Entendi sua solicitação! Analisei o extrato e preparei a importação de **${validTxs.length} lançamentos** (${countReceitas} receitas somando **${money(previewReceitas)}** e ${countDespesas} despesas somando **${money(previewDespesas)}**) para **${monthLabel(targetMonth)}**:\n\n${tabelaMarkdown}\n\nPor favor, revise os itens acima no cartão e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** no chat para cadastrá-los no seu Saldo Livre.`
 
     return {
       response: {
         ok: true,
         aguardandoConfirmacao: true,
-        mensagem: `Entendi que você deseja importar um lote de ${transacoesRaw.length} lançamentos (${countReceitas} receitas e ${countDespesas} despesas) para ${monthLabel(targetMonth)}. Por favor, confirme no botão abaixo se está correto para cadastrá-los no seu Saldo Livre.`,
-        quantidadeTotal: transacoesRaw.length,
+        mensagem: mensagemConfirmacao,
+        quantidadeTotal: validTxs.length,
         quantidadeReceitas: countReceitas,
         quantidadeDespesas: countDespesas,
-        totalReceitas: round2(previewReceitas),
-        totalDespesas: round2(previewDespesas),
-        meuImpactoTotal: round2(previewImpacto),
+        totalReceitas: previewReceitas,
+        totalDespesas: previewDespesas,
+        meuImpactoTotal: previewImpacto,
         mesCompetencia: targetMonth,
+        pending_transactions: pendingTransactionsList,
+        transacoesValidadas: validTxs,
+        tabelaMarkdown,
       },
       action: {
         kind: 'confirmation',
         title: `Confirmar ${previewTitle}`,
         lines: confirmationLines,
+        pending_transactions: pendingTransactionsList,
         pendingAction: {
           id: uid('act'),
           toolName: 'registrarTransacoesLote',
-          args: { ...args, __confirmed: true },
+          args: { ...args, __confirmed: true, pending_transactions: pendingTransactionsList },
           title: previewTitle,
           status: 'pending',
           createdAt: Date.now(),
@@ -774,6 +800,12 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
   for (const item of transacoesRaw) {
     const desc = String(item.descricao ?? '')
     const itemValor = Math.abs(Number(item.valorTotal ?? 0))
+
+    const isRdb = /\b(aplica[çc][ãa]o|resgate)\s+rdb\b/i.test(desc) || /\brdb\b/i.test(desc) || /\bguardar\s+dinheiro\b/i.test(desc)
+    const isInvoicePayment = /pagamento (recebido|de fatura|efetuado)/i.test(desc) || /saldo anterior/i.test(desc)
+    if (item.categoria_filtro === 'ignorada' || isRdb || isInvoicePayment) {
+      continue
+    }
 
     // Detecção inteligente de receitas/entradas
     const isExplicitIncome = item.tipo === 'income' || item.categoria === 'Receita'
@@ -851,6 +883,8 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
       if (resp.mesCompetenciaFatura) targetMonth = resp.mesCompetenciaFatura
     }
   }
+
+  env.setPendingTransactions?.([])
 
   const summaryAfter = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
 
@@ -1547,6 +1581,30 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   const mes = typeof args.mes === 'string' && /^\d{4}-\d{2}$/.test(args.mes) ? args.mes : ''
   const status = typeof args.status === 'string' ? args.status : ''
   const limite = typeof args.limite === 'number' && args.limite > 0 ? args.limite : 20
+
+  const pendingTxs = env.getPendingTransactions?.()
+  if (pendingTxs && pendingTxs.length > 0 && (args.pendentes === true || /pendent|extrato|lote|importad/i.test(termo))) {
+    const validPending = pendingTxs.filter((t) => t.categoria_filtro === 'valida')
+    const somaTotal = validPending.reduce((acc, t) => acc + t.valor_exato, 0)
+    return {
+      response: {
+        ok: true,
+        pendentes: true,
+        totalEncontrados: validPending.length,
+        somaTotal: round2(somaTotal),
+        transacoes: validPending,
+      },
+      action: {
+        kind: 'report',
+        title: `Lançamentos Pendentes do Extrato (${validPending.length} itens)`,
+        lines: [
+          { label: 'Status', value: 'Aguardando Confirmação' },
+          { label: 'Total Itens', value: `${validPending.length} transações` },
+          ...(validPending.slice(0, 3).map((t) => ({ label: t.contraparte || t.data, value: money(t.valor_exato) }))),
+        ],
+      },
+    }
+  }
 
   const filtered = all.filter((t) => {
     if (mes && t.competenceMonth !== mes) return false

@@ -229,6 +229,18 @@ export interface PendingAction {
   status: 'pending' | 'confirmed' | 'cancelled'
   createdAt: number
   lines: { label: string; value: string; tone?: 'positive' | 'negative' | 'neutral' }[]
+  pending_transactions?: PendingBatchTransaction[]
+}
+
+export interface PendingBatchTransaction {
+  data: string
+  tipo: 'income' | 'expense'
+  valor_exato: number
+  contraparte: string
+  categoria_filtro: 'valida' | 'ignorada'
+  categoria?: string
+  metodoPagamento?: 'pix' | 'credit_card' | 'debit' | 'bill'
+  motivoIgnorado?: string
 }
 
 export interface ActionCardData {
@@ -236,6 +248,7 @@ export interface ActionCardData {
   title: string
   lines: { label: string; value: string; tone?: 'positive' | 'negative' | 'neutral' }[]
   pendingAction?: PendingAction
+  pending_transactions?: PendingBatchTransaction[]
 }
 
 export interface ChatAttachment {
@@ -252,6 +265,7 @@ export interface ChatMessage {
   content: string
   attachment?: ChatAttachment
   actions?: ActionCardData[]
+  pending_transactions?: PendingBatchTransaction[]
   pending?: boolean
   error?: boolean
 }
@@ -262,6 +276,7 @@ export interface ChatSession {
   createdAt: number
   updatedAt: number
   messages: ChatMessage[]
+  pending_transactions?: PendingBatchTransaction[]
 }
 
 export interface UserLearnedRule {

@@ -4,7 +4,7 @@
  * `ToolExecutor` injetado pelo FinanceContext.
  */
 import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } from '@google/genai'
-import type { ActionCardData, ChatMessage, ChatAttachment } from '@/types'
+import type { ActionCardData, ChatMessage, ChatAttachment, PendingBatchTransaction } from '@/types'
 import { CATEGORIES } from '@/types'
 
 export const GEMINI_MODEL = 'gemini-3-flash'
@@ -295,6 +295,13 @@ export const functionDeclarations: FunctionDeclaration[] = [
                   '"paid" para extrato de conta corrente (já liquidado na conta); "pending" para compras no cartão na fatura a vencer.',
               },
               categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria. Para entradas e salários use "Receita".' },
+              contraparte: { type: Type.STRING, description: 'Nome limpo do recebedor, pagador ou estabelecimento (ex: "Brisanet Telecom", "João da Silva", "Empresa XPTO").' },
+              categoria_filtro: {
+                type: Type.STRING,
+                enum: ['valida', 'ignorada'],
+                description: '"valida" para movimentações reais; "ignorada" para RDBs, aplicações financeiras, reserva interna ou pagamentos de fatura.',
+              },
+              motivoIgnorado: { type: Type.STRING, description: 'Se ignorada, informe o motivo (ex: "Aplicação RDB", "Pagamento de Fatura").' },
               tipoDivisao: { type: Type.STRING, enum: ['MEU', 'CASAL_50_50', 'PARCEIRO', 'AMIGO', 'TERCEIRO', 'PERSONALIZADA'] },
               nomeAmigo: { type: Type.STRING },
               emailAmigo: { type: Type.STRING },
@@ -503,6 +510,7 @@ export function buildSystemInstruction(ctx: {
   cards: Array<{ id: string; name: string; owner: string; closingDay: number; dueDay: number }>
   friends: Array<{ uid: string; name: string; email: string }>
   learnedRules?: string[]
+  pendingTransactions?: PendingBatchTransaction[]
   summary?: {
     income: number
     paid: number
@@ -553,6 +561,23 @@ export function buildSystemInstruction(ctx: {
 ${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.category} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
       : 'LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento.'
 
+  const validPending = (ctx.pendingTransactions || []).filter((t) => t.categoria_filtro === 'valida')
+  const totalReceitasPending = validPending.filter((t) => t.tipo === 'income').reduce((s, t) => s + t.valor_exato, 0)
+  const totalDespesasPending = validPending.filter((t) => t.tipo === 'expense').reduce((s, t) => s + t.valor_exato, 0)
+
+  const pendingTxsDesc =
+    ctx.pendingTransactions && ctx.pendingTransactions.length > 0
+      ? `TRANSAÇÕES PENDENTES DE CONFIRMAÇÃO DO EXTRATO/LOTE (MEMÓRIA ESTRUTURADA DE ESTADO):
+Existe atualmente salvo no estado da sessão um lote de ${ctx.pendingTransactions.length} transações extraídas do extrato/fatura:
+${ctx.pendingTransactions.map((t, idx) => `${idx + 1}. [${t.data}] ${t.tipo === 'income' ? '🟢 ENTRADA' : '🔴 SAÍDA'} | Contraparte: ${t.contraparte} | R$ ${t.valor_exato.toFixed(2)} | Categoria: ${t.categoria || 'Geral'} | Filtro: ${t.categoria_filtro}${t.motivoIgnorado ? ` (${t.motivoIgnorado})` : ''}`).join('\n')}
+
+TOTAIS VALIDADOS CALCULADOS PELO SISTEMA (DETERMINÍSTICO):
+- Receitas/Entradas válidas: ${validPending.filter((t) => t.tipo === 'income').length} itens somando R$ ${totalReceitasPending.toFixed(2)}
+- Despesas/Saídas válidas: ${validPending.filter((t) => t.tipo === 'expense').length} itens somando R$ ${totalDespesasPending.toFixed(2)}
+
+SE O USUÁRIO PERGUNTAR "quais foram as transações?", "enumere os itens" ou qualquer pergunta sobre as movimentações do extrato, responda EXCLUSIVAMENTE a partir da lista estruturada acima! É expressamente proibido inventar valores ou contrapartes!`
+      : 'TRANSAÇÕES PENDENTES DE CONFIRMAÇÃO DO EXTRATO/LOTE: Nenhum lote pendente de confirmação no momento.'
+
   return `Você é o "Copiloto Saldo Livre", um agente financeiro pessoal brasileiro, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
 
 CONTEXTO ATUAL:
@@ -566,6 +591,8 @@ CONTEXTO ATUAL:
 ${summaryDesc}
 
 ${recentTxsDesc}
+
+${pendingTxsDesc}
 
 REGRAS E PREFERÊNCIAS APRENDIDAS DO USUÁRIO (MEMÓRIA VIVA):
 ${learnedRulesDesc}
@@ -619,6 +646,7 @@ REGRAS DE FUNCIONAMENTO:
   Chame "consultarTransacoes" para obter a lista exata!
 
 7. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO (GUARDRAILS COMPORTAMENTAIS):
+- REGRA CRÍTICA DE INTEGRIDADE FINANCEIRA: Você está estritamente proibido de inventar, estimar ou deduzir valores de transações para fazer a soma bater com um total informado anteriormente. Toda listagem deve refletir caractere por caractere o documento original. Se os itens individuais não estiverem disponíveis no seu contexto atual, releia a ferramenta/documento original antes de responder.
 - NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais informados acima.
 - SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores prováveis ou inventados. O fluxo deve parar e aguardar a resposta dele.
 - CITE OS IDs DE REFERÊNCIA, categorias e números de comprovantes (se houver) sempre que confirmar a preparação de uma tarefa de CRUD/Lançamento.
@@ -632,7 +660,12 @@ REGRAS DE FUNCIONAMENTO:
 
 8. IMPORTAÇÃO DE FATURAS E EXTRATOS BANCÁRIOS EM PDF (ONBOARDING & GASTOS ANTERIORES):
 - Se o usuário anexar um arquivo PDF (fatura de cartão ou extrato de conta bancária) ou colar dados de lançamentos:
-  1. IDENTIFIQUE COM PRECISÃO O TIPO DE DOCUMENTO:
+  1. EXTRAÇÃO ANTES DA AGREGAÇÃO (CHAIN-OF-THOUGHT):
+     - O cálculo de totais nunca deve ser feito pela LLM de cabeça. A LLM deve apenas extrair as linhas literais do documento, e o código da ferramenta "registrarTransacoesLote" deve somar os valores a partir da lista extraída.
+     - Extraia rigorosamente cada linha com: data, descricao/contraparte, valorTotal, tipo ("income" ou "expense"), metodoPagamento e categoria.
+     - IGNORE movimentações internas de reserva (Aplicações RDB, Resgates RDB, Guardar Dinheiro) e pagamentos de fatura de cartão já existentes, marcando-as como categoria_filtro: "ignorada" para que não distorçam os totais de receitas nem despesas.
+
+  2. IDENTIFIQUE COM PRECISÃO O TIPO DE DOCUMENTO:
      A) SE FOR EXTRATO DE CONTA BANCÁRIA (CONTA CORRENTE / POUPANÇA / NUCONTA / INTER CONTA / ITAÚ EXTRATO / BRADESCO):
         - Defina obrigatoriamente: origemDocumento = "extrato_conta" e metodoPagamentoPadrao = "pix" ou "debit"!
         - TODAS as ENTRADAS / CRÉDITOS / VALORES POSITIVOS (identificados com +, C, Crédito, Pix Recebido, Salário, Depósito, TED Recebida, Transferência Recebida, Rendimento):
@@ -656,11 +689,17 @@ REGRAS DE FUNCIONAMENTO:
         - ATENÇÃO: IGNORE linhas de "Pagamento de fatura recebido", "Pagamento efetuado" ou "Saldo anterior" para NÃO duplicar lançamentos nem somar como novo gasto de cartão!
         - mesFaturaPadrao: mês de vencimento da fatura (ex: "2026-11").
 
-  2. EXECUÇÃO EM LOTE:
-     - Chame SEMPRE a ferramenta "registrarTransacoesLote" preenchendo origemDocumento, metodoPagamentoPadrao e a lista de transacoes com cada campo tipo ("income" ou "expense"), metodoPagamento e categoria preenchidos individualmente!
+  3. TRANSPARÊNCIA IMEDIATA NA CONFIRMAÇÃO (PRIMEIRA RESPOSTA AO USUÁRIO):
+     - Sempre que pedir para o usuário clicar em **🟢 Confirmar e Executar**, JÁ EXIBA DE IMEDIATO na sua mensagem de resposta a tabela completa e formatada em Markdown com TODAS as transações válidas que compõem aquele total (Data | Tipo | Descrição / Contraparte | Valor), evitando que o usuário aprove uma importação às cegas ou precise pedir a listagem em uma segunda mensagem!
+     - Exemplo de formato obrigatório na resposta:
+       | Data | Tipo | Descrição / Contraparte | Valor |
+       | :--- | :--- | :--- | :--- |
+       | 05/10/2026 | 🟢 Entrada | Salário Empresa XPTO | R$ 5.200,00 |
+       | 06/10/2026 | 🔴 Saída | Pix enviado Brisanet | R$ 99,90 |
+     - Destaque com clareza o total exato de receitas (entradas) e de despesas (saídas) calculados pela ferramenta.
 
-  3. RESPOSTA AO USUÁRIO:
-     - Destaque com clareza quantas receitas (entradas) e quantas despesas (saídas) foram cadastradas, com os respectivos valores totais e o novo Saldo Livre!
+  4. EXECUÇÃO EM LOTE:
+     - Chame SEMPRE a ferramenta "registrarTransacoesLote" preenchendo origemDocumento, metodoPagamentoPadrao e a lista completa de transações com cada campo tipo, metodoPagamento, categoria, contraparte e categoria_filtro!
 
 9. OPEN FINANCE BRASIL (INTEGRAÇÃO AUTOMÁTICA DE CONTAS):
 - Se o usuário perguntar sobre Open Finance ou como conectar seus bancos automaticamente:
@@ -788,8 +827,24 @@ export function buildChatContents(
             )
             .join('\n')
         : ''
+    const pendingTxs =
+      m.pending_transactions ||
+      m.actions?.flatMap((a) => a.pending_transactions || (a.pendingAction?.args?.pending_transactions as any) || []).filter(Boolean)
+    const pendingTxsDetail =
+      pendingTxs && pendingTxs.length > 0
+        ? '\n[Transações exatas extraídas salvas no estado (' +
+          pendingTxs.length +
+          ' itens):\n' +
+          pendingTxs
+            .map(
+              (t: any, idx: number) =>
+                `• ${idx + 1}. Data: ${t.data} | Tipo: ${t.tipo} | Valor: R$ ${Number(t.valor_exato || t.valorTotal || 0).toFixed(2)} | Contraparte: ${t.contraparte || t.descricao} | Filtro: ${t.categoria_filtro || 'valida'}`,
+            )
+            .join('\n') +
+          '\n]'
+        : ''
     const attachmentNote = m.attachment ? `\n[Arquivo PDF anexado: ${m.attachment.name}]` : ''
-    const text = m.content + attachmentNote + actionDetails
+    const text = m.content + attachmentNote + actionDetails + pendingTxsDetail
 
     const lastTurn = turns[turns.length - 1]
     if (lastTurn && lastTurn.role === role) {

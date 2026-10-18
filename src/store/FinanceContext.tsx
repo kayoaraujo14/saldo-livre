@@ -12,6 +12,7 @@ import type {
   InstallmentGroupUpdateInput,
   MonthSummary,
   NewTransaction,
+  PendingBatchTransaction,
   PendingChargeGroup,
   RecurringBill,
   SplitType,
@@ -225,6 +226,8 @@ interface FinanceContextValue {
   respondChargeRequest: (tx: Transaction, accept: boolean) => Promise<void>
   // agente
   executeTool: ToolExecutor
+  pendingBatchTransactions: PendingBatchTransaction[]
+  setPendingBatchTransactions: (txs: PendingBatchTransaction[]) => void
 }
 
 const FinanceContext = createContext<FinanceContextValue | null>(null)
@@ -237,6 +240,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [forceDemo, setForceDemo] = useState(() => localStorage.getItem(FORCE_DEMO_KEY) === '1')
   const mode: Mode = fb.isFirebaseConfigured && !forceDemo ? 'firebase' : 'demo'
   const [month, setMonth] = useState(currentMonthKey())
+  const [pendingBatchTransactions, setPendingBatchTransactions] = useState<PendingBatchTransaction[]>([])
+  const pendingBatchRef = useRef(pendingBatchTransactions)
+  pendingBatchRef.current = pendingBatchTransactions
 
   // ---------------- Modo Demo ----------------
   const [demo, setDemo] = useState<DemoState>(loadDemo)
@@ -1151,6 +1157,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           getTransactions: () => (mode === 'demo' ? demoRef.current.transactions : fbTxRef.current),
           getRecurring: () => (mode === 'demo' ? demoRef.current.recurring : agentEnvRef.current.recurring),
           getFriends: () => friends,
+          getPendingTransactions: () => pendingBatchRef.current,
+          setPendingTransactions: (txs) => {
+            pendingBatchRef.current = txs
+            setPendingBatchTransactions(txs)
+          },
           lookupUserByEmail,
           addTransaction,
           addMany,
@@ -1272,6 +1283,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     removeFriend,
     respondChargeRequest,
     executeTool,
+    pendingBatchTransactions,
+    setPendingBatchTransactions,
   }
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>

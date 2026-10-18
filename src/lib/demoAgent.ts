@@ -3,11 +3,11 @@
  * e chama as MESMAS ferramentas do Gemini, permitindo testar o fluxo
  * completo sem API key.
  */
-import type { ActionCardData, ChatAttachment } from '@/types'
+import type { ActionCardData, ChatAttachment, PendingBatchTransaction } from '@/types'
 import { CATEGORIES } from '@/types'
 import type { ToolExecutor } from './gemini'
 import { guessCategory } from './finance'
-import { dateInMonth, formatBRL, monthLabel, normalize, todayKey } from './utils'
+import { dateInMonth, formatBRL, formatShortDate, monthLabel, normalize, round2, todayKey } from './utils'
 import { parseTransactionsFromText } from './pdfParser'
 
 const THIRD_PARTIES: [RegExp, string][] = [
@@ -57,12 +57,40 @@ export async function runDemoAgent(
   execute: ToolExecutor,
   monthKey: string,
   attachment?: ChatAttachment,
+  pendingTransactions?: PendingBatchTransaction[],
 ): Promise<{ text: string; actions: ActionCardData[] }> {
   const n = normalize(message)
   const actions: ActionCardData[] = []
   const amount = parseAmount(message)
   const dayMatch = n.match(/dia\s+(\d{1,2})/)
   const date = dayMatch ? dateInMonth(monthKey, Number(dayMatch[1])) : undefined
+
+  // ---------------- Consulta/Enumeração de Transações Pendentes do Extrato ----------------
+  const isQueryingPending =
+    /(quais|enumere|listar|mostrar|ver|detalhe|quais foram).*(transa[çc][õo]es|lan[çc]amentos|itens|gastos|despesas|entradas|receitas)/i.test(n) ||
+    /^(quais foram|quais s[ãa]o elas|enumere elas|quais s[ãa]o os itens|quais itens|o que foi importado)/i.test(n)
+
+  if (isQueryingPending && pendingTransactions && pendingTransactions.length > 0) {
+    const valid = pendingTransactions.filter((t) => t.categoria_filtro === 'valida')
+    const countReceitas = valid.filter((t) => t.tipo === 'income').length
+    const countDespesas = valid.filter((t) => t.tipo === 'expense').length
+    const totalReceitas = round2(valid.filter((t) => t.tipo === 'income').reduce((s, t) => s + t.valor_exato, 0))
+    const totalDespesas = round2(valid.filter((t) => t.tipo === 'expense').reduce((s, t) => s + t.valor_exato, 0))
+
+    const table = [
+      '| Data | Tipo | Descrição / Contraparte | Valor |',
+      '| :--- | :--- | :--- | :--- |',
+      ...valid.map(
+        (t) =>
+          `| ${formatShortDate(t.data)} | ${t.tipo === 'income' ? '🟢 Entrada' : '🔴 Saída'} | ${t.contraparte || 'Transação'} | ${formatBRL(t.valor_exato)} |`,
+      ),
+    ].join('\n')
+
+    return {
+      text: `📋 **Lançamentos reais extraídos do extrato bancário (${valid.length} itens no total):**\n\n• 🟢 **${countReceitas} Receitas / Entradas**: ${formatBRL(totalReceitas)}\n• 🔴 **${countDespesas} Despesas / Saídas**: ${formatBRL(totalDespesas)}\n\n${table}\n\nPara efetivar o cadastro no seu Saldo Livre, clique no botão **🟢 Confirmar e Executar** no cartão acima ou responda **'Sim'** no chat.`,
+      actions: [],
+    }
+  }
 
   // ---------------- Importação de Extrato/Fatura em PDF (Modo Demo) ----------------
   if (attachment || /fatura.*pdf|extrato.*pdf|importar pdf|importar fatura|importar extrato/i.test(n)) {
@@ -86,16 +114,30 @@ export async function runDemoAgent(
           })),
         })
         if (batchResult.action) actions.push(batchResult.action)
+
+        const validTxs = realTxs.filter((t) => t.categoria_filtro !== 'ignorada')
+        const countIncomes = validTxs.filter((t) => t.tipo === 'income').length
+        const countExpenses = validTxs.filter((t) => t.tipo === 'expense').length
+        const totalReceitas = round2(validTxs.filter((t) => t.tipo === 'income').reduce((s, t) => s + t.valorTotal, 0))
+        const totalDespesas = round2(validTxs.filter((t) => t.tipo === 'expense').reduce((s, t) => s + t.valorTotal, 0))
+
+        const table = [
+          '| Data | Tipo | Descrição / Contraparte | Valor |',
+          '| :--- | :--- | :--- | :--- |',
+          ...validTxs.map(
+            (t) =>
+              `| ${formatShortDate(t.data || dateInMonth(monthKey, 10))} | ${t.tipo === 'income' ? '🟢 Entrada' : '🔴 Saída'} | ${t.contraparte || t.descricao} | ${formatBRL(t.valorTotal)} |`,
+          ),
+        ].join('\n')
+
         if (batchResult.action?.kind === 'confirmation') {
           return {
-            text: `📄 **Entendi sua solicitação!** Analisei o arquivo PDF (${fileName}) e extraí **${realTxs.length} lançamentos** (${realTxs.filter(t => t.tipo === 'expense').length} despesas e ${realTxs.filter(t => t.tipo === 'income').length} receitas).\n\nPor favor, revise o resumo no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** no chat para cadastrá-los no seu Saldo Livre.`,
+            text: `📄 **Entendi sua solicitação!** Analisei o arquivo PDF (${fileName}) e extraí **${validTxs.length} lançamentos válidos** (${countExpenses} despesas somando **${formatBRL(totalDespesas)}** e ${countIncomes} receitas somando **${formatBRL(totalReceitas)}**):\n\n${table}\n\nPor favor, revise os itens listados acima e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** no chat para cadastrá-los no seu Saldo Livre.`,
             actions,
           }
         }
-        const incomes = realTxs.filter((t) => t.tipo === 'income').length
-        const expenses = realTxs.filter((t) => t.tipo === 'expense').length
         return {
-          text: `📄 **Arquivo PDF lido com precisão!** (${fileName})\n\nExtraí diretamente do documento **${realTxs.length} lançamentos reais** (${expenses} despesas e ${incomes} receitas):\n\n${realTxs.slice(0, 8).map((t) => `• ${t.tipo === 'income' ? '🟢' : '🔴'} **${t.descricao}**: ${formatBRL(t.valorTotal)} (${t.data || monthKey})`).join('\n')}${realTxs.length > 8 ? `\n... e mais ${realTxs.length - 8} lançamentos cadastrados no sistema.` : ''}\n\n💡 Ao conectar sua **API Key do Gemini** (ícone 🔑), o Copiloto aplica visão multimodal para leitura de layouts complexos e tabelas bancárias!`,
+          text: `📄 **Arquivo PDF lido com precisão!** (${fileName})\n\nExtraí diretamente do documento **${validTxs.length} lançamentos reais** (${countExpenses} despesas somando **${formatBRL(totalDespesas)}** e ${countIncomes} receitas somando **${formatBRL(totalReceitas)}**):\n\n${table}\n\n💡 Ao conectar sua **API Key do Gemini** (ícone 🔑), o Copiloto aplica visão multimodal para leitura de layouts complexos e tabelas bancárias!`,
           actions,
         }
       }
@@ -103,27 +145,38 @@ export async function runDemoAgent(
 
     if (isStatement) {
       // Fallback didático se o PDF for escaneado/imagem sem texto selecionável
+      const fallbackTxs = [
+        { descricao: 'Salário Empresa XPTO', contraparte: 'Empresa XPTO', valorTotal: 4850.00, tipo: 'income' as const, categoria: 'Receita', metodoPagamento: 'pix' as const, status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 5) },
+        { descricao: 'Pix Recebido - Venda Teclado', contraparte: 'Venda Teclado', valorTotal: 220.00, tipo: 'income' as const, categoria: 'Receita', metodoPagamento: 'pix' as const, status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 9) },
+        { descricao: 'Pix Enviado - Aluguel', contraparte: 'Imobiliária Aluguel', valorTotal: 1200.00, tipo: 'expense' as const, categoria: 'Moradia', metodoPagamento: 'pix' as const, status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 6) },
+        { descricao: 'Supermercado Débito', contraparte: 'Supermercado Pão de Açúcar', valorTotal: 284.50, tipo: 'expense' as const, categoria: 'Alimentação', metodoPagamento: 'debit' as const, status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 8) },
+        { descricao: 'Boleto Enel Energia', contraparte: 'Enel Energia', valorTotal: 165.30, tipo: 'expense' as const, categoria: 'Moradia', metodoPagamento: 'bill' as const, status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 10) },
+      ]
       const batchResult = await execute('registrarTransacoesLote', {
         origemDocumento: 'extrato_conta',
         mesFaturaPadrao: monthKey,
         metodoPagamentoPadrao: 'pix',
-        transacoes: [
-          { descricao: 'Salário Empresa XPTO', valorTotal: 4850.00, tipo: 'income', categoria: 'Receita', metodoPagamento: 'pix', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 5) },
-          { descricao: 'Pix Recebido - Venda Teclado', valorTotal: 220.00, tipo: 'income', categoria: 'Receita', metodoPagamento: 'pix', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 9) },
-          { descricao: 'Pix Enviado - Aluguel', valorTotal: 1200.00, tipo: 'expense', categoria: 'Moradia', metodoPagamento: 'pix', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 6) },
-          { descricao: 'Supermercado Débito', valorTotal: 284.50, tipo: 'expense', categoria: 'Alimentação', metodoPagamento: 'debit', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 8) },
-          { descricao: 'Boleto Enel Energia', valorTotal: 165.30, tipo: 'expense', categoria: 'Moradia', metodoPagamento: 'bill', status: 'paid', tipoDivisao: 'MEU', data: dateInMonth(monthKey, 10) },
-        ],
+        transacoes: fallbackTxs,
       })
       if (batchResult.action) actions.push(batchResult.action)
+
+      const table = [
+        '| Data | Tipo | Descrição / Contraparte | Valor |',
+        '| :--- | :--- | :--- | :--- |',
+        ...fallbackTxs.map(
+          (t) =>
+            `| ${formatShortDate(t.data)} | ${t.tipo === 'income' ? '🟢 Entrada' : '🔴 Saída'} | ${t.contraparte} | ${formatBRL(t.valorTotal)} |`,
+        ),
+      ].join('\n')
+
       if (batchResult.action?.kind === 'confirmation') {
         return {
-          text: `📄 **Entendi sua solicitação!** Analisei o extrato bancário (${fileName}) e preparei **5 lançamentos** (2 receitas e 3 despesas de conta).\n\nPor favor, confira os dados no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** para confirmar o cadastro no seu Saldo Livre.`,
+          text: `📄 **Entendi sua solicitação!** Analisei o extrato bancário (${fileName}) e preparei **5 lançamentos** (2 receitas somando **R$ 5.070,00** e 3 despesas somando **R$ 1.649,80**):\n\n${table}\n\nPor favor, confira os dados no cartão abaixo e clique em **🟢 Confirmar e Executar** ou responda **'Sim'** para confirmar o cadastro no seu Saldo Livre.`,
           actions,
         }
       }
       return {
-        text: `📄 **Extrato Bancário processado!** (${fileName})\n\nClassifiquei com precisão os lançamentos bancários da sua conta:\n\n• 🟢 **2 Receitas / Entradas (+R$ 5.070,00)**: Salário e Pix recebido, que **aumentaram diretamente seu Saldo Livre**!\n• 🔴 **3 Despesas de Conta (−R$ 1.649,80)**: Aluguel via Pix, Supermercado no débito e Boleto Enel já debitados da sua conta (**sem gerar despesa de cartão de crédito**).\n\n💡 Conecte sua **API Key do Google Gemini** (ícone 🔑 acima) para ler extratos escaneados e faturas com IA multimodal profunda!`,
+        text: `📄 **Extrato Bancário processado!** (${fileName})\n\nClassifiquei com precisão os lançamentos bancários da sua conta:\n\n${table}\n\n💡 Conecte sua **API Key do Google Gemini** (ícone 🔑 acima) para ler extratos escaneados e faturas com IA multimodal profunda!`,
         actions,
       }
     } else {

@@ -74,10 +74,13 @@ export async function extractTextFromPdf(fileOrBase64: File | string): Promise<E
 export interface ParsedPdfTransaction {
   data?: string
   descricao: string
+  contraparte?: string
   valorTotal: number
   tipo: 'income' | 'expense'
   metodoPagamento: 'pix' | 'credit_card' | 'debit' | 'bill'
   categoria?: string
+  categoria_filtro?: 'valida' | 'ignorada'
+  motivoIgnorado?: string
   parcelaAtual?: number
   totalParcelas?: number
 }
@@ -88,6 +91,24 @@ const MONTH_MAP: Record<string, string> = {
 }
 
 /**
+ * Limpa prefixos bancários comuns para isolar o recebedor, pagador ou estabelecimento
+ */
+export function extractCounterparty(description: string): string {
+  let clean = description
+    .replace(/^(transfer[êe]ncia\s+(recebida|enviada)\s+(pelo|via)?\s*pix(\s+de)?)/i, '')
+    .replace(/^(pix\s+(recebido|enviado)(\s+de|\s+para)?)/i, '')
+    .replace(/^(ted\s+(recebida|enviada)(\s+de|\s+para)?)/i, '')
+    .replace(/^(doc\s+(recebida|enviada)(\s+de|\s+para)?)/i, '')
+    .replace(/^(compra\s+(no\s+d[ée]bito|no\s+cr[ée]dito|d[ée]bito|cr[ée]dito)?)/i, '')
+    .replace(/^(pagamento\s+(de\s+boleto|efetuado|via\s+pix|de\s+fatura)?)/i, '')
+    .replace(/^[-\s:–—]+/, '')
+    .trim()
+
+  if (clean.length < 2) return description.trim()
+  return clean
+}
+
+/**
  * Heurística avançada para interpretar linhas de faturas (Nubank, Itaú, Bradesco, Inter, C6, etc.)
  * e extratos bancários a partir do texto real do PDF.
  */
@@ -95,8 +116,17 @@ export function parseTransactionsFromText(lines: string[], monthKey: string): Pa
   const transactions: ParsedPdfTransaction[] = []
   const year = monthKey.split('-')[0] || new Date().getFullYear().toString()
 
-  const IGNORE_PATTERNS = [
+  const RDB_PATTERNS = [
+    /\b(aplica[çc][ãa]o|resgate)\s+rdb\b/i,
+    /\brdb\s+(resgate|aplica[çc][ãa]o|nubank)?\b/i,
+    /\bguardar\s+dinheiro\b/i,
+    /\bresgate\s+(de\s+investimento|di[áa]rio)\b/i,
+    /\brendimento\s+l[íi]quido\s+rdb\b/i,
+  ]
+
+  const INVOICE_PAYMENT_PATTERNS = [
     /pagamento (recebido|de fatura|efetuado)/i,
+    /pagamento de fatura recebido/i,
     /saldo anterior/i,
     /total a pagar/i,
     /limite disponivel/i,
@@ -106,7 +136,6 @@ export function parseTransactionsFromText(lines: string[], monthKey: string): Pa
 
   for (const line of lines) {
     if (line.length < 5) continue
-    if (IGNORE_PATTERNS.some((p) => p.test(line))) continue
 
     // 1. Procura por valores em reais (ex: R$ 123,45 ou 123,45 ou -15,00)
     // Padrão brasileiro: 1.234,56 ou 123,45
@@ -116,6 +145,16 @@ export function parseTransactionsFromText(lines: string[], monthKey: string): Pa
     const rawValStr = valueMatch[1].replace(/\s/g, '').replace(/\./g, '').replace(',', '.')
     let val = parseFloat(rawValStr)
     if (isNaN(val) || val === 0) continue
+
+    // Identifica se é item a ser ignorado (RDB ou pagamento de fatura)
+    const isRdb = RDB_PATTERNS.some((p) => p.test(line))
+    const isInvoicePayment = INVOICE_PAYMENT_PATTERNS.some((p) => p.test(line))
+    const categoria_filtro: 'valida' | 'ignorada' = isRdb || isInvoicePayment ? 'ignorada' : 'valida'
+    const motivoIgnorado = isRdb
+      ? 'RDB / Aplicação Financeira (reserva interna)'
+      : isInvoicePayment
+        ? 'Pagamento de Fatura / Saldo Anterior'
+        : undefined
 
     // Verifica se tem sinal negativo na linha ou (C)/(D)
     const isCreditSignal = /\b(\+|c|crédito|credito|rec)\b/i.test(line) && !line.includes('cartao de credito')
@@ -178,16 +217,22 @@ export function parseTransactionsFromText(lines: string[], monthKey: string): Pa
       metodoPagamento = 'pix'
     } else if (/debito|débito/i.test(desc)) {
       metodoPagamento = 'debit'
-    } else if (/boleto|energia|luz|agua|água|condominio|tributo/i.test(desc)) {
+    } else if (/boleto|energia|luz|agua|água|condominio|tributo|brisanet/i.test(desc)) {
       metodoPagamento = 'bill'
     }
+
+    const contraparte = extractCounterparty(desc)
 
     transactions.push({
       data: txDate,
       descricao: desc,
+      contraparte,
       valorTotal: absVal,
       tipo,
       metodoPagamento,
+      categoria: tipo === 'income' ? 'Receita' : undefined,
+      categoria_filtro,
+      motivoIgnorado,
       parcelaAtual,
       totalParcelas,
     })

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
-import type { ActionCardData, ChatMessage, ChatSession, ChatAttachment, PendingAction } from '@/types'
+import type { ActionCardData, ChatMessage, ChatSession, ChatAttachment, PendingAction, PendingBatchTransaction } from '@/types'
 import {
   getGeminiApiKey,
   setGeminiApiKey,
@@ -18,7 +18,7 @@ import {
 } from '@/lib/gemini'
 import { runDemoAgent } from '@/lib/demoAgent'
 import { effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
-import { formatShortDate, monthLabel, todayKey } from '@/lib/utils'
+import { formatBRL, formatShortDate, monthLabel, todayKey } from '@/lib/utils'
 import { getLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
 import { extractTextFromPdf } from '@/lib/pdfParser'
 import {
@@ -115,7 +115,18 @@ function saveStoredSessions(uid: string, sessions: ChatSession[]) {
 }
 
 export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpenFinance }: GeminiChatProps) {
-  const { me, partner, month, cards, friends, executeTool, monthTransactions, summary } = useFinance()
+  const {
+    me,
+    partner,
+    month,
+    cards,
+    friends,
+    executeTool,
+    monthTransactions,
+    summary,
+    pendingBatchTransactions,
+    setPendingBatchTransactions,
+  } = useFinance()
   const currentUid = me?.uid ?? 'guest'
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
@@ -185,6 +196,11 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   // Current session & messages
   const currentSession = sessions.find((s) => s.id === currentSessionId) || sessions[0]
   const messages = currentSession?.messages || [INITIAL_MESSAGE]
+
+  const activePendingTxs = useMemo(() => {
+    if (pendingBatchTransactions && pendingBatchTransactions.length > 0) return pendingBatchTransactions
+    return currentSession?.pending_transactions || []
+  }, [pendingBatchTransactions, currentSession])
 
   // Persist sessions to LocalStorage
   useEffect(() => {
@@ -264,6 +280,19 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
           title,
           updatedAt: Date.now(),
           messages: nextMessages,
+        }
+      })
+    })
+  }
+
+  const updateSessionPendingTransactions = (txs: PendingBatchTransaction[]) => {
+    setSessions((prevSessions) => {
+      return prevSessions.map((s) => {
+        if (s.id !== currentSessionId) return s
+        return {
+          ...s,
+          updatedAt: Date.now(),
+          pending_transactions: txs,
         }
       })
     })
@@ -442,6 +471,8 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
         content: `✅ **Ação confirmada e executada com sucesso!**\n\nConcluí a operação **"${pendingAction.title}"** e atualizei os lançamentos e o cálculo do seu Saldo Livre.`,
         actions: result.action ? [result.action] : undefined,
       }
+      setPendingBatchTransactions([])
+      updateSessionPendingTransactions([])
       updateSessionMessages((prev) => [...prev, botMsg])
     } catch (err) {
       console.error(err)
@@ -458,6 +489,8 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   }
 
   const handleCancelPendingAction = (messageId: string, pendingAction: PendingAction) => {
+    setPendingBatchTransactions([])
+    updateSessionPendingTransactions([])
     updateSessionMessages((prev) =>
       prev.map((msg) => {
         if (msg.id !== messageId || !msg.actions) return msg
@@ -527,11 +560,14 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
       if (isStatement) {
         text = `Por favor, analise o extrato bancário de conta corrente em PDF anexado (${currentAttachment.name}).
 Atenção crítica:
-1. Identifique todas as RECEITAS / ENTRADAS (salários, Pix recebidos, TEDs recebidas, depósitos) e cadastre com tipo: "income", categoria: "Receita", método: "pix" e status: "paid" (elas AUMENTAM o Saldo Livre e NÃO são compras de cartão de crédito!).
-2. Identifique todas as DESPESAS / SAÍDAS da conta corrente (Pix enviados, compras no débito, boletos) e cadastre com tipo: "expense", status: "paid" e método "pix", "debit" ou "bill" (sem cartão de crédito).
-3. Chame a ferramenta "registrarTransacoesLote" com origemDocumento: "extrato_conta".`
+1. Extraia linha a linha os lançamentos literais do extrato sem inventar ou estimar valores.
+2. Identifique movimentações internas (como Aplicações/Resgates em RDB, Guardar Dinheiro) e pagamentos de fatura/saldo anterior marcando com categoria_filtro: "ignorada".
+3. Identifique todas as RECEITAS / ENTRADAS válidas (salários, Pix recebidos, TEDs recebidas, depósitos) com tipo: "income", categoria: "Receita", método: "pix" e status: "paid".
+4. Identifique todas as DESPESAS / SAÍDAS válidas (Pix enviados, compras no débito, boletos) com tipo: "expense", status: "paid" e método "pix", "debit" ou "bill" (sem cartão de crédito).
+5. Preencha a contraparte exata de cada item (ex: Brisanet, nome do recebedor/pagador).
+6. Chame a ferramenta "registrarTransacoesLote" com origemDocumento: "extrato_conta" e exiba de imediato a tabela detalhada com todas as transações para conferência antes de pedir confirmação.`
       } else {
-        text = `Por favor, analise o documento em PDF anexado (${currentAttachment.name}). Se for extrato bancário de conta corrente, separe rigorosamente receitas/entradas (tipo: "income", método "pix", aumentam o Saldo Livre) de saídas em conta (método "pix" ou "debit", status "paid"). Se for fatura de cartão de crédito, cadastre as compras a vencer no cartão correspondente. Utilize a ferramenta "registrarTransacoesLote".`
+        text = `Por favor, analise o documento em PDF anexado (${currentAttachment.name}). Se for extrato bancário de conta corrente, separe rigorosamente receitas/entradas (tipo: "income", método "pix", aumentam o Saldo Livre) de saídas em conta (método "pix" ou "debit", status "paid"). Ignore RDBs e pagamentos de fatura. Se for fatura de cartão de crédito, cadastre as compras a vencer no cartão correspondente. Extraia os dados literais e utilize a ferramenta "registrarTransacoesLote", apresentando a listagem completa de itens.`
       }
     }
 
@@ -639,6 +675,7 @@ Atenção crítica:
             status: t.status,
             split: SPLIT_LABELS[t.splitType || 'mine']?.label || t.splitType || 'mine',
           })),
+          pendingTransactions: activePendingTxs.length > 0 ? activePendingTxs : undefined,
         })
 
         result = await runGeminiAgent({
@@ -653,7 +690,19 @@ Atenção crítica:
         })
       } else {
         // Offline demo agent fallback with natural language heuristics
-        result = await runDemoAgent(text, executeTool, month, currentAttachment || undefined)
+        result = await runDemoAgent(text, executeTool, month, currentAttachment || undefined, activePendingTxs)
+      }
+
+      // Se a ferramenta retornou transações em lote pendentes de aprovação, armazena no estado da sessão
+      const batchAction = result.actions?.find((a) => a.pendingAction?.toolName === 'registrarTransacoesLote')
+      const extractedPending = (batchAction?.pending_transactions ||
+        batchAction?.pendingAction?.pending_transactions ||
+        batchAction?.pendingAction?.args?.transacoes ||
+        batchAction?.pendingAction?.args?.pending_transactions) as PendingBatchTransaction[] | undefined
+
+      if (extractedPending && Array.isArray(extractedPending) && extractedPending.length > 0) {
+        setPendingBatchTransactions(extractedPending)
+        updateSessionPendingTransactions(extractedPending)
       }
 
       setRules(getLearnedRules(currentUid))
@@ -663,6 +712,7 @@ Atenção crítica:
         role: 'assistant',
         content: result.text,
         actions: result.actions,
+        pending_transactions: extractedPending && extractedPending.length > 0 ? extractedPending : undefined,
       }
 
       updateSessionMessages((prev) => [...prev, botMsg])
@@ -1226,6 +1276,58 @@ Atenção crítica:
                                 </div>
                               ))}
                             </div>
+
+                            {/* Se for registrarTransacoesLote, exibe a tabela/lista resumida de transações para conferência imediata */}
+                            {pAct.toolName === 'registrarTransacoesLote' && (() => {
+                              const batchTxs: PendingBatchTransaction[] = (pAct.pending_transactions ||
+                                (pAct.args?.transacoes as PendingBatchTransaction[] | undefined) ||
+                                (pAct.args?.pending_transactions as PendingBatchTransaction[] | undefined) ||
+                                activePendingTxs) || []
+                              const validOnly = batchTxs.filter((t: PendingBatchTransaction) => t.categoria_filtro !== 'ignorada')
+                              if (validOnly.length === 0) return null
+
+                              return (
+                                <div className="space-y-1.5 pt-1">
+                                  <div className="flex items-center justify-between text-[11px] font-semibold text-slate-300">
+                                    <span>📋 Transações extraídas ({validOnly.length} itens):</span>
+                                    <span className="text-[10px] text-slate-400">Verificação transparente</span>
+                                  </div>
+                                  <div className="max-h-52 overflow-y-auto rounded-xl border border-white/[0.08] bg-slate-950/70 p-1.5 space-y-1 text-[11px]">
+                                    {validOnly.map((tx: PendingBatchTransaction, idx: number) => (
+                                      <div
+                                        key={idx}
+                                        className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-slate-900/60 hover:bg-slate-800/60 border border-white/[0.04]"
+                                      >
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                          <span className="text-[10px] text-slate-400 shrink-0">
+                                            {formatShortDate(tx.data)}
+                                          </span>
+                                          <span
+                                            className={`text-[9px] px-1 py-0.5 rounded font-bold shrink-0 ${
+                                              tx.tipo === 'income'
+                                                ? 'bg-emerald-500/20 text-emerald-300'
+                                                : 'bg-rose-500/20 text-rose-300'
+                                            }`}
+                                          >
+                                            {tx.tipo === 'income' ? 'Entrada' : 'Saída'}
+                                          </span>
+                                          <span className="text-slate-200 font-medium truncate" title={tx.contraparte}>
+                                            {tx.contraparte}
+                                          </span>
+                                        </div>
+                                        <span
+                                          className={`font-semibold shrink-0 ${
+                                            tx.tipo === 'income' ? 'text-emerald-400' : 'text-rose-400'
+                                          }`}
+                                        >
+                                          {formatBRL(tx.valor_exato)}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )
+                            })()}
 
                             <p className="text-[11px] text-amber-200/90 leading-relaxed bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 font-medium">
                               👉 <strong>Entendi sua solicitação!</strong> Verifique se os dados acima estão corretos. Deseja aplicar essa alteração no seu Saldo Livre?
