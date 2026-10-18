@@ -25,6 +25,7 @@ import {
   Users2,
   SlidersHorizontal,
   Landmark,
+  History,
 } from 'lucide-react'
 
 interface HeaderProps {
@@ -34,6 +35,7 @@ interface HeaderProps {
   onOpenProjection: () => void
   onOpenFriends: () => void
   onOpenOpenFinance: () => void
+  onOpenRecentActivity: () => void
 }
 
 export function Header({
@@ -43,6 +45,7 @@ export function Header({
   onOpenProjection,
   onOpenFriends,
   onOpenOpenFinance,
+  onOpenRecentActivity,
 }: HeaderProps) {
   const {
     mode,
@@ -226,6 +229,17 @@ export function Header({
                   <div className="flex flex-col">
                     <span className="font-medium">Open Finance Brasil</span>
                     <span className="text-[10px] text-slate-500">Conectar contas bancárias e faturas</span>
+                  </div>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={onOpenRecentActivity}
+                  className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
+                >
+                  <History className="size-3.5 text-sky-400" />
+                  <div className="flex flex-col">
+                    <span className="font-medium">Histórico Recente</span>
+                    <span className="text-[10px] text-slate-500">Últimas cadastradas ou recebidas</span>
                   </div>
                 </DropdownMenuItem>
 

@@ -297,6 +297,108 @@ export const SPLIT_LABELS: Record<SplitType, { label: string; emoji: string; sho
   custom: { label: 'Divisão Personalizada', emoji: '⚖️', short: 'Personalizada' },
 }
 
+export interface ThirdPartyInfo {
+  name: string
+  label: string
+  type: 'external' | 'friend' | 'partner' | 'sender'
+  amount?: number
+  percentage?: number
+}
+
+/**
+ * Identifica o terceiro ou pessoa envolvida na despesa/entrada para exibição direta na tabela.
+ */
+export function getThirdPartyInfo(
+  tx: Transaction,
+  currentUid: string,
+  partnerName?: string,
+): ThirdPartyInfo | null {
+  // 1. Alocações externas (ex: "Mãe", "Irmão", "Cliente", etc.)
+  const externalAllocs = tx.allocations?.filter((a) => a.type === 'EXTERNAL')
+  if (externalAllocs && externalAllocs.length > 0) {
+    const names = externalAllocs.map((a) => a.name).filter(Boolean)
+    if (names.length > 0) {
+      return {
+        name: names.join(', '),
+        label: 'Terceiro',
+        type: 'external',
+        amount: externalAllocs.reduce((s, a) => s + (a.amount || 0), 0),
+      }
+    }
+  }
+
+  // 2. Amigo atribuído (assignedFriend)
+  if (tx.assignedFriendName) {
+    if (tx.assignedFriendUid === currentUid) {
+      const sender = tx.paidByUid !== currentUid && partnerName ? partnerName : (tx.assignedFriendName || 'Amigo')
+      return {
+        name: sender,
+        label: 'Recebido de',
+        type: 'sender',
+      }
+    }
+    return {
+      name: tx.assignedFriendName,
+      label: 'Amigo',
+      type: 'friend',
+      percentage: tx.friendSharePct ?? undefined,
+    }
+  }
+
+  // 3. Outros usuários da plataforma em divisões customizadas
+  if (tx.allocations && tx.allocations.length > 0) {
+    const otherUsers = tx.allocations.filter(
+      (a) => a.uid && a.uid !== currentUid && a.name && a.name.toLowerCase() !== 'você'
+    )
+    if (otherUsers.length > 0) {
+      const names = otherUsers.map((a) => a.name).filter(Boolean)
+      const isPartner = partnerName && names.includes(partnerName)
+      return {
+        name: names.join(', '),
+        label: isPartner ? 'Parceiro(a)' : 'Amigo',
+        type: isPartner ? 'partner' : 'friend',
+        amount: otherUsers.reduce((s, a) => s + (a.amount || 0), 0),
+      }
+    }
+  }
+
+  // 4. Tipo de divisão explícito
+  if (tx.splitType === 'external') {
+    return {
+      name: 'Terceiro Externo',
+      label: 'Terceiro',
+      type: 'external',
+    }
+  }
+
+  if (tx.splitType === 'partner' && partnerName) {
+    return {
+      name: partnerName,
+      label: 'Parceiro(a)',
+      type: 'partner',
+    }
+  }
+
+  if (tx.splitType === 'split_50' && partnerName) {
+    return {
+      name: partnerName,
+      label: '50/50',
+      type: 'partner',
+    }
+  }
+
+  // 5. Cartão compartilhado onde outro usuário pagou
+  if (tx.paidByUid && tx.paidByUid !== currentUid && partnerName) {
+    return {
+      name: partnerName,
+      label: 'Pago por',
+      type: 'sender',
+    }
+  }
+
+  return null
+}
+
 // ------------------------------------------------------------------
 // D.5 Reserva de montante em cartão (anti-duplicidade)
 // ------------------------------------------------------------------

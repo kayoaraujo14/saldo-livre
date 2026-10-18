@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge'
 import { type Transaction, type Card as CardType } from '@/types'
-import { effectiveAmount, impactFor, detectSplit } from '@/lib/finance'
+import { effectiveAmount, impactFor, detectSplit, getThirdPartyInfo } from '@/lib/finance'
 import { formatBRL, formatShortDate } from '@/lib/utils'
 import {
   CreditCard,
@@ -39,6 +39,7 @@ export function MobileTransactionCard({
   const isIncome = tx.type === 'income'
   const card = cards.find((c) => c.id === tx.cardId)
   const isInstallment = Boolean(tx.installmentGroupId)
+  const thirdParty = getThirdPartyInfo(tx, currentUid)
 
   // Status visual configurations
   const getStatusBadge = () => {
@@ -162,12 +163,12 @@ export function MobileTransactionCard({
             </span>
           )}
 
-          {/* Split Tag */}
+          {/* Split / Third Party Tag */}
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/60 font-medium">
             {split === 'split_50' && '🤝 50/50'}
             {split === 'partner' && '👤 Parceiro (100%)'}
             {split === 'mine' && '👤 Meu'}
-            {split === 'external' && '🏷️ Terceiro Externo'}
+            {split === 'external' && `🏷️ ${thirdParty?.name ? `Terceiro: ${thirdParty.name}` : 'Terceiro Externo'}`}
             {split === 'friend' && `🧑 ${tx.assignedFriendName || 'Amigo'}`}
             {split === 'custom' && `👥 Dividido (${tx.allocations?.length ?? 2}p)`}
           </span>

@@ -129,3 +129,31 @@ export function formatInstallmentDesc(baseDesc: string, num: number, total: numb
   return `${clean} (${num}/${total})`
 }
 
+export function formatCreatedAt(timestamp?: number): string {
+  if (!timestamp) return 'Data não registrada'
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+
+  const timeStr = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
+  if (diffMins < 1) return 'Agora há pouco'
+  if (diffMins < 60) return `Há ${diffMins} min (${timeStr})`
+  if (diffHours < 24 && date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
+    return `Hoje às ${timeStr}`
+  }
+
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (date.getDate() === yesterday.getDate() && date.getMonth() === yesterday.getMonth() && date.getFullYear() === yesterday.getFullYear()) {
+    return `Ontem às ${timeStr}`
+  }
+
+  const day = pad(date.getDate())
+  const month = pad(date.getMonth() + 1)
+  const year = date.getFullYear()
+  return `${day}/${month}/${year} às ${timeStr}`
+}
+

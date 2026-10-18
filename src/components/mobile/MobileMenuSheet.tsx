@@ -14,6 +14,7 @@ import {
   Download,
   CheckCircle2,
   Landmark,
+  History,
 } from 'lucide-react'
 
 interface MobileMenuSheetProps {
@@ -25,6 +26,7 @@ interface MobileMenuSheetProps {
   onGenerateBills: () => void
   onOpenInstall?: () => void
   onOpenOpenFinance?: () => void
+  onOpenRecentActivity?: () => void
   isInstalled?: boolean
   canInstall?: boolean
   generating?: boolean
@@ -39,6 +41,7 @@ export function MobileMenuSheet({
   onGenerateBills,
   onOpenInstall,
   onOpenOpenFinance,
+  onOpenRecentActivity,
   isInstalled,
   canInstall = true,
   generating,
@@ -200,6 +203,26 @@ export function MobileMenuSheet({
               <div>
                 <span className="text-sm font-semibold text-white block">Open Finance Brasil</span>
                 <span className="text-xs text-slate-400">Conectar contas bancárias e faturas</span>
+              </div>
+            </div>
+            <ChevronRight className="size-4 text-slate-500" />
+          </button>
+        )}
+
+        {/* Histórico Recente (Ordenado por Cadastro) */}
+        {onOpenRecentActivity && (
+          <button
+            type="button"
+            onClick={onOpenRecentActivity}
+            className="w-full p-4 flex items-center justify-between hover:bg-slate-800/40 transition-colors text-left cursor-pointer active:bg-slate-800/60"
+          >
+            <div className="flex items-center gap-3">
+              <div className="size-9 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-300 flex items-center justify-center">
+                <History className="size-4" />
+              </div>
+              <div>
+                <span className="text-sm font-semibold text-white block">Histórico Recente</span>
+                <span className="text-xs text-slate-400">Últimas cadastradas ou recebidas</span>
               </div>
             </div>
             <ChevronRight className="size-4 text-slate-500" />

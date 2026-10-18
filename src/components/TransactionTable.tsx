@@ -17,6 +17,7 @@ import {
   getReserveInfo,
   friendPctOf,
   friendShareOf,
+  getThirdPartyInfo,
 } from '@/lib/finance'
 import { formatBRL, formatShortDate } from '@/lib/utils'
 import {
@@ -36,6 +37,7 @@ import {
   ArrowDown,
   Maximize2,
   Minimize2,
+  User,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 import { MobileTransactionCard } from './mobile/MobileTransactionCard'
@@ -439,6 +441,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                 const card = cards.find((c) => c.id === tx.cardId)
                 const isReserve = Boolean(tx.reserveCardId)
                 const reserveInfo = isReserve ? getReserveInfo(tx, monthTransactions) : null
+                const thirdParty = getThirdPartyInfo(tx, currentUid, partner?.name)
 
                 // Estimation vs Actual comparison
                 const hasComparison = tx.recurringBillId && tx.actualAmount != null && tx.estimatedAmount != null
@@ -533,6 +536,26 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             >
                               {tx.description}
                             </span>
+
+                            {/* Third Party / Friend Badge (Visible directly in row!) */}
+                            {thirdParty && (
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] py-0 px-2 gap-1 font-semibold inline-flex items-center shadow-2xs ${
+                                  thirdParty.type === 'external'
+                                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25'
+                                    : thirdParty.type === 'friend'
+                                      ? 'bg-violet-500/15 text-violet-300 border-violet-500/40 hover:bg-violet-500/25'
+                                      : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/25'
+                                }`}
+                                title={`${thirdParty.label}: ${thirdParty.name}`}
+                              >
+                                <User className="size-2.5 shrink-0" />
+                                <span>
+                                  {thirdParty.label}: <strong className="text-white font-bold">{thirdParty.name}</strong>
+                                </span>
+                              </Badge>
+                            )}
 
                             {/* Estorno / Reembolso Tag */}
                             {isRefund && (
@@ -690,10 +713,15 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                     {/* 5. Division / Payer (Inline Select) */}
                     <td className="py-2 px-3 align-middle">
                       {tx.type === 'income' ? (
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <Badge variant="outline" className="text-[10px] py-0.5 px-2 bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
                             💰 Receita Pessoal
                           </Badge>
+                          {thirdParty && (
+                            <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 bg-sky-500/15 text-sky-300 border-sky-500/35 font-medium">
+                              De: {thirdParty.name}
+                            </Badge>
+                          )}
                         </div>
                       ) : (
                         <div className="flex flex-col gap-1">
@@ -714,7 +742,9 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                               <SelectItem value="mine">👤 100% Meu</SelectItem>
                               {partner && <SelectItem value="split_50">🤝 50/50 ({partner.name})</SelectItem>}
                               {partner && <SelectItem value="partner">🔄 100% {partner.name}</SelectItem>}
-                              <SelectItem value="external">🏷️ Terceiro Externo</SelectItem>
+                              <SelectItem value="external">
+                                🏷️ {thirdParty?.name ? `Terceiro: ${thirdParty.name}` : 'Terceiro Externo'}
+                              </SelectItem>
                               {tx.assignedFriendUid && (
                                 <SelectItem value="friend">
                                   🧑‍🤝‍🧑 {tx.assignedFriendName || 'Amigo'} ({friendPctOf(tx)}%)
