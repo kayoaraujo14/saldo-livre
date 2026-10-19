@@ -768,6 +768,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       const updates: { id: string; patch: Partial<Transaction> }[] = []
       const newDay = input.date ? parseInt(input.date.slice(8, 10), 10) : null
 
+      // Detecta se as parcelas sofreram corrupção de datas (todas colapsadas no mesmo mês)
+      const monthsSet = new Set(groupTxs.map((t) => t.competenceMonth || t.dueDate.slice(0, 7)))
+      const isCorruptedSameMonth = groupTxs.length > 1 && monthsSet.size === 1
+      const firstNum = groupTxs[0].installmentNumber ?? 1
+      const baseMonth = groupTxs[0].competenceMonth || groupTxs[0].dueDate.slice(0, 7) || currentMonthKey()
+
       for (let idx = 0; idx < groupTxs.length; idx++) {
         const t = groupTxs[idx]
         const num = t.installmentNumber ?? idx + 1
@@ -776,11 +782,20 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         const curAmount =
           input.amount !== undefined && input.amount > 0 ? round2(input.amount) : t.totalAmount
 
-        const newDesc = formatInstallmentDesc(input.description, num, total)
+        const newDesc = input.description ? formatInstallmentDesc(input.description, num, total) : t.description
+
+        // Se estavam corrompidas no mesmo mês, redistribui cada uma para seu respectivo mês cronológico
+        let targetMonth = t.competenceMonth || t.dueDate.slice(0, 7) || currentMonthKey()
+        if (isCorruptedSameMonth) {
+          targetMonth = shiftMonth(baseMonth, num - firstNum)
+        }
 
         let newDueDate = t.dueDate
         if (newDay && !isNaN(newDay)) {
-          newDueDate = dateInMonth(t.competenceMonth, newDay)
+          newDueDate = dateInMonth(targetMonth, newDay)
+        } else if (isCorruptedSameMonth) {
+          const origDay = parseInt(t.dueDate.slice(8, 10), 10) || 10
+          newDueDate = dateInMonth(targetMonth, origDay)
         }
 
         const friendSharePct = isFriend ? clampPct(input.friend?.pct ?? t.friendSharePct ?? 100) : null
@@ -808,6 +823,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           cardId: input.paymentMethod === 'credit_card' ? (input.cardId ?? null) : null,
           status: input.status ?? t.status,
           dueDate: newDueDate,
+          competenceMonth: targetMonth,
           estimatedAmount: (input.status ?? t.status) === 'estimated' ? curAmount : null,
           actualAmount: (input.status ?? t.status) === 'estimated' ? null : curAmount,
           totalAmount: curAmount,
@@ -840,6 +856,45 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     },
     [mode, commitDemo, me, partnerParty, cards],
   )
+
+  // Auto-repara qualquer grupo de parcelas cujas datas foram acidentalmente colapsadas no mesmo mês
+  useEffect(() => {
+    if (!transactions.length) return
+    const groups = new Map<string, Transaction[]>()
+    for (const tx of transactions) {
+      if (tx.installmentGroupId && (tx.installmentsTotal ?? 0) > 1) {
+        const list = groups.get(tx.installmentGroupId) || []
+        list.push(tx)
+        groups.set(tx.installmentGroupId, list)
+      }
+    }
+
+    for (const [, list] of groups) {
+      if (list.length > 1) {
+        const months = new Set(list.map((t) => t.competenceMonth || t.dueDate.slice(0, 7)))
+        if (months.size === 1) {
+          const sorted = [...list].sort((a, b) => (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0))
+          const first = sorted[0]
+          const firstNum = first.installmentNumber ?? 1
+          const baseMonth = first.competenceMonth || first.dueDate.slice(0, 7) || currentMonthKey()
+
+          for (const t of sorted) {
+            const num = t.installmentNumber ?? 1
+            const targetMonth = shiftMonth(baseMonth, num - firstNum)
+            const origDay = parseInt(t.dueDate.slice(8, 10), 10) || 10
+            const newDueDate = dateInMonth(targetMonth, origDay)
+
+            if (t.competenceMonth !== targetMonth || t.dueDate !== newDueDate) {
+              updateTransaction(t.id, {
+                competenceMonth: targetMonth,
+                dueDate: newDueDate,
+              })
+            }
+          }
+        }
+      }
+    }
+  }, [transactions, updateTransaction])
 
   const cycleStatus = useCallback(
     async (tx: Transaction) => {

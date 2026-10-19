@@ -119,14 +119,15 @@ export function normalize(s: string) {
 }
 
 /** Extrai a descrição base sem o sufixo numérico de parcela (ex: "Celular (1/10)" → "Celular") */
-export function stripInstallmentSuffix(desc: string): string {
+export function stripInstallmentSuffix(desc?: string): string {
+  if (!desc) return ''
   return desc.replace(/\s*\(\d+\/\d+\)\s*$/, '').trim()
 }
 
 /** Formata a descrição da parcela com a numeração correspondente (ex: "Celular (3/10)") */
-export function formatInstallmentDesc(baseDesc: string, num: number, total: number): string {
+export function formatInstallmentDesc(baseDesc: string | undefined, num: number, total: number): string {
   const clean = stripInstallmentSuffix(baseDesc)
-  return `${clean} (${num}/${total})`
+  return clean ? `${clean} (${num}/${total})` : `(${num}/${total})`
 }
 
 export function formatCreatedAt(timestamp?: number): string {

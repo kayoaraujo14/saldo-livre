@@ -23,6 +23,8 @@ import {
 } from './finance'
 import type { ToolExecutor, ToolName, ToolResult } from './gemini'
 import {
+  currentMonthKey,
+  dateInMonth,
   formatBRL,
   formatInstallmentDesc,
   formatShortDate,
@@ -1301,6 +1303,17 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
     }
   }
 
+  // Se alguma das transações pertencer a um grupo de parcelamento, inclui as parcelas irmãs do mesmo grupo
+  const installmentGroupIds = new Set(targets.map((t) => t.installmentGroupId).filter(Boolean) as string[])
+  if (installmentGroupIds.size > 0) {
+    const siblings = all.filter(
+      (t) => t.installmentGroupId && installmentGroupIds.has(t.installmentGroupId) && !targets.some((x) => x.id === t.id)
+    )
+    if (siblings.length > 0) {
+      targets = [...targets, ...siblings]
+    }
+  }
+
   const novoMesFatura = typeof args.novoMesFatura === 'string' && /^\d{4}-\d{2}$/.test(args.novoMesFatura)
     ? args.novoMesFatura
     : undefined
@@ -1325,14 +1338,17 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
   const novoAmigoEmail = typeof args.novoAmigoEmail === 'string' ? args.novoAmigoEmail.trim().toLowerCase() : ''
   const novoNomeTerceiro = typeof args.novoNomeTerceiro === 'string' ? args.novoNomeTerceiro.trim() : ''
 
+  const isOnlyCategorySubcat = Boolean(novaCategoria || novaSubcategoria !== undefined) && !args.moverFatura
+  const hasInstallments = targets.some((t) => Boolean(t.installmentGroupId))
+
   const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
   if (isPendingConfirmation) {
     const title = `Editar: ${targets.length === 1 ? targets[0].description : `${targets.length} lançamentos`}`
     const confirmationLines = [
       { label: 'Quantidade', value: `${targets.length} item(ns)` },
       { label: 'Itens a Alterar', value: targets.map((t) => t.description).slice(0, 3).join(', ') + (targets.length > 3 ? ` (+${targets.length - 3})` : '') },
-      ...(novoMesFatura ? [{ label: 'Novo Mês da Fatura', value: monthLabel(novoMesFatura) }] : []),
-      ...(novaDataVencimento ? [{ label: 'Novo Vencimento', value: formatShortDate(novaDataVencimento) }] : []),
+      ...(novoMesFatura && !(hasInstallments && isOnlyCategorySubcat) ? [{ label: 'Novo Mês da Fatura', value: monthLabel(novoMesFatura) }] : []),
+      ...(novaDataVencimento && !(hasInstallments && isOnlyCategorySubcat) ? [{ label: 'Novo Vencimento', value: formatShortDate(novaDataVencimento) }] : []),
       ...(novaDescricao ? [{ label: 'Nova Descrição', value: novaDescricao }] : []),
       ...(novoValor !== undefined ? [{ label: 'Novo Valor', value: money(novoValor) }] : []),
       ...(novaCategoria ? [{ label: 'Nova Categoria', value: novaCategoria }] : []),
@@ -1369,16 +1385,63 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
   for (const tx of targets) {
     const patch: Partial<Transaction> = {}
 
-    if (novoMesFatura) {
-      patch.competenceMonth = novoMesFatura
+    const isInstallment = Boolean(tx.installmentGroupId)
+
+    if (isInstallment) {
+      // Encontra todas as parcelas deste grupo para verificar integridade cronológica
+      const groupTxs = all
+        .filter((t) => t.installmentGroupId === tx.installmentGroupId)
+        .sort((a, b) => (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0))
+
+      const firstTx = groupTxs[0] || tx
+      const firstNum = firstTx.installmentNumber ?? 1
+      const num = tx.installmentNumber ?? 1
+      const total = tx.installmentsTotal ?? groupTxs.length
+
+      // Detecta se as parcelas estavam corrompidas (todas colapsadas no mesmo mês)
+      const monthsSet = new Set(groupTxs.map((t) => t.competenceMonth || t.dueDate.slice(0, 7)))
+      const isCorruptedSameMonth = groupTxs.length > 1 && monthsSet.size === 1
+      const baseMonth = firstTx.competenceMonth || firstTx.dueDate.slice(0, 7) || currentMonthKey()
+
+      // Determina mês de competência da parcela
+      let targetMonth = tx.competenceMonth || tx.dueDate.slice(0, 7) || currentMonthKey()
+      if (isCorruptedSameMonth) {
+        // Auto-repara cronologicamente
+        targetMonth = shiftMonth(baseMonth, num - firstNum)
+      } else if (novoMesFatura && !isOnlyCategorySubcat) {
+        // Se explicitamente pediu para mover início do parcelamento
+        targetMonth = shiftMonth(novoMesFatura, num - firstNum)
+      }
+
+      // Determina data de vencimento da parcela
+      const origDay = parseInt(tx.dueDate.slice(8, 10), 10) || 10
+      let newDueDate = tx.dueDate
+      if (novaDataVencimento && !isOnlyCategorySubcat) {
+        const newDay = parseInt(novaDataVencimento.slice(8, 10), 10) || origDay
+        newDueDate = dateInMonth(targetMonth, newDay)
+      } else if (isCorruptedSameMonth || targetMonth !== tx.competenceMonth) {
+        newDueDate = dateInMonth(targetMonth, origDay)
+      }
+
+      patch.competenceMonth = targetMonth
+      patch.dueDate = newDueDate
+
+      if (novaDescricao) {
+        patch.description = formatInstallmentDesc(novaDescricao, num, total)
+      }
+    } else {
+      if (novoMesFatura) {
+        patch.competenceMonth = novoMesFatura
+      }
+      if (novaDataVencimento) {
+        patch.dueDate = novaDataVencimento
+        if (!novoMesFatura) patch.competenceMonth = novaDataVencimento.slice(0, 7)
+      }
+      if (novaDescricao) {
+        patch.description = novaDescricao
+      }
     }
-    if (novaDataVencimento) {
-      patch.dueDate = novaDataVencimento
-      if (!novoMesFatura) patch.competenceMonth = novaDataVencimento.slice(0, 7)
-    }
-    if (novaDescricao) {
-      patch.description = novaDescricao
-    }
+
     if (novaCategoria) {
       patch.category = novaCategoria
     }
@@ -1459,7 +1522,7 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
     updatedIds.push(tx.id)
   }
 
-  const targetMonth = novoMesFatura || targets[0]?.competenceMonth || env.monthKey
+  const targetMonth = novoMesFatura && !hasInstallments ? novoMesFatura : (targets[0]?.competenceMonth || env.monthKey)
   const summaryAfter = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
 
   return {
@@ -1474,8 +1537,8 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
       title: `${updatedIds.length} transaç${updatedIds.length > 1 ? 'ões atualizadas' : 'ão atualizada'}`,
       lines: [
         { label: 'Editadas', value: `${updatedIds.length} item(ns)` },
-        ...(novoMesFatura ? [{ label: 'Novo Mês da Fatura', value: monthLabel(novoMesFatura) }] : []),
-        ...(novaDataVencimento ? [{ label: 'Novo Vencimento', value: novaDataVencimento }] : []),
+        ...(novoMesFatura && !(hasInstallments && isOnlyCategorySubcat) ? [{ label: 'Novo Mês da Fatura', value: monthLabel(novoMesFatura) }] : []),
+        ...(novaDataVencimento && !(hasInstallments && isOnlyCategorySubcat) ? [{ label: 'Novo Vencimento', value: novaDataVencimento }] : []),
         { label: 'Saldo Livre em ' + monthLabel(targetMonth), value: money(summaryAfter.freeBalance) },
       ],
     },

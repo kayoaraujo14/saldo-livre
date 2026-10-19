@@ -317,7 +317,7 @@ export interface FriendSplitInput {
 }
 
 export interface InstallmentGroupUpdateInput {
-  description: string
+  description?: string
   amount?: number
   category?: Category
   subcategory?: string | null

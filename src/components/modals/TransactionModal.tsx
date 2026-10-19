@@ -481,7 +481,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             amount: numericAmount,
             category,
             subcategory: subcategory || null,
-            date,
+            date: date !== editingTx.dueDate ? date : undefined,
             status,
             paymentMethod,
             cardId: paymentMethod === 'credit_card' ? (cardId || null) : null,

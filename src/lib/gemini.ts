@@ -349,8 +349,8 @@ export const functionDeclarations: FunctionDeclaration[] = [
         ids: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'IDs das transações a editar (opcional).' },
         termoBusca: { type: Type.STRING, description: 'Filtra transações pela descrição (ex: "KAYO", "DECOLAR", "99FOOD").' },
         mesOrigem: { type: Type.STRING, description: 'Mês atual das transações a serem filtradas (YYYY-MM). Ex: "2026-10".' },
-        novoMesFatura: { type: Type.STRING, description: 'Novo mês de competência da fatura (YYYY-MM). Ex: "2026-11" para mover para novembro!' },
-        novaDataVencimento: { type: Type.STRING, description: 'Nova data de vencimento da fatura (YYYY-MM-DD). Ex: "2026-11-14".' },
+        novoMesFatura: { type: Type.STRING, description: 'Novo mês de competência da fatura (YYYY-MM). Ex: "2026-11" para mover para novembro! ATENÇÃO: NUNCA informe este campo se estiver apenas alterando categoria, subcategoria, valor ou descrição de compras parceladas, pois isso moveria todas as parcelas para o mesmo mês!' },
+        novaDataVencimento: { type: Type.STRING, description: 'Nova data de vencimento da fatura (YYYY-MM-DD). Ex: "2026-11-14". ATENÇÃO: NUNCA informe este campo ao editar categoria ou subcategoria de compras parceladas!' },
         novoValor: { type: Type.NUMBER, description: 'Novo valor corrigido da compra.' },
         novaDescricao: { type: Type.STRING, description: 'Nova descrição.' },
         novaCategoria: { type: Type.STRING, enum: [...CATEGORIES] },
@@ -650,6 +650,7 @@ REGRAS DE FUNCIONAMENTO:
 5. COMPRAS PARCELADAS:
 - Notações como "9/12", "2/6" ou "10/12" indicam compras parceladas. Preencha parcelaAtual e totalParcelas (ex: parcelaAtual: 9, totalParcelas: 12).
 - O sistema aloca AUTOMATICAMENTE toda a série de parcelas no banco de dados pelos meses correspondentes (passadas como pagas, atual e futuras como pendentes).
+- AO EDITAR CATEGORIA OU SUBCATEGORIA DE COMPRA PARCELADA: passe APENAS termoBusca, novaCategoria e novaSubcategoria. NUNCA passe novoMesFatura nem novaDataVencimento, pois cada parcela tem sua própria data e mês cronológico individual!
 - IMPORTANTE: Confirme a operação de forma simples e direta no mês atual. NÃO fique gerando previsões ou projeções detalhadas de meses futuros ao final da resposta a menos que o usuário peça especificamente.
 - Se o usuário pedir para gerar, expandir ou sincronizar as parcelas passadas e futuras de compras já existentes:
   Chame a ferramenta "expandirParcelamentos" com mes: "2026-11"!
@@ -657,7 +658,9 @@ REGRAS DE FUNCIONAMENTO:
 5. REGISTRO EM LOTE:
 - Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE a ferramenta "registrarTransacoesLote". Isso processa todas as despesas em uma única chamada rápida!
 
-6. EXCLUSÃO CIRÚRGICA DE TRANSAÇÕES (NUNCA EXCLUA EM LOTE SEM PEDIDO EXPLÍCITO):
+6. EDIÇÃO E EXCLUSÃO CIRÚRGICA DE TRANSAÇÕES (NUNCA EXCLUA EM LOTE SEM PEDIDO EXPLÍCITO):
+- Para alterar categoria ou subcategoria de uma despesa (avulsa ou parcelada):
+  Chame "editarTransacoes" passando termoBusca, novaCategoria e novaSubcategoria (NUNCA passe novoMesFatura nem novaDataVencimento a menos que o usuário peça expressamente para mudar o vencimento!).
 - Para excluir um lançamento específico que o usuário pediu (ex: "exclua o almoço de R$ 30", "apague o Supermercado", "delete a compra X"):
   * Consulte os "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS" listados acima no contexto.
   * Localize a transação correspondente e passe SEMPRE o ID específico em ids: ["id_da_transacao"]!
@@ -665,7 +668,7 @@ REGRAS DE FUNCIONAMENTO:
   * Defina SEMPRE limiteQuantidade: 1 para exclusão de item individual.
   * NUNCA use palavras genéricas como "compra", "despesa" ou "gasto" em termoBusca!
   * NUNCA defina apenasRecentes: true ou tudoDoMes: true a menos que o usuário peça expressamente com palavras como: "desfazer último lote", "limpar todos os recentes" ou "apagar tudo do mês"!
-- Se o usuário pedir para mover despesas cadastradas por engano para outro mês/fatura:
+- Se o usuário pedir para mover despesas avulsas cadastradas por engano para outro mês/fatura:
   Chame "editarTransacoes" com mesOrigem, novoMesFatura e novaDataVencimento!
 - Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas:
   Chame "consultarTransacoes" para obter a lista exata!

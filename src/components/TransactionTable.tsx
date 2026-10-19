@@ -61,6 +61,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
     changeSplit,
     changeAmount,
     updateTransaction,
+    updateInstallmentGroup,
     deleteTransaction,
     respondChargeRequest,
   } = useFinance()
@@ -698,12 +699,21 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                       <div className="flex flex-col gap-0.5">
                         <Select
                           value={tx.category}
-                          onValueChange={(cat) =>
-                            updateTransaction(tx.id, {
-                              category: cat as Category,
-                              subcategory: CATEGORY_GROUPS[cat as Category]?.subcategories?.[0] || null,
-                            })
-                          }
+                          onValueChange={(cat) => {
+                            const newCat = cat as Category
+                            const newSub = CATEGORY_GROUPS[newCat]?.subcategories?.[0] || null
+                            if (tx.installmentGroupId) {
+                              updateInstallmentGroup(tx.installmentGroupId, {
+                                category: newCat,
+                                subcategory: newSub,
+                              })
+                            } else {
+                              updateTransaction(tx.id, {
+                                category: newCat,
+                                subcategory: newSub,
+                              })
+                            }
+                          }}
                         >
                           <SelectTrigger size="inline" className="text-slate-300">
                             <SelectValue />
@@ -719,11 +729,18 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                         {CATEGORY_GROUPS[tx.category]?.subcategories && CATEGORY_GROUPS[tx.category].subcategories.length > 0 ? (
                           <Select
                             value={tx.subcategory || ''}
-                            onValueChange={(sub) =>
-                              updateTransaction(tx.id, {
-                                subcategory: sub || null,
-                              })
-                            }
+                            onValueChange={(sub) => {
+                              const newSub = sub || null
+                              if (tx.installmentGroupId) {
+                                updateInstallmentGroup(tx.installmentGroupId, {
+                                  subcategory: newSub,
+                                })
+                              } else {
+                                updateTransaction(tx.id, {
+                                  subcategory: newSub,
+                                })
+                              }
+                            }}
                           >
                             <SelectTrigger size="inline" className="h-5 px-1 py-0 text-[10px] text-emerald-400/90 hover:text-emerald-300 font-medium border-transparent bg-transparent hover:bg-slate-800/60 max-w-[130px] justify-start gap-1">
                               <span className="truncate">› {tx.subcategory || 'Sem subgrupo'}</span>
