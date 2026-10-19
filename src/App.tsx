@@ -254,7 +254,7 @@ function MainDashboard() {
 
           {/* View 3: Mobile COPILOTO IA (Full-Height Conversational Assistant) */}
           {mobileTab === 'chat' && (
-            <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
+            <div className="h-[calc(100dvh-155px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <GeminiChat
                 onOpenApiKey={() => setApiKeyModalOpen(true)}
                 onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}

@@ -173,6 +173,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   const isRecordingRef = useRef(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [audioTranscript, setAudioTranscript] = useState('')
+  const transcriptRef = useRef('')
   const recognitionRef = useRef<any>(null)
   const recordingTimerRef = useRef<any>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
@@ -184,6 +185,9 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     return () => {
       isRecordingRef.current = false
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort() } catch { /* ignore */ }
+      }
       if (mediaStreamRef.current) mediaStreamRef.current.getTracks().forEach((t) => t.stop())
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         try { mediaRecorderRef.current.stop() } catch { /* ignore */ }
@@ -192,108 +196,132 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   }, [])
 
   const startRecording = async () => {
-    const SpeechRecognition =
+    if (isRecordingRef.current) {
+      stopRecording(true)
+      return
+    }
+
+    transcriptRef.current = ''
+    setAudioTranscript('')
+    setRecordingSeconds(0)
+    audioChunksRef.current = []
+
+    const SpeechRecognitionClass =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
 
-    let stream: MediaStream | null = null
-    try {
-      if (navigator.mediaDevices?.getUserMedia) {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        mediaStreamRef.current = stream
-      }
-    } catch (err) {
-      console.warn('Microfone getUserMedia warning:', err)
-    }
-
-    // Inicializa MediaRecorder para garantia de captura real de áudio
-    if (stream && typeof MediaRecorder !== 'undefined') {
-      audioChunksRef.current = []
+    // 1. Web Speech API (Nativo, direto, SEM travar microfone com getUserMedia simultâneo)
+    if (SpeechRecognitionClass) {
       try {
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-          ? 'audio/webm;codecs=opus'
-          : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : MediaRecorder.isTypeSupported('audio/mp4')
-          ? 'audio/mp4'
-          : ''
-        const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
-        recorder.ondataavailable = (e) => {
-          if (e.data && e.data.size > 0) {
-            audioChunksRef.current.push(e.data)
-          }
-        }
-        recorder.start(250)
-        mediaRecorderRef.current = recorder
-      } catch (recErr) {
-        console.warn('Falha ao inicializar MediaRecorder:', recErr)
-      }
-    }
-
-    // Inicializa SpeechRecognition para transcrição ao vivo na tela
-    if (SpeechRecognition) {
-      try {
-        const recognition = new SpeechRecognition()
+        const recognition = new SpeechRecognitionClass()
         recognition.lang = 'pt-BR'
-        const isMobile = /iphone|ipad|ipod|android/i.test(navigator.userAgent)
-        recognition.continuous = !isMobile
+        recognition.continuous = true
         recognition.interimResults = true
+        recognition.maxAlternatives = 1
 
-        let finalTranscript = ''
         recognition.onresult = (event: any) => {
           let interim = ''
+          let currentFinal = ''
           for (let i = event.resultIndex; i < event.results.length; i++) {
             const item = event.results[i]
             if (item.isFinal) {
-              finalTranscript += item[0].transcript + ' '
+              currentFinal += item[0].transcript + ' '
             } else {
               interim += item[0].transcript
             }
           }
-          const combined = (finalTranscript + interim).trim()
-          if (combined) setAudioTranscript(combined)
+          if (currentFinal) {
+            transcriptRef.current = (transcriptRef.current + ' ' + currentFinal).replace(/\s+/g, ' ').trim()
+          }
+          const fullText = (transcriptRef.current + ' ' + interim).replace(/\s+/g, ' ').trim()
+          if (fullText) {
+            setAudioTranscript(fullText)
+            setInput(fullText)
+          }
         }
 
         recognition.onerror = (event: any) => {
           console.warn('Reconhecimento de voz aviso:', event.error)
           if (event.error === 'not-allowed') {
-            alert('Permissão de acesso ao microfone negada. Habilite o microfone nas configurações do navegador.')
+            alert('Permissão de acesso ao microfone negada. Por favor, permita o acesso ao microfone nas configurações do seu navegador para usar o comando de voz.')
             cancelRecording()
           }
         }
 
         recognition.onend = () => {
           if (isRecordingRef.current) {
-            try {
-              recognition.start()
-            } catch {
-              // ignore
-            }
+            setTimeout(() => {
+              if (isRecordingRef.current && recognitionRef.current) {
+                try {
+                  recognitionRef.current.start()
+                } catch {
+                  // ignorar se já estiver rodando
+                }
+              }
+            }, 120)
           }
         }
 
         recognitionRef.current = recognition
         recognition.start()
+
+        isRecordingRef.current = true
+        setIsRecording(true)
+
+        recordingTimerRef.current = setInterval(() => {
+          setRecordingSeconds((prev) => prev + 1)
+        }, 1000)
+        return
       } catch (speechErr) {
-        console.warn('Reconhecimento de voz SpeechRecognition não inicializado, usando MediaRecorder:', speechErr)
+        console.warn('SpeechRecognition falhou ao iniciar, usando fallback MediaRecorder:', speechErr)
       }
     }
 
-    if (!stream && !SpeechRecognition) {
-      alert('Seu navegador não possui suporte para microfone ou captura de áudio.')
-      return
+    // 2. Fallback MediaRecorder caso o navegador não tenha Web Speech API
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        alert('Seu navegador não possui suporte para microfone ou gravação de voz.')
+        return
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+
+      if (typeof MediaRecorder === 'undefined') {
+        alert('Seu navegador não possui suporte para gravação de áudio.')
+        return
+      }
+
+      audioChunksRef.current = []
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/mp4')
+        ? 'audio/mp4'
+        : MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : ''
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data)
+        }
+      }
+      recorder.start(250)
+      mediaRecorderRef.current = recorder
+
+      isRecordingRef.current = true
+      setIsRecording(true)
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1)
+      }, 1000)
+    } catch (err: any) {
+      console.warn('Erro ao acessar microfone:', err)
+      alert('Não foi possível acessar o microfone. Verifique as permissões do navegador.')
     }
-
-    isRecordingRef.current = true
-    setIsRecording(true)
-    setRecordingSeconds(0)
-    setAudioTranscript('')
-
-    recordingTimerRef.current = setInterval(() => {
-      setRecordingSeconds((prev) => prev + 1)
-    }, 1000)
   }
 
-  const stopRecording = async (sendImmediately = false) => {
+  const stopRecording = async (sendImmediately = true) => {
     isRecordingRef.current = false
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
@@ -332,31 +360,31 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     }
 
     setIsRecording(false)
-    const finalResult = audioTranscript.trim()
-    setAudioTranscript('')
     setRecordingSeconds(0)
 
+    const capturedText = (transcriptRef.current || input || audioTranscript).trim()
+    setAudioTranscript('')
+    transcriptRef.current = ''
+
     if (sendImmediately) {
-      if (finalResult) {
-        handleSend(finalResult)
+      if (capturedText) {
+        handleSend(capturedText)
       } else if (recordedBlob && recordedBlob.size > 500) {
-        // Converte o áudio gravado em anexo multimodal do Gemini
         const reader = new FileReader()
         reader.onload = () => {
           const res = reader.result as string
           const b64 = res.includes(',') ? res.split(',')[1] : res
+          const ext = recordedBlob!.type.includes('mp4') ? 'mp4' : 'webm'
           setPendingAttachment({
-            name: 'mensagem_de_voz.webm',
+            name: `mensagem_de_voz.${ext}`,
             size: recordedBlob!.size,
             type: recordedBlob!.type || 'audio/webm',
             base64: b64,
           })
-          handleSend('Por favor, ouça a mensagem de voz gravada pelo usuário e execute as instruções financeiras solicitadas.')
+          handleSend('Por favor, processe esta gravação de áudio com as despesas ou solicitações financeiras faladas.')
         }
         reader.readAsDataURL(recordedBlob)
       }
-    } else if (finalResult) {
-      setInput((prev) => (prev ? `${prev} ${finalResult}` : finalResult))
     }
   }
 
@@ -391,8 +419,10 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     }
 
     setIsRecording(false)
-    setAudioTranscript('')
     setRecordingSeconds(0)
+    setAudioTranscript('')
+    transcriptRef.current = ''
+    setInput('')
     audioChunksRef.current = []
   }
 
@@ -1793,7 +1823,7 @@ Atenção crítica:
       </div>
 
       {/* Input Box */}
-      <div className="p-3 border-t border-white/[0.06] bg-slate-900/60">
+      <div className="p-2.5 sm:p-3 border-t border-white/[0.06] bg-slate-900/60">
         {/* Pending PDF Attachment Preview */}
         {pendingAttachment && (
           <div className="mb-2 p-2 rounded-xl bg-slate-950/90 border border-emerald-500/40 flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-2">
@@ -1826,6 +1856,35 @@ Atenção crítica:
           </div>
         )}
 
+        {/* Live Recording Indicator Bar (aparece acima do input quando gravando, sem cobrir o botão de enviar) */}
+        {isRecording && (
+          <div className="mb-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-950/80 via-slate-950/90 to-rose-950/60 border border-rose-500/50 flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-1">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+              </span>
+              <span className="text-xs font-bold text-rose-300 font-mono">
+                {Math.floor(recordingSeconds / 60).toString().padStart(2, '0')}:{(recordingSeconds % 60).toString().padStart(2, '0')}
+              </span>
+            </div>
+
+            <div className="flex-1 truncate text-xs text-rose-200/90 font-medium italic">
+              {audioTranscript ? `"${audioTranscript}"` : '🎙️ Ouvindo... Pode falar agora'}
+            </div>
+
+            <button
+              type="button"
+              onClick={cancelRecording}
+              className="text-xs text-slate-400 hover:text-white px-2 py-0.5 rounded-md hover:bg-slate-800 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+              title="Cancelar áudio"
+            >
+              <X className="size-3.5 text-rose-400" />
+              <span className="text-[11px]">Cancelar</span>
+            </button>
+          </div>
+        )}
+
         <div className="relative flex items-center gap-1.5 sm:gap-2 w-full max-w-full">
           {/* Hidden File Input */}
           <input
@@ -1840,104 +1899,78 @@ Atenção crítica:
             }}
           />
 
-          {!isRecording ? (
-            <>
-              {/* Attachment Paperclip Button */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => fileInputRef.current?.click()}
-                className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer"
-                title="Anexar fatura ou extrato bancário em PDF"
-              >
-                <Paperclip className="size-4" />
-              </Button>
+          {/* Attachment Paperclip Button */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={isRecording || loading}
+            onClick={() => fileInputRef.current?.click()}
+            className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer disabled:opacity-30"
+            title="Anexar fatura ou extrato bancário em PDF"
+          >
+            <Paperclip className="size-4" />
+          </Button>
 
-              {/* Audio Message Record Button */}
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={startRecording}
-                className="size-8 rounded-lg shrink-0 cursor-pointer transition-all text-slate-400 hover:text-rose-400 hover:bg-slate-800/80"
-                title="Enviar mensagem por voz / áudio"
-              >
-                <Mic className="size-4" />
-              </Button>
+          {/* Audio Message Record Button */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={isRecording ? () => stopRecording(true) : startRecording}
+            className={`size-8 rounded-lg shrink-0 cursor-pointer transition-all ${
+              isRecording
+                ? 'bg-rose-500/25 text-rose-400 border border-rose-500/60 hover:bg-rose-500/35 shadow-md shadow-rose-950/40 animate-pulse'
+                : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800/80'
+            }`}
+            title={isRecording ? 'Concluir e enviar mensagem por áudio' : 'Enviar mensagem por voz / áudio'}
+          >
+            {isRecording ? <Mic className="size-4 text-rose-400 animate-bounce" /> : <Mic className="size-4" />}
+          </Button>
 
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  pendingAttachment
-                    ? 'Instruções opcionais (ou pressione Enter para analisar o PDF)...'
-                    : 'Pergunte, fale por áudio, lance gastos ou anexe PDFs...'
+          <div className="relative flex-1 min-w-0">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                isRecording
+                  ? 'Ouvindo sua voz... (fale agora)'
+                  : pendingAttachment
+                  ? 'Instruções opcionais (ou Enter para analisar o PDF)...'
+                  : 'Pergunte, fale por áudio, lance gastos ou anexe PDFs...'
+              }
+              className={`min-h-[42px] max-h-24 pr-11 text-xs bg-slate-950/80 border-slate-800 resize-none focus-visible:ring-emerald-500/40 ${
+                isRecording ? 'border-rose-500/40 ring-1 ring-rose-500/30' : ''
+              }`}
+              rows={1}
+            />
+
+            {/* Permanent Send Button: Anchor on right inside input, NEVER covered, ALWAYS visible */}
+            <Button
+              size="icon-sm"
+              disabled={(!input.trim() && !pendingAttachment && !isRecording) || loading}
+              onClick={() => {
+                if (isRecording) {
+                  stopRecording(true)
+                } else {
+                  handleSend()
                 }
-                className="min-h-[42px] max-h-24 pr-10 text-xs bg-slate-950/80 border-slate-800 resize-none focus-visible:ring-emerald-500/40"
-                rows={1}
-              />
-
-              <Button
-                size="icon-sm"
-                disabled={(!input.trim() && !pendingAttachment) || loading}
-                onClick={() => handleSend()}
-                className="absolute right-2 top-1/2 -translate-y-1/2 size-7 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm cursor-pointer disabled:opacity-30"
-                title="Enviar mensagem ou analisar anexo"
-              >
-                <Send className="size-3.5" />
-              </Button>
-            </>
-          ) : (
-            /* Live Recording Bar - ocupa 100% da largura sem transbordamento ou rolagem lateral */
-            <div className="w-full max-w-full min-h-[42px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-950/50 via-slate-950/90 to-rose-950/40 border border-rose-500/50 flex items-center justify-between gap-2 shadow-lg shadow-rose-950/30 animate-in fade-in overflow-hidden box-border">
-              {/* Timer & Pulsing Indicator */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
-                </span>
-                <span className="text-[11px] font-bold text-rose-300 font-mono">
-                  {Math.floor(recordingSeconds / 60)
-                    .toString()
-                    .padStart(2, '0')}
-                  :{(recordingSeconds % 60).toString().padStart(2, '0')}
-                </span>
-              </div>
-
-              {/* Live speech preview */}
-              <div className="min-w-0 flex-1 truncate text-xs text-slate-200 font-medium italic">
-                {audioTranscript ? `"${audioTranscript}"` : 'Gravando áudio...'}
-              </div>
-
-              {/* Action Buttons: Cancel and Send */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={cancelRecording}
-                  className="size-7 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
-                  title="Cancelar gravação"
-                >
-                  <X className="size-3.5" />
-                </button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => stopRecording(true)}
-                  className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm cursor-pointer shrink-0"
-                  title="Enviar mensagem de áudio"
-                >
-                  <Send className="size-3" />
-                  <span>Enviar</span>
-                </Button>
-              </div>
-            </div>
-          )}
+              }}
+              className={`absolute right-1.5 top-1/2 -translate-y-1/2 size-7 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm cursor-pointer transition-all ${
+                isRecording
+                  ? 'bg-emerald-500 hover:bg-emerald-400 animate-pulse'
+                  : 'disabled:opacity-30'
+              }`}
+              title="Enviar mensagem ou áudio"
+            >
+              <Send className="size-3.5" />
+            </Button>
+          </div>
         </div>
         <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5 px-1">
           <span>🎙️ Clique no microfone para falar por áudio ou anexe PDFs</span>
-          <span><kbd className="font-mono text-slate-400">Enter</kbd> envia</span>
+          <span className="hidden sm:inline"><kbd className="font-mono text-slate-400">Enter</kbd> envia</span>
         </div>
       </div>
     </div>
