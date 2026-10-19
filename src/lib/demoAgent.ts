@@ -429,7 +429,9 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
 
     for (const [catName, meta] of Object.entries(CATEGORY_GROUPS)) {
       for (const sub of meta.subcategories) {
-        if (n.includes(normalize(sub))) {
+        const normSub = normalize(sub)
+        const singularSub = normSub.endsWith('s') && normSub.length > 4 ? normSub.slice(0, -1) : normSub
+        if (n.includes(normSub) || n.includes(singularSub)) {
           matchedSubcategory = sub
           matchedCategory = catName
           break

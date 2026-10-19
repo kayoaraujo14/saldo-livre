@@ -187,7 +187,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
         descricao: { type: Type.STRING, description: 'Descrição da despesa ou receita. Ex: "Decolar", "Amazon", "Uber".' },
         valorTotal: { type: Type.NUMBER, description: 'Valor da compra em reais (aceita valores negativos para estornos/reembolsos na fatura).' },
         categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria da despesa. Use "Cartão Terceiros" para terceiros sem conta.' },
-        subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Aluguel & Condomínio", "Energia Elétrica", etc.).' },
+        subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Aluguel & Condomínio", "Energia Elétrica", "Presentes", etc.).' },
         metodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Padrão: credit_card.' },
         status: {
           type: Type.STRING,
@@ -296,7 +296,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
                   '"paid" para extrato de conta corrente (já liquidado na conta); "pending" para compras no cartão na fatura a vencer.',
               },
               categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria. Para entradas e salários use "Receita".' },
-              subcategoria: { type: Type.STRING, description: 'Subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Energia Elétrica", etc.).' },
+              subcategoria: { type: Type.STRING, description: 'Subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Presentes", "Energia Elétrica", etc.).' },
               contraparte: { type: Type.STRING, description: 'Nome limpo do recebedor, pagador ou estabelecimento (ex: "Brisanet Telecom", "João da Silva", "Empresa XPTO").' },
               categoria_filtro: {
                 type: Type.STRING,
@@ -632,15 +632,18 @@ REGRAS DE FUNCIONAMENTO:
 4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
 - O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:
   * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
-  * Moradia: Aluguel, Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV, Manutenção & Reformas, Móveis & Utensílios.
-  * Transporte: Combustível, Aplicativos (Uber/99), Transporte Público, Financiamento Veicular, Seguro Auto, IPVA & Licenciamento, Manutenção & Mecânica, Estacionamento & Pedágio.
-  * Saúde: Farmácia & Medicamentos, Consultas Médicas, Exames Laboratoriais, Plano de Saúde, Odontologia, Terapia & Psicologia.
-  * Lazer: Streaming & Assinaturas, Viagens & Hospedagem, Cinema & Teatros, Passeios & Eventos, Games & Hobbies.
-  * Compras: Roupas & Calçados, Eletrônicos & Informática, Cuidados Pessoais & Cosméticos, Casa & Decoração, Livros & Papelaria.
-  * Educação: Mensalidade Escolar/Faculdade, Cursos & Treinamentos, Material Didático, Idiomas.
-  * Pets: Veterinário & Vacinas, Ração & Alimentação Pet, Pet Shop & Banho, Medicamentos Pet.
-  * Outros: Tributos & Taxas, Doações, Imprevistos, Outros.
-  * Receita: Salário Principal, Salário Parceiro(a), Renda Extra & Freelas, Rendimentos & Dividendos, Reembolsos, Pix Recebido, Outras Receitas.
+  * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
+  * Transporte: Combustível, Aplicativos (Uber/99), Transporte Público (Metrô/Ônibus), Estacionamento & Pedágio, Manutenção & Revisão, Seguro & IPVA, Lavagem & Estética Automotiva.
+  * Saúde: Farmácia & Remédios, Consultas & Exames, Plano de Saúde & Dental, Academia & Treinos, Terapia & Psicologia, Cuidados Pessoais & Estética.
+  * Lazer: Cinema, Teatro & Shows, Viagens & Hospedagem, Passeios & Experiências, Jogos & Games, Festas, Baladas & Eventos, Hobbies & Atividades.
+  * Assinaturas: Streaming de Vídeo (Netflix/Max/Disney), Streaming de Música (Spotify/Apple), Softwares, IA & Cloud (iCloud/ChatGPT), Telefonia Celular, Clubes & Assinaturas Recorrentes.
+  * Educação: Cursos Online & Certificações, Faculdade & Pós-Graduação, Livros & E-books, Material Escolar & Papelaria, Idiomas.
+  * Compras: Roupas & Acessórios, Calçados, Eletrônicos & Informática, Casa & Decoração, Presentes.
+  * Pets: Ração & Petiscos, Veterinário & Medicamentos, Banho, Tosa & Cuidados, Acessórios & Brinquedos.
+  * Receita: Salário Principal, Adiantamento / 13º Salário, Freelance & Prestação de Serviços, Rendimentos & Investimentos, Reembolsos & Devoluções, Pix Recebido, Outras Receitas.
+  * Cartão Terceiros: Compras de Amigos, Compras de Familiares, Outros Terceiros.
+  * Estorno: Crédito na Fatura, Devolução / Cancelamento, Cashback Recebido.
+  * Outros: Tarifas Bancárias & Juros, Impostos & Taxas Governamentais, Doações & Caridade, Diversos.
 - Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)").
 - Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), chame "consultarTransacoes" com subcategoria ou utilize o relatório do mês, gerando respostas comparativas detalhadas com clareza.
 

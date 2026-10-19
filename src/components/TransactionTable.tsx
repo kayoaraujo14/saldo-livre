@@ -716,11 +716,31 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             ))}
                           </SelectContent>
                         </Select>
-                        {tx.subcategory && (
+                        {CATEGORY_GROUPS[tx.category]?.subcategories && CATEGORY_GROUPS[tx.category].subcategories.length > 0 ? (
+                          <Select
+                            value={tx.subcategory || ''}
+                            onValueChange={(sub) =>
+                              updateTransaction(tx.id, {
+                                subcategory: sub || null,
+                              })
+                            }
+                          >
+                            <SelectTrigger size="inline" className="h-5 px-1 py-0 text-[10px] text-emerald-400/90 hover:text-emerald-300 font-medium border-transparent bg-transparent hover:bg-slate-800/60 max-w-[130px] justify-start gap-1">
+                              <span className="truncate">› {tx.subcategory || 'Sem subgrupo'}</span>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CATEGORY_GROUPS[tx.category].subcategories.map((sub) => (
+                                <SelectItem key={sub} value={sub} className="text-xs">
+                                  {sub}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : tx.subcategory ? (
                           <span className="text-[10px] text-emerald-400/90 font-medium px-1 truncate max-w-[130px]" title={tx.subcategory}>
                             › {tx.subcategory}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </td>
 

@@ -928,8 +928,11 @@ const SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
   ['Pets', 'Veterinário & Medicamentos', /veterinario|veterinário|vacina pet/i],
 
   // Compras
-  ['Compras', 'Roupas & Acessórios', /zara|renner|riachuelo|c&a|shein|roupa|calcado|calçado|tenis|tênis|nike|adidas/i],
-  ['Compras', 'Eletrônicos & Informática', /kabum|pichau|terabyte|apple|samsung|dell|mercado livre|amazon|shopee|magalu/i],
+  ['Compras', 'Presentes', /presente|presentes|lembrancinha|lembranca|lembrança|aniversario|aniversário|floricultura|flores|cesta|cacau show|kopenhagen|chocolates|brinquedo|ri happy|dia das maes|dia dos pais|dia dos namorados|natal/i],
+  ['Compras', 'Roupas & Acessórios', /zara|renner|riachuelo|c&a|shein|roupa|vestuario|vestuário|acessorio|acessório|nike|adidas|lingerie|joia|bijuteria/i],
+  ['Compras', 'Calçados', /calcado|calçado|tenis|tênis|sapato|sandalia|sandália|havaianas|arezzo|anacapri|vans|olympikus/i],
+  ['Compras', 'Eletrônicos & Informática', /kabum|pichau|terabyte|apple|samsung|dell|mercado livre|amazon|shopee|magalu|celular|smartphone|notebook|computador/i],
+  ['Compras', 'Casa & Decoração', /decoracao|decoração|cama|mesa|banho|tok&stok|tok e stok|etna|camicado|mobly|leroy|marabraz|utilidade|moveis|móveis/i],
 
   // Educação
   ['Educação', 'Cursos Online & Certificações', /curso|udemy|alura|hotmart/i],
@@ -956,7 +959,7 @@ const CATEGORY_HINTS: [Category, RegExp][] = [
   ['Lazer', /cinema|show|viagem|bar|festa|passeio|jogo|livro|teatro/i],
   ['Assinaturas', /netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one/i],
   ['Educação', /curso|faculdade|escola|livro|udemy|alura/i],
-  ['Compras', /roupa|tenis|shopping|eletronico|celular|magazine/i],
+  ['Compras', /roupa|tenis|shopping|eletronico|celular|magazine|presente|lembranc|brinquedo/i],
   ['Pets', /pet|racao|veterinario|cobasi/i],
 ]
 
