@@ -337,34 +337,34 @@ export function OpenFinanceModal({ open, onOpenChange }: OpenFinanceModalProps) 
       <DialogContent className="max-w-2xl bg-[#0b101b] border-slate-800 text-slate-100 p-0 overflow-hidden shadow-2xl rounded-2xl">
         {/* Header */}
         <div className="p-5 border-b border-white/[0.08] bg-gradient-to-r from-slate-900 via-[#0d1424] to-emerald-950/30">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
+          <div className="flex items-start justify-between gap-3 min-w-0">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
               <div className="size-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-md flex items-center justify-center shrink-0">
                 <div className="size-full bg-[#0a0f1d] rounded-[10px] flex items-center justify-center text-emerald-400">
                   <Landmark className="size-5" />
                 </div>
               </div>
-              <div>
-                <DialogTitle className="text-base font-bold text-white flex items-center gap-2">
-                  <span>Open Finance Brasil</span>
-                  <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] font-semibold py-0 px-1.5">
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+                  <span className="truncate">Open Finance Brasil</span>
+                  <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] font-semibold py-0 px-1.5 shrink-0">
                     BACEN Certificado
                   </Badge>
                 </DialogTitle>
-                <DialogDescription className="text-xs text-slate-400 mt-0.5">
+                <DialogDescription className="text-xs text-slate-400 mt-0.5 truncate">
                   Conecte suas contas e faturas bancárias para sincronização automática em tempo real.
                 </DialogDescription>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800 shrink-0">
+            <div className="hidden sm:flex items-center gap-1.5 text-[10px] text-slate-400 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800 shrink-0 ml-auto">
               <ShieldCheck className="size-3.5 text-emerald-400 shrink-0" />
               <span>Somente Leitura</span>
             </div>
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex gap-2 mt-4 pt-3 border-t border-white/[0.06]">
+          <div className="flex gap-2 mt-4 pt-3 border-t border-white/[0.06] overflow-x-auto scrollbar-none">
             <button
               type="button"
               onClick={() => setActiveTab('connections')}

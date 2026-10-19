@@ -49,15 +49,15 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
         <DialogHeader className="space-y-1 pb-3 border-b border-white/[0.06]">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="size-9 rounded-xl bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center shrink-0">
               <CalendarRange className="size-5" />
             </div>
-            <div>
-              <DialogTitle className="text-base sm:text-lg font-bold text-white">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-base sm:text-lg font-bold text-white truncate">
                 Projeção de Fluxo de Caixa (6 Meses)
               </DialogTitle>
-              <DialogDescription className="text-xs text-slate-400">
+              <DialogDescription className="text-xs text-slate-400 truncate">
                 Simulação de Entradas, Contas Fixas e Saldo Livre futuro para planejar gastos com segurança
               </DialogDescription>
             </div>
@@ -178,18 +178,18 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                         variant="ghost"
                         size="sm"
                         onClick={() => handleGenerateForMonth(p.monthKey)}
-                        className="text-[11px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 h-8 px-2.5 gap-1 rounded-lg"
+                        className="text-[11px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 h-8 px-2.5 gap-1 rounded-lg shrink-0"
                       >
                         <Zap className="size-3" /> Gerar Lançamentos
                       </Button>
                     ) : (
-                      <span className="text-[11px] text-slate-500 font-medium">Lançamentos sincronizados</span>
+                      <span className="text-[11px] text-slate-500 font-medium truncate">Lançamentos sincronizados</span>
                     )}
 
                     <Button
                       size="sm"
                       onClick={() => handleGoToMonth(p.monthKey)}
-                      className="text-xs h-8 ml-auto bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white gap-1.5 rounded-lg px-3 cursor-pointer shadow-sm"
+                      className="text-xs h-8 ml-auto bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white gap-1.5 rounded-lg px-3 cursor-pointer shadow-sm shrink-0"
                     >
                       <span>Abrir Mês</span>
                       <ArrowRight className="size-3" />

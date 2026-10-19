@@ -97,15 +97,15 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl w-full max-h-[90vh] flex flex-col p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
         <DialogHeader className="space-y-1 pb-2 border-b border-white/[0.06]">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="size-9 rounded-xl bg-gradient-to-tr from-violet-500/20 to-purple-500/20 border border-violet-500/30 text-violet-400 flex items-center justify-center shrink-0">
               <Users2 className="size-5" />
             </div>
-            <div>
-              <DialogTitle className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-base sm:text-lg font-bold text-white flex items-center gap-2 truncate">
                 <span>Rede de Amizades & Aprovações</span>
               </DialogTitle>
-              <DialogDescription className="text-xs text-slate-400">
+              <DialogDescription className="text-xs text-slate-400 truncate">
                 Gerencie conexões de amigos e aprove cobranças compartilhadas no cartão
               </DialogDescription>
             </div>

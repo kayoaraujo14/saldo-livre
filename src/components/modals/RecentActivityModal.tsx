@@ -144,21 +144,21 @@ export function RecentActivityModal({
       <DialogContent className="sm:max-w-3xl w-full max-h-[92vh] flex flex-col p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
         <DialogHeader className="space-y-1 pb-3 border-b border-white/[0.08] shrink-0">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <div className="size-10 rounded-xl bg-sky-500/15 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0 shadow-[0_0_15px_-3px_rgba(56,189,248,0.3)]">
                 <History className="size-5" />
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <DialogTitle className="text-base sm:text-lg font-bold text-white tracking-tight">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <DialogTitle className="text-base sm:text-lg font-bold text-white tracking-tight truncate">
                     Histórico de Lançamentos Recentes
                   </DialogTitle>
-                  <Badge variant="outline" className="text-[10px] font-mono bg-sky-500/10 text-sky-300 border-sky-500/30">
+                  <Badge variant="outline" className="text-[10px] font-mono bg-sky-500/10 text-sky-300 border-sky-500/30 shrink-0">
                     {filteredList.length} encontrados
                   </Badge>
                 </div>
-                <DialogDescription className="text-xs text-slate-400">
+                <DialogDescription className="text-xs text-slate-400 truncate">
                   Ordenado pela <strong>data de cadastro no sistema</strong>, independente do mês de realização ou vencimento.
                 </DialogDescription>
               </div>

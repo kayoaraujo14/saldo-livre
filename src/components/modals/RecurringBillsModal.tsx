@@ -157,16 +157,16 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
         <DialogHeader className="space-y-1 pb-3 border-b border-white/[0.06]">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <div className="size-9 rounded-xl bg-gradient-to-tr from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
                 <RefreshCw className="size-5" />
               </div>
-              <div>
-                <DialogTitle className="text-base sm:text-lg font-bold text-white">
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-base sm:text-lg font-bold text-white truncate">
                   Moldes & Contas Recorrentes
                 </DialogTitle>
-                <DialogDescription className="text-xs text-slate-400">
+                <DialogDescription className="text-xs text-slate-400 truncate">
                   Previsões automáticas de salários, rendas e contas mensais
                 </DialogDescription>
               </div>
@@ -176,7 +176,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
               <Button
                 size="sm"
                 onClick={handleOpenNew}
-                className="bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm"
+                className="bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm shrink-0"
               >
                 <Plus className="size-3.5" />
                 <span>Novo Molde</span>

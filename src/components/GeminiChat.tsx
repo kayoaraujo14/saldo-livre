@@ -1077,27 +1077,27 @@ Atenção crítica:
       )}
 
       {/* Chat Top Header */}
-      <div className="p-3.5 border-b border-white/[0.06] flex items-center justify-between bg-slate-900/60">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="p-3 sm:p-3.5 border-b border-white/[0.06] flex items-center justify-between bg-slate-900/60 min-w-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
           <div className="size-7 rounded-lg bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shrink-0">
             <div className="size-full bg-slate-950 rounded-[6px] flex items-center justify-center">
               <Bot className="size-4 text-emerald-400" />
             </div>
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
               <h3 className="text-xs font-bold text-white tracking-tight m-0 truncate">
                 {currentSession.title !== 'Nova Conversa' ? currentSession.title : 'Copiloto Saldo Livre'}
               </h3>
               {isLiveGemini ? (
-                <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800 gap-1 font-mono shrink-0">
+                <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800 gap-1 font-mono shrink-0 hidden sm:inline-flex">
                   <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   {activeModel}
                 </Badge>
               ) : (
                 <Badge
                   variant="outline"
-                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono shrink-0"
+                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono shrink-0 hidden sm:inline-flex"
                 >
                   <span className="size-1.5 rounded-full bg-amber-400" />
                   demo offline
@@ -1107,7 +1107,7 @@ Atenção crítica:
           </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 ml-auto">
           {/* New Chat Button */}
           <Button
             variant="ghost"
@@ -1163,14 +1163,13 @@ Atenção crítica:
             )}
           </Button>
 
-
           {/* API Key */}
           {isLiveGemini && (
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={onOpenApiKey}
-              className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer"
+              className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer hidden sm:flex"
               title="Configurar Chave Gemini"
             >
               <KeyRound className="size-3.5" />

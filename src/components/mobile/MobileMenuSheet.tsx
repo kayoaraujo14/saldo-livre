@@ -86,43 +86,43 @@ export function MobileMenuSheet({
               : 'bg-gradient-to-r from-emerald-950/40 via-slate-900/80 to-teal-950/30 border-emerald-500/40 shadow-emerald-950/30'
           }`}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="size-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 font-bold flex items-center justify-center shrink-0 shadow-sm">
               {isInstalled ? <CheckCircle2 className="size-5 stroke-[2.5]" /> : <Download className="size-5 stroke-[2.5]" />}
             </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold text-white">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-sm font-bold text-white truncate">
                   {isInstalled ? 'Aplicativo Instalado' : 'Instalar Aplicativo'}
                 </span>
                 {!isInstalled && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold">
+                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold shrink-0">
                     PWA Nativo
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-400 truncate">
                 {isInstalled
                   ? 'Você já tem o aplicativo na tela inicial'
                   : 'Acesse em tela cheia direto da tela de início'}
               </p>
             </div>
           </div>
-          <ChevronRight className="size-5 text-emerald-400 shrink-0" />
+          <ChevronRight className="size-5 text-emerald-400 shrink-0 ml-2" />
         </div>
       )}
 
       {/* 2. User Profile Card */}
-      <div className="glass-card rounded-2xl p-4 border border-white/[0.08] flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="size-11 rounded-2xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-base shadow-sm">
+      <div className="glass-card rounded-2xl p-4 border border-white/[0.08] flex items-center justify-between min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
+          <div className="size-11 rounded-2xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-base shadow-sm shrink-0">
             {profile?.displayName?.charAt(0) ?? 'U'}
           </div>
-          <div>
-            <h3 className="font-bold text-sm text-white">{profile?.displayName ?? 'Usuário'}</h3>
-            <p className="text-xs text-slate-400">{profile?.email || 'Conta Pessoal'}</p>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-bold text-sm text-white truncate">{profile?.displayName ?? 'Usuário'}</h3>
+            <p className="text-xs text-slate-400 truncate">{profile?.email || 'Conta Pessoal'}</p>
             <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-medium mt-0.5">
-              <ShieldCheck className="size-3" /> Sessão Ativa
+              <ShieldCheck className="size-3 shrink-0" /> Sessão Ativa
             </span>
           </div>
         </div>
@@ -130,7 +130,7 @@ export function MobileMenuSheet({
         <button
           type="button"
           onClick={signOut}
-          className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+          className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors shrink-0 ml-auto"
           title="Sair da conta"
         >
           <LogOut className="size-4" />

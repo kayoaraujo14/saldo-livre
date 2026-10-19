@@ -90,16 +90,16 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
         <DialogHeader className="space-y-1 pb-2 border-b border-white/[0.06]">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <div className="size-9 rounded-xl bg-gradient-to-tr from-sky-500/20 to-indigo-500/20 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
                 <CreditCard className="size-5" />
               </div>
-              <div>
-                <DialogTitle className="text-base sm:text-lg font-bold text-white">
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-base sm:text-lg font-bold text-white truncate">
                   Cartões de Crédito
                 </DialogTitle>
-                <DialogDescription className="text-xs text-slate-400">
+                <DialogDescription className="text-xs text-slate-400 truncate">
                   Gerencie limites, datas de fechamento e cartões compartilhados
                 </DialogDescription>
               </div>
@@ -109,7 +109,7 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
               <Button
                 size="sm"
                 onClick={handleOpenNew}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm shrink-0"
               >
                 <Plus className="size-3.5" />
                 <span>Novo Cartão</span>

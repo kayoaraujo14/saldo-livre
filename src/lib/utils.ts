@@ -57,6 +57,17 @@ export function monthLabel(monthKey: string) {
   return `${MONTH_NAMES[m - 1]} ${y}`
 }
 
+const SHORT_MONTH_NAMES = [
+  'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
+]
+
+export function shortMonthLabel(monthKey: string) {
+  const [y, m] = monthKey.split('-').map(Number)
+  const shortYear = String(y).slice(-2)
+  return `${SHORT_MONTH_NAMES[m - 1]}/${shortYear}`
+}
+
 export function daysInMonth(monthKey: string) {
   const [y, m] = monthKey.split('-').map(Number)
   return new Date(y, m, 0).getDate()

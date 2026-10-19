@@ -92,28 +92,31 @@ export function MobileTransactionCard({
       }`}
     >
       {/* Top row: Category & Date + Status */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 mb-2 min-w-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-hidden">
           {isRefund ? (
-            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px] font-bold px-2 py-0.5">
-              <RotateCcw className="size-2.5 mr-1" /> Estorno / Reembolso
+            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 shrink-0">
+              <RotateCcw className="size-2.5 mr-1 shrink-0" /> Estorno / Reembolso
             </Badge>
           ) : isIncome ? (
-            <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-[10px] font-bold px-2 py-0.5">
-              <ArrowDownLeft className="size-2.5 mr-1" /> {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita'}
+            <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 truncate max-w-[150px] sm:max-w-none">
+              <ArrowDownLeft className="size-2.5 mr-1 shrink-0" /> {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita'}
             </Badge>
           ) : (
-            <span className="text-[11px] font-medium text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60 inline-flex items-center gap-1">
-              <span>{tx.category}</span>
+            <span
+              className="text-[11px] font-medium text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60 inline-flex items-center gap-1 min-w-0 max-w-[155px] sm:max-w-none truncate"
+              title={`${tx.category}${tx.subcategory ? ` › ${tx.subcategory}` : ''}`}
+            >
+              <span className="truncate">{tx.category}</span>
               {tx.subcategory && (
-                <span className="text-emerald-400 font-normal">
+                <span className="text-emerald-400 font-normal truncate">
                   › {tx.subcategory}
                 </span>
               )}
             </span>
           )}
 
-          <span className="text-[11px] text-slate-500 font-mono">
+          <span className="text-[11px] text-slate-500 font-mono shrink-0">
             {formatShortDate(tx.dueDate || tx.competenceMonth)}
           </span>
         </div>
@@ -122,7 +125,7 @@ export function MobileTransactionCard({
         <button
           type="button"
           onClick={() => onCycleStatus(tx)}
-          className="cursor-pointer active:scale-95 transition-transform"
+          className="cursor-pointer active:scale-95 transition-transform shrink-0 ml-auto"
           title="Toque para alternar status da despesa"
         >
           {getStatusBadge()}

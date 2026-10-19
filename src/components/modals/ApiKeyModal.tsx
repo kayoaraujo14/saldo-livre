@@ -72,15 +72,15 @@ export function ApiKeyModal({ open, onOpenChange }: ApiKeyModalProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
         <DialogHeader className="space-y-1 pb-3 border-b border-white/[0.06]">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="size-9 rounded-xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
               <KeyRound className="size-5" />
             </div>
-            <div>
-              <DialogTitle className="text-base sm:text-lg font-bold text-white">
+            <div className="min-w-0 flex-1">
+              <DialogTitle className="text-base sm:text-lg font-bold text-white truncate">
                 Configurar Inteligência Artificial (Gemini)
               </DialogTitle>
-              <DialogDescription className="text-xs text-slate-400">
+              <DialogDescription className="text-xs text-slate-400 truncate">
                 Conecte sua API Key do Google AI Studio para ativar o Copiloto financeiro
               </DialogDescription>
             </div>
@@ -202,13 +202,13 @@ export function ApiKeyModal({ open, onOpenChange }: ApiKeyModalProps) {
               </div>
             )}
 
-            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-[11px] text-slate-400 pt-1">
               <span>A chave é guardada somente no seu navegador com segurança.</span>
               <a
                 href="https://aistudio.google.com/app/apikey"
                 target="_blank"
                 rel="noreferrer"
-                className="text-emerald-400 hover:underline inline-flex items-center gap-1 font-semibold"
+                className="text-emerald-400 hover:underline inline-flex items-center gap-1 font-semibold shrink-0"
               >
                 <span>Obter chave grátis</span>
                 <ExternalLink className="size-3" />

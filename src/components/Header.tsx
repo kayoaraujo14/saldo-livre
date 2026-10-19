@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/overlays'
 import { useFinance } from '@/store/FinanceContext'
-import { monthLabel, shiftMonth, currentMonthKey } from '@/lib/utils'
+import { monthLabel, shortMonthLabel, shiftMonth, currentMonthKey } from '@/lib/utils'
 import { getGeminiApiKey, getSelectedGeminiModel } from '@/lib/gemini'
 import {
   ChevronLeft,
@@ -102,18 +102,18 @@ export function Header({
 
   return (
     <header className="border-b border-white/[0.08] bg-[#090d16]/90 backdrop-blur-xl sticky top-0 z-40 transition-all pt-[max(0.4rem,env(safe-area-inset-top,0px))]">
-      <div className="max-w-[1720px] mx-auto px-3 sm:px-6 py-2.5">
-        <div className="flex items-center justify-between gap-3">
+      <div className="max-w-[1720px] mx-auto px-3 sm:px-6 py-2 sm:py-2.5">
+        <div className="flex items-center justify-between gap-2 sm:gap-3">
           {/* 1. Left: Brand & Month Navigator */}
-          <div className="flex items-center gap-3 sm:gap-5">
+          <div className="flex items-center gap-2 sm:gap-5 min-w-0 shrink">
             {/* Logo */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2 shrink-0">
               <div className="size-8 sm:size-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-[0_0_20px_-3px_rgba(16,185,129,0.5)] flex items-center justify-center shrink-0">
                 <div className="size-full bg-[#0b101b] rounded-[10px] flex items-center justify-center">
                   <Sparkles className="size-3.5 sm:size-4 text-emerald-400" />
                 </div>
               </div>
-              <div className="hidden xs:block">
+              <div className="hidden sm:block">
                 <h1 className="font-bold text-sm sm:text-base tracking-tight text-white m-0 leading-tight">
                   Saldo Livre
                 </h1>
@@ -124,33 +124,34 @@ export function Header({
             </div>
 
             {/* Month Navigator (Pill) */}
-            <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 p-1 rounded-xl shadow-inner">
+            <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-900/90 border border-slate-800 p-0.5 sm:p-1 rounded-xl shadow-inner shrink-0">
               <Button
                 variant="ghost"
                 size="icon-sm"
                 onClick={handlePrevMonth}
-                className="size-7 text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                className="size-6 sm:size-7 text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer p-0"
                 title="Mês anterior"
               >
-                <ChevronLeft className="size-4" />
+                <ChevronLeft className="size-3.5 sm:size-4" />
               </Button>
-              <span className="text-xs font-semibold px-1.5 sm:px-2 min-w-[95px] sm:min-w-[110px] text-center text-slate-200">
-                {monthLabel(month)}
+              <span className="text-xs font-semibold px-1 sm:px-2 min-w-[54px] sm:min-w-[110px] text-center text-slate-200">
+                <span className="sm:hidden">{shortMonthLabel(month)}</span>
+                <span className="hidden sm:inline">{monthLabel(month)}</span>
               </span>
               <Button
                 variant="ghost"
                 size="icon-sm"
                 onClick={handleNextMonth}
-                className="size-7 text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                className="size-6 sm:size-7 text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer p-0"
                 title="Próximo mês"
               >
-                <ChevronRight className="size-4" />
+                <ChevronRight className="size-3.5 sm:size-4" />
               </Button>
               {!isCurrentMonth && (
                 <button
                   type="button"
                   onClick={handleToday}
-                  className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer font-medium"
+                  className="text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer font-medium"
                 >
                   Hoje
                 </button>
@@ -159,17 +160,17 @@ export function Header({
           </div>
 
           {/* 2. Right: Action Buttons & Menus */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
             {/* Botão de Adicionar Lançamento (Exclusivo no Cabeçalho - Entrada ou Despesa) */}
             <Button
               size="sm"
               onClick={onOpenNewTx}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-8 px-2.5 sm:px-3.5 gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer flex items-center rounded-xl transition-all active:scale-95"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-7 sm:h-8 px-2 sm:px-3.5 gap-1 sm:gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer flex items-center rounded-xl transition-all active:scale-95 shrink-0"
               title="Adicionar lançamento (entrada ou despesa)"
             >
               <Plus className="size-3.5 stroke-[2.5]" />
-              <span className="hidden xs:inline">Novo Lançamento</span>
-              <span className="xs:hidden">Lançamento</span>
+              <span className="hidden sm:inline">Novo Lançamento</span>
+              <span className="sm:hidden">Novo</span>
             </Button>
 
             {/* Friends Button (Desktop: visible with badge; Mobile: accessible via Menu & top alert banner) */}
@@ -332,16 +333,16 @@ export function Header({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 py-1 px-2 rounded-xl hover:border-slate-700 transition-all cursor-pointer outline-none"
+                  className="flex items-center gap-1 sm:gap-2 bg-slate-900/90 border border-slate-800 h-7 sm:h-8 px-1.5 sm:px-2 rounded-xl hover:border-slate-700 transition-all cursor-pointer outline-none shrink-0"
                   title="Abrir opções de perfil e usuário"
                 >
-                  <div className="size-6 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-[10px]">
+                  <div className="size-5 sm:size-6 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-[9px] sm:text-[10px] shrink-0">
                     {profile?.displayName?.charAt(0) ?? 'U'}
                   </div>
                   <span className="text-xs font-semibold text-slate-200 hidden md:inline truncate max-w-[100px]">
                     {profile?.displayName?.split(' ')[0] ?? 'Usuário'}
                   </span>
-                  <ChevronDown className="size-3 text-slate-400 hidden sm:inline" />
+                  <ChevronDown className="size-3 text-slate-400 hidden sm:inline shrink-0" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-60 bg-slate-950 border border-slate-800 shadow-2xl p-1.5">
