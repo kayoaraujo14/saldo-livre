@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   Landmark,
   History,
+  TrendingUp,
 } from 'lucide-react'
 
 interface HeaderProps {
@@ -38,6 +39,7 @@ interface HeaderProps {
   onOpenFriends: () => void
   onOpenOpenFinance: () => void
   onOpenRecentActivity: () => void
+  onOpenInvestments?: () => void
 }
 
 export function Header({
@@ -49,6 +51,7 @@ export function Header({
   onOpenFriends,
   onOpenOpenFinance,
   onOpenRecentActivity,
+  onOpenInvestments,
 }: HeaderProps) {
   const {
     mode,
@@ -190,6 +193,20 @@ export function Header({
               )}
             </Button>
 
+            {/* Investments Quick Button (Desktop XL) */}
+            {onOpenInvestments && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onOpenInvestments}
+                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-slate-800 hover:border-purple-500/40 hover:bg-purple-950/20 text-slate-300 hover:text-purple-300 cursor-pointer rounded-xl hidden xl:flex transition-all"
+                title="Controle de Investimentos e Patrimônio"
+              >
+                <TrendingUp className="size-3.5 text-purple-400" />
+                <span>Investimentos</span>
+              </Button>
+            )}
+
             {/* Consolidated "Recursos" Dropdown (Desktop: handy dropdown; Mobile: accessible via bottom Menu dock) */}
             <div className="hidden lg:block">
               <DropdownMenu>
@@ -254,6 +271,19 @@ export function Header({
                     <span className="text-[10px] text-slate-500">Últimas cadastradas ou recebidas</span>
                   </div>
                 </DropdownMenuItem>
+
+                {onOpenInvestments && (
+                  <DropdownMenuItem
+                    onClick={onOpenInvestments}
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
+                  >
+                    <TrendingUp className="size-3.5 text-purple-400" />
+                    <div className="flex flex-col">
+                      <span className="font-medium">Investimentos & Patrimônio</span>
+                      <span className="text-[10px] text-slate-500">Aportes, classes de ativos e simulador</span>
+                    </div>
+                  </DropdownMenuItem>
+                )}
 
                 <DropdownMenuSeparator className="bg-slate-800 my-1" />
                 

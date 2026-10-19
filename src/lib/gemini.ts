@@ -168,6 +168,7 @@ export type ToolName =
   | 'gerenciarContasRecorrentes'
   | 'gerenciarAmizades'
   | 'gerenciarRegrasEMemoria'
+  | 'gerarGraficoFinanceiro'
 
 
 export interface ToolResult {
@@ -503,6 +504,43 @@ export const functionDeclarations: FunctionDeclaration[] = [
       required: ['acao'],
     },
   },
+  {
+    name: 'gerarGraficoFinanceiro',
+    description:
+      'Gera um gráfico visual interativo (donut, pie, bar ou line) diretamente no chat para análise financeira de gastos, investimentos, comparativos de categorias ou evolução.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        tipo: {
+          type: Type.STRING,
+          enum: ['donut', 'pie', 'bar', 'line'],
+          description: 'donut/pie = distribuição percentual (fatias de categorias ou investimentos); bar = comparativo de barras; line = evolução no tempo.',
+        },
+        titulo: {
+          type: Type.STRING,
+          description: 'Título claro do gráfico. Ex: "Distribuição dos Gastos de Outubro" ou "Carteira de Investimentos".',
+        },
+        descricao: {
+          type: Type.STRING,
+          description: 'Subtítulo ou observação contextual.',
+        },
+        dados: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              label: { type: Type.STRING, description: 'Nome da categoria ou item.' },
+              value: { type: Type.NUMBER, description: 'Valor numérico em reais (apenas o número, ex: 1500.50).' },
+              color: { type: Type.STRING, description: 'Cor hexadecimal (opcional).' },
+            },
+            required: ['label', 'value'],
+          },
+          description: 'Série de dados com rótulo e valor.',
+        },
+      },
+      required: ['tipo', 'titulo', 'dados'],
+    },
+  },
 ]
 
 export function buildSystemInstruction(ctx: {
@@ -525,6 +563,9 @@ export function buildSystemInstruction(ctx: {
     receivableTotal: number
     byCategory: Array<{ category: string; amount: number }>
     bySubcategory?: Array<{ category: string; subcategory: string; amount: number; count: number }>
+    totalInvested?: number
+    totalInvestedAccumulated?: number
+    byInvestmentSubcategory?: Array<{ subcategory: string; amount: number; percentage: number }>
   } | null
   recentTransactions?: Array<{
     id?: string
@@ -559,7 +600,10 @@ export function buildSystemInstruction(ctx: {
 - Valores a Receber: R$ ${ctx.summary.receivableTotal.toFixed(2)}
 - Gastos por Categoria neste mês:
   ${ctx.summary.byCategory.length > 0 ? ctx.summary.byCategory.map((c) => `* ${c.category}: R$ ${c.amount.toFixed(2)}`).join('\n  ') : '* Nenhuma despesa computada ainda'}
-${ctx.summary.bySubcategory && ctx.summary.bySubcategory.length > 0 ? `- Gastos Detalhados por Subgrupo/Subcategoria:\n  ${ctx.summary.bySubcategory.map((s) => `* ${s.category} › ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count} item${s.count > 1 ? 's' : ''})`).join('\n  ')}` : ''}`
+${ctx.summary.bySubcategory && ctx.summary.bySubcategory.length > 0 ? `- Gastos Detalhados por Subgrupo/Subcategoria:\n  ${ctx.summary.bySubcategory.map((s) => `* ${s.category} › ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count} item${s.count > 1 ? 's' : ''})`).join('\n  ')}` : ''}
+- Total Investido no Mês: R$ ${ctx.summary.totalInvested != null ? ctx.summary.totalInvested.toFixed(2) : '0.00'}
+- Patrimônio Total Investido Acumulado: R$ ${ctx.summary.totalInvestedAccumulated != null ? ctx.summary.totalInvestedAccumulated.toFixed(2) : '0.00'}
+${ctx.summary.byInvestmentSubcategory && ctx.summary.byInvestmentSubcategory.length > 0 ? `- Alocação de Investimentos por Subcategoria:\n  ${ctx.summary.byInvestmentSubcategory.map((i) => `* ${i.subcategory}: R$ ${i.amount.toFixed(2)} (${i.percentage.toFixed(1)}%)`).join('\n  ')}` : ''}`
     : `DADOS FINANCEIROS: Mês ${ctx.monthLabel} (${ctx.monthKey})`
 
   const recentTxsDesc =
@@ -743,6 +787,30 @@ REGRAS DE FUNCIONAMENTO:
     - Exemplo de despesa: "Entendi que você deseja registrar uma despesa de **R$ 45,00** na **Padaria** no débito para o mês de **Outubro 2026**."
   * Convide o usuário a revisar os detalhes no cartão visual e confirmar clicando no botão **🟢 Confirmar e Executar** (a execução real no banco ocorrerá apenas após esse clique explícito do usuário).
   * NUNCA afirme que a ação já foi salva ou gravada! Diga sempre que a transação foi "preparada/criada em modo rascunho" e está "aguardando a aprovação e confirmação explícita".
+
+11. CRIAÇÃO DE GRÁFICOS FINANCEIROS INTERATIVOS (DATA VISUALIZATION):
+Sempre que o usuário pedir uma análise visual, comparativo, projeção gráfica ou perguntar "faça um gráfico de...", "analise com gráfico", "mostre a evolução", "distribuição de gastos", "como estão meus investimentos", ou você achar relevante enriquecer a resposta com visualização, inclua em sua resposta um bloco de código markdown no formato:
+
+\`\`\`chart
+{
+  "type": "donut",
+  "title": "Distribuição dos Gastos de Outubro",
+  "description": "Total analisado: R$ 3.450,00",
+  "data": [
+    { "label": "Moradia", "value": 1500.00, "color": "#6366f1" },
+    { "label": "Alimentação", "value": 850.00, "color": "#10b981" },
+    { "label": "Investimentos", "value": 600.00, "color": "#8b5cf6" },
+    { "label": "Lazer", "value": 500.00, "color": "#f59e0b" }
+  ]
+}
+\`\`\`
+
+Tipos de gráficos suportados:
+- "donut" (ou "pie"): excelente para distribuição percentual de categorias, divisão de classes de investimentos (Renda Fixa, Ações, FIIs, Cripto), ou proporção de gastos vs sobra.
+- "bar": excelente para comparação entre categorias, orçamentos vs realizados, ou comparativo de gastos.
+- "line": excelente para evolução temporal, patrimônio acumulado ou comportamento do saldo diário.
+IMPORTANTE: Use sempre dados numéricos reais obtidos do contexto (NUNCA invente números). O valor deve ser um número simples (ex: 1500.50). Você também pode chamar a ferramenta "gerarGraficoFinanceiro".
+
 
 EXEMPLOS PRÁTICOS E PADRÕES BANCÁRIOS BRASIL (FEW-SHOT):
 

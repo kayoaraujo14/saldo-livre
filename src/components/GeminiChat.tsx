@@ -19,8 +19,15 @@ import {
 import { runDemoAgent } from '@/lib/demoAgent'
 import { effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
 import { formatBRL, formatShortDate, monthLabel, todayKey } from '@/lib/utils'
-import { getLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
+import { getLearnedRules, addLearnedRule, removeLearnedRule, saveLearnedRules, type UserRule } from '@/lib/agentTools'
 import { extractTextFromPdf } from '@/lib/pdfParser'
+import { ChatChart } from '@/components/ui/ChatChart'
+import {
+  fsSaveChatSession,
+  fsDeleteChatSession,
+  subscribeChatSessions,
+  subscribeAgentRules,
+} from '@/lib/firebase'
 import {
   Bot,
   User,
@@ -202,10 +209,53 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     return currentSession?.pending_transactions || []
   }, [pendingBatchTransactions, currentSession])
 
-  // Persist sessions to LocalStorage
+  // Persist sessions to LocalStorage and Firestore
   useEffect(() => {
     saveStoredSessions(currentUid, sessions)
-  }, [sessions, currentUid])
+    if (currentUid && currentUid !== 'guest') {
+      const active = sessions.find((s) => s.id === currentSessionId)
+      if (active) {
+        fsSaveChatSession(currentUid, active)
+      }
+    }
+  }, [sessions, currentUid, currentSessionId])
+
+  // Real-time Firestore sync for chat sessions and agent rules
+  useEffect(() => {
+    if (!currentUid || currentUid === 'guest') return
+
+    const unsubSessions = subscribeChatSessions(currentUid, (cloudSessions) => {
+      if (cloudSessions.length > 0) {
+        setSessions((prev) => {
+          const prevMap = new Map(prev.map((s) => [s.id, s.updatedAt]))
+          const isDifferent =
+            cloudSessions.length !== prev.length ||
+            cloudSessions.some((cs) => prevMap.get(cs.id) !== cs.updatedAt)
+          if (!isDifferent) return prev
+          saveStoredSessions(currentUid, cloudSessions)
+          return cloudSessions
+        })
+      }
+    })
+
+    const unsubRules = subscribeAgentRules(currentUid, (cloudRules) => {
+      if (cloudRules.length > 0) {
+        setRules((prev) => {
+          const isDiff =
+            cloudRules.length !== prev.length ||
+            cloudRules.some((cr, idx) => prev[idx]?.id !== cr.id)
+          if (!isDiff) return prev
+          saveLearnedRules(currentUid, cloudRules)
+          return cloudRules
+        })
+      }
+    })
+
+    return () => {
+      unsubSessions()
+      unsubRules()
+    }
+  }, [currentUid])
 
   // Reload sessions & rules if user profile changes
   useEffect(() => {
@@ -318,6 +368,9 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
 
   const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    if (currentUid && currentUid !== 'guest') {
+      fsDeleteChatSession(currentUid, sessionId)
+    }
     setSessions((prev) => {
       const filtered = prev.filter((s) => s.id !== sessionId)
       if (filtered.length === 0) {
@@ -329,6 +382,9 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
           messages: [INITIAL_MESSAGE],
         }
         setCurrentSessionId(fresh.id)
+        if (currentUid && currentUid !== 'guest') {
+          fsSaveChatSession(currentUid, fresh)
+        }
         return [fresh]
       }
       if (currentSessionId === sessionId) {
@@ -664,6 +720,10 @@ Atenção crítica:
                 daysRemaining: summary.daysRemaining,
                 receivableTotal: summary.receivableTotal,
                 byCategory: summary.byCategory,
+                bySubcategory: summary.bySubcategory,
+                totalInvested: summary.totalInvested,
+                totalInvestedAccumulated: summary.totalInvestedAccumulated,
+                byInvestmentSubcategory: summary.byInvestmentSubcategory,
               }
             : null,
           recentTransactions: (monthTransactions || []).slice(0, 40).map((t) => ({
@@ -1219,9 +1279,25 @@ Atenção crítica:
                 </div>
               )}
 
-              {/* Markdown Content */}
+              {/* Markdown Content with Chart rendering */}
               <div className="chat-prose">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({ inline, className, children, ...props }: any) {
+                      const match = /language-(\w+)/.exec(className || '')
+                      const lang = match ? match[1].toLowerCase() : ''
+                      if (!inline && (lang === 'chart' || lang === 'grafico')) {
+                        return <ChatChart dataString={String(children).replace(/\n$/, '')} />
+                      }
+                      return (
+                        <code className={className} {...props}>
+                          {children}
+                        </code>
+                      )
+                    },
+                  }}
+                >
                   {msg.content}
                 </ReactMarkdown>
               </div>

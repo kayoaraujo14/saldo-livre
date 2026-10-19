@@ -30,7 +30,7 @@ import {
   writeBatch,
   type Firestore,
 } from 'firebase/firestore'
-import type { Card, Friendship, NewTransaction, RecurringBill, Transaction, UserProfile } from '@/types'
+import type { Card, ChatSession, Friendship, NewTransaction, RecurringBill, Transaction, UserLearnedRule, UserProfile } from '@/types'
 import { stripUndefined } from './utils'
 
 const FIREBASE_CONFIG_STORAGE_KEY = 'saldo-livre:firebase-config'
@@ -110,6 +110,8 @@ export const COLLECTIONS = {
   recurring: 'recurring_bills',
   transactions: 'transactions',
   friendships: 'friendships',
+  agentRules: 'agent_rules',
+  chatSessions: 'chat_sessions',
 } as const
 
 // ------------------------------------------------------------------
@@ -358,3 +360,111 @@ export async function fsRespondChargeRequest(txIds: string[], accept: boolean) {
     await batch.commit()
   }
 }
+
+// ------------------------------------------------------------------
+// Regras e Memória do Agente (Persistência no Firestore)
+// ------------------------------------------------------------------
+export function subscribeAgentRules(uid: string, cb: (rules: UserLearnedRule[]) => void) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return () => {}
+  try {
+    const { db } = ensure()
+    const q = collection(db, COLLECTIONS.users, uid, COLLECTIONS.agentRules)
+    return onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ ...(d.data() as UserLearnedRule), id: d.id }))
+        list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        cb(list)
+      },
+      (err) => {
+        console.warn('Erro ao sincronizar regras do Firestore:', err)
+      }
+    )
+  } catch (err) {
+    console.warn('Falha ao inicializar listener de regras do Firestore:', err)
+    return () => {}
+  }
+}
+
+export async function fsSaveAgentRule(uid: string, rule: UserLearnedRule) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return
+  try {
+    const { db } = ensure()
+    const ref = doc(db, COLLECTIONS.users, uid, COLLECTIONS.agentRules, rule.id)
+    await setDoc(ref, stripUndefined({ ...rule, ownerUid: uid }), { merge: true })
+  } catch (err) {
+    console.warn('Erro ao salvar regra no Firestore:', err)
+  }
+}
+
+export async function fsDeleteAgentRule(uid: string, ruleId: string) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return
+  try {
+    const { db } = ensure()
+    const ref = doc(db, COLLECTIONS.users, uid, COLLECTIONS.agentRules, ruleId)
+    await deleteDoc(ref)
+  } catch (err) {
+    console.warn('Erro ao excluir regra no Firestore:', err)
+  }
+}
+
+// ------------------------------------------------------------------
+// Histórico de Conversas e Sessões de Chat (Persistência no Firestore)
+// ------------------------------------------------------------------
+export function subscribeChatSessions(uid: string, cb: (sessions: ChatSession[]) => void) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return () => {}
+  try {
+    const { db } = ensure()
+    const q = collection(db, COLLECTIONS.users, uid, COLLECTIONS.chatSessions)
+    return onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ ...(d.data() as ChatSession), id: d.id }))
+        list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        cb(list)
+      },
+      (err) => {
+        console.warn('Erro ao sincronizar sessões de chat do Firestore:', err)
+      }
+    )
+  } catch (err) {
+    console.warn('Falha ao inicializar listener de sessões de chat do Firestore:', err)
+    return () => {}
+  }
+}
+
+export async function fsSaveChatSession(uid: string, session: ChatSession) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return
+  try {
+    const { db } = ensure()
+    const ref = doc(db, COLLECTIONS.users, uid, COLLECTIONS.chatSessions, session.id)
+    // Remove dados binários pesados de anexos (base64) para garantir conformidade com limites do Firestore
+    const sanitizedMessages = (session.messages || []).map((m) => {
+      if (m.attachment?.base64) {
+        const { base64: _omitted, ...safeAttachment } = m.attachment
+        return { ...m, attachment: safeAttachment }
+      }
+      return m
+    })
+    const payload = stripUndefined({
+      ...session,
+      messages: sanitizedMessages,
+      ownerUid: uid,
+    })
+    await setDoc(ref, payload, { merge: true })
+  } catch (err) {
+    console.warn('Erro ao salvar sessão de chat no Firestore:', err)
+  }
+}
+
+export async function fsDeleteChatSession(uid: string, sessionId: string) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return
+  try {
+    const { db } = ensure()
+    const ref = doc(db, COLLECTIONS.users, uid, COLLECTIONS.chatSessions, sessionId)
+    await deleteDoc(ref)
+  } catch (err) {
+    console.warn('Erro ao excluir sessão de chat no Firestore:', err)
+  }
+}
+

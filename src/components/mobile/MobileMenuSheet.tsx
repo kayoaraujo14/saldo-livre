@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Landmark,
   History,
+  TrendingUp,
 } from 'lucide-react'
 
 interface MobileMenuSheetProps {
@@ -27,6 +28,7 @@ interface MobileMenuSheetProps {
   onOpenInstall?: () => void
   onOpenOpenFinance?: () => void
   onOpenRecentActivity?: () => void
+  onOpenInvestments?: () => void
   isInstalled?: boolean
   canInstall?: boolean
   generating?: boolean
@@ -42,6 +44,7 @@ export function MobileMenuSheet({
   onOpenInstall,
   onOpenOpenFinance,
   onOpenRecentActivity,
+  onOpenInvestments,
   isInstalled,
   canInstall = true,
   generating,
@@ -223,6 +226,26 @@ export function MobileMenuSheet({
               <div>
                 <span className="text-sm font-semibold text-white block">Histórico Recente</span>
                 <span className="text-xs text-slate-400">Últimas cadastradas ou recebidas</span>
+              </div>
+            </div>
+            <ChevronRight className="size-4 text-slate-500" />
+          </button>
+        )}
+
+        {/* Investimentos & Patrimônio */}
+        {onOpenInvestments && (
+          <button
+            type="button"
+            onClick={onOpenInvestments}
+            className="w-full p-4 flex items-center justify-between hover:bg-slate-800/40 transition-colors text-left cursor-pointer active:bg-slate-800/60"
+          >
+            <div className="flex items-center gap-3">
+              <div className="size-9 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 flex items-center justify-center">
+                <TrendingUp className="size-4" />
+              </div>
+              <div>
+                <span className="text-sm font-semibold text-white block">Investimentos & Patrimônio</span>
+                <span className="text-xs text-slate-400">Aportes, classes de ativos e simulador</span>
               </div>
             </div>
             <ChevronRight className="size-4 text-slate-500" />

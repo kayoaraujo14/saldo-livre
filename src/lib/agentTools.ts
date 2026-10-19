@@ -37,6 +37,7 @@ import {
   todayKey,
   uid,
 } from './utils'
+import { fsDeleteAgentRule, fsSaveAgentRule } from './firebase'
 
 export interface AgentEnv {
   getTransactions: () => Transaction[]
@@ -131,6 +132,8 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
         return gerenciarRegras(env, args)
       case 'consultarTransacoes':
         return consultar(env, args)
+      case 'gerarGraficoFinanceiro':
+        return gerarGrafico(env, args)
       default:
         return { response: { ok: false, erro: `Ferramenta desconhecida: ${name}` } }
     }
@@ -1797,6 +1800,9 @@ async function relatorio(env: AgentEnv): Promise<ToolResult> {
       limiteDiarioSeguro: s.dailyLimit,
       gastosPorCategoria: s.byCategory,
       gastosPorSubcategoria: s.bySubcategory || [],
+      totalInvestido: s.totalInvested || 0,
+      totalInvestidoAcumulado: s.totalInvestedAccumulated || 0,
+      investimentosPorClasse: s.byInvestmentSubcategory || [],
       contasEmAberto: open,
       reservasDeCartao: reserves,
       aReceberTotal: s.receivableTotal,
@@ -2105,15 +2111,34 @@ export function addLearnedRule(uid: string, ruleText: string, category = 'Geral'
   }
   const updated = [newRule, ...existing.filter((r) => r.rule.toLowerCase() !== trimmed.toLowerCase())]
   saveLearnedRules(uid, updated)
+
+  // Persiste no banco de dados Firestore se usuário autenticado
+  if (uid && uid !== 'guest') {
+    fsSaveAgentRule(uid, newRule).catch((err) => {
+      console.warn('Erro ao persistir nova regra no Firestore:', err)
+    })
+  }
+
   return newRule
 }
 
 export function removeLearnedRule(uid: string, idOrSearch: string): boolean {
   const existing = getLearnedRules(uid)
   const target = idOrSearch.trim().toLowerCase()
+  const removedRules = existing.filter((r) => r.id === idOrSearch || r.rule.toLowerCase().includes(target))
   const filtered = existing.filter((r) => r.id !== idOrSearch && !r.rule.toLowerCase().includes(target))
   if (filtered.length !== existing.length) {
     saveLearnedRules(uid, filtered)
+
+    // Remove do banco de dados Firestore
+    if (uid && uid !== 'guest') {
+      for (const r of removedRules) {
+        fsDeleteAgentRule(uid, r.id).catch((err) => {
+          console.warn('Erro ao excluir regra do Firestore:', err)
+        })
+      }
+    }
+
     return true
   }
   return false
@@ -2175,4 +2200,40 @@ async function gerenciarRegras(env: AgentEnv, args: Record<string, unknown>): Pr
 
   return { response: { ok: false, erro: 'Ação inválida para gerenciarRegrasEMemoria.' } }
 }
+
+async function gerarGrafico(_env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const tipo = String(args.tipo || 'donut').toLowerCase()
+  const titulo = String(args.titulo || 'Gráfico Financeiro')
+  const descricao = args.descricao ? String(args.descricao) : undefined
+  const dados = Array.isArray(args.dados) ? args.dados : []
+
+  const chartPayload = {
+    type: ['donut', 'pie', 'bar', 'line'].includes(tipo) ? tipo : 'donut',
+    title: titulo,
+    description: descricao,
+    data: dados,
+  }
+
+  const chartBlock = `\n\`\`\`chart\n${JSON.stringify(chartPayload, null, 2)}\n\`\`\`\n`
+
+  return {
+    response: {
+      ok: true,
+      tipo,
+      titulo,
+      descricao,
+      dados,
+      graficoMarkdown: chartBlock,
+    },
+    action: {
+      kind: 'report',
+      title: `📊 ${titulo}`,
+      lines: [
+        { label: 'Tipo', value: tipo.toUpperCase() },
+        { label: 'Itens mapeados', value: `${dados.length} séries/categorias` },
+      ],
+    },
+  }
+}
+
 

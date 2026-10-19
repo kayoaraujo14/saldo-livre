@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useFinance } from '@/store/FinanceContext'
-import { CATEGORIES, type Category, type EstimationRule, type PaymentMethod, type RecurringBill, type SplitType, type TransactionType } from '@/types'
+import { CATEGORIES, CATEGORY_GROUPS, type Category, type EstimationRule, type PaymentMethod, type RecurringBill, type SplitType, type TransactionType } from '@/types'
 import { ESTIMATION_LABELS } from '@/lib/finance'
 import { formatBRL, currentMonthKey, shiftMonth, monthLabel } from '@/lib/utils'
 import { RefreshCw, Plus, Trash2, Calendar, Split, Sparkles, Wallet, Check, Edit2, Clock, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
@@ -27,6 +27,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
   const [billType, setBillType] = useState<TransactionType>('expense')
   const [description, setDescription] = useState('')
   const [category, setCategory] = useState<Category>('Moradia')
+  const [subcategory, setSubcategory] = useState<string | null>(null)
   const [dueDay, setDueDay] = useState(10)
   const [defaultAmount, setDefaultAmount] = useState(150)
   const [estimationRule, setEstimationRule] = useState<EstimationRule>('fixed')
@@ -49,11 +50,14 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
 
   const handleOpenNew = () => {
     if (!me) return
+    const initialCat: Category = 'Moradia'
+    const initialSub = CATEGORY_GROUPS[initialCat]?.subcategories?.[0] || null
     setEditingBill({
       id: `new_${Date.now()}`,
       ownerUid: me.uid,
       description: '',
-      category: 'Moradia',
+      category: initialCat,
+      subcategory: initialSub,
       dueDay: 10,
       defaultAmount: 200,
       estimationRule: 'fixed',
@@ -64,7 +68,8 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
     })
     setBillType('expense')
     setDescription('')
-    setCategory('Moradia')
+    setCategory(initialCat)
+    setSubcategory(initialSub)
     setDueDay(10)
     setDefaultAmount(200)
     setEstimationRule('fixed')
@@ -78,9 +83,11 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
 
   const handleEdit = (bill: RecurringBill) => {
     setEditingBill(bill)
-    setBillType(bill.type ?? 'expense')
+    const bType = bill.type ?? 'expense'
+    setBillType(bType)
     setDescription(bill.description)
     setCategory(bill.category)
+    setSubcategory(bill.subcategory || null)
     setDueDay(bill.dueDay)
     setDefaultAmount(bill.defaultAmount)
     setEstimationRule(bill.estimationRule)
@@ -109,10 +116,12 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       endMonthVal = shiftMonth(startMonth, installmentsVal - 1)
     }
 
+    const effectiveCat = billType === 'income' ? 'Receita' : category
     const toSave: RecurringBill = {
       ...editingBill,
       description: description.trim(),
-      category: billType === 'income' ? 'Receita' : category,
+      category: effectiveCat,
+      subcategory: subcategory || null,
       dueDay: Number(dueDay),
       defaultAmount: Number(defaultAmount),
       estimationRule,
@@ -254,7 +263,10 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   type="button"
                   onClick={() => {
                     setBillType('expense')
-                    if (category === 'Receita') setCategory('Moradia')
+                    if (category === 'Receita') {
+                      setCategory('Moradia')
+                      setSubcategory(CATEGORY_GROUPS['Moradia']?.subcategories?.[0] || null)
+                    }
                   }}
                   className={`py-1.5 px-3 rounded-lg font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
                     billType === 'expense'
@@ -270,6 +282,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   onClick={() => {
                     setBillType('income')
                     setCategory('Receita')
+                    setSubcategory(CATEGORY_GROUPS['Receita']?.subcategories?.[0] || null)
                   }}
                   className={`py-1.5 px-3 rounded-lg font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
                     billType === 'income'
@@ -299,7 +312,14 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
               {billType === 'expense' && (
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-300">Categoria</label>
-                  <Select value={category} onValueChange={(v) => setCategory(v as Category)}>
+                  <Select
+                    value={category}
+                    onValueChange={(v) => {
+                      const newCat = v as Category
+                      setCategory(newCat)
+                      setSubcategory(CATEGORY_GROUPS[newCat]?.subcategories?.[0] || null)
+                    }}
+                  >
                     <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs sm:text-sm">
                       <SelectValue />
                     </SelectTrigger>
@@ -313,6 +333,34 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   </Select>
                 </div>
               )}
+
+              {/* Subcategoria */}
+              {(() => {
+                const currentCat = billType === 'income' ? 'Receita' : category
+                const availableSubs = CATEGORY_GROUPS[currentCat]?.subcategories || []
+                return (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-slate-300">
+                      Subcategoria {billType === 'income' ? 'da Entrada' : 'da Despesa'}
+                    </label>
+                    <Select
+                      value={subcategory || ''}
+                      onValueChange={(v) => setSubcategory(v || null)}
+                    >
+                      <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs sm:text-sm">
+                        <SelectValue placeholder="Selecione a subcategoria..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableSubs.map((s) => (
+                          <SelectItem key={s} value={s} className="text-xs">
+                            {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )
+              })()}
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-300">
@@ -552,6 +600,11 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                           ) : (
                             <Badge variant="outline" className="text-[10px] bg-slate-800 text-slate-300 border-slate-700">
                               {bill.category}
+                            </Badge>
+                          )}
+                          {bill.subcategory && (
+                            <Badge variant="outline" className="text-[10px] bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
+                              › {bill.subcategory}
                             </Badge>
                           )}
                           <Badge

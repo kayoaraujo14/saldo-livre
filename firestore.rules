@@ -48,6 +48,28 @@ service cloud.firestore {
         resource.data.assignedFriendUid == request.auth.uid
       );
     }
+
+    // Regras e Memórias do Agente (Por Usuário)
+    match /users/{userId}/agent_rules/{ruleId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /agent_rules/{ruleId} {
+      allow read, write: if request.auth != null && (
+        resource.data.ownerUid == request.auth.uid ||
+        request.resource.data.ownerUid == request.auth.uid
+      );
+    }
+
+    // Histórico de Sessões de Chat e Conversas do Copiloto (Por Usuário)
+    match /users/{userId}/chat_sessions/{sessionId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /chat_sessions/{sessionId} {
+      allow read, write: if request.auth != null && (
+        resource.data.ownerUid == request.auth.uid ||
+        request.resource.data.ownerUid == request.auth.uid
+      );
+    }
   }
 }
 

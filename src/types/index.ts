@@ -18,6 +18,7 @@ export const CATEGORIES = [
   'Assinaturas',
   'Educação',
   'Compras',
+  'Investimentos',
   'Pets',
   'Cartão Terceiros',
   'Estorno',
@@ -137,6 +138,20 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
       'Eletrônicos & Informática',
       'Casa & Decoração',
       'Presentes',
+    ],
+  },
+  Investimentos: {
+    icon: 'TrendingUp',
+    color: '#059669',
+    description: 'Aportes, patrimônio e aplicações financeiras',
+    subcategories: [
+      'Renda Fixa (CDB / Tesouro / LCI / LCA)',
+      'Ações & Fundos Imobiliários (FIIs)',
+      'Criptomoedas & Ativos Digitais',
+      'Reserva de Emergência',
+      'Previdência Privada',
+      'Fundos de Investimento',
+      'Outros Investimentos',
     ],
   },
   Pets: {
@@ -371,6 +386,9 @@ export interface MonthSummary {
   payableToOthers: number
   byCategory: { category: string; amount: number }[]
   bySubcategory?: { category: string; subcategory: string; amount: number; count: number }[]
+  totalInvested: number
+  totalInvestedAccumulated: number
+  byInvestmentSubcategory?: { subcategory: string; amount: number; percentage: number }[]
 }
 
 export interface FutureMonthProjection {

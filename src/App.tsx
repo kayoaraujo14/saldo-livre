@@ -15,6 +15,7 @@ import { FriendsModal } from '@/components/modals/FriendsModal'
 import { InstallAppModal } from '@/components/modals/InstallAppModal'
 import { OpenFinanceModal } from '@/components/modals/OpenFinanceModal'
 import { RecentActivityModal } from '@/components/modals/RecentActivityModal'
+import { InvestmentsModal } from '@/components/modals/InvestmentsModal'
 import { ScrollToTop } from '@/components/ui/ScrollToTop'
 import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
@@ -51,6 +52,7 @@ function MainDashboard() {
   const [installModalOpen, setInstallModalOpen] = useState(false)
   const [openFinanceModalOpen, setOpenFinanceModalOpen] = useState(false)
   const [recentActivityModalOpen, setRecentActivityModalOpen] = useState(false)
+  const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [generatingBills, setGeneratingBills] = useState(false)
 
@@ -102,6 +104,7 @@ function MainDashboard() {
         onOpenFriends={() => setFriendsModalOpen(true)}
         onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
         onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
+        onOpenInvestments={() => setInvestmentsModalOpen(true)}
       />
 
       {/* 2. Main Content Area */}
@@ -269,6 +272,7 @@ function MainDashboard() {
               onOpenFriends={() => setFriendsModalOpen(true)}
               onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
               onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
+              onOpenInvestments={() => setInvestmentsModalOpen(true)}
               onGenerateBills={handleGenerate}
               onOpenInstall={() => setInstallModalOpen(true)}
               isInstalled={isInstalled}
@@ -324,6 +328,11 @@ function MainDashboard() {
         open={recentActivityModalOpen}
         onOpenChange={setRecentActivityModalOpen}
         onEditTx={handleEditTx}
+      />
+      <InvestmentsModal
+        open={investmentsModalOpen}
+        onOpenChange={setInvestmentsModalOpen}
+        onOpenNewTx={handleOpenNewTx}
       />
     </div>
   )

@@ -338,6 +338,74 @@ ${tips.map((t) => `- ${t}`).join('\n') || '- Seu mês está equilibrado. Continu
     }
   }
 
+  // ---------------- Geração de Gráficos Financeiros ----------------
+  if (/gr[aá]fico|chart|visualiza|pizza|donut|barras|evoluc[aã]o|distribui[cç][aã]o/.test(n)) {
+    const isInvestment = /invest|aporta|patrimon|ativo|renda fixa|acao|acoes|fii|cripto/.test(n)
+    const r = await execute('obterRelatorioEProjecaoMensal', {})
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+
+    if (isInvestment) {
+      const invClasses = (d.investimentosPorClasse as Array<{ subcategory: string; amount: number; percentage: number }>) || []
+      const totalInv = (d.totalInvestido as number) || 0
+
+      if (invClasses.length === 0 || totalInv === 0) {
+        return {
+          text: `📊 **Análise de Investimentos de ${d.mes}:**\n\nVocê ainda não possui lançamentos registrados na categoria **Investimentos** neste mês.\n\nPara começar a acompanhar sua carteira e gráficos, você pode registrar aportes (ex: *"Investi R$ 500 no Tesouro Selic"* ou *"Comprei R$ 300 em Fundos Imobiliários"*).`,
+          actions,
+        }
+      }
+
+      const chartData = invClasses.map((item) => ({
+        label: item.subcategory,
+        value: item.amount,
+      }))
+
+      const chartMarkdown = `\n\`\`\`chart\n${JSON.stringify({
+        type: 'donut',
+        title: `Alocação de Investimentos (${d.mes})`,
+        description: `Total aportado neste mês: ${formatBRL(totalInv)}`,
+        data: chartData,
+      }, null, 2)}\n\`\`\`\n`
+
+      return {
+        text: `📈 **Gráfico de Investimentos gerado com sucesso!**\n\nNeste mês você aportou um total de **${formatBRL(totalInv)}** distribuído em **${invClasses.length} classe(s) de ativos**:\n\n${chartMarkdown}\n\n💡 *Dica:* Diversificar entre Renda Fixa e Ativos Geradores de Renda (FIIs/Ações) fortalece a proteção e o crescimento do seu patrimônio.`,
+        actions,
+      }
+    }
+
+    // Default to categories expense chart
+    const cats = (d.gastosPorCategoria as Array<{ category: string; amount: number }>) || []
+    const totalCommitted = (d.comprometido as number) || 0
+
+    if (cats.length === 0 || totalCommitted === 0) {
+      return {
+        text: `📊 **Gráfico Financeiro de ${d.mes}:**\n\nAinda não há despesas cadastradas neste mês para gerar um gráfico de distribuição. Cadastre seus primeiros gastos para visualizar a análise completa!`,
+        actions,
+      }
+    }
+
+    const chartData = cats.slice(0, 8).map((c) => ({
+      label: c.category,
+      value: c.amount,
+    }))
+
+    const isBar = /barra|comparativ|ranking/.test(n)
+    const chartType = isBar ? 'bar' : 'donut'
+
+    const chartMarkdown = `\n\`\`\`chart\n${JSON.stringify({
+      type: chartType,
+      title: `Distribuição de Gastos — ${d.mes}`,
+      description: `Total de despesas computadas: ${formatBRL(totalCommitted)}`,
+      data: chartData,
+    }, null, 2)}\n\`\`\`\n`
+
+    return {
+      text: `📊 **Aqui está a análise visual das suas despesas em ${d.mes}:**\n\n${chartMarkdown}\n\nO total comprometido no mês é de **${formatBRL(totalCommitted)}**. Seu **Saldo Livre** atual é de **${formatBRL(d.saldoLivreReal as number)}**.`,
+      actions,
+    }
+  }
+
   // ---------------- Saldo Livre / Limite Diário Direto ----------------
   if (/saldo livre|qual.*saldo|quanto.*saldo|meu saldo|limite diario|qual.*limite|quanto tenho/.test(n)) {
     const r = await execute('obterRelatorioEProjecaoMensal', {})

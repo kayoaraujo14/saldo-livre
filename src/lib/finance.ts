@@ -473,8 +473,10 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
   let receivableFromExternal = 0
   let receivableFromFriends = 0
   let payableToOthers = 0
+  let totalInvested = 0
   const cat = new Map<string, number>()
   const subcat = new Map<string, { category: string; subcategory: string; amount: number; count: number }>()
+  const investSubcat = new Map<string, number>()
 
   for (const tx of monthTxs) {
     const impact = impactFor(tx, uid, all)
@@ -488,6 +490,13 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
 
     if (impact > 0) {
       cat.set(tx.category, (cat.get(tx.category) ?? 0) + impact)
+
+      if (tx.category === 'Investimentos') {
+        totalInvested += impact
+        const subName = tx.subcategory || 'Outros Investimentos'
+        investSubcat.set(subName, (investSubcat.get(subName) ?? 0) + impact)
+      }
+
       if (tx.subcategory) {
         const subKey = `${tx.category} › ${tx.subcategory}`
         const existing = subcat.get(subKey)
@@ -527,6 +536,15 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
     }
   }
 
+  // Total acumulado investido no histórico do usuário
+  let totalInvestedAccumulated = 0
+  for (const tx of all) {
+    if (tx.category === 'Investimentos' && tx.visibleToUids.includes(uid)) {
+      const imp = impactFor(tx, uid, all)
+      if (imp > 0) totalInvestedAccumulated += imp
+    }
+  }
+
   const committed = committedEstimated + committedPending
   const freeBalance = income - (paid + committed)
   const daysRemaining = getDaysRemaining(monthKey)
@@ -547,6 +565,15 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
     receivableFromFriends: round2(receivableFromFriends),
     receivableTotal: round2(receivableFromPartner + receivableFromExternal + receivableFromFriends),
     payableToOthers: round2(payableToOthers),
+    totalInvested: round2(totalInvested),
+    totalInvestedAccumulated: round2(totalInvestedAccumulated),
+    byInvestmentSubcategory: [...investSubcat.entries()]
+      .map(([subcategory, amount]) => ({
+        subcategory,
+        amount: round2(amount),
+        percentage: totalInvested > 0 ? Math.round((amount / totalInvested) * 100) : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount),
     byCategory: [...cat.entries()]
       .map(([category, amount]) => ({ category, amount: round2(amount) }))
       .sort((a, b) => b.amount - a.amount),
@@ -738,6 +765,7 @@ export function generateMonthBills(args: {
       paidByUid: me.uid,
       description: bill.description,
       category: isIncome ? 'Receita' : bill.category,
+      subcategory: bill.subcategory || null,
       type: bill.type ?? 'expense',
       paymentMethod: bill.paymentMethod ?? (isIncome ? 'pix' : 'bill'),
       status: 'estimated',
@@ -946,12 +974,22 @@ const SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
   ['Receita', 'Salário Principal', /salario|salário|folha|pro-?labore|empresa/i],
   ['Receita', 'Pix Recebido', /pix recebido|ted recebida|deposito|depósito/i],
 
+  // Investimentos
+  ['Investimentos', 'Renda Fixa (CDB / Tesouro / LCI / LCA)', /cdb|tesouro|selic|lci|lca|ipca|renda fixa|debênture|debenture|cri|cra|nuinvest|inter invest/i],
+  ['Investimentos', 'Ações & Fundos Imobiliários (FIIs)', /acoes|ações|fii|fiis|hglg|mxrf|knip|xpml|bova11|ivvb11|smal11|itub|petr|vale|bbas|wege|dividendo|jcp/i],
+  ['Investimentos', 'Criptomoedas & Ativos Digitais', /bitcoin|btc|ethereum|eth|solana|binance|mercado bitcoin|crypto|cripto/i],
+  ['Investimentos', 'Reserva de Emergência', /reserva|reserva de emergencia|guardar dinheiro|cofrinho|reserva financeira/i],
+  ['Investimentos', 'Previdência Privada', /previdencia|previdência|pgbl|vgbl/i],
+  ['Investimentos', 'Fundos de Investimento', /fundo de investimento|fundo multimercado|fundo cambial/i],
+  ['Investimentos', 'Outros Investimentos', /investimento|aporte|aplicacao|aplicação|corretora|xp investimentos|rico|clear|btg/i],
+
   // Estorno
   ['Estorno', 'Crédito na Fatura', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|cashback/i],
 ]
 
 const CATEGORY_HINTS: [Category, RegExp][] = [
   ['Estorno', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|credito na fatura|credit voucher|cashback/i],
+  ['Investimentos', /investimento|aporte|cdb|tesouro|selic|lci|lca|fii|fiis|acoes|ações|cripto|bitcoin|btc|eth|corretora|nuinvest|binance/i],
   ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|financiamento|iptu|casa|apartamento/i],
   ['Alimentação', /jantar|almoco|cafe|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira/i],
   ['Transporte', /uber|99|gasolina|combustivel|onibus|metro|estacionamento|carro|pedagio/i],
