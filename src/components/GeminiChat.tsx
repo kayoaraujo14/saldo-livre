@@ -51,6 +51,8 @@ import {
   UploadCloud,
   Check,
   XCircle,
+  Mic,
+  MicOff,
 } from 'lucide-react'
 
 
@@ -165,6 +167,146 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Voice / Audio message recognition state
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [audioTranscript, setAudioTranscript] = useState('')
+  const recognitionRef = useRef<any>(null)
+  const recordingTimerRef = useRef<any>(null)
+  const mediaStreamRef = useRef<MediaStream | null>(null)
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      if (mediaStreamRef.current) mediaStreamRef.current.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
+  const startRecording = async () => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+
+    if (!SpeechRecognition) {
+      alert(
+        'O reconhecimento de voz nativo não é suportado por este navegador. Para enviar mensagens de áudio, utilize o Google Chrome, Microsoft Edge ou Safari.',
+      )
+      return
+    }
+
+    try {
+      // Requisita permissão de áudio para microfone
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+
+      const recognition = new SpeechRecognition()
+      recognition.lang = 'pt-BR'
+      recognition.continuous = true
+      recognition.interimResults = true
+
+      let finalTranscript = ''
+
+      recognition.onresult = (event: any) => {
+        let interim = ''
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const item = event.results[i]
+          if (item.isFinal) {
+            finalTranscript += item[0].transcript + ' '
+          } else {
+            interim += item[0].transcript
+          }
+        }
+        const combined = (finalTranscript + interim).trim()
+        setAudioTranscript(combined)
+      }
+
+      recognition.onerror = (event: any) => {
+        console.warn('Erro no reconhecimento de voz:', event.error)
+        if (event.error === 'not-allowed') {
+          alert(
+            'Permissão de acesso ao microfone negada. Permita o uso do microfone nas opções do navegador para enviar áudio.',
+          )
+          stopRecording(false)
+        }
+      }
+
+      recognitionRef.current = recognition
+      recognition.start()
+      setIsRecording(true)
+      setRecordingSeconds(0)
+      setAudioTranscript('')
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds((prev) => prev + 1)
+      }, 1000)
+    } catch (err) {
+      console.warn('Falha ao acessar microfone:', err)
+      alert(
+        'Não foi possível acessar o microfone. Verifique se o microfone está conectado e habilitado no navegador.',
+      )
+    }
+  }
+
+  const stopRecording = (sendImmediately = false) => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+      mediaStreamRef.current = null
+    }
+
+    setIsRecording(false)
+
+    const finalResult = audioTranscript.trim()
+    setAudioTranscript('')
+    setRecordingSeconds(0)
+
+    if (finalResult) {
+      if (sendImmediately) {
+        handleSend(finalResult)
+      } else {
+        setInput((prev) => (prev ? `${prev} ${finalResult}` : finalResult))
+      }
+    }
+  }
+
+  const cancelRecording = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort()
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop())
+      mediaStreamRef.current = null
+    }
+
+    setIsRecording(false)
+    setAudioTranscript('')
+    setRecordingSeconds(0)
+  }
 
   const handleFileSelect = (file: File) => {
     if (!file) return
@@ -402,71 +544,78 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   const isLiveGemini = Boolean(apiKey)
   const [activeModel, setActiveModel] = useState<string>(getSelectedGeminiModel())
 
-  // Sugestões inteligentes aprendendo com os dados e histórico do usuário
+  // Sugestões inteligentes avançadas focadas em análise financeira real e tomada de decisão
   const dynamicSuggestions = useMemo(() => {
     const list: string[] = []
+    const free = summary?.freeBalance ?? 0
+    const daily = summary?.dailyLimit
+    const invested = summary?.totalInvested ?? 0
+    const income = summary?.income ?? 0
+    const receivables = summary?.receivableTotal ?? 0
+    const label = monthLabel(month)
 
-    // 1. Prompts aprendidos do histórico do próprio usuário
-    const learned = getLearnedPrompts()
-    if (learned.length > 0) {
-      list.push(...learned.slice(0, 2))
+    // 1. Gráficos & Visualizações Financeiras
+    list.push(`📊 Gerar gráfico de distribuição dos meus gastos em ${label}`)
+    if (invested > 0 || (summary?.byInvestmentSubcategory && summary.byInvestmentSubcategory.length > 0)) {
+      list.push(`📈 Criar gráfico de alocação da minha carteira de investimentos`)
+    } else {
+      list.push(`📊 Criar gráfico comparativo das categorias onde mais gastei`)
     }
 
-    // 2. Contas pendentes ou estimadas do mês atual
+    // 2. Análise Estratégica & Regra 50/30/20
+    list.push(`⚖️ Avaliar meus gastos de ${label} segundo a Regra 50/30/20`)
+
+    // 3. Limite Diário Seguro e Projeção
+    if (daily != null) {
+      list.push(`💡 Qual é o meu limite diário seguro até o final de ${label}?`)
+      list.push(`🎉 Quanto posso gastar no final de semana sem comprometer o mês?`)
+    }
+
+    // 4. Diagnóstico de Saúde do Saldo Livre
+    if (free < 0) {
+      list.push(`⚠️ Meu Saldo Livre está negativo em ${formatBRL(Math.abs(free))}. Onde cortar urgente?`)
+    } else if (free > 0 && income > 0) {
+      list.push(`✨ Tenho ${formatBRL(free)} de Saldo Livre. Quanto você recomenda aportar em investimentos?`)
+    }
+
+    // 5. Investimentos & Acúmulo Patrimonial
+    if (invested > 0) {
+      const rate = income > 0 ? (invested / income) * 100 : 0
+      list.push(`💰 Analisar minha taxa de poupança (${rate.toFixed(1)}%) e aportes acumulados`)
+    } else {
+      list.push(`🌱 Como começar a investir e quanto poupar da minha receita?`)
+    }
+
+    // 6. Contas Fixas vs Variáveis
     const pendingBills = monthTransactions.filter(
       (t) => t.type === 'expense' && t.status !== 'paid' && t.totalAmount > 0,
     )
     if (pendingBills.length > 0) {
       const bill = pendingBills[0]
       const cleanName = bill.description.replace(/\s*\(\d+\/\d+\)/, '').trim()
+      list.push(`⚡ Quanto falta pagar das minhas contas de ${label}?`)
       list.push(`A conta de ${cleanName} veio R$ ${effectiveAmount(bill)}, atualize para mim`)
-      list.push(`Marcar conta de ${cleanName} como paga`)
+    } else {
+      list.push(`🔍 Onde estão os maiores ralos de dinheiro no meu orçamento deste mês?`)
     }
 
-    // 3. Divisões com amigos conectados
-    if (friends.length > 0) {
-      const topFriend = friends[0]
-      list.push(`Almoço de R$ 90 dividido 50/50 com ${topFriend.name}`)
-      list.push(`Lançar compra de R$ 120 onde ${topFriend.name} paga 100%`)
-    } else if (partner) {
-      list.push(`Jantar de R$ 160 dividido 50/50 com ${partner.name}`)
+    // 7. Recebíveis e Amigos
+    if (receivables > 0) {
+      list.push(`📬 Detalhar todos os valores que tenho a receber (${formatBRL(receivables)})`)
     }
 
-    // 4. Cartões de crédito cadastrados
+    // 8. Fatura de Cartões
     if (cards.length > 0) {
       const card = cards[0]
-      list.push(`Quanto falta para fechar a fatura do cartão ${card.cardName}?`)
+      list.push(`💳 Qual a previsão da fatura do cartão ${card.cardName} e compras ativas?`)
     }
 
-    // 5. Categorias mais frequentes
-    const catCounts: Record<string, number> = {}
-    monthTransactions.forEach((t) => {
-      catCounts[t.category] = (catCounts[t.category] || 0) + 1
-    })
-    const topCategory = Object.keys(catCounts).sort((a, b) => catCounts[b] - catCounts[a])[0]
-    if (topCategory && topCategory !== 'Receita') {
-      list.push(`Quanto gastei com ${topCategory} em ${monthLabel(month)}?`)
-      list.push(`Adicionar despesa de R$ 45 em ${topCategory}`)
-    }
+    // 9. Projeção de Fluxo de Caixa Futuro
+    list.push(`🔮 Projetar meu fluxo de caixa e saldo para os próximos 3 meses`)
 
-    // 6. Regras Aprendidas e Exemplos Bancários Few-Shot
-    if (rules.length === 0) {
-      list.push('Aprenda que todo gasto no Zé Delivery é Lazer e 100% meu')
-      list.push('Aprenda que almoço no Da Vila custa R$ 35 e é Alimentação')
-    } else {
-      list.push('Quais regras você aprendeu sobre os meus gastos?')
-    }
-    list.push('Lançar compra parcelada: Magazine Luiza 03/10 R$ 189,90')
-
-    // 7. Consultas de limite e onboarding histórico
-    list.push('📄 Anexar fatura ou extrato em PDF')
-    list.push('🏦 Como funciona o Open Finance?')
-    list.push('Quanto ainda posso gastar hoje sem furar o Saldo Livre?')
-    list.push('Quais compras parceladas estão ativas na minha fatura?')
-
-    // Remove duplicatas
+    // Remove eventuais duplicatas
     return Array.from(new Set(list))
-  }, [monthTransactions, friends, partner, cards, month, rules])
+  }, [summary, monthTransactions, cards, month])
 
   // Pega fatia rotacionada de 4-5 chips
   const displayedChips = useMemo(() => {
@@ -1634,38 +1783,117 @@ Atenção crítica:
             type="button"
             variant="ghost"
             size="icon-sm"
+            disabled={isRecording}
             onClick={() => fileInputRef.current?.click()}
-            className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer"
+            className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer disabled:opacity-30"
             title="Anexar fatura ou extrato bancário em PDF"
           >
             <Paperclip className="size-4" />
           </Button>
 
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              pendingAttachment
-                ? 'Instruções opcionais (ou pressione Enter para analisar o PDF)...'
-                : 'Pergunte, lance gastos ou anexe faturas/extratos em PDF...'
-            }
-            className="min-h-[42px] max-h-24 pr-10 text-xs bg-slate-950/80 border-slate-800 resize-none focus-visible:ring-emerald-500/40"
-            rows={1}
-          />
-
+          {/* Audio Message Record Button */}
           <Button
+            type="button"
+            variant="ghost"
             size="icon-sm"
-            disabled={(!input.trim() && !pendingAttachment) || loading}
-            onClick={() => handleSend()}
-            className="absolute right-2 top-1/2 -translate-y-1/2 size-7 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm cursor-pointer disabled:opacity-30"
-            title="Enviar mensagem ou analisar anexo"
+            onClick={isRecording ? () => stopRecording(false) : startRecording}
+            className={`size-8 rounded-lg shrink-0 cursor-pointer transition-all ${
+              isRecording
+                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30 animate-pulse'
+                : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800/80'
+            }`}
+            title={isRecording ? 'Parar gravação de voz' : 'Enviar mensagem por voz / áudio'}
           >
-            <Send className="size-3.5" />
+            {isRecording ? <MicOff className="size-4 text-rose-400" /> : <Mic className="size-4" />}
           </Button>
+
+          {/* Live Recording Bar OR Textarea Input */}
+          {isRecording ? (
+            <div className="flex-1 min-h-[42px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-950/40 via-slate-950/90 to-rose-950/30 border border-rose-500/50 flex items-center justify-between gap-3 shadow-lg shadow-rose-950/30 animate-in fade-in">
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+                </span>
+                <span className="text-[11px] font-bold text-rose-300 font-mono">
+                  {Math.floor(recordingSeconds / 60)
+                    .toString()
+                    .padStart(2, '0')}
+                  :{(recordingSeconds % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
+
+              {/* Animated Waveform */}
+              <div className="hidden xs:flex items-center gap-0.5 shrink-0 px-1">
+                {[6, 12, 18, 10, 22, 14, 8, 16, 11].map((h, i) => (
+                  <span
+                    key={i}
+                    className="w-1 bg-rose-400/80 rounded-full animate-pulse"
+                    style={{
+                      height: `${h}px`,
+                      animationDuration: `${0.4 + (i % 3) * 0.2}s`,
+                    }}
+                  />
+                ))}
+              </div>
+
+              {/* Live speech preview */}
+              <div className="min-w-0 flex-1 truncate text-xs text-slate-200 font-medium italic">
+                {audioTranscript ? `"${audioTranscript}"` : 'Fale agora com o Copiloto...'}
+              </div>
+
+              {/* Cancel and Send Buttons */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={cancelRecording}
+                  className="size-7 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+                  title="Cancelar gravação"
+                >
+                  <X className="size-3.5" />
+                </button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => stopRecording(true)}
+                  disabled={!audioTranscript.trim()}
+                  className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-40"
+                  title="Enviar mensagem de áudio"
+                >
+                  <Send className="size-3" />
+                  <span className="hidden sm:inline">Enviar</span>
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  pendingAttachment
+                    ? 'Instruções opcionais (ou pressione Enter para analisar o PDF)...'
+                    : 'Pergunte, fale por áudio, lance gastos ou anexe PDFs...'
+                }
+                className="min-h-[42px] max-h-24 pr-10 text-xs bg-slate-950/80 border-slate-800 resize-none focus-visible:ring-emerald-500/40"
+                rows={1}
+              />
+
+              <Button
+                size="icon-sm"
+                disabled={(!input.trim() && !pendingAttachment) || loading}
+                onClick={() => handleSend()}
+                className="absolute right-2 top-1/2 -translate-y-1/2 size-7 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm cursor-pointer disabled:opacity-30"
+                title="Enviar mensagem ou analisar anexo"
+              >
+                <Send className="size-3.5" />
+              </Button>
+            </>
+          )}
         </div>
         <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5 px-1">
-          <span>Arraste e solte arquivos PDF no chat para importar faturas</span>
+          <span>🎙️ Clique no microfone para falar por áudio ou anexe PDFs</span>
           <span><kbd className="font-mono text-slate-400">Enter</kbd> envia</span>
         </div>
       </div>
