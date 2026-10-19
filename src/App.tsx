@@ -21,6 +21,7 @@ import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBotto
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
 import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
 import { usePwaInstall } from '@/hooks/usePwaInstall'
+import { useTheme } from '@/hooks/useTheme'
 import { Button } from '@/components/ui/button'
 import { Clock, ArrowRight, ReceiptText } from 'lucide-react'
 import type { Transaction } from '@/types'
@@ -41,6 +42,7 @@ function MainDashboard() {
   } = useFinance()
 
   const { canInstall, isInstalled, isIOS, promptInstall } = usePwaInstall()
+  useTheme()
 
   const [cardsModalOpen, setCardsModalOpen] = useState(false)
   const [recurringModalOpen, setRecurringModalOpen] = useState(false)
@@ -93,7 +95,7 @@ function MainDashboard() {
   const recentTransactions = monthTransactions.slice(0, 4)
 
   return (
-    <div className="flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden">
+    <div className="flex flex-col min-h-[100dvh] bg-[var(--background)] text-[var(--foreground)] font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden">
       {/* 1. Header (Sticky & Native Safe-Top Padded) */}
       <Header
         onOpenNewTx={handleOpenNewTx}

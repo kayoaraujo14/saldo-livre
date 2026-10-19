@@ -19,14 +19,12 @@ import {
 import { runDemoAgent } from '@/lib/demoAgent'
 import { effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
 import { formatBRL, formatShortDate, monthLabel, todayKey } from '@/lib/utils'
-import { getLearnedRules, addLearnedRule, removeLearnedRule, saveLearnedRules, type UserRule } from '@/lib/agentTools'
 import { extractTextFromPdf } from '@/lib/pdfParser'
 import { ChatChart } from '@/components/ui/ChatChart'
 import {
   fsSaveChatSession,
   fsDeleteChatSession,
   subscribeChatSessions,
-  subscribeAgentRules,
 } from '@/lib/firebase'
 import {
   Bot,
@@ -52,7 +50,6 @@ import {
   Check,
   XCircle,
   Mic,
-  MicOff,
 } from 'lucide-react'
 
 
@@ -135,6 +132,9 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     summary,
     pendingBatchTransactions,
     setPendingBatchTransactions,
+    rules: syncedRules,
+    addRule: contextAddRule,
+    deleteRule: contextDeleteRule,
   } = useFinance()
   const currentUid = me?.uid ?? 'guest'
 
@@ -158,7 +158,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [rules, setRules] = useState<UserRule[]>(() => getLearnedRules(currentUid))
+  const rules = syncedRules || []
   const [newRuleInput, setNewRuleInput] = useState('')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -168,19 +168,26 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Voice / Audio message recognition state
+  // Voice / Audio message recognition & recorder state
   const [isRecording, setIsRecording] = useState(false)
+  const isRecordingRef = useRef(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [audioTranscript, setAudioTranscript] = useState('')
   const recognitionRef = useRef<any>(null)
   const recordingTimerRef = useRef<any>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      isRecordingRef.current = false
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
       if (mediaStreamRef.current) mediaStreamRef.current.getTracks().forEach((t) => t.stop())
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try { mediaRecorderRef.current.stop() } catch { /* ignore */ }
+      }
     }
   }, [])
 
@@ -188,67 +195,106 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
 
-    if (!SpeechRecognition) {
-      alert(
-        'O reconhecimento de voz nativo não é suportado por este navegador. Para enviar mensagens de áudio, utilize o Google Chrome, Microsoft Edge ou Safari.',
-      )
+    let stream: MediaStream | null = null
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        mediaStreamRef.current = stream
+      }
+    } catch (err) {
+      console.warn('Microfone getUserMedia warning:', err)
+    }
+
+    // Inicializa MediaRecorder para garantia de captura real de áudio
+    if (stream && typeof MediaRecorder !== 'undefined') {
+      audioChunksRef.current = []
+      try {
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+          ? 'audio/webm;codecs=opus'
+          : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : MediaRecorder.isTypeSupported('audio/mp4')
+          ? 'audio/mp4'
+          : ''
+        const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            audioChunksRef.current.push(e.data)
+          }
+        }
+        recorder.start(250)
+        mediaRecorderRef.current = recorder
+      } catch (recErr) {
+        console.warn('Falha ao inicializar MediaRecorder:', recErr)
+      }
+    }
+
+    // Inicializa SpeechRecognition para transcrição ao vivo na tela
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition()
+        recognition.lang = 'pt-BR'
+        const isMobile = /iphone|ipad|ipod|android/i.test(navigator.userAgent)
+        recognition.continuous = !isMobile
+        recognition.interimResults = true
+
+        let finalTranscript = ''
+        recognition.onresult = (event: any) => {
+          let interim = ''
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const item = event.results[i]
+            if (item.isFinal) {
+              finalTranscript += item[0].transcript + ' '
+            } else {
+              interim += item[0].transcript
+            }
+          }
+          const combined = (finalTranscript + interim).trim()
+          if (combined) setAudioTranscript(combined)
+        }
+
+        recognition.onerror = (event: any) => {
+          console.warn('Reconhecimento de voz aviso:', event.error)
+          if (event.error === 'not-allowed') {
+            alert('Permissão de acesso ao microfone negada. Habilite o microfone nas configurações do navegador.')
+            cancelRecording()
+          }
+        }
+
+        recognition.onend = () => {
+          if (isRecordingRef.current) {
+            try {
+              recognition.start()
+            } catch {
+              // ignore
+            }
+          }
+        }
+
+        recognitionRef.current = recognition
+        recognition.start()
+      } catch (speechErr) {
+        console.warn('Reconhecimento de voz SpeechRecognition não inicializado, usando MediaRecorder:', speechErr)
+      }
+    }
+
+    if (!stream && !SpeechRecognition) {
+      alert('Seu navegador não possui suporte para microfone ou captura de áudio.')
       return
     }
 
-    try {
-      // Requisita permissão de áudio para microfone
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaStreamRef.current = stream
+    isRecordingRef.current = true
+    setIsRecording(true)
+    setRecordingSeconds(0)
+    setAudioTranscript('')
 
-      const recognition = new SpeechRecognition()
-      recognition.lang = 'pt-BR'
-      recognition.continuous = true
-      recognition.interimResults = true
-
-      let finalTranscript = ''
-
-      recognition.onresult = (event: any) => {
-        let interim = ''
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const item = event.results[i]
-          if (item.isFinal) {
-            finalTranscript += item[0].transcript + ' '
-          } else {
-            interim += item[0].transcript
-          }
-        }
-        const combined = (finalTranscript + interim).trim()
-        setAudioTranscript(combined)
-      }
-
-      recognition.onerror = (event: any) => {
-        console.warn('Erro no reconhecimento de voz:', event.error)
-        if (event.error === 'not-allowed') {
-          alert(
-            'Permissão de acesso ao microfone negada. Permita o uso do microfone nas opções do navegador para enviar áudio.',
-          )
-          stopRecording(false)
-        }
-      }
-
-      recognitionRef.current = recognition
-      recognition.start()
-      setIsRecording(true)
-      setRecordingSeconds(0)
-      setAudioTranscript('')
-
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1)
-      }, 1000)
-    } catch (err) {
-      console.warn('Falha ao acessar microfone:', err)
-      alert(
-        'Não foi possível acessar o microfone. Verifique se o microfone está conectado e habilitado no navegador.',
-      )
-    }
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1)
+    }, 1000)
   }
 
-  const stopRecording = (sendImmediately = false) => {
+  const stopRecording = async (sendImmediately = false) => {
+    isRecordingRef.current = false
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = null
@@ -263,27 +309,59 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
       recognitionRef.current = null
     }
 
+    let recordedBlob: Blob | null = null
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        await new Promise<void>((resolve) => {
+          mediaRecorderRef.current!.onstop = () => resolve()
+          mediaRecorderRef.current!.stop()
+        })
+        if (audioChunksRef.current.length > 0) {
+          const mime = mediaRecorderRef.current.mimeType || 'audio/webm'
+          recordedBlob = new Blob(audioChunksRef.current, { type: mime })
+        }
+      } catch (err) {
+        console.warn('Erro ao finalizar gravação:', err)
+      }
+      mediaRecorderRef.current = null
+    }
+
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop())
       mediaStreamRef.current = null
     }
 
     setIsRecording(false)
-
     const finalResult = audioTranscript.trim()
     setAudioTranscript('')
     setRecordingSeconds(0)
 
-    if (finalResult) {
-      if (sendImmediately) {
+    if (sendImmediately) {
+      if (finalResult) {
         handleSend(finalResult)
-      } else {
-        setInput((prev) => (prev ? `${prev} ${finalResult}` : finalResult))
+      } else if (recordedBlob && recordedBlob.size > 500) {
+        // Converte o áudio gravado em anexo multimodal do Gemini
+        const reader = new FileReader()
+        reader.onload = () => {
+          const res = reader.result as string
+          const b64 = res.includes(',') ? res.split(',')[1] : res
+          setPendingAttachment({
+            name: 'mensagem_de_voz.webm',
+            size: recordedBlob!.size,
+            type: recordedBlob!.type || 'audio/webm',
+            base64: b64,
+          })
+          handleSend('Por favor, ouça a mensagem de voz gravada pelo usuário e execute as instruções financeiras solicitadas.')
+        }
+        reader.readAsDataURL(recordedBlob)
       }
+    } else if (finalResult) {
+      setInput((prev) => (prev ? `${prev} ${finalResult}` : finalResult))
     }
   }
 
   const cancelRecording = () => {
+    isRecordingRef.current = false
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = null
@@ -298,6 +376,15 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
       recognitionRef.current = null
     }
 
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop()
+      } catch {
+        // ignore
+      }
+      mediaRecorderRef.current = null
+    }
+
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop())
       mediaStreamRef.current = null
@@ -306,6 +393,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     setIsRecording(false)
     setAudioTranscript('')
     setRecordingSeconds(0)
+    audioChunksRef.current = []
   }
 
   const handleFileSelect = (file: File) => {
@@ -356,50 +444,41 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     saveStoredSessions(currentUid, sessions)
     if (currentUid && currentUid !== 'guest') {
       const active = sessions.find((s) => s.id === currentSessionId)
-      if (active) {
+      // Only persist to Firestore if the session contains actual user activity
+      const hasContent = active && (active.messages.length > 1 || active.messages[0]?.id !== INITIAL_MESSAGE.id)
+      if (hasContent) {
         fsSaveChatSession(currentUid, active)
       }
     }
   }, [sessions, currentUid, currentSessionId])
 
-  // Real-time Firestore sync for chat sessions and agent rules
+  // Real-time Firestore sync for chat sessions
   useEffect(() => {
     if (!currentUid || currentUid === 'guest') return
 
     const unsubSessions = subscribeChatSessions(currentUid, (cloudSessions) => {
       if (cloudSessions.length > 0) {
-        setSessions((prev) => {
-          const prevMap = new Map(prev.map((s) => [s.id, s.updatedAt]))
-          const isDifferent =
-            cloudSessions.length !== prev.length ||
-            cloudSessions.some((cs) => prevMap.get(cs.id) !== cs.updatedAt)
-          if (!isDifferent) return prev
-          saveStoredSessions(currentUid, cloudSessions)
-          return cloudSessions
-        })
-      }
-    })
+        setSessions(cloudSessions)
+        saveStoredSessions(currentUid, cloudSessions)
 
-    const unsubRules = subscribeAgentRules(currentUid, (cloudRules) => {
-      if (cloudRules.length > 0) {
-        setRules((prev) => {
-          const isDiff =
-            cloudRules.length !== prev.length ||
-            cloudRules.some((cr, idx) => prev[idx]?.id !== cr.id)
-          if (!isDiff) return prev
-          saveLearnedRules(currentUid, cloudRules)
-          return cloudRules
+        // Se a sessão atual for apenas uma inicial em branco, chaveia para a mais recente da nuvem
+        setCurrentSessionId((prevId) => {
+          const current = sessions.find((s) => s.id === prevId)
+          const isBlank = !current || current.messages.length <= 1
+          if (isBlank && cloudSessions[0]?.id) {
+            return cloudSessions[0].id
+          }
+          return prevId
         })
       }
     })
 
     return () => {
       unsubSessions()
-      unsubRules()
     }
   }, [currentUid])
 
-  // Reload sessions & rules if user profile changes
+  // Reload sessions if user profile changes
   useEffect(() => {
     const loaded = getStoredSessions(currentUid)
     if (loaded.length > 0) {
@@ -416,32 +495,17 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
       setSessions([fresh])
       setCurrentSessionId(fresh.id)
     }
-    setRules(getLearnedRules(currentUid))
   }, [currentUid])
 
-  // Listen to automatic rules updates from agent tools
-  useEffect(() => {
-    const handleRulesUpdated = (e: Event) => {
-      const custom = e as CustomEvent<{ uid?: string }>
-      if (!custom.detail?.uid || custom.detail.uid === currentUid) {
-        setRules(getLearnedRules(currentUid))
-      }
-    }
-    window.addEventListener('saldo_livre_rules_updated', handleRulesUpdated)
-    return () => window.removeEventListener('saldo_livre_rules_updated', handleRulesUpdated)
-  }, [currentUid])
-
-  const handleAddRule = (text?: string) => {
+  const handleAddRule = async (text?: string) => {
     const ruleText = (text ?? newRuleInput).trim()
     if (!ruleText) return
-    addLearnedRule(currentUid, ruleText)
-    setRules(getLearnedRules(currentUid))
+    await contextAddRule(ruleText)
     setNewRuleInput('')
   }
 
-  const handleDeleteRule = (id: string) => {
-    removeLearnedRule(currentUid, id)
-    setRules(getLearnedRules(currentUid))
+  const handleDeleteRule = async (id: string) => {
+    await contextDeleteRule(id)
   }
 
 
@@ -913,8 +977,6 @@ Atenção crítica:
         setPendingBatchTransactions(extractedPending)
         updateSessionPendingTransactions(extractedPending)
       }
-
-      setRules(getLearnedRules(currentUid))
 
       const botMsg: ChatMessage = {
         id: `bot_${Date.now()}`,
@@ -1764,7 +1826,7 @@ Atenção crítica:
           </div>
         )}
 
-        <div className="relative flex items-center gap-2">
+        <div className="relative flex items-center gap-1.5 sm:gap-2 w-full max-w-full">
           {/* Hidden File Input */}
           <input
             ref={fileInputRef}
@@ -1778,95 +1840,32 @@ Atenção crítica:
             }}
           />
 
-          {/* Attachment Paperclip Button */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            disabled={isRecording}
-            onClick={() => fileInputRef.current?.click()}
-            className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer disabled:opacity-30"
-            title="Anexar fatura ou extrato bancário em PDF"
-          >
-            <Paperclip className="size-4" />
-          </Button>
-
-          {/* Audio Message Record Button */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={isRecording ? () => stopRecording(false) : startRecording}
-            className={`size-8 rounded-lg shrink-0 cursor-pointer transition-all ${
-              isRecording
-                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30 animate-pulse'
-                : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800/80'
-            }`}
-            title={isRecording ? 'Parar gravação de voz' : 'Enviar mensagem por voz / áudio'}
-          >
-            {isRecording ? <MicOff className="size-4 text-rose-400" /> : <Mic className="size-4" />}
-          </Button>
-
-          {/* Live Recording Bar OR Textarea Input */}
-          {isRecording ? (
-            <div className="flex-1 min-h-[42px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-950/40 via-slate-950/90 to-rose-950/30 border border-rose-500/50 flex items-center justify-between gap-3 shadow-lg shadow-rose-950/30 animate-in fade-in">
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
-                </span>
-                <span className="text-[11px] font-bold text-rose-300 font-mono">
-                  {Math.floor(recordingSeconds / 60)
-                    .toString()
-                    .padStart(2, '0')}
-                  :{(recordingSeconds % 60).toString().padStart(2, '0')}
-                </span>
-              </div>
-
-              {/* Animated Waveform */}
-              <div className="hidden xs:flex items-center gap-0.5 shrink-0 px-1">
-                {[6, 12, 18, 10, 22, 14, 8, 16, 11].map((h, i) => (
-                  <span
-                    key={i}
-                    className="w-1 bg-rose-400/80 rounded-full animate-pulse"
-                    style={{
-                      height: `${h}px`,
-                      animationDuration: `${0.4 + (i % 3) * 0.2}s`,
-                    }}
-                  />
-                ))}
-              </div>
-
-              {/* Live speech preview */}
-              <div className="min-w-0 flex-1 truncate text-xs text-slate-200 font-medium italic">
-                {audioTranscript ? `"${audioTranscript}"` : 'Fale agora com o Copiloto...'}
-              </div>
-
-              {/* Cancel and Send Buttons */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={cancelRecording}
-                  className="size-7 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
-                  title="Cancelar gravação"
-                >
-                  <X className="size-3.5" />
-                </button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => stopRecording(true)}
-                  disabled={!audioTranscript.trim()}
-                  className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm cursor-pointer disabled:opacity-40"
-                  title="Enviar mensagem de áudio"
-                >
-                  <Send className="size-3" />
-                  <span className="hidden sm:inline">Enviar</span>
-                </Button>
-              </div>
-            </div>
-          ) : (
+          {!isRecording ? (
             <>
+              {/* Attachment Paperclip Button */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => fileInputRef.current?.click()}
+                className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer"
+                title="Anexar fatura ou extrato bancário em PDF"
+              >
+                <Paperclip className="size-4" />
+              </Button>
+
+              {/* Audio Message Record Button */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={startRecording}
+                className="size-8 rounded-lg shrink-0 cursor-pointer transition-all text-slate-400 hover:text-rose-400 hover:bg-slate-800/80"
+                title="Enviar mensagem por voz / áudio"
+              >
+                <Mic className="size-4" />
+              </Button>
+
               <Textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -1890,6 +1889,50 @@ Atenção crítica:
                 <Send className="size-3.5" />
               </Button>
             </>
+          ) : (
+            /* Live Recording Bar - ocupa 100% da largura sem transbordamento ou rolagem lateral */
+            <div className="w-full max-w-full min-h-[42px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-950/50 via-slate-950/90 to-rose-950/40 border border-rose-500/50 flex items-center justify-between gap-2 shadow-lg shadow-rose-950/30 animate-in fade-in overflow-hidden box-border">
+              {/* Timer & Pulsing Indicator */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
+                </span>
+                <span className="text-[11px] font-bold text-rose-300 font-mono">
+                  {Math.floor(recordingSeconds / 60)
+                    .toString()
+                    .padStart(2, '0')}
+                  :{(recordingSeconds % 60).toString().padStart(2, '0')}
+                </span>
+              </div>
+
+              {/* Live speech preview */}
+              <div className="min-w-0 flex-1 truncate text-xs text-slate-200 font-medium italic">
+                {audioTranscript ? `"${audioTranscript}"` : 'Gravando áudio...'}
+              </div>
+
+              {/* Action Buttons: Cancel and Send */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={cancelRecording}
+                  className="size-7 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors shrink-0"
+                  title="Cancelar gravação"
+                >
+                  <X className="size-3.5" />
+                </button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => stopRecording(true)}
+                  className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-sm cursor-pointer shrink-0"
+                  title="Enviar mensagem de áudio"
+                >
+                  <Send className="size-3" />
+                  <span>Enviar</span>
+                </Button>
+              </div>
+            </div>
           )}
         </div>
         <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5 px-1">

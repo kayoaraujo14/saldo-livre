@@ -134,7 +134,7 @@ export function InvestmentsModal({ open, onOpenChange, onOpenNewTx }: Investment
     const targetInvest = income * 0.2
 
     // Estimate needs from categories
-    const needsCats = new Set(['Moradia', 'Alimentação', 'Saúde', 'Transporte', 'Educação'])
+    const needsCats = new Set(['Moradia', 'Alimentação', 'Saúde', 'Transporte', 'Educação', 'Financiamentos & Empréstimos'])
     let realNeeds = 0
     let realWants = 0
     let realInvest = totalInvestedThisMonth

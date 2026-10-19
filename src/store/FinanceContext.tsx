@@ -35,7 +35,7 @@ import {
 } from '@/lib/finance'
 import * as fb from '@/lib/firebase'
 import { DEMO_CARDS, DEMO_RECURRING, DEMO_USERS, buildDemoTransactions } from '@/lib/mockData'
-import { createToolExecutor } from '@/lib/agentTools'
+import { createToolExecutor, getLearnedRules, saveLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
 import type { ToolExecutor } from '@/lib/gemini'
 import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, formatInstallmentDesc, stripInstallmentSuffix } from '@/lib/utils'
 
@@ -225,10 +225,13 @@ interface FinanceContextValue {
   respondFriendRequest: (friendshipId: string, accept: boolean) => Promise<void>
   removeFriend: (friendshipId: string) => Promise<void>
   respondChargeRequest: (tx: Transaction, accept: boolean) => Promise<void>
-  // agente
+  // agente e regras
   executeTool: ToolExecutor
   pendingBatchTransactions: PendingBatchTransaction[]
   setPendingBatchTransactions: (txs: PendingBatchTransaction[]) => void
+  rules: UserRule[]
+  addRule: (text: string, category?: string) => Promise<UserRule>
+  deleteRule: (id: string) => Promise<void>
 }
 
 const FinanceContext = createContext<FinanceContextValue | null>(null)
@@ -270,6 +273,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [fbCards, setFbCards] = useState<Card[]>([])
   const [fbRecurring, setFbRecurring] = useState<RecurringBill[]>([])
   const [fbFriendships, setFbFriendships] = useState<Friendship[]>([])
+  const [fbRules, setFbRules] = useState<UserRule[]>([])
 
   useEffect(() => {
     if (mode !== 'firebase') return
@@ -288,6 +292,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         setFbCards([])
         setFbRecurring([])
         setFbFriendships([])
+        setFbRules([])
       }
       setAuthLoading(false)
     })
@@ -305,6 +310,10 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       fb.subscribeCards(uid, setFbCards),
       fb.subscribeRecurring(uid, setFbRecurring),
       fb.subscribeFriendships(uid, setFbFriendships),
+      fb.subscribeAgentRules(uid, (rules) => {
+        setFbRules(rules)
+        saveLearnedRules(uid, rules)
+      }),
     ]
     return () => unsubs.forEach((u) => u())
   }, [mode, authUser])
@@ -1286,6 +1295,38 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     [mode, friends, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction, commitDemo, sendFriendRequest, respondFriendRequest],
   )
 
+  const rules = useMemo(() => {
+    if (mode === 'demo') {
+      return sessionUid ? getLearnedRules(sessionUid) : []
+    }
+    return fbRules
+  }, [mode, sessionUid, fbRules])
+
+  const addRule = useCallback(
+    async (ruleText: string, category = 'Geral') => {
+      const uid = currentUid || 'guest'
+      const newRule = addLearnedRule(uid, ruleText, category)
+      if (mode === 'firebase' && authUser) {
+        await fb.fsSaveAgentRule(authUser.uid, newRule)
+        setFbRules((prev) => [newRule, ...prev.filter((r) => r.id !== newRule.id)])
+      }
+      return newRule
+    },
+    [currentUid, mode, authUser],
+  )
+
+  const deleteRule = useCallback(
+    async (ruleId: string) => {
+      const uid = currentUid || 'guest'
+      removeLearnedRule(uid, ruleId)
+      if (mode === 'firebase' && authUser) {
+        await fb.fsDeleteAgentRule(authUser.uid, ruleId)
+        setFbRules((prev) => prev.filter((r) => r.id !== ruleId))
+      }
+    },
+    [currentUid, mode, authUser],
+  )
+
   const value: FinanceContextValue = {
     mode,
     firebaseAvailable: fb.isFirebaseConfigured,
@@ -1343,6 +1384,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     executeTool,
     pendingBatchTransactions,
     setPendingBatchTransactions,
+    rules,
+    addRule,
+    deleteRule,
   }
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>

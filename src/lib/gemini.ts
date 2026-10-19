@@ -683,12 +683,13 @@ REGRAS DE FUNCIONAMENTO:
   * Assinaturas: Streaming de Vídeo (Netflix/Max/Disney), Streaming de Música (Spotify/Apple), Softwares, IA & Cloud (iCloud/ChatGPT), Telefonia Celular, Clubes & Assinaturas Recorrentes.
   * Educação: Cursos Online & Certificações, Faculdade & Pós-Graduação, Livros & E-books, Material Escolar & Papelaria, Idiomas.
   * Compras: Roupas & Acessórios, Calçados, Eletrônicos & Informática, Casa & Decoração, Presentes.
+  * Financiamentos & Empréstimos: Financiamento Imobiliário, Financiamento Veicular, Empréstimo Pessoal, Empréstimo Consignado, Amortização de Financiamento, Crédito Estudantil (FIES/Pravaler), Renegociação de Dívidas, Juros & Tarifas de Empréstimo, Outros Empréstimos.
   * Pets: Ração & Petiscos, Veterinário & Medicamentos, Banho, Tosa & Cuidados, Acessórios & Brinquedos.
   * Receita: Salário Principal, Adiantamento / 13º Salário, Freelance & Prestação de Serviços, Rendimentos & Investimentos, Reembolsos & Devoluções, Pix Recebido, Outras Receitas.
   * Cartão Terceiros: Compras de Amigos, Compras de Familiares, Outros Terceiros.
   * Estorno: Crédito na Fatura, Devolução / Cancelamento, Cashback Recebido.
   * Outros: Tarifas Bancárias & Juros, Impostos & Taxas Governamentais, Doações & Caridade, Diversos.
-- Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)").
+- Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)"; "Financiamento Habitacional / Caixa" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Financiamento Imobiliário"; "Financiamento Carro" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Financiamento Veicular"; "Empréstimo Pessoal Nubank" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Empréstimo Pessoal"; "Amortização de Parcela" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Amortização de Financiamento").
 - Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), chame "consultarTransacoes" com subcategoria ou utilize o relatório do mês, gerando respostas comparativas detalhadas com clareza.
 
 5. COMPRAS PARCELADAS:

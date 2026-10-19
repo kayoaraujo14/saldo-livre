@@ -983,14 +983,25 @@ const SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
   ['Investimentos', 'Fundos de Investimento', /fundo de investimento|fundo multimercado|fundo cambial/i],
   ['Investimentos', 'Outros Investimentos', /investimento|aporte|aplicacao|aplicação|corretora|xp investimentos|rico|clear|btg/i],
 
+  // Financiamentos & Empréstimos
+  ['Financiamentos & Empréstimos', 'Financiamento Imobiliário', /financiamento habitacional|habitacional|caixa habitacional|financ(?:iamento)? imobil|parcela (?:do |de )?(?:ape|apê|apartamento|imovel|imóvel|casa)|prestacao (?:ape|casa|imovel)|credito imobiliario|crédito imobiliário/i],
+  ['Financiamentos & Empréstimos', 'Financiamento Veicular', /financiamento (?:auto|veiculo|veículo|carro|moto)|parcela (?:do |de )?(?:carro|veiculo|veículo|moto)|consorcio (?:auto|carro|moto)|consórcio (?:auto|carro|moto)|bv financeira|pan auto|itau veiculos|santander auto/i],
+  ['Financiamentos & Empréstimos', 'Empréstimo Pessoal', /emprestimo pessoal|empréstimo pessoal|emprestimo nubank|emprestimo inter|emprestimo c6|emprestimo mercado pago|credito pessoal|crédito pessoal|emprestimo/i],
+  ['Financiamentos & Empréstimos', 'Empréstimo Consignado', /consignado|inss consignado|emprestimo folha|desconto em folha emprestimo|siape/i],
+  ['Financiamentos & Empréstimos', 'Amortização de Financiamento', /amortizacao|amortização|amortizar|reducao de prazo|redução de prazo|abatimento saldo devedor/i],
+  ['Financiamentos & Empréstimos', 'Crédito Estudantil (FIES/Pravaler)', /fies|pravaler|credito estudantil|crédito estudantil|financiamento estudantil/i],
+  ['Financiamentos & Empréstimos', 'Renegociação de Dívidas', /renegociacao|renegociação|acordo serasa|acordo divida|acordo dívida|recuperacao de credito|desenrola/i],
+  ['Financiamentos & Empréstimos', 'Juros & Tarifas de Empréstimo', /iof emprestimo|tarifa operacao credito|tac emprestimo|juros emprestimo|juros financ/i],
+
   // Estorno
   ['Estorno', 'Crédito na Fatura', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|cashback/i],
 ]
 
 const CATEGORY_HINTS: [Category, RegExp][] = [
   ['Estorno', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|credito na fatura|credit voucher|cashback/i],
+  ['Financiamentos & Empréstimos', /financiamento|emprestimo|empréstimo|consignado|amortizacao|amortização|fies|pravaler|renegociacao|renegociação|parcela habitacional|parcela auto|parcela carro|parcela moto|credito pessoal|crédito pessoal/i],
   ['Investimentos', /investimento|aporte|cdb|tesouro|selic|lci|lca|fii|fiis|acoes|ações|cripto|bitcoin|btc|eth|corretora|nuinvest|binance/i],
-  ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|financiamento|iptu|casa|apartamento/i],
+  ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|iptu|casa|apartamento/i],
   ['Alimentação', /jantar|almoco|cafe|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira/i],
   ['Transporte', /uber|99|gasolina|combustivel|onibus|metro|estacionamento|carro|pedagio/i],
   ['Saúde', /farmacia|remedio|medic|consulta|exame|dentista|academia|plano de saude|drogaria/i],
