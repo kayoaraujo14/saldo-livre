@@ -28,10 +28,7 @@ import {
   Landmark,
   History,
   TrendingUp,
-  Sun,
-  Moon,
 } from 'lucide-react'
-import { useTheme } from '@/hooks/useTheme'
 
 interface HeaderProps {
   onOpenNewTx: () => void
@@ -70,7 +67,6 @@ export function Header({
     pendingChargeGroups,
   } = useFinance()
 
-  const { theme, toggleTheme } = useTheme()
   const [generating, setGenerating] = useState(false)
   const [generateToast, setGenerateToast] = useState<{ created: number; skipped: number } | null>(null)
 
@@ -330,20 +326,6 @@ export function Header({
               </DropdownMenuContent>
             </DropdownMenu>
             </div>
-
-            {/* Theme Toggle Button (Dark / Light Mode) */}
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="size-8 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-center text-slate-300 hover:text-amber-400 hover:border-slate-700 transition-all cursor-pointer shadow-sm"
-              title={theme === 'dark' ? 'Alternar para Modo Claro' : 'Alternar para Modo Escuro'}
-            >
-              {theme === 'dark' ? (
-                <Sun className="size-4 text-amber-400 hover:rotate-45 transition-transform" />
-              ) : (
-                <Moon className="size-4 text-indigo-500 hover:-rotate-12 transition-transform" />
-              )}
-            </button>
 
             {/* User Profile Dropdown Menu */}
             <DropdownMenu>

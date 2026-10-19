@@ -16,10 +16,7 @@ import {
   Landmark,
   History,
   TrendingUp,
-  Sun,
-  Moon,
 } from 'lucide-react'
-import { useTheme } from '@/hooks/useTheme'
 
 interface MobileMenuSheetProps {
   onOpenCards: () => void
@@ -62,7 +59,6 @@ export function MobileMenuSheet({
     pendingFriendRequests,
     pendingChargeGroups,
   } = useFinance()
-  const { theme, toggleTheme } = useTheme()
 
   const hasGeminiKey = Boolean(getGeminiApiKey())
   const activeModel = getSelectedGeminiModel()
@@ -349,29 +345,6 @@ export function MobileMenuSheet({
                 </span>
               </div>
               <span className="text-xs text-slate-400">Alterar chave ou modelo de IA</span>
-            </div>
-          </div>
-          <ChevronRight className="size-4 text-slate-500" />
-        </button>
-
-        {/* Alternar Tema Escuro / Claro */}
-        <button
-          type="button"
-          onClick={toggleTheme}
-          className="w-full p-4 flex items-center justify-between hover:bg-slate-800/40 transition-colors text-left cursor-pointer active:bg-slate-800/60"
-        >
-          <div className="flex items-center gap-3">
-            <div className="size-9 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center justify-center">
-              {theme === 'dark' ? <Sun className="size-4 text-amber-400" /> : <Moon className="size-4 text-indigo-400" />}
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-white">Tema Visual</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-semibold">
-                  {theme === 'dark' ? 'Modo Escuro' : 'Modo Claro'}
-                </span>
-              </div>
-              <span className="text-xs text-slate-400">Clique para alternar entre claro e escuro</span>
             </div>
           </div>
           <ChevronRight className="size-4 text-slate-500" />

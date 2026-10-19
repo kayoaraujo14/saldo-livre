@@ -1,9 +1,7 @@
 @import "tailwindcss";
 
 @layer base {
-  :root,
-  html.dark,
-  html[data-theme="dark"] {
+  :root {
     --background: #090d16;
     --foreground: #f1f5f9;
 
@@ -35,41 +33,6 @@
     --radius: 0.75rem;
 
     color-scheme: dark;
-  }
-
-  html.light,
-  html[data-theme="light"] {
-    --background: #f8fafc;
-    --foreground: #0f172a;
-
-    --card: rgba(255, 255, 255, 0.90);
-    --card-foreground: #0f172a;
-
-    --popover: #ffffff;
-    --popover-foreground: #0f172a;
-
-    --primary: #059669;
-    --primary-foreground: #ffffff;
-
-    --secondary: #f1f5f9;
-    --secondary-foreground: #0f172a;
-
-    --muted: #f1f5f9;
-    --muted-foreground: #64748b;
-
-    --accent: #f8fafc;
-    --accent-foreground: #0f172a;
-
-    --destructive: #e11d48;
-    --destructive-foreground: #ffffff;
-
-    --border: rgba(15, 23, 42, 0.09);
-    --input: rgba(15, 23, 42, 0.12);
-    --ring: #059669;
-
-    --radius: 0.75rem;
-
-    color-scheme: light;
   }
 }
 
@@ -211,91 +174,4 @@ body {
 .chat-prose tr:nth-child(even) {
   background: rgba(255, 255, 255, 0.02);
 }
-
-/* Light mode overrides and surface adaptations */
-html.light body,
-html[data-theme="light"] body {
-  background-color: var(--background);
-  color: var(--foreground);
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.08), transparent),
-    radial-gradient(ellipse 60% 40% at 90% 20%, rgba(99, 102, 241, 0.05), transparent),
-    radial-gradient(ellipse 40% 30% at 10% 80%, rgba(14, 165, 233, 0.04), transparent);
-}
-
-html.light .glass-card,
-html[data-theme="light"] .glass-card {
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
-}
-
-html.light .glass-card-hover:hover,
-html[data-theme="light"] .glass-card-hover:hover {
-  background: rgba(255, 255, 255, 0.96);
-  border-color: rgba(15, 23, 42, 0.15);
-  box-shadow: 0 10px 25px -4px rgba(0, 0, 0, 0.08);
-}
-
-html.light .glass-panel,
-html[data-theme="light"] .glass-panel {
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-}
-
-html.light ::-webkit-scrollbar-thumb,
-html[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-}
-html.light ::-webkit-scrollbar-thumb:hover,
-html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
-}
-
-html.light .chat-prose,
-html[data-theme="light"] .chat-prose {
-  color: #1e293b;
-}
-html.light .chat-prose strong,
-html[data-theme="light"] .chat-prose strong {
-  color: #0f172a;
-}
-html.light .chat-prose code,
-html[data-theme="light"] .chat-prose code {
-  background: rgba(0, 0, 0, 0.06);
-  color: #0f172a;
-}
-html.light .chat-prose th,
-html.light .chat-prose td,
-html[data-theme="light"] .chat-prose th,
-html[data-theme="light"] .chat-prose td {
-  border-color: rgba(0, 0, 0, 0.08);
-}
-html.light .chat-prose th,
-html[data-theme="light"] .chat-prose th {
-  background: rgba(0, 0, 0, 0.04);
-  color: #0f172a;
-}
-
-/* Light mode text & container contrast helpers */
-html.light .text-slate-100 { color: #0f172a; }
-html.light .text-slate-200 { color: #1e293b; }
-html.light .text-slate-300 { color: #334155; }
-html.light .text-slate-400 { color: #64748b; }
-html.light .text-white { color: #0f172a; }
-html.light .bg-slate-950 { background-color: #ffffff; }
-html.light .bg-slate-900 { background-color: #f8fafc; }
-html.light .bg-slate-900\/80 { background-color: rgba(248, 250, 252, 0.85); }
-html.light .bg-slate-800 { background-color: #f1f5f9; }
-html.light .bg-slate-800\/80 { background-color: rgba(241, 245, 249, 0.85); }
-html.light .bg-slate-800\/50 { background-color: rgba(241, 245, 249, 0.6); }
-html.light .border-slate-800 { border-color: rgba(15, 23, 42, 0.08); }
-html.light .border-slate-800\/60 { border-color: rgba(15, 23, 42, 0.08); }
-html.light .border-white\/\[0\.08\] { border-color: rgba(15, 23, 42, 0.08); }
-html.light .border-white\/\[0\.05\] { border-color: rgba(15, 23, 42, 0.05); }
-html.light .border-white\/10 { border-color: rgba(15, 23, 42, 0.08); }
 
