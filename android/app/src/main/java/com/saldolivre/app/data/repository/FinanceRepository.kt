@@ -18,9 +18,28 @@ interface FinanceRepository {
     fun getMonthSummary(): Flow<MonthSummary>
 
     suspend fun addTransaction(tx: Transaction)
+    suspend fun addTransactions(transactions: List<Transaction>)
     suspend fun updateTransaction(tx: Transaction)
     suspend fun deleteTransaction(id: String)
+    suspend fun deleteInstallmentGroup(groupId: String): Int
+    suspend fun updateInstallmentGroup(groupId: String, input: InstallmentGroupUpdateInput): Int
     suspend fun markTransactionPaid(id: String)
     suspend fun markAllocationReimbursed(transactionId: String, nameOrUid: String)
     suspend fun updateEstimatedWithActual(id: String, actualAmount: Double)
+    suspend fun generateBillsForMonth(monthKey: String): Pair<Int, Int>
+    suspend fun saveRecurringBill(bill: RecurringBill)
+    suspend fun deleteRecurringBill(id: String)
+    suspend fun updateMonthlyIncome(income: Double)
+    suspend fun saveCard(card: Card)
+    suspend fun deleteCard(id: String)
+
+    fun getFriendships(): Flow<List<Friendship>>
+    suspend fun sendFriendRequest(email: String): Pair<Boolean, String>
+    suspend fun respondFriendRequest(friendshipId: String, accept: Boolean)
+    suspend fun removeFriend(friendshipId: String)
+    suspend fun respondChargeRequest(tx: Transaction, accept: Boolean)
+
+    fun getActivityLogs(): Flow<List<ActivityLog>>
+    suspend fun logActivity(log: ActivityLog)
+    suspend fun clearActivityLogs()
 }

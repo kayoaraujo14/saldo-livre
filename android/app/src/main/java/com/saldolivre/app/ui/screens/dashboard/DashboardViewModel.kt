@@ -76,4 +76,10 @@ class DashboardViewModel(
             repository.markTransactionPaid(id)
         }
     }
+
+    fun generateBills() {
+        viewModelScope.launch {
+            repository.generateBillsForMonth(_uiState.value.selectedMonth)
+        }
+    }
 }

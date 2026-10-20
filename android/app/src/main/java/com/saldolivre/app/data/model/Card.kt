@@ -16,5 +16,6 @@ data class Card(
     val sharedWithUsers: List<SharedUser> = emptyList(),
     val sharedWithUids: List<String> = emptyList(),
     val frequentThirdParties: List<String> = emptyList(),
-    val color: String = "violet"
+    val color: String = "violet",
+    val limit: Double? = null
 )

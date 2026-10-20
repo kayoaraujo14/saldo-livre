@@ -1,9 +1,21 @@
 package com.saldolivre.app.data.model
 
+import com.google.gson.annotations.SerializedName
+
 enum class EstimationRule(val value: String) {
+    @SerializedName("fixed")
     FIXED("fixed"),
+
+    @SerializedName("last_month")
     LAST_MONTH("last_month"),
-    AVG_3_MONTHS("avg_3_months")
+
+    @SerializedName("avg_3_months")
+    AVG_3_MONTHS("avg_3_months");
+
+    companion object {
+        fun from(value: String?): EstimationRule =
+            entries.find { it.value.equals(value, ignoreCase = true) } ?: FIXED
+    }
 }
 
 data class RecurringBill(

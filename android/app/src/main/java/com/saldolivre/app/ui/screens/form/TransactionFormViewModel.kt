@@ -123,6 +123,7 @@ class TransactionFormViewModel(
                 // Gera parcelas
                 val groupId = "inst_grp_" + UUID.randomUUID().toString().take(8)
                 val installmentAmount = FinanceEngine.round2(total / current.installmentsCount)
+                val installmentList = mutableListOf<Transaction>()
 
                 for (i in 1..current.installmentsCount) {
                     val purchaseMonth = FinanceEngine.shiftMonth(repository.selectedMonth.value, i - 1)
@@ -150,7 +151,7 @@ class TransactionFormViewModel(
                         createdByUid = user.uid,
                         paidByUid = user.uid,
                         cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.id else null,
-                        description = "${current.description} ($i/${current.installmentsCount})",
+                        description = FinanceEngine.formatInstallmentDesc(current.description, i, current.installmentsCount),
                         category = current.category,
                         subcategory = current.subcategory,
                         type = current.type,
@@ -169,8 +170,9 @@ class TransactionFormViewModel(
                         installmentsTotal = current.installmentsCount,
                         splitType = current.splitType
                     )
-                    repository.addTransaction(tx)
+                    installmentList.add(tx)
                 }
+                repository.addTransactions(installmentList)
             } else {
                 // Transação individual
                 val (dueDate, competenceMonth) = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) {

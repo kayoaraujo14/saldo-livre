@@ -9,6 +9,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,7 +35,14 @@ fun DashboardScreen(
     onNavigateToTransactions: () -> Unit,
     onNavigateToAddTransaction: () -> Unit,
     onNavigateToReceivables: () -> Unit,
-    onNavigateToCards: () -> Unit
+    onNavigateToCards: () -> Unit,
+    onNavigateToRecurringBills: () -> Unit = {},
+    onNavigateToInvestments: () -> Unit = {},
+    onNavigateToFriends: () -> Unit = {},
+    onNavigateToProjections: () -> Unit = {},
+    onNavigateToRecentActivity: () -> Unit = {},
+    onNavigateToImportStatement: () -> Unit = {},
+    onLogout: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val summary = uiState.summary
@@ -80,6 +90,30 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onNavigateToImportStatement) {
+                        Icon(
+                            imageVector = Icons.Default.FileUpload,
+                            contentDescription = "Importar Extrato",
+                            tint = Emerald400
+                        )
+                    }
+
+                    IconButton(onClick = onNavigateToRecentActivity) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = "Histórico Recente",
+                            tint = Cyan400
+                        )
+                    }
+
+                    IconButton(onClick = onNavigateToFriends) {
+                        Icon(
+                            imageVector = Icons.Default.Group,
+                            contentDescription = "Rede de Amizades",
+                            tint = Purple400
+                        )
+                    }
+
                     // Profile demo toggle button
                     Box {
                         Row(
@@ -144,6 +178,70 @@ fun DashboardScreen(
                                     }
                                 )
                             }
+                            HorizontalDivider(color = DarkBorder, modifier = Modifier.padding(vertical = 4.dp))
+                            DropdownMenuItem(
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.FileUpload,
+                                        contentDescription = null,
+                                        tint = Emerald400,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        text = "Importar Extrato (PDF/OFX/CSV)",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                },
+                                onClick = {
+                                    showUserMenu = false
+                                    onNavigateToImportStatement()
+                                }
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = null,
+                                        tint = Cyan400,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        text = "Histórico de Atividades",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                },
+                                onClick = {
+                                    showUserMenu = false
+                                    onNavigateToRecentActivity()
+                                }
+                            )
+                            DropdownMenuItem(
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Logout,
+                                        contentDescription = null,
+                                        tint = Rose400,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                text = {
+                                    Text(
+                                        text = "Sair / Trocar de Modo",
+                                        color = Rose400,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                },
+                                onClick = {
+                                    showUserMenu = false
+                                    onLogout()
+                                }
+                            )
                         }
                     }
                 }
@@ -178,6 +276,49 @@ fun DashboardScreen(
                     onNextMonth = { viewModel.nextMonth() },
                     onCurrentMonth = { viewModel.currentMonth() }
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Surface(
+                    color = DarkSurfaceVariant.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToProjections() }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CalendarMonth,
+                                contentDescription = null,
+                                tint = Cyan400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Projeção de Fluxo de Caixa (6 Meses)",
+                                style = Typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
             }
 
             // Hero KPI Card: Saldo Livre Real do Mês
@@ -331,24 +472,26 @@ fun DashboardScreen(
                         KpiCard(
                             title = "Investimentos",
                             value = FinanceEngine.formatCurrency(summary.totalInvested),
-                            icon = Icons.Default.TrendingUp,
+                            icon = Icons.AutoMirrored.Filled.TrendingUp,
                             accentColor = Cyan500,
                             subtitle = "Aportes do mês",
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            onClick = onNavigateToInvestments
                         )
                     }
                 }
             }
 
-            // Quick Actions: Cartões Compartilhados & A Receber
+            // Quick Actions: Cartões, A Receber & Recorrentes
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedButton(
                         onClick = onNavigateToCards,
                         modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 10.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = TextPrimary
                         ),
@@ -361,15 +504,16 @@ fun DashboardScreen(
                             imageVector = Icons.Default.CreditCard,
                             contentDescription = null,
                             tint = Cyan400,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "Meus Cartões", style = Typography.labelLarge)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Cartões", style = Typography.labelMedium)
                     }
 
                     OutlinedButton(
                         onClick = onNavigateToReceivables,
                         modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 10.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = TextPrimary
                         ),
@@ -382,10 +526,32 @@ fun DashboardScreen(
                             imageVector = Icons.Default.Payments,
                             contentDescription = null,
                             tint = Purple400,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "A Receber", style = Typography.labelLarge)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "A Receber", style = Typography.labelMedium)
+                    }
+
+                    OutlinedButton(
+                        onClick = onNavigateToRecurringBills,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = TextPrimary
+                        ),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(
+                            brush = Brush.horizontalGradient(listOf(DarkBorder, DarkBorder))
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Repeat,
+                            contentDescription = null,
+                            tint = Amber400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "Recorrentes", style = Typography.labelMedium)
                     }
                 }
             }

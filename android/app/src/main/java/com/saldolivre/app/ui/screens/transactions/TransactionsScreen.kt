@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,6 +25,7 @@ import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
+import com.saldolivre.app.ui.components.DeleteInstallmentDialog
 import com.saldolivre.app.ui.components.StatusBadge
 import com.saldolivre.app.ui.components.TransactionItem
 import com.saldolivre.app.ui.theme.*
@@ -37,6 +39,7 @@ fun TransactionsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
+    var txToDelete by remember { mutableStateOf<Transaction?>(null) }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -48,7 +51,7 @@ fun TransactionsScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Voltar",
                             tint = TextPrimary
                         )
@@ -322,7 +325,7 @@ fun TransactionsScreen(
             dismissButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteTransaction(tx.id)
+                        txToDelete = tx
                         selectedTxForDetails = null
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = Rose400)
@@ -333,6 +336,60 @@ fun TransactionsScreen(
                 }
             }
         )
+    }
+
+    txToDelete?.let { tx ->
+        if (tx.isInstallment && !tx.installmentGroupId.isNullOrBlank()) {
+            DeleteInstallmentDialog(
+                transaction = tx,
+                allTransactions = uiState.transactions,
+                onDismissRequest = { txToDelete = null },
+                onDeleteSingle = { singleTx ->
+                    viewModel.deleteTransaction(singleTx.id)
+                    txToDelete = null
+                },
+                onDeleteAll = { groupId ->
+                    viewModel.deleteInstallmentGroup(groupId)
+                    txToDelete = null
+                }
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { txToDelete = null },
+                containerColor = DarkSurface,
+                title = {
+                    Text(
+                        text = "Excluir Lançamento",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Deseja realmente excluir \"${tx.description}\"?",
+                        color = TextSecondary,
+                        style = Typography.bodyMedium
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteTransaction(tx.id)
+                            txToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Rose500)
+                    ) {
+                        Text(text = "Excluir", color = TextPrimary)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { txToDelete = null }) {
+                        Text(text = "Cancelar", color = TextSecondary)
+                    }
+                }
+            )
+        }
     }
 }
 

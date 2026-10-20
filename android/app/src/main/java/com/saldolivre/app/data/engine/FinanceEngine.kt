@@ -6,6 +6,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.UUID
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
@@ -43,6 +44,15 @@ object FinanceEngine {
         }
     }
 
+    /**
+     * Gera YYYY-MM-DD para um dia específico do mês, limitando ao último dia válido do mês.
+     */
+    fun dateInMonth(monthKey: String, day: Int): String {
+        val maxDays = daysInMonth(monthKey)
+        val clampedDay = day.coerceIn(1, maxDays)
+        return String.format(Locale.US, "%s-%02d", monthKey, clampedDay)
+    }
+
     fun formatMonthLabel(monthKey: String): String {
         return try {
             val parts = monthKey.split("-")
@@ -52,6 +62,24 @@ object FinanceEngine {
         } catch (_: Exception) {
             monthKey
         }
+    }
+
+    fun monthLabel(monthKey: String): String = formatMonthLabel(monthKey)
+
+    /**
+     * Remove o sufixo numérico de parcelamento como " (1/10)" do final da descrição.
+     */
+    fun stripInstallmentSuffix(desc: String?): String {
+        if (desc.isNullOrBlank()) return ""
+        return desc.replace(Regex("""\s*\(\d+/\d+\)\s*$"""), "").trim()
+    }
+
+    /**
+     * Formata a descrição da parcela com a numeração correspondente (ex: "Celular (3/10)").
+     */
+    fun formatInstallmentDesc(baseDesc: String?, num: Int, total: Int): String {
+        val clean = stripInstallmentSuffix(baseDesc)
+        return if (clean.isNotBlank()) "$clean ($num/$total)" else "($num/$total)"
     }
 
     fun shiftMonth(monthKey: String, delta: Int): String {
@@ -488,4 +516,358 @@ object FinanceEngine {
             receivables = receivablesList
         )
     }
+
+    data class EstimateResult(
+        val amount: Double,
+        val basis: String
+    )
+
+    /**
+     * Calcula o valor estimado para uma conta recorrente com base na sua regra
+     * ('fixed', 'last_month' ou 'avg_3_months'), espelhando finance.ts na web.
+     */
+    fun estimateRecurring(bill: RecurringBill, all: List<Transaction>, monthKey: String): EstimateResult {
+        fun fromMonth(offset: Int): Transaction? {
+            val targetMonth = shiftMonth(monthKey, -offset)
+            return all.find { it.recurringBillId == bill.id && it.competenceMonth == targetMonth }
+        }
+
+        return when (bill.estimationRule) {
+            EstimationRule.LAST_MONTH -> {
+                val prev = fromMonth(1)
+                val v = prev?.actualAmount ?: prev?.estimatedAmount
+                if (v != null) {
+                    EstimateResult(round2(v), "Valor real do mês anterior")
+                } else {
+                    EstimateResult(bill.defaultAmount, "Sem histórico — valor padrão")
+                }
+            }
+            EstimationRule.AVG_3_MONTHS -> {
+                val values = listOf(1, 2, 3)
+                    .mapNotNull { fromMonth(it) }
+                    .filter { it.actualAmount != null }
+                    .map { it.actualAmount!! }
+                if (values.isNotEmpty()) {
+                    val avg = round2(values.sum() / values.size)
+                    val suffix = if (values.size == 1) "mês" else "meses"
+                    EstimateResult(avg, "Média de ${values.size} $suffix pagos")
+                } else {
+                    EstimateResult(bill.defaultAmount, "Sem histórico — valor padrão")
+                }
+            }
+            EstimationRule.FIXED -> {
+                EstimateResult(bill.defaultAmount, "Valor fixo")
+            }
+        }
+    }
+
+    data class GenerateBillsResult(
+        val created: List<Transaction>,
+        val skipped: Int
+    )
+
+    /**
+     * Gera as contas e salários previstos para o mês especificado,
+     * ignorando contas já geradas ou fora do período de vigência.
+     */
+    fun generateMonthBills(
+        bills: List<RecurringBill>,
+        all: List<Transaction>,
+        monthKey: String,
+        me: UserProfile,
+        partner: UserProfile? = null
+    ): GenerateBillsResult {
+        val created = mutableListOf<Transaction>()
+        var skipped = 0
+
+        // 1. Receita mensal (salário) a partir do perfil
+        if (me.monthlyIncome > 0) {
+            val salaryId = "salary_${me.uid}"
+            val exists = all.any { it.recurringBillId == salaryId && it.competenceMonth == monthKey }
+            if (!exists) {
+                val split = buildSplit(
+                    splitType = SplitType.MINE,
+                    total = me.monthlyIncome,
+                    myUid = me.uid,
+                    myName = me.displayName,
+                    partnerUid = null,
+                    partnerName = null,
+                    payerUid = me.uid
+                )
+                created.add(
+                    Transaction(
+                        id = "tx_gen_${UUID.randomUUID().toString().take(8)}",
+                        createdByUid = me.uid,
+                        paidByUid = me.uid,
+                        description = "Salário",
+                        category = "Receita",
+                        type = TransactionType.INCOME,
+                        paymentMethod = PaymentMethod.PIX,
+                        status = TransactionStatus.ESTIMATED,
+                        estimatedAmount = me.monthlyIncome,
+                        actualAmount = null,
+                        totalAmount = me.monthlyIncome,
+                        dueDate = dateInMonth(monthKey, 5),
+                        competenceMonth = monthKey,
+                        recurringBillId = salaryId,
+                        allocations = split.allocations,
+                        userImpact = split.userImpact,
+                        visibleToUids = split.visibleToUids,
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+            } else {
+                skipped++
+            }
+        }
+
+        // 2. Contas recorrentes ativas do usuário
+        val activeBills = bills.filter { it.active && it.ownerUid == me.uid }
+        for (bill in activeBills) {
+            // Feature 1: Limite de meses da recorrência/parcelas
+            if (!bill.startMonth.isNullOrBlank() && monthKey < bill.startMonth) {
+                skipped++
+                continue
+            }
+            if (!bill.endMonth.isNullOrBlank() && monthKey > bill.endMonth) {
+                skipped++
+                continue
+            }
+
+            val exists = all.any { it.recurringBillId == bill.id && it.competenceMonth == monthKey }
+            if (exists) {
+                skipped++
+                continue
+            }
+
+            val estimate = estimateRecurring(bill, all, monthKey)
+            val amount = estimate.amount
+            val split = buildSplit(
+                splitType = bill.splitType ?: SplitType.MINE,
+                total = amount,
+                myUid = me.uid,
+                myName = me.displayName,
+                partnerUid = partner?.uid,
+                partnerName = partner?.displayName,
+                payerUid = me.uid
+            )
+            val isIncome = bill.type == TransactionType.INCOME
+
+            created.add(
+                Transaction(
+                    id = "tx_gen_${UUID.randomUUID().toString().take(8)}",
+                    createdByUid = me.uid,
+                    paidByUid = me.uid,
+                    description = bill.description,
+                    category = if (isIncome) "Receita" else bill.category,
+                    subcategory = bill.subcategory,
+                    type = bill.type,
+                    paymentMethod = bill.paymentMethod ?: if (isIncome) PaymentMethod.PIX else PaymentMethod.BILL,
+                    status = TransactionStatus.ESTIMATED,
+                    estimatedAmount = amount,
+                    actualAmount = null,
+                    totalAmount = amount,
+                    dueDate = dateInMonth(monthKey, bill.dueDay),
+                    competenceMonth = monthKey,
+                    recurringBillId = bill.id,
+                    allocations = split.allocations,
+                    userImpact = split.userImpact,
+                    visibleToUids = split.visibleToUids,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        return GenerateBillsResult(created = created, skipped = skipped)
+    }
+
+    /**
+     * Projeta os próximos N meses com base nas transações existentes e moldes de contas ativas,
+     * espelhando projectFutureMonths de finance.ts na web.
+     */
+    fun projectFutureMonths(
+        all: List<Transaction>,
+        bills: List<RecurringBill>,
+        profile: UserProfile?,
+        uid: String,
+        startMonthKey: String,
+        count: Int = 6
+    ): List<FutureMonthProjection> {
+        val projections = mutableListOf<FutureMonthProjection>()
+
+        for (i in 0 until count) {
+            val monthKey = shiftMonth(startMonthKey, i)
+            val label = formatMonthLabel(monthKey)
+            val dim = daysInMonth(monthKey)
+
+            val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
+            val isGenerated = monthTxs.any { !it.recurringBillId.isNullOrBlank() }
+
+            var projectedIncome = 0.0
+            var projectedExpense = 0.0
+            var incomeCount = 0
+            var expenseCount = 0
+
+            // 1. Sempre inclui transações reais agendadas para aquele mês (ex: parcelas de compras com cartão)
+            for (t in monthTxs) {
+                val impact = impactFor(t, uid, all)
+                if (t.type == TransactionType.INCOME) {
+                    projectedIncome += impact
+                    incomeCount++
+                } else {
+                    projectedExpense += impact
+                    expenseCount++
+                }
+            }
+
+            // 2. Se as contas do mês ainda não foram geradas, projeta o salário e os moldes ativos válidos
+            if (!isGenerated) {
+                val hasSalary = monthTxs.any { it.recurringBillId == "salary_$uid" }
+                if (!hasSalary && profile != null && profile.monthlyIncome > 0) {
+                    projectedIncome += profile.monthlyIncome
+                    incomeCount++
+                }
+
+                for (bill in bills.filter { it.active && it.ownerUid == uid }) {
+                    if (monthTxs.any { it.recurringBillId == bill.id }) continue
+
+                    if (!bill.startMonth.isNullOrBlank() && monthKey < bill.startMonth) continue
+                    if (!bill.endMonth.isNullOrBlank() && monthKey > bill.endMonth) continue
+
+                    val estimate = estimateRecurring(bill, all, monthKey)
+                    val amount = estimate.amount
+                    val myFraction = if (bill.splitType == SplitType.SPLIT_50) round2(amount / 2.0) else amount
+
+                    if (bill.type == TransactionType.INCOME) {
+                        projectedIncome += myFraction
+                        incomeCount++
+                    } else {
+                        projectedExpense += myFraction
+                        expenseCount++
+                    }
+                }
+            }
+
+            projectedIncome = round2(projectedIncome)
+            projectedExpense = round2(projectedExpense)
+            val projectedFreeBalance = round2(projectedIncome - projectedExpense)
+            val projectedDailyLimit = if (dim > 0) round2(projectedFreeBalance / dim.toDouble()) else null
+
+            projections.add(
+                FutureMonthProjection(
+                    monthKey = monthKey,
+                    label = label,
+                    daysInMonth = dim,
+                    projectedIncome = projectedIncome,
+                    projectedExpense = projectedExpense,
+                    projectedFreeBalance = projectedFreeBalance,
+                    projectedDailyLimit = projectedDailyLimit,
+                    isGenerated = isGenerated,
+                    incomeCount = incomeCount,
+                    expenseCount = expenseCount
+                )
+            )
+        }
+
+        return projections
+    }
+
+    fun friendShareOf(tx: Transaction): Double {
+        val friendAlloc = tx.allocations.filter { it.uid == tx.assignedFriendUid }
+        if (friendAlloc.isNotEmpty()) {
+            return round2(friendAlloc.sumOf { it.amount })
+        }
+        return round2(tx.totalAmount)
+    }
+
+    fun groupPendingCharges(
+        transactions: List<Transaction>,
+        currentUid: String,
+        allUsers: List<UserProfile> = emptyList()
+    ): List<PendingChargeGroup> {
+        if (currentUid.isBlank()) return emptyList()
+
+        val rawPending = transactions.filter {
+            it.assignedFriendUid == currentUid && it.acceptanceStatus == "pending_approval"
+        }
+
+        val groups = mutableListOf<PendingChargeGroup>()
+        val seenGroups = mutableSetOf<String>()
+
+        for (tx in rawPending) {
+            val gId = tx.installmentGroupId
+            if (!gId.isNullOrBlank()) {
+                if (seenGroups.contains(gId)) continue
+                seenGroups.add(gId)
+
+                val items = rawPending
+                    .filter { it.installmentGroupId == gId }
+                    .sortedBy { it.installmentNumber ?: 0 }
+
+                val primaryTx = items.first()
+                val baseDesc = stripInstallmentSuffix(primaryTx.description)
+                val sender = allUsers.find { it.uid == primaryTx.createdByUid }
+                val friendPct = primaryTx.friendSharePct ?: 100.0
+
+                val totalAmount = round2(items.sumOf { it.totalAmount })
+                val friendShareAmount = round2(items.sumOf { friendShareOf(it) })
+
+                val dates = items.map { it.dueDate }.sorted()
+                val firstDueDate = dates.firstOrNull() ?: primaryTx.dueDate
+                val lastDueDate = dates.lastOrNull() ?: primaryTx.dueDate
+
+                groups.add(
+                    PendingChargeGroup(
+                        id = gId,
+                        isInstallment = true,
+                        installmentGroupId = gId,
+                        installmentsCount = items.size,
+                        baseDescription = baseDesc,
+                        cardId = primaryTx.cardId,
+                        senderUid = primaryTx.createdByUid,
+                        senderName = sender?.displayName ?: "Amigo",
+                        totalAmount = totalAmount,
+                        friendShareAmount = friendShareAmount,
+                        friendSharePct = friendPct,
+                        firstDueDate = firstDueDate,
+                        lastDueDate = lastDueDate,
+                        perInstallmentAmount = primaryTx.totalAmount,
+                        perInstallmentFriendShare = friendShareOf(primaryTx),
+                        items = items,
+                        primaryTx = primaryTx
+                    )
+                )
+            } else {
+                val sender = allUsers.find { it.uid == tx.createdByUid }
+                val friendPct = tx.friendSharePct ?: 100.0
+                val friendShare = friendShareOf(tx)
+
+                groups.add(
+                    PendingChargeGroup(
+                        id = tx.id,
+                        isInstallment = false,
+                        installmentGroupId = null,
+                        installmentsCount = 1,
+                        baseDescription = tx.description,
+                        cardId = tx.cardId,
+                        senderUid = tx.createdByUid,
+                        senderName = sender?.displayName ?: "Amigo",
+                        totalAmount = tx.totalAmount,
+                        friendShareAmount = friendShare,
+                        friendSharePct = friendPct,
+                        firstDueDate = tx.dueDate,
+                        lastDueDate = tx.dueDate,
+                        perInstallmentAmount = tx.totalAmount,
+                        perInstallmentFriendShare = friendShare,
+                        items = listOf(tx),
+                        primaryTx = tx
+                    )
+                )
+            }
+        }
+
+        return groups
+    }
 }
+
+

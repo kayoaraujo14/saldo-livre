@@ -13,15 +13,28 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.saldolivre.app.data.repository.FinanceRepository
+import com.saldolivre.app.ui.screens.activity.RecentActivityScreen
+import com.saldolivre.app.ui.screens.activity.RecentActivityViewModel
 import com.saldolivre.app.ui.screens.cards.CardsScreen
+import com.saldolivre.app.ui.screens.cards.CardsViewModel
 import com.saldolivre.app.ui.screens.chat.GeminiChatScreen
 import com.saldolivre.app.ui.screens.chat.GeminiChatViewModel
 import com.saldolivre.app.ui.screens.dashboard.DashboardScreen
 import com.saldolivre.app.ui.screens.dashboard.DashboardViewModel
 import com.saldolivre.app.ui.screens.form.TransactionFormScreen
 import com.saldolivre.app.ui.screens.form.TransactionFormViewModel
+import com.saldolivre.app.ui.screens.friends.FriendsScreen
+import com.saldolivre.app.ui.screens.friends.FriendsViewModel
+import com.saldolivre.app.ui.screens.import_statement.ImportStatementScreen
+import com.saldolivre.app.ui.screens.import_statement.ImportStatementViewModel
+import com.saldolivre.app.ui.screens.investments.InvestmentsScreen
+import com.saldolivre.app.ui.screens.investments.InvestmentsViewModel
+import com.saldolivre.app.ui.screens.projections.FutureProjectionsScreen
+import com.saldolivre.app.ui.screens.projections.FutureProjectionsViewModel
 import com.saldolivre.app.ui.screens.receivables.ReceivablesScreen
 import com.saldolivre.app.ui.screens.receivables.ReceivablesViewModel
+import com.saldolivre.app.ui.screens.recurring.RecurringBillsScreen
+import com.saldolivre.app.ui.screens.recurring.RecurringBillsViewModel
 import com.saldolivre.app.ui.screens.transactions.TransactionsScreen
 import com.saldolivre.app.ui.screens.transactions.TransactionsViewModel
 import com.saldolivre.app.ui.theme.*
@@ -29,7 +42,8 @@ import com.saldolivre.app.ui.theme.*
 @Composable
 fun AppNavHost(
     navController: NavHostController,
-    repository: FinanceRepository
+    repository: FinanceRepository,
+    onLogout: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -98,7 +112,14 @@ fun AppNavHost(
                     onNavigateToTransactions = { navController.navigate(BottomNavItem.Transactions.route) },
                     onNavigateToAddTransaction = { navController.navigate("add_transaction") },
                     onNavigateToReceivables = { navController.navigate(BottomNavItem.Receivables.route) },
-                    onNavigateToCards = { navController.navigate(BottomNavItem.Cards.route) }
+                    onNavigateToCards = { navController.navigate(BottomNavItem.Cards.route) },
+                    onNavigateToRecurringBills = { navController.navigate("recurring_bills") },
+                    onNavigateToInvestments = { navController.navigate("investments") },
+                    onNavigateToFriends = { navController.navigate("friends") },
+                    onNavigateToProjections = { navController.navigate("projections") },
+                    onNavigateToRecentActivity = { navController.navigate("recent_activity") },
+                    onNavigateToImportStatement = { navController.navigate("import_statement") },
+                    onLogout = onLogout
                 )
             }
 
@@ -121,6 +142,24 @@ fun AppNavHost(
                 )
             }
 
+            // Moldes Recorrentes
+            composable("recurring_bills") {
+                val recurringViewModel = viewModel { RecurringBillsViewModel(repository) }
+                RecurringBillsScreen(
+                    viewModel = recurringViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // Investimentos & Patrimônio
+            composable("investments") {
+                val investmentsViewModel = viewModel { InvestmentsViewModel(repository) }
+                InvestmentsScreen(
+                    viewModel = investmentsViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
             // A Receber
             composable(BottomNavItem.Receivables.route) {
                 val receivablesViewModel = viewModel { ReceivablesViewModel(repository) }
@@ -132,8 +171,9 @@ fun AppNavHost(
 
             // Cartões
             composable(BottomNavItem.Cards.route) {
+                val cardsViewModel = viewModel { CardsViewModel(repository) }
                 CardsScreen(
-                    repository = repository,
+                    viewModel = cardsViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -143,6 +183,45 @@ fun AppNavHost(
                 val chatViewModel = viewModel { GeminiChatViewModel(repository) }
                 GeminiChatScreen(
                     viewModel = chatViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // Rede de Amigos & Aprovações
+            composable("friends") {
+                val friendsViewModel = viewModel { FriendsViewModel(repository) }
+                FriendsScreen(
+                    viewModel = friendsViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // Projeção de Fluxo de Caixa (6 Meses)
+            composable("projections") {
+                val projectionsViewModel = viewModel { FutureProjectionsViewModel(repository) }
+                FutureProjectionsScreen(
+                    viewModel = projectionsViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // Histórico de Atividades / Auditoria
+            composable("recent_activity") {
+                val activityViewModel = viewModel { RecentActivityViewModel(repository) }
+                RecentActivityScreen(
+                    viewModel = activityViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToMonth = { _ ->
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            // Importador de Extratos (PDF, OFX, CSV, TXT)
+            composable("import_statement") {
+                val importViewModel = viewModel { ImportStatementViewModel(repository) }
+                ImportStatementScreen(
+                    viewModel = importViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }

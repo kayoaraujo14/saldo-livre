@@ -75,12 +75,49 @@ enum class SplitType(val value: String, val label: String, val emoji: String) {
     }
 }
 
+enum class AcceptanceStatus(val value: String, val label: String) {
+    @SerializedName("pending_approval")
+    PENDING_APPROVAL("pending_approval", "Aguardando Aprovação"),
+
+    @SerializedName("accepted")
+    ACCEPTED("accepted", "Aceito"),
+
+    @SerializedName("rejected")
+    REJECTED("rejected", "Recusado");
+
+    companion object {
+        fun from(value: String?): AcceptanceStatus? =
+            entries.find { it.value.equals(value, ignoreCase = true) }
+    }
+}
+
 data class Allocation(
     val type: String = "PLATFORM_USER", // "PLATFORM_USER" | "EXTERNAL"
     val uid: String? = null,
     val name: String = "",
     val amount: Double = 0.0,
     val reimbursed: Boolean = false
+)
+
+data class FriendSplitInput(
+    val uid: String = "",
+    val name: String = "",
+    val pct: Double? = null
+)
+
+data class InstallmentGroupUpdateInput(
+    val description: String? = null,
+    val amount: Double? = null,
+    val category: String? = null,
+    val subcategory: String? = null,
+    val paymentMethod: PaymentMethod? = null,
+    val cardId: String? = null,
+    val splitType: SplitType? = null,
+    val externalName: String? = null,
+    val friend: FriendSplitInput? = null,
+    val customAllocations: List<Allocation>? = null,
+    val date: String? = null,
+    val status: TransactionStatus? = null
 )
 
 data class Transaction(
@@ -106,13 +143,14 @@ data class Transaction(
     val reserveCardId: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
 
-    // Compartilhamento com Amigos
+    // Compartilhamento com Amigos & Aceite Prévio
     val assignedFriendUid: String? = null,
     val assignedFriendName: String? = null,
     val acceptanceStatus: String? = null, // "pending_approval", "accepted", "rejected"
     val friendSharePct: Double? = null,
+    val respondedAt: Long? = null,
 
-    // Parcelamento
+    // Parcelamento & Grupo
     val installmentGroupId: String? = null,
     val installmentNumber: Int? = null,
     val installmentsTotal: Int? = null,
@@ -120,4 +158,19 @@ data class Transaction(
 ) {
     val effectiveAmount: Double
         get() = actualAmount ?: estimatedAmount ?: totalAmount
+
+    val isInstallment: Boolean
+        get() = !installmentGroupId.isNullOrBlank() || (installmentNumber != null && installmentsTotal != null)
+
+    val installmentTag: String?
+        get() = if (installmentNumber != null && installmentsTotal != null) "$installmentNumber/$installmentsTotal" else null
+
+    val isPendingApproval: Boolean
+        get() = acceptanceStatus == AcceptanceStatus.PENDING_APPROVAL.value
+
+    val isAccepted: Boolean
+        get() = acceptanceStatus == AcceptanceStatus.ACCEPTED.value
+
+    val isRejected: Boolean
+        get() = acceptanceStatus == AcceptanceStatus.REJECTED.value
 }

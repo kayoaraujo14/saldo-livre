@@ -88,6 +88,12 @@ class TransactionsViewModel(
         }
     }
 
+    fun deleteInstallmentGroup(groupId: String) {
+        viewModelScope.launch {
+            repository.deleteInstallmentGroup(groupId)
+        }
+    }
+
     private fun applyFilters() {
         val state = _uiState.value
         val query = state.searchQuery.trim().lowercase()
