@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Saldo Livre</string>
+    <string name="default_web_client_id">251257095844-vrrr51le7l29pq582ak5ogq6pqojd5vu.apps.googleusercontent.com</string>
+    <string name="free_balance_title">Saldo Livre Real</string>
+    <string name="daily_limit_title">Disponível por Dia</string>
+    <string name="committed_title">Comprometido</string>
+    <string name="already_paid_title">Já Pago</string>
+    <string name="receivables_title">A Receber</string>
+    <string name="invested_title">Investimentos</string>
+</resources>

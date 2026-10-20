@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "251257095844",
+    "project_id": "saldo-livre-c3ca3",
+    "storage_bucket": "saldo-livre-c3ca3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:251257095844:android:36ab5000afa5e8a4560831",
+        "android_client_info": {
+          "package_name": "com.saldolivre.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "251257095844-vrrr51le7l29pq582ak5ogq6pqojd5vu.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBwUL6ZpSh5PmI-tAHvL_Z8bYHHucvUBzA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "251257095844-vrrr51le7l29pq582ak5ogq6pqojd5vu.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

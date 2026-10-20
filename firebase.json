@@ -1,7 +1,7 @@
 {
   "hosting": {
     "site": "saldo-livre-c3ca3",
-    "public": "dist",
+    "public": "web/dist",
     "ignore": [
       "firebase.json",
       "**/.*",

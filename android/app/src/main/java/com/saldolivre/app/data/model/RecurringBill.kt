@@ -1,0 +1,25 @@
+package com.saldolivre.app.data.model
+
+enum class EstimationRule(val value: String) {
+    FIXED("fixed"),
+    LAST_MONTH("last_month"),
+    AVG_3_MONTHS("avg_3_months")
+}
+
+data class RecurringBill(
+    val id: String = "",
+    val ownerUid: String = "",
+    val description: String = "",
+    val category: String = "Moradia",
+    val subcategory: String? = null,
+    val dueDay: Int = 10,
+    val defaultAmount: Double = 0.0,
+    val estimationRule: EstimationRule = EstimationRule.FIXED,
+    val active: Boolean = true,
+    val splitType: SplitType? = null,
+    val paymentMethod: PaymentMethod? = null,
+    val type: TransactionType = TransactionType.EXPENSE,
+    val startMonth: String? = null,
+    val endMonth: String? = null,
+    val installmentsCount: Int? = null
+)
