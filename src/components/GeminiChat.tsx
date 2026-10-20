@@ -206,77 +206,8 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     setRecordingSeconds(0)
     audioChunksRef.current = []
 
-    const SpeechRecognitionClass =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-
-    // 1. Web Speech API (Nativo, direto, SEM travar microfone com getUserMedia simultâneo)
-    if (SpeechRecognitionClass) {
-      try {
-        const recognition = new SpeechRecognitionClass()
-        recognition.lang = 'pt-BR'
-        recognition.continuous = true
-        recognition.interimResults = true
-        recognition.maxAlternatives = 1
-
-        recognition.onresult = (event: any) => {
-          let interim = ''
-          let currentFinal = ''
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const item = event.results[i]
-            if (item.isFinal) {
-              currentFinal += item[0].transcript + ' '
-            } else {
-              interim += item[0].transcript
-            }
-          }
-          if (currentFinal) {
-            transcriptRef.current = (transcriptRef.current + ' ' + currentFinal).replace(/\s+/g, ' ').trim()
-          }
-          const fullText = (transcriptRef.current + ' ' + interim).replace(/\s+/g, ' ').trim()
-          if (fullText) {
-            setAudioTranscript(fullText)
-            setInput(fullText)
-          }
-        }
-
-        recognition.onerror = (event: any) => {
-          console.warn('Reconhecimento de voz aviso:', event.error)
-          if (event.error === 'not-allowed') {
-            alert('Permissão de acesso ao microfone negada. Por favor, permita o acesso ao microfone nas configurações do seu navegador para usar o comando de voz.')
-            cancelRecording()
-          }
-        }
-
-        recognition.onend = () => {
-          if (isRecordingRef.current) {
-            setTimeout(() => {
-              if (isRecordingRef.current && recognitionRef.current) {
-                try {
-                  recognitionRef.current.start()
-                } catch {
-                  // ignorar se já estiver rodando
-                }
-              }
-            }, 120)
-          }
-        }
-
-        recognitionRef.current = recognition
-        recognition.start()
-
-        isRecordingRef.current = true
-        setIsRecording(true)
-
-        recordingTimerRef.current = setInterval(() => {
-          setRecordingSeconds((prev) => prev + 1)
-        }, 1000)
-        return
-      } catch (speechErr) {
-        console.warn('SpeechRecognition falhou ao iniciar, usando fallback MediaRecorder:', speechErr)
-      }
-    }
-
-    // 2. Fallback MediaRecorder caso o navegador não tenha Web Speech API
+    // Sempre usar MediaRecorder para enviar o áudio direto para o modelo Gemini processar.
+    // Isso evita o problema de transcrição falhando silenciosamente no Chrome/Android.
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         alert('Seu navegador não possui suporte para microfone ou gravação de voz.')
@@ -328,15 +259,6 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
       recordingTimerRef.current = null
     }
 
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop()
-      } catch {
-        // ignore
-      }
-      recognitionRef.current = null
-    }
-
     let recordedBlob: Blob | null = null
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
@@ -362,11 +284,12 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     setIsRecording(false)
     setRecordingSeconds(0)
 
-    const capturedText = (transcriptRef.current || input || audioTranscript).trim()
+    const capturedText = input.trim()
     setAudioTranscript('')
     transcriptRef.current = ''
 
     if (sendImmediately) {
+      // Se tiver texto digitado envia, caso contrário, se tiver o áudio (gravado com MediaRecorder) envia o áudio.
       if (capturedText) {
         handleSend(capturedText)
       } else if (recordedBlob && recordedBlob.size > 500) {
@@ -381,7 +304,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
             type: recordedBlob!.type || 'audio/webm',
             base64: b64,
           })
-          handleSend('Por favor, processe esta gravação de áudio com as despesas ou solicitações financeiras faladas.')
+          handleSend('Por favor, processe e transcreva esta gravação de áudio com minhas instruções financeiras ou lançamentos.')
         }
         reader.readAsDataURL(recordedBlob)
       }
@@ -393,15 +316,6 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = null
-    }
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort()
-      } catch {
-        // ignore
-      }
-      recognitionRef.current = null
     }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
