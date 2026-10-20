@@ -9,6 +9,7 @@ import com.google.gson.JsonObject
 import com.saldolivre.app.SaldoLivreApplication
 import com.saldolivre.app.data.ai.GeminiExecutionResult
 import com.saldolivre.app.data.ai.GeminiLoadBalancer
+import com.saldolivre.app.data.ai.NeuralFinanceClassifier
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.repository.FinanceRepository
@@ -55,6 +56,7 @@ class GeminiChatViewModel(
     private val gson = Gson()
     private val appContext: Context? = runCatching { SaldoLivreApplication.instance }.getOrNull()
     private val loadBalancer = GeminiLoadBalancer(appContext)
+    private val neuralClassifier = NeuralFinanceClassifier(appContext)
 
     companion object {
         val AVAILABLE_MODELS = GeminiLoadBalancer.DEFAULT_MODELS_POOL
@@ -68,11 +70,12 @@ class GeminiChatViewModel(
                 ChatMessage(
                     sender = MessageSender.ASSISTANT,
                     text = "Olá! Sou o **Copiloto Saldo Livre** 🤖✨\n\n" +
-                            "Estou conectado aos seus dados financeiros em tempo real com **balanceamento inteligente de IA**. Você pode conversar comigo para:\n" +
-                            "• ⚡ **Lançamentos rápidos**: contas que chegaram ou compras parceladas (ex: *\"Gastei 65 no almoço no cartão\"* ou *\"Conta de luz veio R$ 245\"*)\n" +
+                            "Estou conectado aos seus dados com **IA Generativa Avançada (Google Gemini 3 Flash & 2.5 Pro)** e **Rede Neural Heurística com Memória Viva**. Você pode conversar comigo para:\n" +
+                            "• ⚡ **Lançamentos rápidos**: lance contas, faturas ou compras parceladas em linguagem natural (ex: *\"Gastei 65 no almoço no cartão\"* ou *\"Conta de luz veio R$ 245\"*)\n" +
                             "• 📊 **Gráficos e visualizações**: gere gráficos de pizza ou comparativos em barra para ver seus maiores gastos\n" +
+                            "• 🧠 **Aprendizado contínuo**: ensine preferências financeiras (ex: *\"Aprenda que almoço no RU custa 12 e é Alimentação\"*)\n" +
                             "• 💡 **Consultor ativo**: consulte seu Saldo Livre real, Limite Diário Seguro e contas a pagar\n" +
-                            "• 🤝 **Divisões inteligentes**: dividir despesas com parceiro(a) ou amigos da rede\n\n" +
+                            "• 🤝 **Divisões inteligentes**: dividir despesas com parceiro(a), amigos ou terceiros (mãe, pai)\n\n" +
                             "Como posso ajudar você hoje?"
                 )
             )
@@ -259,6 +262,12 @@ class GeminiChatViewModel(
         }
 
         val partner = repository.allUsers.find { it.uid != user.uid }
+        val learnedRules = neuralClassifier.getLearnedRules()
+        val learnedRulesDesc = if (learnedRules.isNotEmpty()) {
+            learnedRules.mapIndexed { idx: Int, r: String -> "${idx + 1}. $r" }.joinToString("\n")
+        } else {
+            "Nenhuma regra personalizada memorizada ainda. Você pode aprender novas regras sempre que o usuário pedir (\"Aprenda que...\", \"Lembre-se que...\", \"Sempre que eu falar X coloque em Y\")."
+        }
 
         return """
             Você é o "Copiloto Saldo Livre", um agente financeiro pessoal brasileiro, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
@@ -283,6 +292,20 @@ class GeminiChatViewModel(
             - Total Investido no Mês: R$ ${FinanceEngine.round2(summary.totalInvested)}$byInvestmentDesc
 
             $recentTxsDesc
+
+            REGRAS E PREFERÊNCIAS APRENDIDAS DO USUÁRIO (MEMÓRIA VIVA):
+            $learnedRulesDesc
+
+            ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
+            Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, inclua no final o bloco JSON com "LEARN_RULE" ou "DELETE_RULE"!
+
+            DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO (GUARDRAILS COMPORTAMENTAIS):
+            - NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais informados acima.
+            - SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores prováveis ou inventados.
+            - CITE OS IDs DE REFERÊNCIA, categorias e números de comprovantes (se houver) sempre que confirmar a preparação de um lançamento.
+            - APLIQUE RIGOROSAMENTE a formatação da moeda corrente nas respostas visuais (ex: R$ 45,00 em vez de 45 ou $45).
+            - NÃO faça cálculos matemáticos soltos por conta própria para dar saldos. Você deve sempre consultar os dados fornecidos no CONTEXTO ATUAL acima (soma determinística).
+            - Seja extremamente DIRETO, OBJETIVO e SUCINTO. Elimine rodeios, introduções prolixas e sermões moralistas.
 
             REGRAS DE FUNCIONAMENTO:
 
@@ -314,7 +337,7 @@ class GeminiChatViewModel(
             - Notações como "2/6", "10/12" indicam compras parceladas. Preencha installments = { "current": 2, "total": 6 }. O sistema aloca todas as parcelas cronologicamente.
 
             6. EXECUÇÃO DE AÇÕES FINANCEIRAS:
-            Quando o usuário solicitar o registro de um gasto/receita, atualização de conta ou geração de gráfico, forneça sua resposta em texto natural e INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com uma das seguintes ações:
+            Quando o usuário solicitar o registro de um gasto/receita, atualização de conta, geração de gráfico ou memorização de regra, forneça sua resposta em texto natural e INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com uma das seguintes ações:
 
             a) Criar Lançamento:
             ```json
@@ -365,6 +388,22 @@ class GeminiChatViewModel(
             }
             ```
             (chartType pode ser "donut" ou "bar").
+
+            e) Aprender Nova Regra (Memória Viva):
+            ```json
+            {
+              "action": "LEARN_RULE",
+              "rule": "<regra aprendida>"
+            }
+            ```
+
+            f) Esquecer Regra da Memória:
+            ```json
+            {
+              "action": "DELETE_RULE",
+              "rule": "<regra a esquecer>"
+            }
+            ```
         """.trimIndent()
     }
 
@@ -593,6 +632,32 @@ class GeminiChatViewModel(
                             )
                         }
                     }
+
+                    "LEARN_RULE" -> {
+                        val rule = jsonObj.get("rule")?.asString ?: ""
+                        if (rule.isNotBlank()) {
+                            neuralClassifier.saveLearnedRule(rule)
+                            actionCard = ActionCardData(
+                                title = "Regra Memorizada pela IA 🧠✨",
+                                description = rule,
+                                detail = "Salva na memória neural viva do app",
+                                isSuccess = true
+                            )
+                        }
+                    }
+
+                    "DELETE_RULE" -> {
+                        val rule = jsonObj.get("rule")?.asString ?: ""
+                        if (rule.isNotBlank()) {
+                            neuralClassifier.deleteLearnedRule(rule)
+                            actionCard = ActionCardData(
+                                title = "Regra Removida da Memória",
+                                description = rule,
+                                detail = "O copiloto não aplicará mais esta regra",
+                                isSuccess = true
+                            )
+                        }
+                    }
                 }
             } catch (_: Exception) {
             }
@@ -769,30 +834,38 @@ class GeminiChatViewModel(
             )
         }
 
-        // 6. Intenção de registrar gasto
-        val amountRegex = Regex("""(\d+([.,]\d{1,2})?)""")
-        val match = amountRegex.find(lower)
-
-        if ((lower.contains("gastei") || lower.contains("comprei") || lower.contains("paguei") || lower.contains("lancei") || lower.contains("adicione")) && match != null) {
-            val amountVal = match.value.replace(",", ".").toDoubleOrNull() ?: 0.0
-            val desc = query
-                .replace(Regex("(?i)(gastei|comprei|paguei|lancei|adicione|reais|r\\$|no|na|de|para|cartão|nubank|inter|itau)"), "")
-                .replace(match.value, "")
-                .trim()
-                .ifBlank { "Gasto rápido via IA" }
-                .replaceFirstChar { it.uppercase() }
-
-            val cat = when {
-                lower.contains("almoço") || lower.contains("jantar") || lower.contains("mercado") || lower.contains("comida") || lower.contains("padaria") -> "Alimentação"
-                lower.contains("uber") || lower.contains("gasolina") || lower.contains("combustível") || lower.contains("ônibus") -> "Transporte"
-                lower.contains("farmácia") || lower.contains("remédio") || lower.contains("médico") -> "Saúde"
-                lower.contains("cinema") || lower.contains("lazer") || lower.contains("jogo") || lower.contains("show") -> "Lazer"
-                lower.contains("luz") || lower.contains("energia") || lower.contains("aluguel") || lower.contains("condomínio") -> "Moradia"
-                else -> "Outros"
+        // 6. Aprendizado de Regras e Memória Viva ("Aprenda que...", "Lembre-se que...", "Sempre que...")
+        val isLearn = lower.startsWith("aprenda que") || lower.startsWith("lembre-se que") || lower.startsWith("memorize que") || lower.startsWith("sempre que")
+        if (isLearn) {
+            val ruleText = query.replace(Regex("^(aprenda que|lembre-se que|memorize que|grave que)", RegexOption.IGNORE_CASE), "").trim()
+            if (ruleText.isNotBlank()) {
+                neuralClassifier.saveLearnedRule(ruleText)
+                return AgentResponse(
+                    text = "Entendido! Memorizei essa regra na minha **Rede Neural / Memória Viva**:\n\n*\"$ruleText\"*\n\nPassarei a aplicar essa regra automaticamente em todos os seus lançamentos e análises financeiras.",
+                    actionCard = ActionCardData(
+                        title = "Regra Aprendida com Sucesso! 🧠✨",
+                        description = ruleText,
+                        detail = "Salva na memória neural viva do app",
+                        isSuccess = true
+                    )
+                )
             }
+        }
 
-            val isCard = lower.contains("cartão") || lower.contains("nubank") || lower.contains("inter") || lower.contains("crédito")
-            val card = cards.firstOrNull { it.cardName.contains("nubank", ignoreCase = true) } ?: cards.firstOrNull()
+        // 7. Intenção de registrar gasto / receita / parcelamento via Rede Neural Heurística
+        val extracted = neuralClassifier.parseNaturalIntent(query)
+        if (extracted != null) {
+            val amountVal = extracted.amount
+            val desc = extracted.description
+            val cat = extracted.category
+            val subcat = extracted.subcategory
+            val isCard = extracted.isCreditCard
+            val hint = extracted.cardNameHint
+            val card = if (!hint.isNullOrBlank()) {
+                cards.find { it.cardName.contains(hint, ignoreCase = true) } ?: cards.firstOrNull()
+            } else if (isCard) {
+                cards.firstOrNull()
+            } else null
 
             val today = FinanceEngine.todayKey()
             val (dueDate, compMonth) = if (isCard && card != null) {
@@ -801,41 +874,104 @@ class GeminiChatViewModel(
                 Pair(today, FinanceEngine.currentMonthKey())
             }
 
-            val tx = Transaction(
-                id = "tx_" + UUID.randomUUID().toString().take(8),
-                createdByUid = user.uid,
-                paidByUid = user.uid,
-                cardId = if (isCard) card?.id else null,
-                description = desc,
-                category = cat,
-                type = TransactionType.EXPENSE,
-                paymentMethod = if (isCard) PaymentMethod.CREDIT_CARD else PaymentMethod.PIX,
-                status = if (isCard) TransactionStatus.PENDING else TransactionStatus.PAID,
-                actualAmount = amountVal,
-                totalAmount = amountVal,
-                dueDate = dueDate,
-                competenceMonth = compMonth,
-                visibleToUids = listOf(user.uid),
-                userImpact = mapOf(user.uid to amountVal),
-                splitType = SplitType.MINE
+            val partner = repository.allUsers.find { it.uid != user.uid }
+            val splitResult = FinanceEngine.buildSplit(
+                splitType = extracted.splitType,
+                total = amountVal,
+                myUid = user.uid,
+                myName = user.displayName,
+                partnerUid = partner?.uid,
+                partnerName = partner?.displayName,
+                payerUid = user.uid
             )
-            repository.addTransaction(tx)
+
+            val totalInstallments = extracted.totalInstallments
+            val currentInstallment = extracted.currentInstallment
+
+            if (totalInstallments > 1) {
+                val groupId = "inst_" + UUID.randomUUID().toString().take(8)
+                val baseDesc = FinanceEngine.stripInstallmentSuffix(desc)
+                val installmentList = mutableListOf<Transaction>()
+
+                for (i in 1..totalInstallments) {
+                    val monthOffset = i - currentInstallment
+                    val targetMonth = FinanceEngine.shiftMonth(compMonth, monthOffset)
+                    val targetDueDate = if (isCard && card != null) {
+                        FinanceEngine.dateInMonth(targetMonth, card.dueDay)
+                    } else {
+                        FinanceEngine.dateInMonth(targetMonth, 10)
+                    }
+
+                    val status = if (monthOffset < 0) TransactionStatus.PAID else TransactionStatus.PENDING
+
+                    installmentList.add(
+                        Transaction(
+                            id = "tx_" + UUID.randomUUID().toString().take(8),
+                            createdByUid = user.uid,
+                            paidByUid = user.uid,
+                            cardId = card?.id,
+                            description = FinanceEngine.formatInstallmentDesc(baseDesc, i, totalInstallments),
+                            category = cat,
+                            subcategory = subcat,
+                            type = extracted.type,
+                            paymentMethod = if (isCard) PaymentMethod.CREDIT_CARD else PaymentMethod.PIX,
+                            status = status,
+                            actualAmount = amountVal,
+                            totalAmount = amountVal,
+                            dueDate = targetDueDate,
+                            competenceMonth = targetMonth,
+                            visibleToUids = splitResult.visibleToUids,
+                            userImpact = splitResult.userImpact,
+                            allocations = splitResult.allocations,
+                            splitType = extracted.splitType,
+                            installmentGroupId = groupId,
+                            installmentNumber = i,
+                            installmentsTotal = totalInstallments
+                        )
+                    )
+                }
+                repository.addTransactions(installmentList)
+            } else {
+                val tx = Transaction(
+                    id = "tx_" + UUID.randomUUID().toString().take(8),
+                    createdByUid = user.uid,
+                    paidByUid = user.uid,
+                    cardId = card?.id,
+                    description = desc,
+                    category = cat,
+                    subcategory = subcat,
+                    type = extracted.type,
+                    paymentMethod = if (isCard) PaymentMethod.CREDIT_CARD else PaymentMethod.PIX,
+                    status = if (isCard) TransactionStatus.PENDING else TransactionStatus.PAID,
+                    actualAmount = amountVal,
+                    totalAmount = amountVal,
+                    dueDate = dueDate,
+                    competenceMonth = compMonth,
+                    visibleToUids = splitResult.visibleToUids,
+                    userImpact = splitResult.userImpact,
+                    allocations = splitResult.allocations,
+                    splitType = extracted.splitType
+                )
+                repository.addTransaction(tx)
+            }
 
             val updatedSummary = repository.getMonthSummary().first()
 
+            val subDesc = if (!subcat.isNullOrBlank()) " › $subcat" else ""
             val actionCard = ActionCardData(
-                title = "Lançamento Registrado com Sucesso!",
+                title = if (totalInstallments > 1) "Parcelamento Registrado ($totalInstallments x)" else "Lançamento Registrado com Sucesso!",
                 description = "$desc • ${FinanceEngine.formatCurrency(amountVal)}",
-                detail = "Categoria: $cat • ${if (isCard) "Cartão de Crédito" else "Pix"}",
+                detail = "Categoria: $cat$subDesc • ${if (isCard) "Cartão de Crédito (${card?.cardName ?: "Padrão"})" else "Pix"}",
                 newFreeBalance = "Novo Saldo Livre: ${FinanceEngine.formatCurrency(updatedSummary.freeBalance)}",
                 isSuccess = true
             )
 
             return AgentResponse(
-                text = "Pronto! Registrei sua despesa diretamente no seu controle:\n\n" +
+                text = "Pronto! Registrei sua despesa com classificação neural:\n\n" +
                         "• **Descrição**: $desc\n" +
                         "• **Valor**: ${FinanceEngine.formatCurrency(amountVal)}\n" +
-                        "• **Categoria**: $cat\n" +
+                        "• **Categoria**: $cat${if (!subcat.isNullOrBlank()) " › $subcat" else ""}\n" +
+                        "• **Tipo**: ${if (extracted.type == TransactionType.INCOME) "Receita (Entrada)" else "Despesa (Saída)"}\n" +
                         "• **Forma de Pagamento**: ${if (isCard) "Cartão de Crédito (${card?.cardName ?: "Padrão"})" else "Pix"}\n" +
                         "• **Vencimento / Competência**: $dueDate ($compMonth)",
                 actionCard = actionCard
@@ -843,9 +979,10 @@ class GeminiChatViewModel(
         }
 
         return AgentResponse(
-            text = "Compreendi sua mensagem! Como seu copiloto financeiro, posso calcular projeções, registrar seus gastos por texto ou gerar gráficos do seu orçamento.\n\n" +
+            text = "Compreendi sua mensagem! Como seu copiloto financeiro com IA e Rede Neural, posso calcular projeções, registrar seus gastos por texto ou gerar gráficos do seu orçamento.\n\n" +
                     "Tente perguntar:\n" +
-                    "• *\"Gerar gráfico de gastos\"*\n" +
+                    "• *\"Aprenda que almoço no RU custa 12 e é Alimentação\"*\n" +
+                    "• *\"Gerar gráfico de despesas\"*\n" +
                     "• *\"Quanto posso gastar hoje?\"*\n" +
                     "• *\"Gastei 45 no almoço no cartão\"*\n" +
                     "• *\"Quais são as minhas contas a pagar?\"*"

@@ -128,10 +128,11 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
       setIsInstallment(isGrp)
       setEditScope('all')
 
-      if (editingTx.splitType === 'custom' || editingTx.allocations.length > 2) {
+      const allocs = editingTx.allocations || []
+      if (editingTx.splitType === 'custom' || allocs.length > 2) {
         setSplitType('custom')
         const total = Math.abs(effectiveAmount(editingTx)) || 1
-        const rows: CustomParticipantRow[] = editingTx.allocations.map((a, i) => {
+        const rows: CustomParticipantRow[] = allocs.map((a, i) => {
           const isMe = a.uid === me?.uid
           const isPart = partner && a.uid === partner.uid
           const isFr = friends.some((f) => f.uid === a.uid)
@@ -158,14 +159,14 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
         ]
         setCustomParticipants(rows)
       } else {
-        const hasExternal = editingTx.allocations.some((a) => a.type === 'EXTERNAL')
+        const hasExternal = allocs.some((a) => a.type === 'EXTERNAL')
         if (hasExternal) {
           setSplitType('external')
-          const ext = editingTx.allocations.find((a) => a.type === 'EXTERNAL')
+          const ext = allocs.find((a) => a.type === 'EXTERNAL')
           if (ext) setExternalName(ext.name)
-        } else if (editingTx.allocations.length > 1) {
+        } else if (allocs.length > 1) {
           setSplitType('split_50')
-        } else if (editingTx.allocations[0]?.uid === me?.uid) {
+        } else if (allocs[0]?.uid === me?.uid) {
           setSplitType('mine')
         } else {
           setSplitType('partner')

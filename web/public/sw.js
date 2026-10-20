@@ -1,5 +1,5 @@
 // Service Worker para Saldo Livre PWA
-const CACHE_NAME = 'saldo-livre-v2';
+const CACHE_NAME = 'saldo-livre-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

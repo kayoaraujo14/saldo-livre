@@ -276,26 +276,45 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [fbRules, setFbRules] = useState<UserRule[]>([])
 
   useEffect(() => {
-    if (mode !== 'firebase') return
-    setAuthLoading(true)
-    return fb.onAuthChange(async (u) => {
-      setAuthUser(u)
-      if (u) {
-        try {
-          setFbProfile(await fb.upsertUserProfile(u))
-        } catch (e) {
-          console.error(e)
-        }
-      } else {
-        setFbProfile(null)
-        setFbTx([])
-        setFbCards([])
-        setFbRecurring([])
-        setFbFriendships([])
-        setFbRules([])
-      }
+    if (mode !== 'firebase') {
       setAuthLoading(false)
-    })
+      return
+    }
+    setAuthLoading(true)
+    let unsub = () => {}
+    try {
+      unsub = fb.onAuthChange(async (u) => {
+        setAuthUser(u)
+        if (u) {
+          try {
+            setFbProfile(await fb.upsertUserProfile(u))
+          } catch (e) {
+            console.error('Falha ao sincronizar perfil do Firestore:', e)
+          }
+        } else {
+          setFbProfile(null)
+          setFbTx([])
+          setFbCards([])
+          setFbRecurring([])
+          setFbFriendships([])
+          setFbRules([])
+        }
+        setAuthLoading(false)
+      })
+    } catch (err) {
+      console.warn('Falha ao inicializar observador do Firebase Auth:', err)
+      setAuthLoading(false)
+    }
+
+    // Safety timeout: never let the screen hang indefinitely on loading
+    const timer = setTimeout(() => {
+      setAuthLoading(false)
+    }, 3500)
+
+    return () => {
+      clearTimeout(timer)
+      unsub()
+    }
   }, [mode])
 
   useEffect(() => {
@@ -562,7 +581,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
               (t) =>
                 t.installmentGroupId === tx.installmentGroupId &&
                 t.assignedFriendUid === tx.assignedFriendUid &&
-                (!currentUid || t.visibleToUids.includes(currentUid)),
+                (!currentUid || (t.visibleToUids || []).includes(currentUid)),
             )
             .map((t) => t.id)
         : []
@@ -586,7 +605,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   // ---------------- Lançamentos do mês e resumo ----------------
   const monthTransactions = useMemo(() => {
     if (!currentUid) return []
-    return transactions.filter((t) => t.competenceMonth === month && t.visibleToUids.includes(currentUid))
+    return transactions.filter((t) => t.competenceMonth === month && (t.visibleToUids || []).includes(currentUid))
   }, [transactions, month, currentUid])
 
   const summary = useMemo(() => {
@@ -996,7 +1015,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     async (txId: string, idx: number, value: boolean) => {
       const tx = transactions.find((t) => t.id === txId)
       if (!tx) return
-      const allocations = tx.allocations.map((a, i) => (i === idx ? { ...a, reimbursed: value } : a))
+      const allocations = (tx.allocations || []).map((a, i) => (i === idx ? { ...a, reimbursed: value } : a))
       await updateTransaction(txId, { allocations })
     },
     [transactions, updateTransaction],

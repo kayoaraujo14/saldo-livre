@@ -141,6 +141,15 @@ fun GeminiChatScreen(
                     ) {
                         GeminiChatViewModel.AVAILABLE_MODELS.forEach { modelName ->
                             val isSelected = tempModel == modelName
+                            val label = when (modelName) {
+                                "gemini-3-flash" -> "Gemini 3 Flash (Padrão)"
+                                "gemini-2.5-pro" -> "Gemini 2.5 Pro (Inteligente)"
+                                "gemini-3.5-flash-lite" -> "Gemini 3.5 Flash-Lite"
+                                "gemini-3.1-flash-lite" -> "Gemini 3.1 Flash-Lite"
+                                "gemini-2.5-flash" -> "Gemini 2.5 Flash"
+                                "gemini-1.5-flash" -> "Gemini 1.5 Flash"
+                                else -> modelName
+                            }
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
@@ -154,7 +163,7 @@ fun GeminiChatScreen(
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
                                 Text(
-                                    text = modelName,
+                                    text = label,
                                     fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) Emerald400 else TextSecondary

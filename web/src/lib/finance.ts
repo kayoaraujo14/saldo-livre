@@ -107,16 +107,16 @@ export function calculateCardInvoiceDates(
 // ------------------------------------------------------------------
 // D. Divisões: allocations → userImpact → visibleToUids
 // ------------------------------------------------------------------
-export function deriveImpact(allocations: Allocation[], visibleToUids: string[]) {
+export function deriveImpact(allocations: Allocation[] = [], visibleToUids: string[] = []) {
   const impact: Record<string, number> = {}
-  for (const u of visibleToUids) impact[u] = 0
-  for (const a of allocations) {
-    if (a.type === 'PLATFORM_USER' && a.uid) {
+  for (const u of visibleToUids || []) impact[u] = 0
+  for (const a of allocations || []) {
+    if (a && a.type === 'PLATFORM_USER' && a.uid) {
       // Quando alguém reembolsa, o impacto NÃO some, pois a pessoa que pagou a fatura
       // original já pagou pro banco de qualquer forma, e quem foi reembolsado já enviou o dinheiro.
       // O impacto deve sempre refletir o valor de cota de cada um na transação para o mês,
       // para bater o orçamento (Saldo Livre) de cada usuário com precisão bancária.
-      impact[a.uid] = round2((impact[a.uid] ?? 0) + a.amount)
+      impact[a.uid] = round2((impact[a.uid] ?? 0) + (a.amount || 0))
     }
   }
   return impact
@@ -150,9 +150,9 @@ export function clampPct(pct: number | null | undefined) {
 /** Valor que cabe ao amigo numa cobrança de amigo (fallback: total, para dados legados). */
 export function friendShareOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount'>) {
   if (!tx.assignedFriendUid) return 0
-  const allocs = tx.allocations.filter((a) => a.uid === tx.assignedFriendUid)
-  if (!allocs.length) return tx.totalAmount
-  return round2(allocs.reduce((s, a) => s + a.amount, 0))
+  const allocs = (tx.allocations || []).filter((a) => a.uid === tx.assignedFriendUid)
+  if (!allocs.length) return tx.totalAmount || 0
+  return round2(allocs.reduce((s, a) => s + (a.amount || 0), 0))
 }
 
 export function friendPctOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>) {
@@ -242,18 +242,19 @@ export function buildSplit(input: SplitInput) {
 
 /** Reescala as divisões quando o valor efetivo muda (ex: conta de luz chegou). */
 export function rescaleSplit(tx: Transaction, newTotal: number) {
-  const oldTotal = tx.allocations.reduce((s, a) => s + a.amount, 0)
+  const allocs = tx.allocations || []
+  const oldTotal = allocs.reduce((s, a) => s + (a.amount || 0), 0)
   let allocations: Allocation[]
-  if (tx.allocations.length === 0) {
+  if (allocs.length === 0) {
     allocations = []
   } else if (oldTotal <= 0) {
-    const each = round2(newTotal / tx.allocations.length)
-    allocations = tx.allocations.map((a) => ({ ...a, amount: each }))
+    const each = round2(newTotal / allocs.length)
+    allocations = allocs.map((a) => ({ ...a, amount: each }))
   } else {
     const ratio = newTotal / oldTotal
     let acc = 0
-    allocations = tx.allocations.map((a, i) => {
-      if (i === tx.allocations.length - 1) return { ...a, amount: round2(newTotal - acc) }
+    allocations = allocs.map((a, i) => {
+      if (i === allocs.length - 1) return { ...a, amount: round2(newTotal - acc) }
       const amount = round2(a.amount * ratio)
       acc += amount
       return { ...a, amount }
@@ -262,20 +263,21 @@ export function rescaleSplit(tx: Transaction, newTotal: number) {
   return {
     totalAmount: round2(newTotal),
     allocations,
-    userImpact: deriveImpact(allocations, tx.visibleToUids),
+    userImpact: deriveImpact(allocations, tx.visibleToUids || []),
   }
 }
 
 /** Detecta o tipo de divisão do ponto de vista de quem está olhando. */
 export function detectSplit(tx: Transaction, viewerUid: string): SplitType {
+  const allocs = tx.allocations || []
   if (tx.splitType === 'custom') return 'custom'
-  if (tx.allocations.length > 2) return 'custom'
+  if (allocs.length > 2) return 'custom'
   if (tx.assignedFriendUid) return 'friend'
-  if (tx.allocations.some((a) => a.type === 'EXTERNAL')) {
-    if (tx.allocations.length === 1) return 'external'
+  if (allocs.some((a) => a.type === 'EXTERNAL')) {
+    if (allocs.length === 1) return 'external'
     return 'custom'
   }
-  const users = tx.allocations.filter((a) => a.type === 'PLATFORM_USER')
+  const users = allocs.filter((a) => a.type === 'PLATFORM_USER')
   const mine = users.some((a) => a.uid === viewerUid)
   const others = users.some((a) => a.uid !== viewerUid)
   if (mine && others) {
@@ -434,16 +436,16 @@ export function impactFor(tx: Transaction, uid: string, all: Transaction[]) {
     if (tx.acceptanceStatus === 'accepted') {
       // Amigo aceitou: cada um sofre apenas a sua parte
       if (uid === tx.assignedFriendUid) return friendShare
-      return tx.userImpact[uid] ?? 0
+      return tx.userImpact?.[uid] ?? 0
     }
     // Pendente ou recusado: amigo ainda NÃO tem o saldo comprometido
     if (uid === tx.assignedFriendUid) return 0
     // Quem lançou provisiona também a parte do amigo até o aceite
-    const own = tx.userImpact[uid] ?? 0
+    const own = tx.userImpact?.[uid] ?? 0
     return uid === tx.createdByUid ? round2(own + friendShare) : own
   }
 
-  return tx.userImpact[uid] ?? 0
+  return tx.userImpact?.[uid] ?? 0
 }
 
 // ------------------------------------------------------------------
@@ -464,7 +466,7 @@ export function getDaysRemaining(monthKey: string) {
 }
 
 export function computeSummary(all: Transaction[], uid: string, monthKey: string): MonthSummary {
-  const monthTxs = all.filter((t) => t.competenceMonth === monthKey && t.visibleToUids.includes(uid))
+  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
   let income = 0
   let paid = 0
   let committedEstimated = 0
@@ -514,32 +516,33 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
       }
     }
 
-    const friendAlloc = tx.assignedFriendUid ? tx.allocations.find((a) => a.uid === tx.assignedFriendUid) : undefined
+    const allocs = tx.allocations || []
+    const friendAlloc = tx.assignedFriendUid ? allocs.find((a) => a.uid === tx.assignedFriendUid) : undefined
     const friendOpen = tx.acceptanceStatus === 'accepted' && !(friendAlloc?.reimbursed ?? false)
 
     if (tx.paidByUid === uid) {
       if (tx.assignedFriendUid && tx.assignedFriendUid !== uid && friendOpen) {
         receivableFromFriends += friendShareOf(tx)
       }
-      for (const a of tx.allocations) {
+      for (const a of allocs) {
         if (a.reimbursed) continue
-        if (a.type === 'EXTERNAL') receivableFromExternal += a.amount
-        else if (a.uid !== uid && a.uid !== tx.assignedFriendUid) receivableFromPartner += a.amount
+        if (a.type === 'EXTERNAL') receivableFromExternal += (a.amount || 0)
+        else if (a.uid !== uid && a.uid !== tx.assignedFriendUid) receivableFromPartner += (a.amount || 0)
       }
     } else {
       if (tx.assignedFriendUid === uid && friendOpen) {
         payableToOthers += friendShareOf(tx)
       }
-      for (const a of tx.allocations) {
-        if (a.type === 'PLATFORM_USER' && a.uid === uid && !a.reimbursed && !tx.assignedFriendUid) payableToOthers += a.amount
+      for (const a of allocs) {
+        if (a.type === 'PLATFORM_USER' && a.uid === uid && !a.reimbursed && !tx.assignedFriendUid) payableToOthers += (a.amount || 0)
       }
     }
   }
 
   // Total acumulado investido no histórico do usuário
   let totalInvestedAccumulated = 0
-  for (const tx of all) {
-    if (tx.category === 'Investimentos' && tx.visibleToUids.includes(uid)) {
+  for (const tx of all || []) {
+    if (tx.category === 'Investimentos' && (tx.visibleToUids || []).includes(uid)) {
       const imp = impactFor(tx, uid, all)
       if (imp > 0) totalInvestedAccumulated += imp
     }
@@ -586,14 +589,15 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
 export function listReceivables(all: Transaction[], uid: string, monthKey: string, cards: Card[]) {
   const items: ReceivableItem[] = []
   const payables: ReceivableItem[] = []
-  for (const tx of all) {
-    if (tx.competenceMonth !== monthKey || tx.type !== 'expense' || !tx.visibleToUids.includes(uid)) continue
-    const cardName = cards.find((c) => c.id === tx.cardId)?.cardName
+  for (const tx of all || []) {
+    if (tx.competenceMonth !== monthKey || tx.type !== 'expense' || !(tx.visibleToUids || []).includes(uid)) continue
+    const cardName = cards?.find((c) => c.id === tx.cardId)?.cardName
 
+    const allocs = tx.allocations || []
     // Amigo atribuído no cartão
     if (tx.assignedFriendUid) {
-      const idx = Math.max(0, tx.allocations.findIndex((a) => a.uid === tx.assignedFriendUid))
-      if (tx.allocations[idx]?.reimbursed && tx.allocations[idx]?.uid === tx.assignedFriendUid) continue
+      const idx = Math.max(0, allocs.findIndex((a) => a.uid === tx.assignedFriendUid))
+      if (allocs[idx]?.reimbursed && allocs[idx]?.uid === tx.assignedFriendUid) continue
       const base = {
         transactionId: tx.id,
         allocationIndex: idx,
@@ -613,7 +617,7 @@ export function listReceivables(all: Transaction[], uid: string, monthKey: strin
       continue
     }
 
-    tx.allocations.forEach((a, i) => {
+    allocs.forEach((a, i) => {
       if (a.reimbursed) return
       const base: ReceivableItem = {
         transactionId: tx.id,
@@ -801,7 +805,7 @@ export function projectFutureMonths(args: {
     const dim = daysInMonth(monthKey)
 
     // Check existing transactions for that month visible to uid
-    const monthTxs = all.filter((t) => t.competenceMonth === monthKey && t.visibleToUids.includes(uid))
+    const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
     const isGenerated = monthTxs.some((t) => Boolean(t.recurringBillId))
 
     let projectedIncome = 0

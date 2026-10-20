@@ -25,10 +25,13 @@ class GeminiLoadBalancer(
         const val PREF_KEY_MODEL = "saldo_livre_gemini_model"
 
         val DEFAULT_MODELS_POOL = listOf(
+            "gemini-3-flash",
+            "gemini-2.5-pro",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
             "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.0-flash",
-            "gemini-2.5-flash"
+            "gemini-1.5-pro"
         )
     }
 
@@ -59,7 +62,11 @@ class GeminiLoadBalancer(
     }
 
     fun getSelectedModel(): String {
-        return prefs?.getString(PREF_KEY_MODEL, null) ?: "gemini-1.5-flash"
+        val saved = prefs?.getString(PREF_KEY_MODEL, null)
+        if (saved.isNullOrBlank() || saved == "gemini-1.5-flash" || saved == "gemini-2.0-flash") {
+            return "gemini-3-flash"
+        }
+        return saved
     }
 
     fun setSelectedModel(model: String) {
@@ -78,7 +85,9 @@ class GeminiLoadBalancer(
         )
 
         return if (analysisRegex.containsMatchIn(userQuery)) {
-            "gemini-1.5-pro"
+            "gemini-2.5-pro"
+        } else if (preferredModel == "gemini-2.5-pro") {
+            "gemini-3-flash"
         } else {
             preferredModel
         }
@@ -199,7 +208,7 @@ class GeminiLoadBalancer(
             return Pair(false, "Chave da API não fornecida.")
         }
 
-        val pool = listOf(getSelectedModel(), "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash")
+        val pool = listOf(getSelectedModel(), "gemini-3-flash", "gemini-2.5-pro", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash")
         for (model in pool) {
             try {
                 val generativeModel = GenerativeModel(

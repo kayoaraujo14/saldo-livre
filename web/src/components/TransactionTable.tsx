@@ -97,7 +97,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         const isShared = card && (card.sharedWithUsers.length > 0 || card.sharedWithUids.length > 0)
         if (!isShared && !tx.reserveCardId) return false
       } else if (activeTab === 'third_party') {
-        const isThird = tx.allocations.some((a) => a.type === 'EXTERNAL')
+        const isThird = (tx.allocations || []).some((a) => a.type === 'EXTERNAL')
         if (!isThird) return false
       } else if (activeTab === 'friends_installments') {
         const isFriend = Boolean(tx.assignedFriendUid)
@@ -111,7 +111,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         const matchesDesc = tx.description.toLowerCase().includes(q)
         const matchesCat = tx.category.toLowerCase().includes(q)
         const matchesSubcat = tx.subcategory?.toLowerCase().includes(q)
-        const matchesAlloc = tx.allocations.some((a) => a.name.toLowerCase().includes(q))
+        const matchesAlloc = (tx.allocations || []).some((a) => a.name.toLowerCase().includes(q))
         if (!matchesDesc && !matchesCat && !matchesSubcat && !matchesAlloc) return false
       }
 
@@ -149,7 +149,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         const card = cards.find((c) => c.id === t.cardId)
         return (card && (card.sharedWithUsers.length > 0 || card.sharedWithUids.length > 0)) || t.reserveCardId
       }).length,
-      third: monthTransactions.filter((t: Transaction) => t.allocations.some((a) => a.type === 'EXTERNAL')).length,
+      third: monthTransactions.filter((t: Transaction) => (t.allocations || []).some((a) => a.type === 'EXTERNAL')).length,
       friends_installments: monthTransactions.filter((t: Transaction) => Boolean(t.assignedFriendUid || t.installmentGroupId)).length,
     }
   }, [monthTransactions, cards])

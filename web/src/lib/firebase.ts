@@ -157,7 +157,16 @@ export async function upsertUserProfile(user: User): Promise<UserProfile> {
 }
 
 export function subscribeUserProfile(uid: string, cb: (u: UserProfile | null) => void) {
-  return onSnapshot(doc(ensure().db, COLLECTIONS.users, uid), (s) => cb(s.exists() ? (s.data() as UserProfile) : null))
+  try {
+    return onSnapshot(
+      doc(ensure().db, COLLECTIONS.users, uid),
+      (s) => cb(s.exists() ? (s.data() as UserProfile) : null),
+      (err) => console.warn('Erro ao sincronizar perfil do Firestore:', err)
+    )
+  } catch (err) {
+    console.warn('Falha ao iniciar listener de perfil:', err)
+    return () => {}
+  }
 }
 
 export function updateUserProfile(uid: string, patch: Partial<UserProfile>) {
@@ -176,37 +185,68 @@ export const lookupUserByEmail = findUserByEmail
 // Subscriptions (tempo real)
 // ------------------------------------------------------------------
 export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => void) {
-  // array-contains sem outros filtros → não exige índice composto.
-  const q = query(collection(ensure().db, COLLECTIONS.transactions), where('visibleToUids', 'array-contains', uid))
-  return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as NewTransaction), id: d.id }))))
+  try {
+    // array-contains sem outros filtros → não exige índice composto.
+    const q = query(collection(ensure().db, COLLECTIONS.transactions), where('visibleToUids', 'array-contains', uid))
+    return onSnapshot(
+      q,
+      (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as NewTransaction), id: d.id }))),
+      (err) => console.warn('Erro ao sincronizar transações do Firestore:', err)
+    )
+  } catch (err) {
+    console.warn('Falha ao iniciar listener de transações:', err)
+    return () => {}
+  }
 }
 
 export function subscribeCards(uid: string, cb: (cards: Card[]) => void) {
-  const { db } = ensure()
-  let owned: Card[] = []
-  let shared: Card[] = []
-  const emit = () => {
-    const map = new Map<string, Card>()
-    for (const c of [...owned, ...shared]) map.set(c.id, c)
-    cb([...map.values()])
-  }
-  const u1 = onSnapshot(query(collection(db, COLLECTIONS.cards), where('ownerUid', '==', uid)), (s) => {
-    owned = s.docs.map((d) => ({ ...(d.data() as Card), id: d.id }))
-    emit()
-  })
-  const u2 = onSnapshot(query(collection(db, COLLECTIONS.cards), where('sharedWithUids', 'array-contains', uid)), (s) => {
-    shared = s.docs.map((d) => ({ ...(d.data() as Card), id: d.id }))
-    emit()
-  })
-  return () => {
-    u1()
-    u2()
+  try {
+    const { db } = ensure()
+    let owned: Card[] = []
+    let shared: Card[] = []
+    const emit = () => {
+      const map = new Map<string, Card>()
+      for (const c of [...owned, ...shared]) map.set(c.id, c)
+      cb([...map.values()])
+    }
+    const u1 = onSnapshot(
+      query(collection(db, COLLECTIONS.cards), where('ownerUid', '==', uid)),
+      (s) => {
+        owned = s.docs.map((d) => ({ ...(d.data() as Card), id: d.id }))
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar cartões próprios:', err)
+    )
+    const u2 = onSnapshot(
+      query(collection(db, COLLECTIONS.cards), where('sharedWithUids', 'array-contains', uid)),
+      (s) => {
+        shared = s.docs.map((d) => ({ ...(d.data() as Card), id: d.id }))
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar cartões compartilhados:', err)
+    )
+    return () => {
+      u1()
+      u2()
+    }
+  } catch (err) {
+    console.warn('Falha ao iniciar listener de cartões:', err)
+    return () => {}
   }
 }
 
 export function subscribeRecurring(uid: string, cb: (bills: RecurringBill[]) => void) {
-  const q = query(collection(ensure().db, COLLECTIONS.recurring), where('ownerUid', '==', uid))
-  return onSnapshot(q, (s) => cb(s.docs.map((d) => ({ ...(d.data() as RecurringBill), id: d.id }))))
+  try {
+    const q = query(collection(ensure().db, COLLECTIONS.recurring), where('ownerUid', '==', uid))
+    return onSnapshot(
+      q,
+      (s) => cb(s.docs.map((d) => ({ ...(d.data() as RecurringBill), id: d.id }))),
+      (err) => console.warn('Erro ao sincronizar despesas recorrentes:', err)
+    )
+  } catch (err) {
+    console.warn('Falha ao iniciar listener de despesas recorrentes:', err)
+    return () => {}
+  }
 }
 
 // ------------------------------------------------------------------
@@ -286,30 +326,43 @@ export function fsDeleteRecurring(id: string) {
 // Rede de Amizades
 // ------------------------------------------------------------------
 export function subscribeFriendships(uid: string, cb: (fs: Friendship[]) => void) {
-  const { db } = ensure()
-  let list1: Friendship[] = []
-  let list2: Friendship[] = []
+  try {
+    const { db } = ensure()
+    let list1: Friendship[] = []
+    let list2: Friendship[] = []
 
-  const emit = () => {
-    const map = new Map<string, Friendship>()
-    for (const f of list1) map.set(f.id, f)
-    for (const f of list2) map.set(f.id, f)
-    cb([...map.values()])
-  }
+    const emit = () => {
+      const map = new Map<string, Friendship>()
+      for (const f of list1) map.set(f.id, f)
+      for (const f of list2) map.set(f.id, f)
+      cb([...map.values()])
+    }
 
-  const u1 = onSnapshot(query(collection(db, COLLECTIONS.friendships), where('requesterUid', '==', uid)), (s) => {
-    list1 = s.docs.map((d) => ({ ...(d.data() as Friendship), id: d.id }))
-    emit()
-  })
+    const u1 = onSnapshot(
+      query(collection(db, COLLECTIONS.friendships), where('requesterUid', '==', uid)),
+      (s) => {
+        list1 = s.docs.map((d) => ({ ...(d.data() as Friendship), id: d.id }))
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar convites de amizade enviados:', err)
+    )
 
-  const u2 = onSnapshot(query(collection(db, COLLECTIONS.friendships), where('recipientUid', '==', uid)), (s) => {
-    list2 = s.docs.map((d) => ({ ...(d.data() as Friendship), id: d.id }))
-    emit()
-  })
+    const u2 = onSnapshot(
+      query(collection(db, COLLECTIONS.friendships), where('recipientUid', '==', uid)),
+      (s) => {
+        list2 = s.docs.map((d) => ({ ...(d.data() as Friendship), id: d.id }))
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar convites de amizade recebidos:', err)
+    )
 
-  return () => {
-    u1()
-    u2()
+    return () => {
+      u1()
+      u2()
+    }
+  } catch (err) {
+    console.warn('Falha ao iniciar listener de amizades:', err)
+    return () => {}
   }
 }
 
