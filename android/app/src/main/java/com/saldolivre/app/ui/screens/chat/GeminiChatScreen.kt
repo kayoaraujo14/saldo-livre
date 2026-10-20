@@ -52,6 +52,9 @@ fun GeminiChatScreen(
 
     // Modal de Configuração de API Key & Modelo
     if (showApiKeyDialog) {
+        var testFeedback by remember { mutableStateOf<String?>(null) }
+        var isTestSuccess by remember { mutableStateOf<Boolean?>(null) }
+
         AlertDialog(
             onDismissRequest = { showApiKeyDialog = false },
             containerColor = DarkSurface,
@@ -61,16 +64,20 @@ fun GeminiChatScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(
-                        text = "Informe sua chave da API do Google Gemini (obtida gratuitamente no Google AI Studio) para habilitar o modelo completo em tempo real:",
-                        fontSize = 13.sp,
+                        text = "Informe suas chaves da API do Google Gemini (do Google AI Studio). Você pode colar múltiplas chaves separadas por vírgula ou quebra de linha para ativar o Load Balancing e rotação automática anti-rate limit (429):",
+                        fontSize = 12.sp,
                         color = TextSecondary,
-                        lineHeight = 18.sp
+                        lineHeight = 17.sp
                     )
                     OutlinedTextField(
                         value = tempApiKey,
-                        onValueChange = { tempApiKey = it },
-                        placeholder = { Text("AIzaSy...", color = TextMuted) },
-                        singleLine = true,
+                        onValueChange = {
+                            tempApiKey = it
+                            testFeedback = null
+                        },
+                        placeholder = { Text("AIzaSy... (uma ou mais chaves)", color = TextMuted, fontSize = 13.sp) },
+                        minLines = 2,
+                        maxLines = 4,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Emerald500,
                             unfocusedBorderColor = DarkBorder,
@@ -80,8 +87,47 @@ fun GeminiChatScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    // Botão de Teste de Conexão
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val firstKey = tempApiKey.split(',', ';', '\n')
+                                    .map { it.trim() }
+                                    .firstOrNull { it.isNotBlank() } ?: ""
+                                viewModel.testConnection(firstKey) { outcome ->
+                                    isTestSuccess = outcome.first
+                                    testFeedback = outcome.second
+                                }
+                            },
+                            enabled = tempApiKey.isNotBlank() && !uiState.isTestingConnection,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            if (uiState.isTestingConnection) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Emerald400, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Testando...", fontSize = 11.sp, color = TextSecondary)
+                            } else {
+                                Text("Testar Conexão", fontSize = 11.sp, color = Emerald400)
+                            }
+                        }
+
+                        testFeedback?.let { msg ->
+                            Text(
+                                text = msg,
+                                fontSize = 11.sp,
+                                color = if (isTestSuccess == true) Emerald400 else Rose400,
+                                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                                maxLines = 2
+                            )
+                        }
+                    }
+
                     Text(
-                        text = "Modelo Gemini Selecionado:",
+                        text = "Modelo Principal Preferido (Router Inteligente):",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TextMuted
@@ -230,9 +276,11 @@ fun GeminiChatScreen(
                                 }
                             }
                             Text(
-                                text = "Assistente financeiro em tempo real",
+                                text = uiState.connectionStatus ?: "Assistente financeiro em tempo real",
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = if (uiState.connectionStatus != null) Emerald400 else TextMuted,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
                         }
                     }

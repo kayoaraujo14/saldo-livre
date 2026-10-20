@@ -1,15 +1,14 @@
 package com.saldolivre.app.ui.screens.chat
 
 import android.content.Context
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.compose.ui.graphics.Color
-import com.google.ai.client.generativeai.GenerativeModel
-import com.google.ai.client.generativeai.type.content
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.saldolivre.app.BuildConfig
 import com.saldolivre.app.SaldoLivreApplication
+import com.saldolivre.app.data.ai.GeminiExecutionResult
+import com.saldolivre.app.data.ai.GeminiLoadBalancer
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.repository.FinanceRepository
@@ -45,7 +44,8 @@ data class ChatUiState(
     val inputText: String = "",
     val apiKey: String = "",
     val selectedModel: String = "gemini-1.5-flash",
-    val connectionStatus: String? = null
+    val connectionStatus: String? = null,
+    val isTestingConnection: Boolean = false
 )
 
 class GeminiChatViewModel(
@@ -54,29 +54,24 @@ class GeminiChatViewModel(
 
     private val gson = Gson()
     private val appContext: Context? = runCatching { SaldoLivreApplication.instance }.getOrNull()
-    private val prefs = appContext?.getSharedPreferences("saldo_livre_gemini_prefs", Context.MODE_PRIVATE)
+    private val loadBalancer = GeminiLoadBalancer(appContext)
 
     companion object {
-        private const val PREF_KEY_API_KEY = "saldo_livre_gemini_api_key"
-        private const val PREF_KEY_MODEL = "saldo_livre_gemini_model"
-        val AVAILABLE_MODELS = listOf(
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.5-flash"
-        )
+        val AVAILABLE_MODELS = GeminiLoadBalancer.DEFAULT_MODELS_POOL
     }
 
     private val _uiState = MutableStateFlow(
         ChatUiState(
-            apiKey = loadSavedApiKey(),
-            selectedModel = loadSavedModel(),
+            apiKey = loadBalancer.getApiKeys().joinToString(", "),
+            selectedModel = loadBalancer.getSelectedModel(),
             messages = listOf(
                 ChatMessage(
                     sender = MessageSender.ASSISTANT,
                     text = "Olá! Sou o **Copiloto Saldo Livre** 🤖✨\n\n" +
-                            "Estou conectado aos seus dados financeiros em tempo real. Você pode conversar comigo para:\n" +
+                            "Estou conectado aos seus dados financeiros em tempo real com **balanceamento inteligente de IA**. Você pode conversar comigo para:\n" +
                             "• ⚡ **Lançamentos rápidos**: contas que chegaram ou compras parceladas (ex: *\"Gastei 65 no almoço no cartão\"* ou *\"Conta de luz veio R$ 245\"*)\n" +
-                            "• 📊 **Consultor ativo**: consulte seu Saldo Livre real, Limite Diário Seguro e contas a pagar\n" +
+                            "• 📊 **Gráficos e visualizações**: gere gráficos de pizza ou comparativos em barra para ver seus maiores gastos\n" +
+                            "• 💡 **Consultor ativo**: consulte seu Saldo Livre real, Limite Diário Seguro e contas a pagar\n" +
                             "• 🤝 **Divisões inteligentes**: dividir despesas com parceiro(a) ou amigos da rede\n\n" +
                             "Como posso ajudar você hoje?"
                 )
@@ -85,23 +80,14 @@ class GeminiChatViewModel(
     )
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    private fun loadSavedApiKey(): String {
-        val saved = prefs?.getString(PREF_KEY_API_KEY, null)?.trim()
-        return if (!saved.isNullOrBlank()) saved else BuildConfig.GEMINI_API_KEY
-    }
-
-    private fun loadSavedModel(): String {
-        return prefs?.getString(PREF_KEY_MODEL, null) ?: "gemini-1.5-flash"
-    }
-
-    fun onApiKeyChange(key: String) {
-        val trimmed = key.trim()
-        prefs?.edit()?.putString(PREF_KEY_API_KEY, trimmed)?.apply()
+    fun onApiKeyChange(keyInput: String) {
+        val trimmed = keyInput.trim()
+        loadBalancer.saveApiKeys(trimmed)
         _uiState.update { it.copy(apiKey = trimmed, connectionStatus = null) }
     }
 
     fun onModelChange(model: String) {
-        prefs?.edit()?.putString(PREF_KEY_MODEL, model)?.apply()
+        loadBalancer.setSelectedModel(model)
         _uiState.update { it.copy(selectedModel = model) }
     }
 
@@ -119,6 +105,20 @@ class GeminiChatViewModel(
                     )
                 )
             )
+        }
+    }
+
+    fun testConnection(testKey: String, onResult: (Pair<Boolean, String>) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTestingConnection = true) }
+            val outcome = loadBalancer.testConnection(testKey)
+            _uiState.update {
+                it.copy(
+                    isTestingConnection = false,
+                    connectionStatus = outcome.second
+                )
+            }
+            onResult(outcome)
         }
     }
 
@@ -167,9 +167,9 @@ class GeminiChatViewModel(
         val friendships = repository.getFriendships().first()
         val selectedMonth = repository.selectedMonth.value
 
-        val activeApiKey = _uiState.value.apiKey.ifBlank { BuildConfig.GEMINI_API_KEY }
+        val keys = loadBalancer.getApiKeys()
 
-        if (activeApiKey.isNotBlank()) {
+        if (keys.isNotEmpty()) {
             try {
                 val systemPrompt = buildSystemInstruction(
                     user = user,
@@ -181,20 +181,23 @@ class GeminiChatViewModel(
                     selectedMonth = selectedMonth
                 )
 
-                val generativeModel = GenerativeModel(
-                    modelName = _uiState.value.selectedModel,
-                    apiKey = activeApiKey,
-                    systemInstruction = content { text(systemPrompt) }
+                val result: GeminiExecutionResult = loadBalancer.executeWithResilience(
+                    userQuery = query,
+                    systemInstructionText = systemPrompt,
+                    onModelSwitched = { newModel ->
+                        _uiState.update { it.copy(selectedModel = newModel) }
+                    }
                 )
 
-                val response = generativeModel.generateContent(query)
-                val rawResponse = response.text ?: ""
+                _uiState.update {
+                    it.copy(connectionStatus = "Ativo • ${result.modelUsed} (${result.keyUsedMasked})")
+                }
 
-                if (rawResponse.isNotBlank()) {
-                    return processGeminiResponseAndExecuteActions(rawResponse, user, cards, transactions)
+                if (result.responseText.isNotBlank()) {
+                    return processGeminiResponseAndExecuteActions(result.responseText, user, cards, transactions)
                 }
             } catch (e: Exception) {
-                // Fallback automático caso haja erro na API (sem internet, quota excedida ou chave inválida)
+                // Se o load balancer esgotar tentativas ou encontrar rate limits, utiliza o fallback local
             }
         }
 
@@ -210,117 +213,158 @@ class GeminiChatViewModel(
         friendships: List<Friendship>,
         selectedMonth: String
     ): String {
-        val cardsDesc = if (cards.isEmpty()) "Nenhum cartão cadastrado"
+        val cardsDesc = if (cards.isEmpty()) "nenhum"
         else cards.joinToString("; ") {
-            "${it.cardName} (Titular: ${it.ownerName}, Fecha dia ${it.closingDay}, Vence dia ${it.dueDay}, ID: ${it.id})"
+            "${it.cardName} (titular: ${it.ownerName}, fecha dia ${it.closingDay}, vence dia ${it.dueDay}, id: ${it.id})"
         }
 
-        val friendsDesc = if (friendships.isEmpty()) "Nenhum amigo cadastrado"
+        val friendsDesc = if (friendships.isEmpty()) "nenhum"
         else friendships.joinToString("; ") {
             val (friendUid, friendName) = it.otherUser(user.uid)
             val friendEmail = if (it.requesterUid == user.uid) it.recipientEmail else it.requesterEmail
-            "$friendName ($friendEmail, UID: $friendUid)"
+            "$friendName (email: $friendEmail, uid: $friendUid)"
         }
 
-        val recurringDesc = if (recurringBills.isEmpty()) "Nenhuma conta recorrente cadastrada"
+        val recurringDesc = if (recurringBills.isEmpty()) "nenhuma conta recorrente ativa"
         else recurringBills.filter { it.active }.joinToString("; ") {
-            "${it.description} (R$ ${it.defaultAmount}, Vence dia ${it.dueDay}, Categoria: ${it.category})"
+            "${it.description} (R$ ${it.defaultAmount}, vence dia ${it.dueDay}, categoria: ${it.category})"
         }
 
-        val recentTxs = transactions
-            .sortedByDescending { it.dueDate }
-            .take(20)
-            .joinToString("\n") {
-                "• [ID: ${it.id}] ${it.dueDate} | ${it.description} | R$ ${FinanceEngine.round2(it.effectiveAmount)} | ${it.category} | ${it.paymentMethod.label} | ${it.status.label}"
-            }
+        val recentTxsDesc = if (transactions.isEmpty()) {
+            "LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento."
+        } else {
+            val sorted = transactions.sortedByDescending { it.dueDate }.take(25)
+            "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS (${sorted.size} itens):\n" +
+                    sorted.joinToString("\n") {
+                        val subText = if (!it.subcategory.isNullOrBlank()) "${it.category} › ${it.subcategory}" else it.category
+                        "• [ID: ${it.id}] ${it.dueDate} | ${it.description} | R$ ${FinanceEngine.round2(it.effectiveAmount)} | $subText | ${it.status.label} | ${it.paymentMethod.label}"
+                    }
+        }
 
-        val dailyLimitDesc = if (summary.dailyLimit != null && summary.dailyLimit > 0)
+        val byCategoryDesc = if (summary.byCategory.isNotEmpty()) {
+            summary.byCategory.joinToString("\n  ") { "* ${it.category}: R$ ${FinanceEngine.round2(it.amount)}" }
+        } else {
+            "* Nenhuma despesa computada ainda"
+        }
+
+        val byInvestmentDesc = if (summary.byInvestmentSubcategory.isNotEmpty()) {
+            "\n- Alocação de Investimentos por Subcategoria:\n  " +
+                    summary.byInvestmentSubcategory.joinToString("\n  ") { "* ${it.subcategory}: R$ ${FinanceEngine.round2(it.amount)} (${it.percentage}%)" }
+        } else ""
+
+        val dailyLimitDesc = if (summary.dailyLimit != null && summary.dailyLimit > 0) {
             "R$ ${FinanceEngine.round2(summary.dailyLimit)}/dia (${summary.daysRemaining} dias restantes)"
-        else "R$ 0,00 (Sem saldo diário disponível)"
+        } else {
+            "R$ 0,00 (Mês encerrado ou saldo insuficiente)"
+        }
 
         val partner = repository.allUsers.find { it.uid != user.uid }
 
         return """
-            Você é o "Copiloto Saldo Livre", assistente e conselheiro financeiro nativo no Android.
-            Responda SEMPRE em português do Brasil de forma acolhedora, objetiva, precisa e direta ao ponto.
-            
-            DADOS FINANCEIROS EM TEMPO REAL:
-            - Usuário Logado: ${user.displayName} (UID: ${user.uid})
-            - Parceiro(a) Vinculado(a): ${partner?.displayName ?: "Nenhum"}
-            - Hoje é: ${FinanceEngine.todayKey()}
-            - Mês de Competência em Análise: ${FinanceEngine.monthLabel(selectedMonth)} ($selectedMonth)
-            - Saldo Livre Real Atual: R$ ${FinanceEngine.round2(summary.freeBalance)}
+            Você é o "Copiloto Saldo Livre", um agente financeiro pessoal brasileiro, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
+
+            CONTEXTO ATUAL:
+            - Usuário logado: ${user.displayName} (UID: ${user.uid}).
+            - Parceiro(a) vinculado(a): ${partner?.displayName ?: "nenhum"}.
+            - Hoje é: ${FinanceEngine.todayKey()}.
+            - Mês em análise na tela: ${FinanceEngine.monthLabel(selectedMonth)} ($selectedMonth).
+            - Cartões cadastrados: $cardsDesc.
+            - Amigos na plataforma: $friendsDesc.
+            - Contas recorrentes ativas: $recurringDesc.
+
+            DADOS FINANCEIROS REAIS DO USUÁRIO EM ${FinanceEngine.monthLabel(selectedMonth).uppercase()} ($selectedMonth):
+            - Saldo Livre Real: R$ ${FinanceEngine.round2(summary.freeBalance)}
             - Limite Diário Seguro: $dailyLimitDesc
             - Total de Receitas: R$ ${FinanceEngine.round2(summary.income)}
-            - Total Comprometido: R$ ${FinanceEngine.round2(summary.committed)} (Já Pago: R$ ${FinanceEngine.round2(summary.paid)}, A Pagar: R$ ${FinanceEngine.round2(summary.committed - summary.paid)})
-            - Total a Receber: R$ ${FinanceEngine.round2(summary.receivableTotal)} (Parceiro: R$ ${FinanceEngine.round2(summary.receivableFromPartner)}, Amigos: R$ ${FinanceEngine.round2(summary.receivableFromFriends)}, Terceiros: R$ ${FinanceEngine.round2(summary.receivableFromExternal)})
-            
-            RECURSOS CADASTRADOS:
-            - Cartões: $cardsDesc
-            - Contas Recorrentes: $recurringDesc
-            - Amigos na Rede: $friendsDesc
-            
-            ÚLTIMOS LANÇAMENTOS DO MÊS:
-            $recentTxs
-            
-            DIRETRIZES DE RESPOSTA E AÇÕES FINANCEIRAS:
-            1. Zero Alucinação: NUNCA invente lançamentos ou números que não estejam no contexto.
-            2. Competência de Cartão: Compras no cartão de crédito afetam a competência do MÊS DE VENCIMENTO DA FATURA, e não a data da compra. Se a compra for após o dia de fechamento (closingDay), a fatura fecha no ciclo seguinte.
-            3. EXECUÇÃO DE AÇÕES FINANCEIRAS:
-               Quando o usuário solicitar o registro de um gasto/receita, a atualização de uma conta prevista ou exclusão, forneça sua resposta em texto natural e INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com uma das seguintes ações:
-               
-               a) Criar Lançamento:
-               ```json
-               {
-                 "action": "CREATE_TRANSACTION",
-                 "description": "<descrição>",
-                 "amount": 50.0,
-                 "type": "expense",
-                 "category": "Alimentação",
-                 "subcategory": "Restaurante",
-                 "paymentMethod": "credit_card",
-                 "cardName": "<nome do cartão se houver>",
-                 "splitType": "MINE",
-                 "friendName": null,
-                 "installments": { "current": 1, "total": 1 }
-               }
-               ```
-               (Categorias válidas: Alimentação, Moradia, Transporte, Saúde, Lazer, Assinaturas, Compras, Educação, Financiamentos & Empréstimos, Pets, Receita, Outros).
-               (Métodos válidos: credit_card, pix, debit, bill).
-               (Splits válidos: MINE, SPLIT_50, PARTNER, FRIEND, EXTERNAL).
-               
-               b) Atualizar Conta Prevista com Valor Real:
-               ```json
-               {
-                 "action": "UPDATE_ESTIMATED",
-                 "transactionId": "<id da transação de previsão>",
-                 "actualAmount": 245.50
-               }
-               ```
-               
-               c) Excluir Lançamento:
-               ```json
-               {
-                 "action": "DELETE_TRANSACTION",
-                 "transactionId": "<id da transação>",
-                 "description": "<nome do item>"
-               }
-               ```
-               
-               d) Gerar Gráfico de Análise Financeira (quando solicitado pelo usuário):
-               ```json
-               {
-                 "action": "GENERATE_CHART",
-                 "chartType": "donut",
-                 "title": "Distribuição de Gastos",
-                 "description": "Despesas por categoria",
-                 "data": [
-                   { "label": "Alimentação", "value": 450.0, "colorHex": "#10B981" },
-                   { "label": "Transporte", "value": 180.0, "colorHex": "#3B82F6" }
-                 ]
-               }
-               ```
-               (chartType pode ser "donut" ou "bar").
+            - Total Comprometido: R$ ${FinanceEngine.round2(summary.committed)} (Já Pago: R$ ${FinanceEngine.round2(summary.paid)}, A Pagar/Pendente: R$ ${FinanceEngine.round2(summary.committed - summary.paid)})
+            - Valores a Receber: R$ ${FinanceEngine.round2(summary.receivableTotal)} (Parceiro: R$ ${FinanceEngine.round2(summary.receivableFromPartner)}, Amigos: R$ ${FinanceEngine.round2(summary.receivableFromFriends)}, Terceiros: R$ ${FinanceEngine.round2(summary.receivableFromExternal)})
+            - Gastos por Categoria neste mês:
+              $byCategoryDesc
+            - Total Investido no Mês: R$ ${FinanceEngine.round2(summary.totalInvested)}$byInvestmentDesc
+
+            $recentTxsDesc
+
+            REGRAS DE FUNCIONAMENTO:
+
+            1. CARTÕES DE CRÉDITO, FATURA E MÊS DE COMPETÊNCIA:
+            - Compras no cartão de crédito comprometem a renda do MÊS DE VENCIMENTO DA FATURA (competenceMonth), e NÃO a data em que a compra foi feita!
+            - Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay).
+
+            2. AMIGOS NA REDE E DIVISÃO DE CONTAS:
+            - Se o gasto for de um amigo na plataforma (cadastrado em Amigos):
+              Preencha friendName e splitType = "FRIEND". O sistema aloca a cota correta e gera a cobrança com aceite mútuo.
+            - Se for pessoa sem conta na plataforma (ex: "Mãe", "Pai", "Irmão"):
+              Use splitType = "EXTERNAL".
+
+            3. ESTORNOS E REEMBOLSOS (VALORES NEGATIVOS):
+            - Se o gasto for estorno/crédito na fatura, use categoria = "Estorno" e valor negativo (ex: -15.00), aliviando o Saldo Livre.
+
+            4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS:
+            - Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Bares & Bebidas.
+            - Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo.
+            - Transporte: Combustível, Aplicativos (Uber/99), Transporte Público, Estacionamento & Pedágio.
+            - Saúde: Farmácia & Remédios, Consultas & Exames, Academia & Treinos.
+            - Lazer: Cinema, Teatro & Shows, Viagens & Hospedagem.
+            - Assinaturas: Streaming de Vídeo, Streaming de Música, Softwares, IA & Cloud.
+            - Compras: Roupas & Acessórios, Eletrônicos & Informática, Casa & Decoração, Presentes.
+            - Receita: Salário Principal, Pix Recebido, Rendimentos.
+            - Estorno: Crédito na Fatura, Reembolso.
+
+            5. COMPRAS PARCELADAS:
+            - Notações como "2/6", "10/12" indicam compras parceladas. Preencha installments = { "current": 2, "total": 6 }. O sistema aloca todas as parcelas cronologicamente.
+
+            6. EXECUÇÃO DE AÇÕES FINANCEIRAS:
+            Quando o usuário solicitar o registro de um gasto/receita, atualização de conta ou geração de gráfico, forneça sua resposta em texto natural e INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com uma das seguintes ações:
+
+            a) Criar Lançamento:
+            ```json
+            {
+              "action": "CREATE_TRANSACTION",
+              "description": "<descrição>",
+              "amount": 50.0,
+              "type": "expense",
+              "category": "Alimentação",
+              "subcategory": "Restaurante",
+              "paymentMethod": "credit_card",
+              "cardName": "<nome do cartão se houver>",
+              "splitType": "MINE",
+              "friendName": null,
+              "installments": { "current": 1, "total": 1 }
+            }
+            ```
+
+            b) Atualizar Conta Prevista:
+            ```json
+            {
+              "action": "UPDATE_ESTIMATED",
+              "transactionId": "<id da transação>",
+              "actualAmount": 245.50
+            }
+            ```
+
+            c) Excluir Lançamento:
+            ```json
+            {
+              "action": "DELETE_TRANSACTION",
+              "transactionId": "<id da transação>",
+              "description": "<nome do item>"
+            }
+            ```
+
+            d) Gerar Gráfico de Análise Financeira:
+            ```json
+            {
+              "action": "GENERATE_CHART",
+              "chartType": "donut",
+              "title": "Distribuição de Gastos",
+              "description": "Despesas por categoria",
+              "data": [
+                { "label": "Alimentação", "value": 450.0, "colorHex": "#10B981" },
+                { "label": "Transporte", "value": 180.0, "colorHex": "#3B82F6" }
+              ]
+            }
+            ```
+            (chartType pode ser "donut" ou "bar").
         """.trimIndent()
     }
 
@@ -393,7 +437,7 @@ class GeminiChatViewModel(
                             payerUid = user.uid
                         )
 
-                        // Verifica parcelamento
+                        // Parcelamento
                         val installmentsObj = jsonObj.getAsJsonObject("installments")
                         val totalInstallments = installmentsObj?.get("total")?.asInt ?: 1
                         val currentInstallment = installmentsObj?.get("current")?.asInt ?: 1
@@ -554,7 +598,7 @@ class GeminiChatViewModel(
             }
         }
 
-        // Verifica se há bloco ```chart ... ```
+        // Bloco ```chart ... ```
         val chartBlockRegex = Regex("""```(?:chart|grafico)\s*(\{[\s\S]*?\})\s*```""")
         val chartBlockMatch = chartBlockRegex.find(rawResponse)
         if (chartBlockMatch != null) {
@@ -725,7 +769,7 @@ class GeminiChatViewModel(
             )
         }
 
-        // 5. Intenção de registrar gasto
+        // 6. Intenção de registrar gasto
         val amountRegex = Regex("""(\d+([.,]\d{1,2})?)""")
         val match = amountRegex.find(lower)
 
@@ -799,8 +843,9 @@ class GeminiChatViewModel(
         }
 
         return AgentResponse(
-            text = "Compreendi sua mensagem! Como seu assistente financeiro, posso calcular projeções, registrar seus gastos por texto ou tirar dúvidas sobre o seu orçamento.\n\n" +
+            text = "Compreendi sua mensagem! Como seu copiloto financeiro, posso calcular projeções, registrar seus gastos por texto ou gerar gráficos do seu orçamento.\n\n" +
                     "Tente perguntar:\n" +
+                    "• *\"Gerar gráfico de gastos\"*\n" +
                     "• *\"Quanto posso gastar hoje?\"*\n" +
                     "• *\"Gastei 45 no almoço no cartão\"*\n" +
                     "• *\"Quais são as minhas contas a pagar?\"*"
