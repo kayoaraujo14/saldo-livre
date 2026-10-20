@@ -14,6 +14,7 @@ import {
   getSelectedGeminiModel,
   testGeminiConnection,
   formatGeminiErrorMessage,
+  transcribeAudioWithGemini,
   type ToolName,
 } from '@/lib/gemini'
 import { runDemoAgent } from '@/lib/demoAgent'
@@ -50,6 +51,7 @@ import {
   Check,
   XCircle,
   Mic,
+  Loader2,
 } from 'lucide-react'
 
 
@@ -171,6 +173,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   // Voice / Audio message recognition & recorder state
   const [isRecording, setIsRecording] = useState(false)
   const isRecordingRef = useRef(false)
+  const [isTranscribingAudio, setIsTranscribingAudio] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [audioTranscript, setAudioTranscript] = useState('')
   const transcriptRef = useRef('')
@@ -206,50 +209,126 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     setRecordingSeconds(0)
     audioChunksRef.current = []
 
-    // Sempre usar MediaRecorder para enviar o áudio direto para o modelo Gemini processar.
-    // Isso evita o problema de transcrição falhando silenciosamente no Chrome/Android.
+    // 1. Obter permissão e stream do microfone (essencial para mobile Safari/Chrome e PWA)
+    let stream: MediaStream | null = null
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        alert('Seu navegador não possui suporte para microfone ou gravação de voz.')
+        alert('Seu navegador não possui suporte para acesso ao microfone.')
         return
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
       mediaStreamRef.current = stream
-
-      if (typeof MediaRecorder === 'undefined') {
-        alert('Seu navegador não possui suporte para gravação de áudio.')
-        return
-      }
-
-      audioChunksRef.current = []
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/mp4')
-        ? 'audio/mp4'
-        : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : ''
-
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          audioChunksRef.current.push(e.data)
-        }
-      }
-      recorder.start(250)
-      mediaRecorderRef.current = recorder
-
-      isRecordingRef.current = true
-      setIsRecording(true)
-
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1)
-      }, 1000)
-    } catch (err: any) {
-      console.warn('Erro ao acessar microfone:', err)
-      alert('Não foi possível acessar o microfone. Verifique as permissões do navegador.')
+    } catch (micErr: any) {
+      console.warn('Permissão de microfone negada ou indisponível:', micErr)
+      alert('Não foi possível acessar o microfone. Verifique se a permissão de microfone está autorizada nas configurações do seu celular ou navegador.')
+      return
     }
+
+    // 2. Iniciar MediaRecorder em segundo plano (garante áudio gravado mesmo se o Web Speech falhar no celular)
+    if (stream && typeof MediaRecorder !== 'undefined') {
+      try {
+        const mimeCandidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/aac',
+          'audio/ogg',
+        ]
+        let chosenMime = ''
+        for (const m of mimeCandidates) {
+          if (MediaRecorder.isTypeSupported(m)) {
+            chosenMime = m
+            break
+          }
+        }
+
+        const recorder = chosenMime
+          ? new MediaRecorder(stream, { mimeType: chosenMime })
+          : new MediaRecorder(stream)
+
+        audioChunksRef.current = []
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) {
+            audioChunksRef.current.push(e.data)
+          }
+        }
+        recorder.start(100) // Coleta pedaços a cada 100ms para nada se perder ao pausar
+        mediaRecorderRef.current = recorder
+      } catch (recErr) {
+        console.warn('MediaRecorder não pôde ser inicializado:', recErr)
+      }
+    }
+
+    // 3. Iniciar Web Speech API simultaneamente para transcrição em tempo real na tela
+    const SpeechRecognitionClass =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+
+    if (SpeechRecognitionClass) {
+      try {
+        const recognition = new SpeechRecognitionClass()
+        recognition.lang = 'pt-BR'
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.maxAlternatives = 1
+
+        recognition.onresult = (event: any) => {
+          let interim = ''
+          let currentFinal = ''
+          for (let i = 0; i < event.results.length; i++) {
+            const item = event.results[i]
+            if (item.isFinal) {
+              currentFinal += item[0].transcript + ' '
+            } else {
+              interim += item[0].transcript
+            }
+          }
+          const fullText = (currentFinal + interim).replace(/\s+/g, ' ').trim()
+          if (fullText) {
+            transcriptRef.current = fullText
+            setAudioTranscript(fullText)
+            setInput(fullText)
+          }
+        }
+
+        recognition.onerror = (event: any) => {
+          console.warn('SpeechRecognition aviso no mobile:', event.error)
+          // Em navegadores móveis (Safari iOS, PWAs, Chrome Android), erros como 'no-speech'
+          // ou 'not-allowed' no SpeechRecognition NÃO devem cancelar a gravação!
+          // O MediaRecorder está gravando o áudio que será transcrito por IA.
+        }
+
+        recognition.onend = () => {
+          // Se ainda estiver gravando, tenta manter a escuta ativa
+          if (isRecordingRef.current && recognitionRef.current) {
+            try {
+              recognitionRef.current.start()
+            } catch {
+              // Comportamento normal no mobile quando a sessão expira sem toque
+            }
+          }
+        }
+
+        recognitionRef.current = recognition
+        recognition.start()
+      } catch (speechErr) {
+        console.warn('SpeechRecognition falhou ao iniciar, usando áudio nativo:', speechErr)
+      }
+    }
+
+    isRecordingRef.current = true
+    setIsRecording(true)
+
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1)
+    }, 1000)
   }
 
   const stopRecording = async (sendImmediately = true) => {
@@ -257,6 +336,11 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = null
+    }
+
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch {}
+      recognitionRef.current = null
     }
 
     let recordedBlob: Blob | null = null
@@ -284,30 +368,104 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     setIsRecording(false)
     setRecordingSeconds(0)
 
-    const capturedText = input.trim()
+    let capturedText = (transcriptRef.current || input || audioTranscript).trim()
     setAudioTranscript('')
     transcriptRef.current = ''
 
-    if (sendImmediately) {
-      // Se tiver texto digitado envia, caso contrário, se tiver o áudio (gravado com MediaRecorder) envia o áudio.
-      if (capturedText) {
-        handleSend(capturedText)
-      } else if (recordedBlob && recordedBlob.size > 500) {
+    // Se o reconhecimento nativo do navegador não gerou texto (muito comum em iPhones, PWAs e celulares),
+    // mas capturamos o áudio real pelo microfone:
+    if (!capturedText && recordedBlob && recordedBlob.size > 500) {
+      setIsTranscribingAudio(true)
+      try {
         const reader = new FileReader()
-        reader.onload = () => {
-          const res = reader.result as string
-          const b64 = res.includes(',') ? res.split(',')[1] : res
-          const ext = recordedBlob!.type.includes('mp4') ? 'mp4' : 'webm'
-          setPendingAttachment({
-            name: `mensagem_de_voz.${ext}`,
-            size: recordedBlob!.size,
-            type: recordedBlob!.type || 'audio/webm',
-            base64: b64,
-          })
-          handleSend('Por favor, processe e transcreva esta gravação de áudio com minhas instruções financeiras ou lançamentos.')
-        }
+        const b64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => {
+            const res = reader.result as string
+            const b64 = res.includes(',') ? res.split(',')[1] : res
+            resolve(b64)
+          }
+          reader.onerror = reject
+        })
         reader.readAsDataURL(recordedBlob)
+        const b64 = await b64Promise
+
+        const mime = recordedBlob.type || 'audio/webm'
+        const ext = mime.includes('mp4') || mime.includes('aac') ? 'mp4' : 'webm'
+        const audioAttachment: ChatAttachment = {
+          name: `audio_${Date.now()}.${ext}`,
+          size: recordedBlob.size,
+          type: mime,
+          base64: b64,
+        }
+
+        // Se temos a chave da API do Gemini conectada, transcrevemos com IA diretamente
+        if (apiKey) {
+          try {
+            const aiTranscription = await transcribeAudioWithGemini({
+              apiKey,
+              audioBase64: b64,
+              mimeType: mime,
+            })
+            if (aiTranscription) {
+              capturedText = aiTranscription
+              setInput(aiTranscription)
+            }
+          } catch (tErr) {
+            console.warn('Transcrição direta falhou, enviando áudio para o Copilot:', tErr)
+          }
+        }
+
+        if (sendImmediately) {
+          const finalPrompt = capturedText || '🎙️ [Áudio]: Por favor, transcreva este áudio e processe as despesas ou solicitações faladas.'
+          await handleSend(finalPrompt, audioAttachment)
+        } else if (capturedText) {
+          setInput(capturedText)
+        } else if (!apiKey) {
+          alert('Não foi possível transcrever a voz pelo navegador do celular. Conecte sua chave gratuita do Gemini no botão 🔑 para ativar a transcrição com IA!')
+        }
+      } catch (err) {
+        console.error('Erro ao processar gravação de voz:', err)
+      } finally {
+        setIsTranscribingAudio(false)
       }
+      return
+    }
+
+    // Se temos texto capturado via Web Speech
+    if (capturedText) {
+      if (sendImmediately) {
+        let audioAttachment: ChatAttachment | undefined
+        if (recordedBlob && recordedBlob.size > 500) {
+          try {
+            const reader = new FileReader()
+            const b64Promise = new Promise<string>((resolve, reject) => {
+              reader.onload = () => {
+                const res = reader.result as string
+                const b64 = res.includes(',') ? res.split(',')[1] : res
+                resolve(b64)
+              }
+              reader.onerror = reject
+            })
+            reader.readAsDataURL(recordedBlob)
+            const b64 = await b64Promise
+            const mime = recordedBlob.type || 'audio/webm'
+            const ext = mime.includes('mp4') || mime.includes('aac') ? 'mp4' : 'webm'
+            audioAttachment = {
+              name: `audio_${Date.now()}.${ext}`,
+              size: recordedBlob.size,
+              type: mime,
+              base64: b64,
+            }
+          } catch {
+            // Se falhar converter blob, envia só o texto
+          }
+        }
+        handleSend(capturedText, audioAttachment)
+      } else {
+        setInput(capturedText)
+      }
+    } else {
+      console.warn('Nenhuma fala ou áudio capturado.')
     }
   }
 
@@ -333,6 +491,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     }
 
     setIsRecording(false)
+    setIsTranscribingAudio(false)
     setRecordingSeconds(0)
     setAudioTranscript('')
     transcriptRef.current = ''
@@ -730,9 +889,9 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     updateSessionMessages((prev) => [...prev, cancelMsg])
   }
 
-  const handleSend = async (textToSend?: string) => {
+  const handleSend = async (textToSend?: string, attachmentToSend?: ChatAttachment) => {
     let text = (textToSend ?? input).trim()
-    const currentAttachment = pendingAttachment
+    const currentAttachment = attachmentToSend || pendingAttachment
 
     if ((!text && !currentAttachment) || loading) return
 
@@ -767,11 +926,18 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
       }
     }
 
-    // Se estiver enviando um arquivo PDF sem texto digitado, define instrução padrão inteligente de onboarding
+    // Se estiver enviando um anexo sem texto digitado
     if (!text && currentAttachment) {
-      const isStatement = /extrato|conta|bank|statement|saldo/i.test(currentAttachment.name)
-      if (isStatement) {
-        text = `Por favor, analise o extrato bancário de conta corrente em PDF anexado (${currentAttachment.name}).
+      const isAudio =
+        currentAttachment.type?.startsWith('audio/') ||
+        /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(currentAttachment.name || '')
+
+      if (isAudio) {
+        text = '🎙️ [Áudio recebido]: Por favor, transcreva o áudio falado e execute as despesas ou solicitações financeiras.'
+      } else {
+        const isStatement = /extrato|conta|bank|statement|saldo/i.test(currentAttachment.name)
+        if (isStatement) {
+          text = `Por favor, analise o extrato bancário de conta corrente em PDF anexado (${currentAttachment.name}).
 Atenção crítica:
 1. Extraia linha a linha os lançamentos literais do extrato sem inventar ou estimar valores.
 2. Identifique movimentações internas (como Aplicações/Resgates em RDB, Guardar Dinheiro) e pagamentos de fatura/saldo anterior marcando com categoria_filtro: "ignorada".
@@ -779,8 +945,9 @@ Atenção crítica:
 4. Identifique todas as DESPESAS / SAÍDAS válidas (Pix enviados, compras no débito, boletos) com tipo: "expense", status: "paid" e método "pix", "debit" ou "bill" (sem cartão de crédito).
 5. Preencha a contraparte exata de cada item (ex: Brisanet, nome do recebedor/pagador).
 6. Chame a ferramenta "registrarTransacoesLote" com origemDocumento: "extrato_conta" e exiba de imediato a tabela detalhada com todas as transações para conferência antes de pedir confirmação.`
-      } else {
-        text = `Por favor, analise o documento em PDF anexado (${currentAttachment.name}). Se for extrato bancário de conta corrente, separe rigorosamente receitas/entradas (tipo: "income", método "pix", aumentam o Saldo Livre) de saídas em conta (método "pix" ou "debit", status "paid"). Ignore RDBs e pagamentos de fatura. Se for fatura de cartão de crédito, cadastre as compras a vencer no cartão correspondente. Extraia os dados literais e utilize a ferramenta "registrarTransacoesLote", apresentando a listagem completa de itens.`
+        } else {
+          text = `Por favor, analise o documento em PDF anexado (${currentAttachment.name}). Se for extrato bancário de conta corrente, separe rigorosamente receitas/entradas (tipo: "income", método "pix", aumentam o Saldo Livre) de saídas em conta (método "pix" ou "debit", status "paid"). Ignore RDBs e pagamentos de fatura. Se for fatura de cartão de crédito, cadastre as compras a vencer no cartão correspondente. Extraia os dados literais e utilize a ferramenta "registrarTransacoesLote", apresentando a listagem completa de itens.`
+        }
       }
     }
 
@@ -834,6 +1001,7 @@ Atenção crítica:
             size: currentAttachment.size,
             type: currentAttachment.type,
             extractedText: currentAttachment.extractedText,
+            base64: currentAttachment.base64,
           }
         : undefined,
     }
@@ -1406,32 +1574,53 @@ Atenção crítica:
                     : 'bg-slate-900/80 border border-slate-800/80 text-slate-200 rounded-tl-xs shadow-sm'
               }`}
             >
-              {/* PDF Attachment Badge in Message */}
-              {msg.attachment && (
-                <div
-                  className={`mb-2.5 p-2 rounded-xl flex items-center gap-2 border ${
-                    msg.role === 'user'
-                      ? 'bg-emerald-700/60 border-emerald-400/40 text-white'
-                      : 'bg-slate-950/60 border-slate-700 text-slate-200'
-                  }`}
-                >
-                  <div className="size-7 rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-300 flex items-center justify-center shrink-0">
-                    <FileText className="size-3.5 text-rose-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[11px] font-semibold truncate block leading-tight">
-                      {msg.attachment.name}
-                    </span>
-                    <span
-                      className={`text-[9px] ${
-                        msg.role === 'user' ? 'text-emerald-200' : 'text-slate-400'
+              {/* Attachment Badge in Message */}
+              {msg.attachment && (() => {
+                const isAudio =
+                  msg.attachment.type?.startsWith('audio/') ||
+                  /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(msg.attachment.name || '')
+                return (
+                  <div
+                    className={`mb-2.5 p-2 rounded-xl flex items-center gap-2 border ${
+                      msg.role === 'user'
+                        ? isAudio
+                          ? 'bg-rose-950/70 border-rose-500/50 text-white'
+                          : 'bg-emerald-700/60 border-emerald-400/40 text-white'
+                        : 'bg-slate-950/60 border-slate-700 text-slate-200'
+                    }`}
+                  >
+                    <div
+                      className={`size-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        isAudio
+                          ? 'bg-rose-500/30 border border-rose-500/50 text-rose-300'
+                          : 'bg-rose-500/20 border border-rose-500/30 text-rose-300'
                       }`}
                     >
-                      {(msg.attachment.size / 1024).toFixed(0)} KB · Fatura / Extrato PDF
-                    </span>
+                      {isAudio ? (
+                        <Mic className="size-3.5 text-rose-300" />
+                      ) : (
+                        <FileText className="size-3.5 text-rose-400" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[11px] font-semibold truncate block leading-tight">
+                        {isAudio ? 'Mensagem de Áudio' : msg.attachment.name}
+                      </span>
+                      <span
+                        className={`text-[9px] ${
+                          msg.role === 'user'
+                            ? isAudio
+                              ? 'text-rose-200/90'
+                              : 'text-emerald-200'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {(msg.attachment.size / 1024).toFixed(0)} KB · {isAudio ? 'Gravação de Voz' : 'Fatura / Extrato PDF'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
 
               {/* Markdown Content with Chart rendering */}
               <div className="chat-prose">
@@ -1737,37 +1926,72 @@ Atenção crítica:
 
       {/* Input Box */}
       <div className="p-2.5 sm:p-3 border-t border-white/[0.06] bg-slate-900/60">
-        {/* Pending PDF Attachment Preview */}
-        {pendingAttachment && (
-          <div className="mb-2 p-2 rounded-xl bg-slate-950/90 border border-emerald-500/40 flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-2">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <div className="size-8 rounded-lg bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
-                <FileText className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-white truncate block">
-                    {pendingAttachment.name}
-                  </span>
-                  <Badge variant="outline" className="text-[9px] py-0 px-1 bg-emerald-500/20 text-emerald-300 border-emerald-500/30 shrink-0">
-                    PDF Pronto
-                  </Badge>
-                </div>
-                <span className="text-[10px] text-slate-400 block truncate">
-                  {(pendingAttachment.size / 1024).toFixed(1)} KB · O Copiloto lerá e importará as despesas deste documento
-                </span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPendingAttachment(null)}
-              className="size-6 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors cursor-pointer shrink-0"
-              title="Remover anexo"
-            >
-              <X className="size-3.5" />
-            </button>
+        {/* Audio Transcribing Indicator */}
+        {isTranscribingAudio && (
+          <div className="mb-2 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-950/80 via-slate-950/90 to-emerald-950/60 border border-emerald-500/50 flex items-center gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-1">
+            <Loader2 className="size-3.5 text-emerald-400 animate-spin shrink-0" />
+            <span className="text-xs font-medium text-emerald-200">
+              Transcrevendo sua mensagem de voz com Inteligência Artificial...
+            </span>
           </div>
         )}
+
+        {/* Pending Attachment Preview (PDF ou Áudio) */}
+        {pendingAttachment && (() => {
+          const isAudio =
+            pendingAttachment.type?.startsWith('audio/') ||
+            /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(pendingAttachment.name || '')
+          return (
+            <div
+              className={`mb-2 p-2 rounded-xl bg-slate-950/90 border ${
+                isAudio ? 'border-rose-500/40' : 'border-emerald-500/40'
+              } flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-2`}
+            >
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div
+                  className={`size-8 rounded-lg ${
+                    isAudio
+                      ? 'bg-rose-500/20 border border-rose-500/30 text-rose-400'
+                      : 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+                  } flex items-center justify-center shrink-0`}
+                >
+                  {isAudio ? <Mic className="size-4 text-rose-400" /> : <FileText className="size-4 text-emerald-400" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-white truncate block">
+                      {isAudio ? 'Mensagem de Áudio Gravada' : pendingAttachment.name}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={`text-[9px] py-0 px-1 ${
+                        isAudio
+                          ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      } shrink-0`}
+                    >
+                      {isAudio ? 'Áudio Pronto' : 'PDF Pronto'}
+                    </Badge>
+                  </div>
+                  <span className="text-[10px] text-slate-400 block truncate">
+                    {(pendingAttachment.size / 1024).toFixed(1)} KB ·{' '}
+                    {isAudio
+                      ? 'O Copiloto transcreverá e executará os comandos deste áudio'
+                      : 'O Copiloto lerá e importará as despesas deste documento'}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingAttachment(null)}
+                className="size-6 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                title="Remover anexo"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )
+        })()}
 
         {/* Live Recording Indicator Bar (aparece acima do input quando gravando, sem cobrir o botão de enviar) */}
         {isRecording && (

@@ -728,6 +728,12 @@ REGRAS DE FUNCIONAMENTO:
 - NUNCA afirme que o usuário comprou algo ou gastou determinado valor a menos que conste nos LANÇAMENTOS REAIS acima ou seja retornado pela ferramenta "consultarTransacoes".
 - Se o usuário perguntar algo sobre seu extrato, compras passadas ou se um pagamento foi feito, consulte os LANÇAMENTOS REAIS acima ou chame "consultarTransacoes". Se não encontrar, diga com sinceridade e exatidão: "Não encontrei nenhum lançamento de [X] registrado no mês de ${ctx.monthLabel}."
 - Seja extremamente DIRETO, OBJETIVO e SUCINTO. Elimine rodeios, introduções prolixas, encerramentos repetitivos e sermões não solicitados.
+
+8. MENSAGENS DE ÁUDIO E COMANDOS POR VOZ (MULTIMODAL):
+- Quando o usuário gravar áudio ou enviar mensagem de voz (ou se houver áudio anexado):
+  1. Transcreva com fidelidade logo no início da sua resposta:
+     🎙️ **Áudio:** *"[texto exato falado pelo usuário]"*
+  2. Em seguida, processe e execute imediatamente as transações, contas divididas, consultas ou despesas solicitadas na mensagem de áudio!
 - Ao registrar, editar ou excluir despesas, confirme a operação em NO MÁXIMO 2 a 3 linhas objetivas.
 - NÃO dê sermões ou lições financeiras a menos que o usuário explicitamente peça conselhos.
 
@@ -940,7 +946,14 @@ export function buildChatContents(
             .join('\n') +
           '\n]'
         : ''
-    const attachmentNote = m.attachment ? `\n[Arquivo PDF anexado: ${m.attachment.name}]` : ''
+    const isAudio =
+      m.attachment?.type?.startsWith('audio/') ||
+      /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(m.attachment?.name || '')
+    const attachmentNote = m.attachment
+      ? isAudio
+        ? `\n[Mensagem de áudio anexada: ${m.attachment.name}]`
+        : `\n[Arquivo PDF anexado: ${m.attachment.name}]`
+      : ''
     const text = m.content + attachmentNote + actionDetails + pendingTxsDetail
 
     const lastTurn = turns[turns.length - 1]
@@ -960,9 +973,20 @@ export function buildChatContents(
 
   const userParts: Part[] = [{ text: promptText }]
   if (newAttachment?.base64) {
+    const isAudio =
+      newAttachment.type?.startsWith('audio/') ||
+      /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(newAttachment.name || '')
+    let detectedMime = newAttachment.type
+    if (!detectedMime || detectedMime === 'application/pdf') {
+      if (isAudio) {
+        detectedMime = newAttachment.name.endsWith('.mp4') ? 'audio/mp4' : 'audio/webm'
+      } else {
+        detectedMime = 'application/pdf'
+      }
+    }
     userParts.push({
       inlineData: {
-        mimeType: newAttachment.type || 'application/pdf',
+        mimeType: detectedMime,
         data: newAttachment.base64,
       },
     })
@@ -1150,4 +1174,62 @@ export async function runGeminiAgent(opts: {
   }
   return { text: 'Executei as ações solicitadas.', actions }
 }
+
+/**
+ * Transcreve áudio com extrema fidelidade em português do Brasil usando a API multimodal do Gemini.
+ * Suporta gravações de celulares (mp4/aac no iOS Safari e webm/opus no Android Chrome).
+ */
+export async function transcribeAudioWithGemini(opts: {
+  apiKey: string
+  audioBase64: string
+  mimeType: string
+}): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey: opts.apiKey })
+  const models = ['gemini-3-flash', 'gemini-2.5-flash', 'gemini-3.5-flash-lite']
+  let lastError: unknown = null
+
+  let normalizedMime = opts.mimeType || 'audio/webm'
+  if (normalizedMime.includes('webm')) normalizedMime = 'audio/webm'
+  else if (normalizedMime.includes('mp4') || normalizedMime.includes('m4a')) normalizedMime = 'audio/mp4'
+  else if (normalizedMime.includes('aac')) normalizedMime = 'audio/aac'
+  else if (normalizedMime.includes('ogg')) normalizedMime = 'audio/ogg'
+  else if (normalizedMime.includes('wav')) normalizedMime = 'audio/wav'
+
+  for (const model of models) {
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: 'Transcreva com fidelidade absoluta em português do Brasil o que foi falado neste áudio. Retorne EXCLUSIVAMENTE o texto transcrito, sem aspas, sem saudações, sem introduções e sem explicações.',
+              },
+              {
+                inlineData: {
+                  mimeType: normalizedMime,
+                  data: opts.audioBase64,
+                },
+              },
+            ],
+          },
+        ],
+        config: {
+          temperature: 0.1,
+        },
+      })
+
+      const text = (res.text || '').trim().replace(/^["']|["']$/g, '')
+      if (text) return text
+    } catch (err) {
+      lastError = err
+      console.warn(`Falha na transcrição com modelo ${model}:`, err)
+    }
+  }
+
+  if (lastError) throw lastError
+  return ''
+}
+
 
