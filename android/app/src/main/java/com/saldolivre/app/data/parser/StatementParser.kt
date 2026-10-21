@@ -2,6 +2,7 @@ package com.saldolivre.app.data.parser
 
 import android.content.Context
 import android.net.Uri
+import androidx.compose.runtime.Immutable
 import com.saldolivre.app.data.model.PaymentMethod
 import com.saldolivre.app.data.model.TransactionType
 import java.io.ByteArrayInputStream
@@ -10,6 +11,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.zip.InflaterInputStream
 
+@Immutable
 data class ParsedStatementItem(
     val id: String = UUID.randomUUID().toString(),
     val rawLine: String = "",
@@ -25,8 +27,8 @@ data class ParsedStatementItem(
     val ignoredReason: String? = null,
     val installmentNumber: Int? = null,
     val installmentsTotal: Int? = null,
-    var isSelected: Boolean = true,
-    var targetCardId: String? = null
+    val isSelected: Boolean = true,
+    val targetCardId: String? = null
 )
 
 object StatementParser {
@@ -178,15 +180,30 @@ object StatementParser {
         val fileName = uri.lastPathSegment?.lowercase() ?: ""
 
         val bytes = cr.openInputStream(uri)?.use { it.readBytes() } ?: return emptyList()
+        return parseFromBytes(bytes, fileName, mimeType, defaultMonthKey)
+    }
 
-        return if (fileName.endsWith(".pdf") || mimeType.contains("pdf") || (bytes.size >= 4 && bytes[0] == 0x25.toByte() && bytes[1] == 0x50.toByte())) {
+    /**
+     * Ponto de entrada para ler a partir de um array de bytes (PDF, OFX, CSV, TXT)
+     */
+    fun parseFromBytes(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String,
+        defaultMonthKey: String
+    ): List<ParsedStatementItem> {
+        if (bytes.isEmpty()) return emptyList()
+        val lowerName = fileName.lowercase()
+        val lowerMime = mimeType.lowercase()
+
+        return if (lowerName.endsWith(".pdf") || lowerMime.contains("pdf") || (bytes.size >= 4 && bytes[0] == 0x25.toByte() && bytes[1] == 0x50.toByte())) {
             val lines = extractTextFromPdfBytes(bytes)
             parseTextLines(lines, defaultMonthKey)
         } else {
             val textContent = String(bytes, Charsets.UTF_8)
-            if (fileName.endsWith(".ofx") || fileName.endsWith(".qfx") || textContent.contains("<OFX>", ignoreCase = true) || textContent.contains("<STMTTRN>", ignoreCase = true)) {
+            if (lowerName.endsWith(".ofx") || lowerName.endsWith(".qfx") || textContent.contains("<OFX>", ignoreCase = true) || textContent.contains("<STMTTRN>", ignoreCase = true)) {
                 parseOfx(textContent, defaultMonthKey)
-            } else if (fileName.endsWith(".csv") || textContent.contains(";") || (textContent.contains(",") && textContent.lines().size > 2)) {
+            } else if (lowerName.endsWith(".csv") || textContent.contains(";") || (textContent.contains(",") && textContent.lines().size > 2)) {
                 parseCsv(textContent, defaultMonthKey)
             } else {
                 parseTextLines(textContent.lines(), defaultMonthKey)

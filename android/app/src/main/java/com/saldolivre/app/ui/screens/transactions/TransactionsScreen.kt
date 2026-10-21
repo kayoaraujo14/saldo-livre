@@ -32,16 +32,33 @@ import com.saldolivre.app.ui.components.StatusBadge
 import com.saldolivre.app.ui.components.TransactionItem
 import com.saldolivre.app.ui.theme.*
 
+private val FilterChipShape = RoundedCornerShape(20.dp)
+private val SelectedFilterChipBg = Emerald500.copy(alpha = 0.2f)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionsScreen(
     viewModel: TransactionsViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToAddTransaction: () -> Unit
+    onNavigateToAddTransaction: () -> Unit,
+    onNavigateToEditTransaction: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
     var txToDelete by remember { mutableStateOf<Transaction?>(null) }
+
+    val formattedMonthLabel = remember(uiState.selectedMonth) {
+        FinanceEngine.formatMonthLabel(uiState.selectedMonth)
+    }
+    val formattedTotalIncome = remember(uiState.totalIncome) {
+        "Entradas: ${FinanceEngine.formatCurrency(uiState.totalIncome)}"
+    }
+    val formattedTotalExpense = remember(uiState.totalExpense) {
+        "Saídas: ${FinanceEngine.formatCurrency(uiState.totalExpense)}"
+    }
+    val isListEmpty by remember(uiState.filteredTransactions) {
+        derivedStateOf { uiState.filteredTransactions.isEmpty() }
+    }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -70,7 +87,7 @@ fun TransactionsScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = FinanceEngine.formatMonthLabel(uiState.selectedMonth),
+                            text = formattedMonthLabel,
                             fontSize = 11.sp,
                             color = TextMuted,
                             maxLines = 1,
@@ -243,14 +260,14 @@ fun TransactionsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Entradas: ${FinanceEngine.formatCurrency(uiState.totalIncome)}",
+                        text = formattedTotalIncome,
                         fontSize = 12.sp,
                         color = Emerald400,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1
                     )
                     Text(
-                        text = "Saídas: ${FinanceEngine.formatCurrency(uiState.totalExpense)}",
+                        text = formattedTotalExpense,
                         fontSize = 12.sp,
                         color = Rose400,
                         fontWeight = FontWeight.SemiBold,
@@ -260,7 +277,7 @@ fun TransactionsScreen(
             }
 
             // Transaction List
-            if (uiState.filteredTransactions.isEmpty()) {
+            if (isListEmpty) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -279,10 +296,15 @@ fun TransactionsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    items(uiState.filteredTransactions) { tx ->
+                    items(
+                        items = uiState.filteredTransactions,
+                        key = { it.id },
+                        contentType = { "transaction_item" }
+                    ) { tx ->
+                        val onItemClick = remember(tx) { { selectedTxForDetails = tx } }
                         TransactionItem(
                             transaction = tx,
-                            onClick = { selectedTxForDetails = tx }
+                            onClick = onItemClick
                         )
                     }
                 }
@@ -340,22 +362,48 @@ fun TransactionsScreen(
                 }
             },
             confirmButton = {
-                if (tx.status != TransactionStatus.PAID) {
-                    Button(
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FilledTonalButton(
                         onClick = {
-                            viewModel.markAsPaid(tx.id)
+                            val targetId = tx.id
                             selectedTxForDetails = null
+                            onNavigateToEditTransaction(targetId)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = Cyan500.copy(alpha = 0.2f),
+                            contentColor = Cyan400
+                        )
                     ) {
-                        Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Marcar como Pago",
-                            color = DarkBackground,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = "Editar",
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
+                    }
+
+                    if (tx.status != TransactionStatus.PAID) {
+                        Button(
+                            onClick = {
+                                viewModel.markAsPaid(tx.id)
+                                selectedTxForDetails = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
+                        ) {
+                            Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Pago",
+                                color = DarkBackground,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             },
@@ -440,16 +488,16 @@ private fun FilterChipItem(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val bgColor = if (isSelected) Emerald500.copy(alpha = 0.2f) else DarkSurface
+    val bgColor = if (isSelected) SelectedFilterChipBg else DarkSurface
     val borderColor = if (isSelected) Emerald500 else DarkBorder
     val textColor = if (isSelected) Emerald400 else TextSecondary
 
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
+            .clip(FilterChipShape)
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(20.dp))
-            .clickable { onClick() }
+            .border(1.dp, borderColor, FilterChipShape)
+            .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
     ) {

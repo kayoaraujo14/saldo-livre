@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,23 +26,41 @@ import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.ui.theme.*
 
+private val TransactionItemShape = RoundedCornerShape(14.dp)
+private val InstallmentBadgeShape = RoundedCornerShape(4.dp)
+
 @Composable
 fun TransactionItem(
     transaction: Transaction,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
-    val categoryDetail = CategoryRegistry.get(transaction.category)
+    val categoryDetail = remember(transaction.category) {
+        CategoryRegistry.get(transaction.category)
+    }
+    val catBgColor = remember(categoryDetail.color) {
+        categoryDetail.color.copy(alpha = 0.15f)
+    }
+    val catBorderColor = remember(categoryDetail.color) {
+        categoryDetail.color.copy(alpha = 0.35f)
+    }
     val isIncome = transaction.type == TransactionType.INCOME
-    val shape = RoundedCornerShape(14.dp)
+    val shortDate = remember(transaction.dueDate) {
+        transaction.dueDate.takeLast(5).replace("-", "/")
+    }
+    val formattedAmount = remember(transaction.effectiveAmount, isIncome) {
+        val prefix = if (isIncome) "+ " else "- "
+        prefix + FinanceEngine.formatCurrency(transaction.effectiveAmount)
+    }
+    val amountColor = if (isIncome) Emerald400 else TextPrimary
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(shape)
+            .clip(TransactionItemShape)
             .background(DarkSurface)
-            .border(1.dp, DarkBorder, shape)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .border(1.dp, DarkBorder, TransactionItemShape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(14.dp)
     ) {
         Row(
@@ -52,8 +71,8 @@ fun TransactionItem(
             Box(
                 modifier = Modifier
                     .size(42.dp)
-                    .background(categoryDetail.color.copy(alpha = 0.15f), CircleShape)
-                    .border(1.dp, categoryDetail.color.copy(alpha = 0.35f), CircleShape),
+                    .background(catBgColor, CircleShape)
+                    .border(1.dp, catBorderColor, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -86,7 +105,7 @@ fun TransactionItem(
                         Spacer(modifier = Modifier.width(6.dp))
                         Box(
                             modifier = Modifier
-                                .background(DarkSurfaceVariant, RoundedCornerShape(4.dp))
+                                .background(DarkSurfaceVariant, InstallmentBadgeShape)
                                 .padding(horizontal = 4.dp, vertical = 1.dp)
                         ) {
                             Text(
@@ -107,7 +126,7 @@ fun TransactionItem(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = transaction.dueDate.takeLast(5).replace("-", "/"),
+                        text = shortDate,
                         style = Typography.labelSmall,
                         color = TextMuted,
                         maxLines = 1
@@ -140,11 +159,8 @@ fun TransactionItem(
             Column(
                 horizontalAlignment = Alignment.End
             ) {
-                val prefix = if (isIncome) "+ " else "- "
-                val amountColor = if (isIncome) Emerald400 else TextPrimary
-
                 Text(
-                    text = prefix + FinanceEngine.formatCurrency(transaction.effectiveAmount),
+                    text = formattedAmount,
                     style = Typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = amountColor,

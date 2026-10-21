@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.saldolivre.app.SaldoLivreApplication
@@ -15,10 +16,14 @@ import com.saldolivre.app.data.ai.LearnedRulesManager
 import com.saldolivre.app.data.ai.NeuralFinanceClassifier
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
+import com.saldolivre.app.data.parser.ParsedStatementItem
+import com.saldolivre.app.data.parser.StatementParser
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.ui.theme.Emerald500
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 data class ChatUiState(
@@ -41,8 +46,17 @@ data class ChatUiState(
     val isRecordingAudio: Boolean = false,
     val recordingSeconds: Int = 0,
     val isTranscribingAudio: Boolean = false,
-    // Anexos
+    // Anexos & Importação de Extrato (PDF / OFX / CSV / TXT)
     val pendingAttachment: ChatAttachment? = null,
+    val parsedStatementItems: List<ParsedStatementItem> = emptyList(),
+    val isStatementReviewOpen: Boolean = false,
+    val statementFileName: String = "",
+    val availableCards: List<Card> = emptyList(),
+    val selectedImportCardId: String? = null,
+    val hideIgnoredStatementItems: Boolean = true,
+    val isImportingStatement: Boolean = false,
+    val showPasteStatementDialog: Boolean = false,
+    val pasteStatementText: String = "",
     // Sugestões Dinâmicas
     val displayedSuggestions: List<String> = emptyList(),
     val suggestionOffset: Int = 0
@@ -59,6 +73,8 @@ class GeminiChatViewModel(
     private val sessionManager = ChatSessionManager(appContext)
     private val rulesManager = LearnedRulesManager(appContext)
     private var speechManager: AndroidSpeechManager? = null
+    private var sessionsListener: ListenerRegistration? = null
+    private var rulesListener: ListenerRegistration? = null
 
     companion object {
         val AVAILABLE_MODELS = GeminiLoadBalancer.DEFAULT_MODELS_POOL
@@ -82,7 +98,7 @@ class GeminiChatViewModel(
             initialSessions.first()
         } else {
             val fresh = sessionManager.createInitialSession()
-            sessionManager.saveSession(userUid, fresh)
+            sessionManager.saveSession(userUid, fresh, syncToCloud = false)
             fresh
         }
 
@@ -112,6 +128,12 @@ class GeminiChatViewModel(
                 repository.getCards(),
                 repository.selectedMonth
             ) { summary, txs, cards, month ->
+                _uiState.update { state ->
+                    state.copy(
+                        availableCards = cards,
+                        selectedImportCardId = state.selectedImportCardId ?: cards.firstOrNull()?.id
+                    )
+                }
                 computeDynamicSuggestions(summary, txs, cards, month)
             }.collect { suggestions ->
                 updateDisplayedSuggestions(suggestions, _uiState.value.suggestionOffset)
@@ -120,6 +142,9 @@ class GeminiChatViewModel(
     }
 
     private fun loadUserSessionsAndRules(uid: String) {
+        sessionsListener?.remove()
+        rulesListener?.remove()
+
         val loadedSessions = sessionManager.getLocalSessions(uid)
         val loadedRules = rulesManager.getLocalRules(uid)
 
@@ -127,7 +152,7 @@ class GeminiChatViewModel(
             loadedSessions.first()
         } else {
             val fresh = sessionManager.createInitialSession()
-            sessionManager.saveSession(uid, fresh)
+            sessionManager.saveSession(uid, fresh, syncToCloud = false)
             fresh
         }
 
@@ -140,26 +165,38 @@ class GeminiChatViewModel(
             )
         }
 
-        // Inscreve escutas em tempo real do Firestore se logado
-        sessionManager.subscribeCloudSessions(uid) { cloudSessions ->
+        // Inscreve escutas em tempo real do Firestore se logado (mesma coleção e estrutura da Web)
+        sessionsListener = sessionManager.subscribeCloudSessions(uid) { cloudSessions ->
             if (cloudSessions.isNotEmpty()) {
                 _uiState.update { state ->
-                    val activeId = if (state.currentSessionId.isBlank()) cloudSessions.first().id else state.currentSessionId
-                    val active = cloudSessions.find { it.id == activeId } ?: cloudSessions.first()
+                    val currentLocal = state.sessions.find { it.id == state.currentSessionId }
+                    val isCurrentBlank = currentLocal == null || sessionManager.isBlankInitialSession(currentLocal)
+                    // Se a sessão atual for apenas uma tela inicial em branco, chaveia para a mais recente da nuvem (igual à Web)
+                    val targetActive = if (isCurrentBlank) {
+                        cloudSessions.first()
+                    } else {
+                        cloudSessions.find { it.id == state.currentSessionId } ?: cloudSessions.first()
+                    }
                     state.copy(
                         sessions = cloudSessions,
-                        currentSessionId = active.id,
-                        messages = active.messages
+                        currentSessionId = targetActive.id,
+                        messages = targetActive.messages
                     )
                 }
             }
         }
 
-        rulesManager.subscribeCloudRules(uid) { cloudRules ->
-            if (cloudRules.isNotEmpty()) {
-                _uiState.update { it.copy(learnedRules = cloudRules) }
-            }
+        rulesListener = rulesManager.subscribeCloudRules(uid) { cloudRules ->
+            neuralClassifier.syncLearnedRules(cloudRules.filter { it.active }.map { it.rule })
+            _uiState.update { it.copy(learnedRules = cloudRules) }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        sessionsListener?.remove()
+        rulesListener?.remove()
+        speechManager?.cancelListening()
     }
 
     // -------------------------------------------------------------
@@ -184,7 +221,7 @@ class GeminiChatViewModel(
     fun onNewSession() {
         val userUid = repository.currentUser.value.uid
         val fresh = sessionManager.createInitialSession()
-        sessionManager.saveSession(userUid, fresh)
+        sessionManager.saveSession(userUid, fresh, syncToCloud = false)
 
         _uiState.update {
             it.copy(
@@ -204,7 +241,7 @@ class GeminiChatViewModel(
             val updatedSessions = state.sessions.filter { it.id != sessionId }
             if (updatedSessions.isEmpty()) {
                 val fresh = sessionManager.createInitialSession()
-                sessionManager.saveSession(userUid, fresh)
+                sessionManager.saveSession(userUid, fresh, syncToCloud = false)
                 state.copy(
                     sessions = listOf(fresh),
                     currentSessionId = fresh.id,
@@ -226,9 +263,14 @@ class GeminiChatViewModel(
         val freshMsg = sessionManager.createInitialSession().messages
         val userUid = repository.currentUser.value.uid
 
+        // Se a sessão limpa existia na nuvem, remove-a do Firestore para refletir na Web
+        if (currentId.isNotBlank()) {
+            sessionManager.deleteSession(userUid, currentId)
+        }
+
         _uiState.update { state ->
             val updated = state.sessions.map { s ->
-                if (s.id == currentId) s.copy(messages = freshMsg, updatedAt = System.currentTimeMillis()) else s
+                if (s.id == currentId) s.copy(title = "Nova Conversa", messages = freshMsg, updatedAt = System.currentTimeMillis()) else s
             }
             sessionManager.saveLocalSessions(userUid, updated)
             state.copy(messages = freshMsg, sessions = updated)
@@ -383,7 +425,7 @@ class GeminiChatViewModel(
     }
 
     // -------------------------------------------------------------
-    // GESTÃO DE ANEXOS (PDF / IMAGEM / EXTRATO)
+    // GESTÃO DE ANEXOS (PDF / IMAGEM / EXTRATO OFX / CSV / TXT)
     // -------------------------------------------------------------
 
     fun onAttachmentSelected(name: String, size: Long, mimeType: String, bytes: ByteArray, textContent: String? = null) {
@@ -396,10 +438,301 @@ class GeminiChatViewModel(
             extractedText = textContent
         )
         _uiState.update { it.copy(pendingAttachment = attachment) }
+
+        // Tenta extrair lançamentos nativamente via StatementParser (PDF, OFX, CSV, TXT)
+        val isImage = mimeType.startsWith("image/") || name.lowercase().let {
+            it.endsWith(".png") || it.endsWith(".jpg") || it.endsWith(".jpeg") || it.endsWith(".webp")
+        }
+        if (!isImage) {
+            viewModelScope.launch {
+                val defaultMonth = repository.selectedMonth.value
+                val rawItems = withContext(Dispatchers.Default) {
+                    runCatching {
+                        if (!textContent.isNullOrBlank()) {
+                            StatementParser.parseFromRawText(textContent, defaultMonth)
+                        } else {
+                            StatementParser.parseFromBytes(bytes, name, mimeType, defaultMonth)
+                        }
+                    }.getOrDefault(emptyList())
+                }
+                val enriched = enrichStatementItemsWithRules(rawItems)
+                if (enriched.isNotEmpty()) {
+                    _uiState.update {
+                        it.copy(
+                            parsedStatementItems = enriched,
+                            statementFileName = name,
+                            isStatementReviewOpen = true
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun onRemoveAttachment() {
-        _uiState.update { it.copy(pendingAttachment = null) }
+        _uiState.update {
+            it.copy(
+                pendingAttachment = null,
+                parsedStatementItems = emptyList(),
+                isStatementReviewOpen = false,
+                statementFileName = ""
+            )
+        }
+    }
+
+    private fun enrichStatementItemsWithRules(items: List<ParsedStatementItem>): List<ParsedStatementItem> {
+        val rules = _uiState.value.learnedRules
+        return items.map { item ->
+            var cat = item.category
+            var sub = item.subcategory
+
+            // Se ainda for "Outros", consulta o classificador neural
+            if (cat == "Outros" && item.type == TransactionType.EXPENSE) {
+                val guess = neuralClassifier.guessCategoryAndSubcategory(
+                    "${item.description} ${item.counterparty}",
+                    item.amount
+                )
+                if (guess.category != "Outros") {
+                    cat = guess.category
+                    sub = guess.subcategory ?: sub
+                }
+            }
+
+            // Aplica regras aprendidas do usuário (ex: "Padaria X é Alimentação")
+            val combinedText = "${item.description} ${item.counterparty}".lowercase()
+            val knownCategories = listOf(
+                "Alimentação", "Moradia", "Transporte", "Saúde", "Lazer",
+                "Assinaturas", "Compras", "Educação", "Pets", "Investimentos", "Estorno", "Outros"
+            )
+            for (ruleObj in rules) {
+                val ruleLower = ruleObj.rule.lowercase()
+                for (knownCat in knownCategories) {
+                    val knownCatLower = knownCat.lowercase()
+                    if (ruleLower.contains(knownCatLower)) {
+                        val keywords = ruleLower
+                            .replace(knownCatLower, "")
+                            .split(Regex("""[\s,;.=:\->]+"""))
+                            .filter { kw -> kw.length >= 4 && kw !in listOf("sempre", "categoria", "coloque", "classifique", "como", "para", "gasto", "despesa", "lancamento", "lançamento") }
+                        if (keywords.any { kw -> combinedText.contains(kw) }) {
+                            cat = knownCat
+                            break
+                        }
+                    }
+                }
+            }
+
+            item.copy(category = cat, subcategory = sub)
+        }
+    }
+
+    fun setStatementReviewOpen(open: Boolean) {
+        _uiState.update { it.copy(isStatementReviewOpen = open) }
+    }
+
+    fun setShowPasteStatementDialog(show: Boolean) {
+        _uiState.update { it.copy(showPasteStatementDialog = show) }
+    }
+
+    fun onPasteStatementTextChange(text: String) {
+        _uiState.update { it.copy(pasteStatementText = text) }
+    }
+
+    fun onParseRawStatementText(rawText: String? = null) {
+        val textToParse = (rawText ?: _uiState.value.pasteStatementText).trim()
+        if (textToParse.isBlank()) return
+
+        viewModelScope.launch {
+            val defaultMonth = repository.selectedMonth.value
+            val parsed = withContext(Dispatchers.Default) {
+                runCatching {
+                    StatementParser.parseFromRawText(textToParse, defaultMonth)
+                }.getOrDefault(emptyList())
+            }
+            val enriched = enrichStatementItemsWithRules(parsed)
+            if (enriched.isNotEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        parsedStatementItems = enriched,
+                        statementFileName = "Extrato Colado (${enriched.size} itens)",
+                        isStatementReviewOpen = true,
+                        showPasteStatementDialog = false,
+                        pasteStatementText = ""
+                    )
+                }
+            } else {
+                // Caso não seja um extrato tabular estruturado, envia como mensagem para o Copiloto analisar
+                _uiState.update {
+                    it.copy(
+                        showPasteStatementDialog = false,
+                        pasteStatementText = ""
+                    )
+                }
+                sendMessage(overrideText = "Analise e extraia os lançamentos deste extrato:\n$textToParse")
+            }
+        }
+    }
+
+    fun toggleStatementItemSelection(itemId: String) {
+        _uiState.update { state ->
+            state.copy(
+                parsedStatementItems = state.parsedStatementItems.map {
+                    if (it.id == itemId) it.copy(isSelected = !it.isSelected) else it
+                }
+            )
+        }
+    }
+
+    fun toggleSelectAllStatementItems(selectAll: Boolean) {
+        _uiState.update { state ->
+            state.copy(
+                parsedStatementItems = state.parsedStatementItems.map {
+                    if (state.hideIgnoredStatementItems && it.isIgnored) it else it.copy(isSelected = selectAll)
+                }
+            )
+        }
+    }
+
+    fun setSelectedImportCard(cardId: String?) {
+        _uiState.update { it.copy(selectedImportCardId = cardId) }
+    }
+
+    fun setHideIgnoredStatementItems(hide: Boolean) {
+        _uiState.update { it.copy(hideIgnoredStatementItems = hide) }
+    }
+
+    fun confirmStatementImport() {
+        val state = _uiState.value
+        val selectedItems = state.parsedStatementItems.filter { it.isSelected }
+        if (selectedItems.isEmpty() || state.isImportingStatement) return
+
+        _uiState.update { it.copy(isImportingStatement = true) }
+
+        viewModelScope.launch {
+            try {
+                val currentUser = repository.currentUser.value
+                val targetCard = state.availableCards.find { it.id == state.selectedImportCardId }
+                val defaultMonth = repository.selectedMonth.value
+
+                val transactions = selectedItems.map { item ->
+                    val isCard = item.paymentMethod == PaymentMethod.CREDIT_CARD && targetCard != null
+                    val (dueDate, compMonth) = if (isCard && targetCard != null) {
+                        FinanceEngine.calculateCardInvoiceDates(
+                            purchaseDate = item.date,
+                            card = targetCard
+                        )
+                    } else {
+                        val m = if (item.date.length >= 7) item.date.substring(0, 7) else defaultMonth
+                        Pair(item.date, m)
+                    }
+
+                    val descWithInstallment = if (item.installmentNumber != null && item.installmentsTotal != null) {
+                        if (!item.description.contains("${item.installmentNumber}/${item.installmentsTotal}")) {
+                            "${item.description} (${item.installmentNumber}/${item.installmentsTotal})"
+                        } else item.description
+                    } else item.description
+
+                    Transaction(
+                        id = "imp_" + UUID.randomUUID().toString().take(8),
+                        createdByUid = currentUser.uid,
+                        paidByUid = currentUser.uid,
+                        cardId = if (isCard) targetCard?.id else null,
+                        description = descWithInstallment,
+                        category = item.category,
+                        subcategory = item.subcategory,
+                        type = item.type,
+                        paymentMethod = item.paymentMethod,
+                        status = if (item.type == TransactionType.INCOME || item.paymentMethod == PaymentMethod.PIX || item.paymentMethod == PaymentMethod.DEBIT) {
+                            TransactionStatus.PAID
+                        } else {
+                            TransactionStatus.PENDING
+                        },
+                        actualAmount = item.amount,
+                        totalAmount = item.amount,
+                        dueDate = dueDate,
+                        competenceMonth = compMonth,
+                        installmentNumber = item.installmentNumber ?: 1,
+                        installmentsTotal = item.installmentsTotal ?: 1,
+                        visibleToUids = listOf(currentUser.uid),
+                        userImpact = mapOf(currentUser.uid to item.amount),
+                        allocations = listOf(
+                            Allocation(
+                                type = "PLATFORM_USER",
+                                uid = currentUser.uid,
+                                name = currentUser.displayName,
+                                amount = item.amount,
+                                reimbursed = true
+                            )
+                        )
+                    )
+                }
+
+                repository.addTransactions(transactions)
+
+                val totalAmount = selectedItems.sumOf { it.amount }
+                val sourceLabel = state.statementFileName.ifBlank { "Extrato Bancário" }
+
+                repository.logActivity(
+                    ActivityLog(
+                        id = "act_" + UUID.randomUUID().toString().take(8),
+                        actionType = ActivityActionType.TRANSACTION_CREATED,
+                        title = "Importação de Extrato ($sourceLabel)",
+                        description = "Importou ${transactions.size} lançamentos via Copiloto IA",
+                        amount = totalAmount,
+                        competenceMonth = transactions.firstOrNull()?.competenceMonth ?: defaultMonth,
+                        userUid = currentUser.uid,
+                        userName = currentUser.displayName
+                    )
+                )
+
+                val userImportMsg = ChatMessage(
+                    sender = MessageSender.USER,
+                    text = "📄 Importar extrato: **$sourceLabel** (${transactions.size} itens selecionados)"
+                )
+
+                val targetDestinationLabel = if (targetCard != null) {
+                    "no cartão **${targetCard.cardName}**"
+                } else {
+                    "na sua **Conta Corrente**"
+                }
+
+                val assistantConfirmMsg = ChatMessage(
+                    sender = MessageSender.ASSISTANT,
+                    text = buildString {
+                        appendLine("✅ **Importação concluída com sucesso!**")
+                        appendLine()
+                        appendLine("Foram adicionados **${transactions.size} lançamentos** $targetDestinationLabel, somando **${FinanceEngine.formatCurrency(totalAmount)}**.")
+                        appendLine()
+                        val byCat = selectedItems.groupBy { it.category }
+                            .mapValues { entry -> entry.value.sumOf { it.amount } }
+                            .entries.sortedByDescending { it.value }
+                            .take(4)
+                        if (byCat.isNotEmpty()) {
+                            appendLine("📊 **Resumo por categoria importada:**")
+                            byCat.forEach { (cat, sum) ->
+                                appendLine("• **$cat**: ${FinanceEngine.formatCurrency(sum)}")
+                            }
+                            appendLine()
+                        }
+                        append("O seu **Extrato** e o **Saldo Livre** já foram atualizados em tempo real!")
+                    }
+                )
+
+                val updatedMessages = _uiState.value.messages + userImportMsg + assistantConfirmMsg
+                updateActiveSessionMessages(updatedMessages, userPromptForTitle = "Importação $sourceLabel")
+
+                _uiState.update {
+                    it.copy(
+                        isImportingStatement = false,
+                        isStatementReviewOpen = false,
+                        parsedStatementItems = emptyList(),
+                        pendingAttachment = null,
+                        statementFileName = ""
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isImportingStatement = false) }
+            }
+        }
     }
 
     // -------------------------------------------------------------

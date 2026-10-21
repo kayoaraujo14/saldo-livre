@@ -26,10 +26,10 @@ import com.saldolivre.app.ui.screens.form.TransactionFormScreen
 import com.saldolivre.app.ui.screens.form.TransactionFormViewModel
 import com.saldolivre.app.ui.screens.friends.FriendsScreen
 import com.saldolivre.app.ui.screens.friends.FriendsViewModel
-import com.saldolivre.app.ui.screens.import_statement.ImportStatementScreen
-import com.saldolivre.app.ui.screens.import_statement.ImportStatementViewModel
 import com.saldolivre.app.ui.screens.investments.InvestmentsScreen
 import com.saldolivre.app.ui.screens.investments.InvestmentsViewModel
+import com.saldolivre.app.ui.screens.menu.MenuScreen
+import com.saldolivre.app.ui.screens.menu.MenuViewModel
 import com.saldolivre.app.ui.screens.projections.FutureProjectionsScreen
 import com.saldolivre.app.ui.screens.projections.FutureProjectionsViewModel
 import com.saldolivre.app.ui.screens.receivables.ReceivablesScreen
@@ -52,9 +52,9 @@ fun AppNavHost(
     val bottomNavItems = listOf(
         BottomNavItem.Dashboard,
         BottomNavItem.Transactions,
-        BottomNavItem.Receivables,
         BottomNavItem.Cards,
-        BottomNavItem.GeminiChat
+        BottomNavItem.GeminiChat,
+        BottomNavItem.Menu
     )
 
     val showBottomBar = currentRoute in bottomNavItems.map { it.route }
@@ -112,38 +112,103 @@ fun AppNavHost(
             startDestination = BottomNavItem.Dashboard.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            // Dashboard
+            // 1. Dashboard (Início)
             composable(BottomNavItem.Dashboard.route) {
                 val dashboardViewModel = viewModel { DashboardViewModel(repository) }
                 DashboardScreen(
                     viewModel = dashboardViewModel,
-                    onNavigateToTransactions = { navController.navigate(BottomNavItem.Transactions.route) },
+                    onNavigateToTransactions = {
+                        navController.navigate(BottomNavItem.Transactions.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                     onNavigateToAddTransaction = { navController.navigate("add_transaction") },
                     onNavigateToReceivables = { navController.navigate(BottomNavItem.Receivables.route) },
-                    onNavigateToCards = { navController.navigate(BottomNavItem.Cards.route) },
-                    onNavigateToRecurringBills = { navController.navigate("recurring_bills") },
-                    onNavigateToInvestments = { navController.navigate("investments") },
-                    onNavigateToFriends = { navController.navigate("friends") },
-                    onNavigateToProjections = { navController.navigate("projections") },
-                    onNavigateToRecentActivity = { navController.navigate("recent_activity") },
-                    onNavigateToImportStatement = { navController.navigate("import_statement") },
-                    onLogout = onLogout
+                    onNavigateToInvestments = { navController.navigate("investments") }
                 )
             }
 
-            // Transactions Extrato
+            // 2. Transactions (Extrato)
             composable(BottomNavItem.Transactions.route) {
                 val transactionsViewModel = viewModel { TransactionsViewModel(repository) }
                 TransactionsScreen(
                     viewModel = transactionsViewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    onNavigateToAddTransaction = { navController.navigate("add_transaction") }
+                    onNavigateToAddTransaction = { navController.navigate("add_transaction") },
+                    onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") }
+                )
+            }
+
+            // 3. Cartões
+            composable(BottomNavItem.Cards.route) {
+                val cardsViewModel = viewModel { CardsViewModel(repository) }
+                CardsScreen(
+                    viewModel = cardsViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // 4. Copiloto IA Gemini
+            composable(BottomNavItem.GeminiChat.route) {
+                val chatViewModel = viewModel { GeminiChatViewModel(repository) }
+                GeminiChatScreen(
+                    viewModel = chatViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // 5. Menu & Ferramentas
+            composable(BottomNavItem.Menu.route) {
+                val menuViewModel = viewModel { MenuViewModel(repository) }
+                MenuScreen(
+                    viewModel = menuViewModel,
+                    onNavigateToReceivables = { navController.navigate(BottomNavItem.Receivables.route) },
+                    onNavigateToCards = {
+                        navController.navigate(BottomNavItem.Cards.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onNavigateToRecurringBills = { navController.navigate("recurring_bills") },
+                    onNavigateToInvestments = { navController.navigate("investments") },
+                    onNavigateToFriends = { navController.navigate("friends") },
+                    onNavigateToProjections = { navController.navigate("projections") },
+                    onNavigateToRecentActivity = { navController.navigate("recent_activity") },
+                    onNavigateToChat = {
+                        navController.navigate(BottomNavItem.GeminiChat.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onLogout = onLogout
                 )
             }
 
             // Form: Nova Transação
             composable("add_transaction") {
                 val formViewModel = viewModel { TransactionFormViewModel(repository) }
+                TransactionFormScreen(
+                    viewModel = formViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // Form: Editar Transação Existente
+            composable("edit_transaction/{txId}") { backStackEntry ->
+                val txId = backStackEntry.arguments?.getString("txId")
+                val formViewModel = viewModel(key = "edit_tx_$txId") {
+                    TransactionFormViewModel(repository, editingTxId = txId)
+                }
                 TransactionFormScreen(
                     viewModel = formViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -168,29 +233,11 @@ fun AppNavHost(
                 )
             }
 
-            // A Receber
+            // A Receber (Acessível via Menu e Card KPI)
             composable(BottomNavItem.Receivables.route) {
                 val receivablesViewModel = viewModel { ReceivablesViewModel(repository) }
                 ReceivablesScreen(
                     viewModel = receivablesViewModel,
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            }
-
-            // Cartões
-            composable(BottomNavItem.Cards.route) {
-                val cardsViewModel = viewModel { CardsViewModel(repository) }
-                CardsScreen(
-                    viewModel = cardsViewModel,
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            }
-
-            // Copiloto IA Gemini
-            composable(BottomNavItem.GeminiChat.route) {
-                val chatViewModel = viewModel { GeminiChatViewModel(repository) }
-                GeminiChatScreen(
-                    viewModel = chatViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -222,15 +269,6 @@ fun AppNavHost(
                     onNavigateToMonth = { _ ->
                         navController.popBackStack()
                     }
-                )
-            }
-
-            // Importador de Extratos (PDF, OFX, CSV, TXT)
-            composable("import_statement") {
-                val importViewModel = viewModel { ImportStatementViewModel(repository) }
-                ImportStatementScreen(
-                    viewModel = importViewModel,
-                    onNavigateBack = { navController.popBackStack() }
                 )
             }
         }

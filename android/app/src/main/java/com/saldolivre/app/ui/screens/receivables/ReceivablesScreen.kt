@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,7 +65,12 @@ fun ReceivablesScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header Card
-            item {
+            item(key = "receivables_summary_header", contentType = "receivables_summary_header") {
+                val formattedTotal = remember(summary.receivableTotal) { FinanceEngine.formatCurrency(summary.receivableTotal) }
+                val formattedPartner = remember(summary.receivableFromPartner) { FinanceEngine.formatCurrency(summary.receivableFromPartner) }
+                val formattedFriends = remember(summary.receivableFromFriends) { FinanceEngine.formatCurrency(summary.receivableFromFriends) }
+                val formattedExternal = remember(summary.receivableFromExternal) { FinanceEngine.formatCurrency(summary.receivableFromExternal) }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -84,7 +90,7 @@ fun ReceivablesScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = FinanceEngine.formatCurrency(summary.receivableTotal),
+                            text = formattedTotal,
                             fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
                             color = Purple400,
@@ -105,7 +111,7 @@ fun ReceivablesScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = FinanceEngine.formatCurrency(summary.receivableFromPartner),
+                                    text = formattedPartner,
                                     style = Typography.labelLarge,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -120,7 +126,7 @@ fun ReceivablesScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = FinanceEngine.formatCurrency(summary.receivableFromFriends),
+                                    text = formattedFriends,
                                     style = Typography.labelLarge,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -135,7 +141,7 @@ fun ReceivablesScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = FinanceEngine.formatCurrency(summary.receivableFromExternal),
+                                    text = formattedExternal,
                                     style = Typography.labelLarge,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -146,7 +152,7 @@ fun ReceivablesScreen(
                 }
             }
 
-            item {
+            item(key = "receivables_list_header", contentType = "receivables_list_header") {
                 Text(
                     text = "Lançamentos Pendentes (${uiState.items.size})",
                     style = Typography.titleMedium,
@@ -158,7 +164,7 @@ fun ReceivablesScreen(
             }
 
             if (uiState.items.isEmpty()) {
-                item {
+                item(key = "receivables_empty", contentType = "receivables_empty") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -169,7 +175,12 @@ fun ReceivablesScreen(
                     }
                 }
             } else {
-                items(uiState.items) { item ->
+                items(
+                    items = uiState.items,
+                    key = { "${it.transactionId}_${it.name}" },
+                    contentType = { "receivable_item" }
+                ) { item ->
+                    val formattedItemAmount = remember(item.amount) { FinanceEngine.formatCurrency(item.amount) }
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -229,7 +240,7 @@ fun ReceivablesScreen(
 
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(
-                                    text = FinanceEngine.formatCurrency(item.amount),
+                                    text = formattedItemAmount,
                                     style = Typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = Purple400,

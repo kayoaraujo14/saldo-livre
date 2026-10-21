@@ -1,11 +1,15 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class SharedUser(
     val uid: String = "",
     val email: String = "",
     val name: String = ""
 )
 
+@Immutable
 data class Card(
     val id: String = "",
     val ownerUid: String = "",

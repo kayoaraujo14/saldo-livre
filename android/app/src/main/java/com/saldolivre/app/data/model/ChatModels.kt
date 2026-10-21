@@ -63,6 +63,7 @@ data class ChatSession(
 data class UserLearnedRule(
     val id: String = "rule_${UUID.randomUUID().toString().take(8)}",
     val rule: String,
+    val category: String = "Geral",
     val createdAt: Long = System.currentTimeMillis(),
     val active: Boolean = true
 )

@@ -279,7 +279,11 @@ fun RecentActivityScreen(
                     contentPadding = PaddingValues(vertical = 12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    itemsIndexed(uiState.filteredItems) { index, item ->
+                    itemsIndexed(
+                        items = uiState.filteredItems,
+                        key = { _, item -> item.id },
+                        contentType = { _, _ -> "activity_timeline_item" }
+                    ) { index, item ->
                         TimelineActivityCard(
                             item = item,
                             isLast = index == uiState.filteredItems.lastIndex,
@@ -338,6 +342,13 @@ private fun TimelineActivityCard(
     isLast: Boolean,
     onNavigateToMonth: () -> Unit
 ) {
+    val formattedAmount = remember(item.amount, item.isIncome) {
+        "${if (item.isIncome) "+" else ""}${FinanceEngine.formatCurrency(item.amount)}"
+    }
+    val formattedImpact = remember(item.myImpact) {
+        "Sua cota no Saldo Livre: ${FinanceEngine.formatCurrency(item.myImpact)}"
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top
@@ -414,7 +425,7 @@ private fun TimelineActivityCard(
                     Spacer(modifier = Modifier.width(8.dp))
 
                     Text(
-                        text = "${if (item.isIncome) "+" else ""}${FinanceEngine.formatCurrency(item.amount)}",
+                        text = formattedAmount,
                         style = Typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (item.isIncome) Emerald400 else if (item.isRefund) Cyan400 else Rose400,
@@ -523,7 +534,7 @@ private fun TimelineActivityCard(
                 // Impacto pessoal se houver divisão
                 if (item.myImpact != item.amount && item.myImpact > 0) {
                     Text(
-                        text = "Sua cota no Saldo Livre: ${FinanceEngine.formatCurrency(item.myImpact)}",
+                        text = formattedImpact,
                         fontSize = 11.sp,
                         color = Emerald400,
                         fontWeight = FontWeight.SemiBold,

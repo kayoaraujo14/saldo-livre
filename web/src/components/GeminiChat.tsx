@@ -54,12 +54,11 @@ import {
   Loader2,
 } from 'lucide-react'
 
-
 interface GeminiChatProps {
   onOpenApiKey: () => void
   onToggleExpand?: () => void
   isExpanded?: boolean
-  onOpenOpenFinance?: () => void
+
 }
 
 const INITIAL_MESSAGE: ChatMessage = {
@@ -69,7 +68,7 @@ const INITIAL_MESSAGE: ChatMessage = {
 
 Estou conectado aos seus lançamentos em tempo real. Você pode falar comigo em linguagem natural para:
 - 📄 **Importar faturas e extratos em PDF**: arraste ou anexe o arquivo PDF do seu banco (Nubank, Itaú, Inter, Bradesco, etc.) e eu cadastro todos os gastos anteriores de uma só vez!
-- 🏦 **Open Finance**: consulte ou sincronize seus bancos conectados automaticamente.
+
 - ⚡ **Lançamentos rápidos**: contas que chegaram ou compras parceladas (ex: *"A conta de luz veio R$ 245 para o dia 22"* ou *"Jantar R$ 160 50/50"*).
 - 📊 **Consultor ativo**: pergunte seu limite diário, projeções futuras e sugestões de corte de custos.
 
@@ -122,7 +121,7 @@ function saveStoredSessions(uid: string, sessions: ChatSession[]) {
   }
 }
 
-export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpenFinance }: GeminiChatProps) {
+export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiChatProps) {
   const {
     me,
     partner,
@@ -613,7 +612,6 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   const handleDeleteRule = async (id: string) => {
     await contextDeleteRule(id)
   }
-
 
   const updateSessionMessages = (
     newMessagesOrUpdater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
@@ -1541,7 +1539,6 @@ Atenção crítica:
         </div>
       )}
 
-
       {/* Offline Alert Banner */}
       {!isLiveGemini && (
         <div className="mx-3.5 mt-2.5 p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-xs text-amber-300 animate-in fade-in">
@@ -1917,8 +1914,6 @@ Atenção crítica:
               onClick={() => {
                 if (chip.includes('Anexar fatura')) {
                   fileInputRef.current?.click()
-                } else if (chip.includes('Open Finance') && onOpenOpenFinance) {
-                  onOpenOpenFinance()
                 } else {
                   handleSend(chip)
                 }

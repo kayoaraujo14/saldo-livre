@@ -15,33 +15,26 @@ import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.ui.theme.*
 
+private val StatusBadgeShape = RoundedCornerShape(6.dp)
+private val PaidColors = Triple(Emerald500.copy(alpha = 0.15f), Emerald400, Emerald500.copy(alpha = 0.35f))
+private val PendingColors = Triple(Amber500.copy(alpha = 0.15f), Amber400, Amber500.copy(alpha = 0.35f))
+private val EstimatedColors = Triple(Cyan500.copy(alpha = 0.15f), Cyan400, Cyan500.copy(alpha = 0.35f))
+
 @Composable
 fun StatusBadge(
     status: TransactionStatus,
     modifier: Modifier = Modifier
 ) {
     val (bgColor, textColor, borderColor) = when (status) {
-        TransactionStatus.PAID -> Triple(
-            Emerald500.copy(alpha = 0.15f),
-            Emerald400,
-            Emerald500.copy(alpha = 0.35f)
-        )
-        TransactionStatus.PENDING -> Triple(
-            Amber500.copy(alpha = 0.15f),
-            Amber400,
-            Amber500.copy(alpha = 0.35f)
-        )
-        TransactionStatus.ESTIMATED -> Triple(
-            Cyan500.copy(alpha = 0.15f),
-            Cyan400,
-            Cyan500.copy(alpha = 0.35f)
-        )
+        TransactionStatus.PAID -> PaidColors
+        TransactionStatus.PENDING -> PendingColors
+        TransactionStatus.ESTIMATED -> EstimatedColors
     }
 
     Box(
         modifier = modifier
-            .background(bgColor, RoundedCornerShape(6.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(6.dp))
+            .background(bgColor, StatusBadgeShape)
+            .border(1.dp, borderColor, StatusBadgeShape)
             .padding(horizontal = 8.dp, vertical = 2.dp)
     ) {
         Text(

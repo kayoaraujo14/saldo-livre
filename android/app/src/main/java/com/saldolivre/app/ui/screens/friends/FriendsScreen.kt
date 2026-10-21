@@ -418,7 +418,11 @@ private fun ApprovalsTabContent(
                 }
             }
 
-            items(groups, key = { it.id }) { group ->
+            items(
+                items = groups,
+                key = { it.id },
+                contentType = { "pending_charge_group" }
+            ) { group ->
                 val card = cards.find { it.id == group.cardId }
                 val isExpanded = expandedGroupIds.contains(group.id)
 
@@ -840,7 +844,11 @@ private fun FriendsTabContent(
                 )
             }
 
-            items(pendingRequests, key = { it.friendshipId }) { req ->
+            items(
+                items = pendingRequests,
+                key = { it.friendshipId },
+                contentType = { "pending_friend_request" }
+            ) { req ->
                 Surface(
                     color = DarkSurface,
                     shape = RoundedCornerShape(12.dp),
@@ -936,7 +944,11 @@ private fun FriendsTabContent(
                 }
             }
         } else {
-            items(activeFriends, key = { it.friendshipId }) { friend ->
+            items(
+                items = activeFriends,
+                key = { it.friendshipId },
+                contentType = { "active_friend_item" }
+            ) { friend ->
                 Surface(
                     color = DarkSurface,
                     shape = RoundedCornerShape(12.dp),

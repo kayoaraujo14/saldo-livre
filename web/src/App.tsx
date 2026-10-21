@@ -12,7 +12,6 @@ import { ApiKeyModal } from '@/components/modals/ApiKeyModal'
 import { TransactionModal } from '@/components/modals/TransactionModal'
 import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal'
 import { FriendsModal } from '@/components/modals/FriendsModal'
-import { OpenFinanceModal } from '@/components/modals/OpenFinanceModal'
 import { RecentActivityModal } from '@/components/modals/RecentActivityModal'
 import { InvestmentsModal } from '@/components/modals/InvestmentsModal'
 import { ScrollToTop } from '@/components/ui/ScrollToTop'
@@ -45,7 +44,6 @@ function MainDashboard() {
   const [txModalOpen, setTxModalOpen] = useState(false)
   const [projectionModalOpen, setProjectionModalOpen] = useState(false)
   const [friendsModalOpen, setFriendsModalOpen] = useState(false)
-  const [openFinanceModalOpen, setOpenFinanceModalOpen] = useState(false)
   const [recentActivityModalOpen, setRecentActivityModalOpen] = useState(false)
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
@@ -97,7 +95,6 @@ function MainDashboard() {
         onOpenApiKey={() => setApiKeyModalOpen(true)}
         onOpenProjection={() => setProjectionModalOpen(true)}
         onOpenFriends={() => setFriendsModalOpen(true)}
-        onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
         onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
         onOpenInvestments={() => setInvestmentsModalOpen(true)}
       />
@@ -173,7 +170,6 @@ function MainDashboard() {
               >
                 <GeminiChat
                   onOpenApiKey={() => setApiKeyModalOpen(true)}
-                  onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
                   onToggleExpand={() =>
                     setDesktopView((prev) => (prev === 'chat_full' ? 'chat_focus' : 'chat_full'))
                   }
@@ -252,7 +248,6 @@ function MainDashboard() {
             <div className="h-[calc(100dvh-155px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <GeminiChat
                 onOpenApiKey={() => setApiKeyModalOpen(true)}
-                onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
               />
             </div>
           )}
@@ -265,7 +260,6 @@ function MainDashboard() {
               onOpenApiKey={() => setApiKeyModalOpen(true)}
               onOpenProjection={() => setProjectionModalOpen(true)}
               onOpenFriends={() => setFriendsModalOpen(true)}
-              onOpenOpenFinance={() => setOpenFinanceModalOpen(true)}
               onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
               onOpenInvestments={() => setInvestmentsModalOpen(true)}
               onGenerateBills={handleGenerate}
@@ -304,10 +298,6 @@ function MainDashboard() {
       <FriendsModal
         open={friendsModalOpen}
         onOpenChange={setFriendsModalOpen}
-      />
-      <OpenFinanceModal
-        open={openFinanceModalOpen}
-        onOpenChange={setOpenFinanceModalOpen}
       />
       <RecentActivityModal
         open={recentActivityModalOpen}

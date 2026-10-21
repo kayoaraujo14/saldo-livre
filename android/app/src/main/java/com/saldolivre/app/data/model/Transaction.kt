@@ -1,5 +1,6 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 
 enum class TransactionType(val value: String) {
@@ -91,6 +92,7 @@ enum class AcceptanceStatus(val value: String, val label: String) {
     }
 }
 
+@Immutable
 data class Allocation(
     val type: String = "PLATFORM_USER", // "PLATFORM_USER" | "EXTERNAL"
     val uid: String? = null,
@@ -99,12 +101,14 @@ data class Allocation(
     val reimbursed: Boolean = false
 )
 
+@Immutable
 data class FriendSplitInput(
     val uid: String = "",
     val name: String = "",
     val pct: Double? = null
 )
 
+@Immutable
 data class InstallmentGroupUpdateInput(
     val description: String? = null,
     val amount: Double? = null,
@@ -120,6 +124,7 @@ data class InstallmentGroupUpdateInput(
     val status: TransactionStatus? = null
 )
 
+@Immutable
 data class Transaction(
     val id: String = "",
     val createdByUid: String = "",

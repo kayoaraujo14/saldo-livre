@@ -11,7 +11,6 @@ import {
   ChevronRight,
   ShieldCheck,
   Sparkles,
-  Landmark,
   History,
   TrendingUp,
 } from 'lucide-react'
@@ -23,7 +22,6 @@ interface MobileMenuSheetProps {
   onOpenProjection: () => void
   onOpenFriends: () => void
   onGenerateBills: () => void
-  onOpenOpenFinance?: () => void
   onOpenRecentActivity?: () => void
   onOpenInvestments?: () => void
   generating?: boolean
@@ -36,7 +34,6 @@ export function MobileMenuSheet({
   onOpenProjection,
   onOpenFriends,
   onGenerateBills,
-  onOpenOpenFinance,
   onOpenRecentActivity,
   onOpenInvestments,
   generating,
@@ -147,26 +144,6 @@ export function MobileMenuSheet({
           </div>
           <ChevronRight className="size-4 text-slate-500" />
         </button>
-
-        {/* Open Finance Brasil */}
-        {onOpenOpenFinance && (
-          <button
-            type="button"
-            onClick={onOpenOpenFinance}
-            className="w-full p-4 flex items-center justify-between hover:bg-slate-800/40 transition-colors text-left cursor-pointer active:bg-slate-800/60"
-          >
-            <div className="flex items-center gap-3">
-              <div className="size-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center">
-                <Landmark className="size-4" />
-              </div>
-              <div>
-                <span className="text-sm font-semibold text-white block">Open Finance Brasil</span>
-                <span className="text-xs text-slate-400">Conectar contas bancárias e faturas</span>
-              </div>
-            </div>
-            <ChevronRight className="size-4 text-slate-500" />
-          </button>
-        )}
 
         {/* Histórico Recente (Ordenado por Cadastro) */}
         {onOpenRecentActivity && (

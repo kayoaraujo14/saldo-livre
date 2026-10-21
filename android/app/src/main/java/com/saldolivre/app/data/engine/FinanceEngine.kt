@@ -14,10 +14,17 @@ import kotlin.math.round
 object FinanceEngine {
 
     private val ptBrLocale = Locale("pt", "BR")
-    private val currencyFormat = NumberFormat.getCurrencyInstance(ptBrLocale)
+    private val currencyFormatThreadLocal = object : ThreadLocal<NumberFormat>() {
+        override fun initialValue(): NumberFormat = NumberFormat.getCurrencyInstance(ptBrLocale)
+    }
+    private val monthLabelFormatter = DateTimeFormatter.ofPattern("MMMM 'de' yyyy", ptBrLocale)
+    private val installmentSuffixRegex = Regex("""\s*\(\d+/\d+\)\s*$""")
+    private val fullDateRegex = Regex("""^\d{4}-\d{2}-\d{2}$""")
+    private val yearMonthRegex = Regex("""^\d{4}-\d{2}$""")
 
     fun formatCurrency(amount: Double): String {
-        return currencyFormat.format(amount)
+        return currencyFormatThreadLocal.get()?.format(amount)
+            ?: String.format(ptBrLocale, "R$ %,.2f", amount)
     }
 
     fun round2(value: Double): Double {
@@ -57,8 +64,7 @@ object FinanceEngine {
         return try {
             val parts = monthKey.split("-")
             val ym = YearMonth.of(parts[0].toInt(), parts[1].toInt())
-            val formatter = DateTimeFormatter.ofPattern("MMMM 'de' yyyy", ptBrLocale)
-            ym.format(formatter).replaceFirstChar { it.uppercase() }
+            ym.format(monthLabelFormatter).replaceFirstChar { it.uppercase() }
         } catch (_: Exception) {
             monthKey
         }
@@ -71,7 +77,7 @@ object FinanceEngine {
      */
     fun stripInstallmentSuffix(desc: String?): String {
         if (desc.isNullOrBlank()) return ""
-        return desc.replace(Regex("""\s*\(\d+/\d+\)\s*$"""), "").trim()
+        return desc.replace(installmentSuffixRegex, "").trim()
     }
 
     /**
@@ -102,9 +108,9 @@ object FinanceEngine {
         explicitDueDate: String? = null,
         explicitMonth: String? = null
     ): Pair<String, String> {
-        if (!explicitDueDate.isNullOrBlank() && explicitDueDate.matches(Regex("""^\d{4}-\d{2}-\d{2}$"""))) {
+        if (!explicitDueDate.isNullOrBlank() && explicitDueDate.matches(fullDateRegex)) {
             val cleanDue = explicitDueDate.trim()
-            val cleanMonth = if (!explicitMonth.isNullOrBlank() && explicitMonth.matches(Regex("""^\d{4}-\d{2}$"""))) {
+            val cleanMonth = if (!explicitMonth.isNullOrBlank() && explicitMonth.matches(yearMonthRegex)) {
                 explicitMonth.trim()
             } else {
                 cleanDue.substring(0, 7)

@@ -2,9 +2,11 @@ package com.saldolivre.app.data.model
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 
+@Immutable
 data class CategoryDetail(
     val name: String,
     val color: Color,

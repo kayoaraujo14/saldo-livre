@@ -11,7 +11,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -58,7 +61,11 @@ fun TransactionFormScreen(
                 },
                 title = {
                     Text(
-                        text = if (state.type == TransactionType.EXPENSE) "Nova Despesa" else "Nova Receita",
+                        text = when {
+                            state.isEditing -> "Editar Lançamento"
+                            state.type == TransactionType.EXPENSE -> "Nova Despesa"
+                            else -> "Nova Receita"
+                        },
                         style = Typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
@@ -88,6 +95,150 @@ fun TransactionFormScreen(
                         .padding(12.dp)
                 ) {
                     Text(text = error, color = Rose400, fontSize = 13.sp)
+                }
+            }
+
+            // Banner de Escopo de Edição para Compras Parceladas (idêntico à Web)
+            val editingTx = state.editingTx
+            if (state.isEditing && editingTx != null && !editingTx.installmentGroupId.isNullOrBlank()) {
+                val totalInst = editingTx.installmentsTotal ?: state.installmentsCount
+                val curInst = editingTx.installmentNumber ?: 1
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Purple500.copy(alpha = 0.12f))
+                        .border(1.dp, Purple500.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                        .padding(14.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(Purple500.copy(alpha = 0.25f), RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Layers,
+                                        contentDescription = null,
+                                        tint = Purple400,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Compra Parcelada Conectada",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "Onde deseja aplicar as alterações?",
+                                        fontSize = 11.sp,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .background(Purple500.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, Purple400.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Parcela $curInst/$totalInst",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Purple400
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val isAll = state.editScope == "all"
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isAll) Purple500.copy(alpha = 0.28f) else DarkSurface)
+                                    .border(1.dp, if (isAll) Purple400 else DarkBorder, RoundedCornerShape(12.dp))
+                                    .clickable { viewModel.onEditScopeChange("all") }
+                                    .padding(10.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Sync,
+                                            contentDescription = null,
+                                            tint = if (isAll) Purple400 else TextSecondary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = "Todas as $totalInst Parcelas",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isAll) TextPrimary else TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = "Sincroniza em toda a série",
+                                        fontSize = 10.sp,
+                                        color = TextMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            val isSingle = state.editScope == "single"
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSingle) Purple500.copy(alpha = 0.28f) else DarkSurface)
+                                    .border(1.dp, if (isSingle) Purple400 else DarkBorder, RoundedCornerShape(12.dp))
+                                    .clickable { viewModel.onEditScopeChange("single") }
+                                    .padding(10.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "Apenas Nesta ($curInst/$totalInst)",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSingle) TextPrimary else TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Modifica só este mês",
+                                        fontSize = 10.sp,
+                                        color = TextMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -187,6 +338,38 @@ fun TransactionFormScreen(
                 )
             )
 
+            // Due Date Input (YYYY-MM-DD)
+            OutlinedTextField(
+                value = state.dueDateText,
+                onValueChange = { viewModel.onDueDateChange(it) },
+                label = {
+                    Text(
+                        if (state.type == TransactionType.INCOME) "Data de Recebimento (AAAA-MM-DD)"
+                        else "Data de Vencimento / Compra (AAAA-MM-DD)"
+                    )
+                },
+                placeholder = { Text("Ex: 2026-10-21") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.CalendarToday,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Emerald500,
+                    unfocusedBorderColor = DarkBorder,
+                    focusedContainerColor = DarkSurface,
+                    unfocusedContainerColor = DarkSurface,
+                    focusedTextColor = TextPrimary,
+                    unfocusedTextColor = TextPrimary
+                )
+            )
+
             // Category Selector
             Text(text = "Categoria", style = Typography.titleMedium, color = TextPrimary)
             Row(
@@ -212,6 +395,38 @@ fun TransactionFormScreen(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                             color = if (isSelected) cat.color else TextSecondary
                         )
+                    }
+                }
+            }
+
+            // Subcategory Selector
+            val currentCategoryDetail = remember(state.category) { CategoryRegistry.get(state.category) }
+            if (currentCategoryDetail.subcategories.isNotEmpty()) {
+                Text(text = "Subcategoria", style = Typography.titleMedium, color = TextPrimary)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    currentCategoryDetail.subcategories.forEach { sub ->
+                        val isSelected = state.subcategory == sub
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) Cyan500.copy(alpha = 0.2f) else DarkSurface)
+                                .border(1.dp, if (isSelected) Cyan400 else DarkBorder, RoundedCornerShape(10.dp))
+                                .clickable { viewModel.onSubcategoryChange(sub) }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = sub,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) Cyan400 else TextSecondary
+                            )
+                        }
                     }
                 }
             }
@@ -390,7 +605,7 @@ fun TransactionFormScreen(
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Text(
-                    text = "Salvar Lançamento",
+                    text = if (state.isEditing) "Salvar Alterações" else "Salvar Lançamento",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = DarkBackground,

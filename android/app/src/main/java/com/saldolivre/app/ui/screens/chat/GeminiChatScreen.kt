@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -39,7 +40,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
+import com.saldolivre.app.data.parser.ParsedStatementItem
 import com.saldolivre.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -68,13 +71,13 @@ fun GeminiChatScreen(
         }
     }
 
-    // Launcher para selecionar arquivo (PDF ou Imagem)
+    // Launcher para selecionar arquivo (PDF, OFX, CSV, TXT ou Imagem)
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
             try {
-                var fileName = "documento.pdf"
+                var fileName = "extrato.pdf"
                 var fileSize = 0L
                 context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -87,12 +90,22 @@ fun GeminiChatScreen(
                 val mimeType = context.contentResolver.getType(uri) ?: "application/pdf"
                 val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: ByteArray(0)
                 if (bytes.isNotEmpty()) {
+                    val lowerName = fileName.lowercase()
+                    val isTextFile = lowerName.endsWith(".ofx") ||
+                        lowerName.endsWith(".qfx") ||
+                        lowerName.endsWith(".csv") ||
+                        lowerName.endsWith(".txt") ||
+                        mimeType.startsWith("text/")
+                    val textContent = if (isTextFile) {
+                        runCatching { String(bytes, Charsets.UTF_8) }.getOrNull()
+                    } else null
+
                     viewModel.onAttachmentSelected(
                         name = fileName,
-                        size = fileSize,
+                        size = if (fileSize > 0L) fileSize else bytes.size.toLong(),
                         mimeType = mimeType,
                         bytes = bytes,
-                        textContent = null
+                        textContent = textContent
                     )
                 }
             } catch (e: Exception) {
@@ -139,6 +152,95 @@ fun GeminiChatScreen(
                 onDeleteRule = { viewModel.onDeleteRule(it) }
             )
         }
+    }
+
+    // Modal Sheet de Revisão de Extrato / Fatura (PDF / OFX / CSV / TXT)
+    if (uiState.isStatementReviewOpen && uiState.parsedStatementItems.isNotEmpty()) {
+        ModalBottomSheet(
+            onDismissRequest = { viewModel.setStatementReviewOpen(false) },
+            containerColor = DarkSurface,
+            dragHandle = { BottomSheetDefaults.DragHandle(color = DarkBorder) }
+        ) {
+            StatementReviewSheetContent(
+                fileName = uiState.statementFileName,
+                items = uiState.parsedStatementItems,
+                availableCards = uiState.availableCards,
+                selectedCardId = uiState.selectedImportCardId,
+                hideIgnoredItems = uiState.hideIgnoredStatementItems,
+                isImporting = uiState.isImportingStatement,
+                onSelectCard = { viewModel.setSelectedImportCard(it) },
+                onToggleHideIgnored = { viewModel.setHideIgnoredStatementItems(it) },
+                onToggleSelectAll = { viewModel.toggleSelectAllStatementItems(it) },
+                onToggleItem = { viewModel.toggleStatementItemSelection(it) },
+                onConfirmImport = { viewModel.confirmStatementImport() },
+                onSendToAiChat = {
+                    viewModel.setStatementReviewOpen(false)
+                    viewModel.sendMessage()
+                }
+            )
+        }
+    }
+
+    // Modal para Colar Texto de Extrato / Fatura Diretamente no Chat
+    if (uiState.showPasteStatementDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.setShowPasteStatementDialog(false) },
+            containerColor = DarkSurface,
+            title = {
+                Text(
+                    text = "Colar Fatura ou Extrato",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Cole abaixo as linhas da sua fatura (Nubank, Itaú, Inter, C6, CSV ou OFX). O Copiloto irá identificar e categorizar todos os lançamentos para sua revisão.",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                    OutlinedTextField(
+                        value = uiState.pasteStatementText,
+                        onValueChange = { viewModel.onPasteStatementTextChange(it) },
+                        placeholder = {
+                            Text(
+                                text = "Ex:\n10 MAR Ifood *Restaurante R$ 48,90\n12 MAR Uber *Trip R$ 22,50\n15 MAR Supermercado Extra 1/2 R$ 180,00",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(170.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Emerald500,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.onParseRawStatementText() },
+                    enabled = uiState.pasteStatementText.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
+                ) {
+                    Text(
+                        text = "Analisar Lançamentos",
+                        color = DarkBackground,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.setShowPasteStatementDialog(false) }) {
+                    Text("Cancelar", color = TextSecondary)
+                }
+            }
+        )
     }
 
     // Modal de Configuração de API Key & Modelo
@@ -517,6 +619,7 @@ fun GeminiChatScreen(
             if (uiState.pendingAttachment != null) {
                 val att = uiState.pendingAttachment!!
                 val isAudio = att.type.startsWith("audio/") || att.name.endsWith(".m4a")
+                val extractedCount = uiState.parsedStatementItems.count { it.isSelected }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -544,11 +647,29 @@ fun GeminiChatScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         val sizeKb = (att.size / 1024L).coerceAtLeast(1L)
+                        val subtitle = when {
+                            isAudio -> "Áudio gravado • ${sizeKb} KB"
+                            uiState.parsedStatementItems.isNotEmpty() -> "${uiState.parsedStatementItems.size} lançamentos detectados • ${sizeKb} KB"
+                            else -> "Arquivo anexado • ${sizeKb} KB"
+                        }
                         Text(
-                            text = if (isAudio) "Áudio gravado • ${sizeKb} KB" else "Documento PDF • ${sizeKb} KB",
+                            text = subtitle,
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = if (uiState.parsedStatementItems.isNotEmpty()) Emerald400 else TextMuted
                         )
+                    }
+                    if (uiState.parsedStatementItems.isNotEmpty()) {
+                        TextButton(
+                            onClick = { viewModel.setStatementReviewOpen(true) },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Revisar ($extractedCount)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Emerald400
+                            )
+                        }
                     }
                     IconButton(
                         onClick = { viewModel.onRemoveAttachment() },
@@ -639,16 +760,29 @@ fun GeminiChatScreen(
                             .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Botão de Anexo (PDF / Imagem)
+                        // Botão de Anexo (PDF / OFX / CSV / TXT / Imagem)
                         IconButton(
                             onClick = { filePickerLauncher.launch("*/*") },
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(38.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AttachFile,
-                                contentDescription = "Anexar arquivo PDF ou extrato",
+                                contentDescription = "Anexar extrato PDF, OFX, CSV ou TXT",
                                 tint = if (uiState.pendingAttachment != null) Emerald400 else TextSecondary,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(21.dp)
+                            )
+                        }
+
+                        // Botão para Colar Texto de Extrato / Fatura
+                        IconButton(
+                            onClick = { viewModel.setShowPasteStatementDialog(true) },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentPaste,
+                                contentDescription = "Colar texto de fatura ou extrato",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(19.dp)
                             )
                         }
 
@@ -1159,6 +1293,415 @@ fun ChatBubble(
             fontSize = 9.sp,
             color = TextMuted,
             modifier = Modifier.padding(horizontal = 4.dp)
+        )
+    }
+}
+
+// -------------------------------------------------------------
+// SHEET DE REVISÃO E IMPORTAÇÃO DE EXTRATO / FATURA (PDF / OFX / CSV)
+// -------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StatementReviewSheetContent(
+    fileName: String,
+    items: List<ParsedStatementItem>,
+    availableCards: List<Card>,
+    selectedCardId: String?,
+    hideIgnoredItems: Boolean,
+    isImporting: Boolean,
+    onSelectCard: (String?) -> Unit,
+    onToggleHideIgnored: (Boolean) -> Unit,
+    onToggleSelectAll: (Boolean) -> Unit,
+    onToggleItem: (String) -> Unit,
+    onConfirmImport: () -> Unit,
+    onSendToAiChat: () -> Unit
+) {
+    val displayedItems = remember(items, hideIgnoredItems) {
+        if (hideIgnoredItems) items.filter { !it.isIgnored } else items
+    }
+    val selectedItems = remember(items) { items.filter { it.isSelected } }
+    val selectedTotal = remember(selectedItems) { selectedItems.sumOf { it.amount } }
+    val allDisplayedSelected = remember(displayedItems) {
+        displayedItems.isNotEmpty() && displayedItems.all { it.isSelected }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.88f)
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 20.dp)
+    ) {
+        // Cabeçalho
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Emerald500.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
+                        contentDescription = null,
+                        tint = Emerald400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Revisão de Extrato / Fatura",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "$fileName • ${items.size} lançamentos identificados",
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            TextButton(onClick = onSendToAiChat) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = Cyan400,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Pedir Análise IA",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Cyan400
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Seletor de Destino (Cartão de Crédito ou Conta Bancária)
+        Text(
+            text = "DESTINO DOS LANÇAMENTOS:",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextMuted
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = selectedCardId == null,
+                onClick = { onSelectCard(null) },
+                label = {
+                    Text(
+                        text = "Conta Corrente / Pix",
+                        fontSize = 11.sp
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.AccountBalance,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = Emerald500.copy(alpha = 0.2f),
+                    selectedLabelColor = Emerald400,
+                    selectedLeadingIconColor = Emerald400
+                )
+            )
+
+            availableCards.forEach { card ->
+                val isSelected = selectedCardId == card.id
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onSelectCard(card.id) },
+                    label = {
+                        Text(
+                            text = card.cardName,
+                            fontSize = 11.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.CreditCard,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Emerald500.copy(alpha = 0.2f),
+                        selectedLabelColor = Emerald400,
+                        selectedLeadingIconColor = Emerald400
+                    )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Controles de Seleção e Filtro de Ignorados
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            TextButton(
+                onClick = { onToggleSelectAll(!allDisplayedSelected) },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Icon(
+                    imageVector = if (allDisplayedSelected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                    contentDescription = null,
+                    tint = Emerald400,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (allDisplayedSelected) "Desmarcar Todos" else "Marcar Todos",
+                    fontSize = 12.sp,
+                    color = Emerald400,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Ocultar RDB/Pagto Fatura",
+                    fontSize = 11.sp,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Switch(
+                    checked = hideIgnoredItems,
+                    onCheckedChange = onToggleHideIgnored,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = DarkBackground,
+                        checkedTrackColor = Emerald500
+                    )
+                )
+            }
+        }
+
+        HorizontalDivider(color = DarkBorder, modifier = Modifier.padding(vertical = 6.dp))
+
+        // Lista de Lançamentos Extraídos
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 6.dp)
+        ) {
+            items(
+                items = displayedItems,
+                key = { it.id },
+                contentType = { "parsed_statement_item" }
+            ) { item ->
+                StatementItemRow(
+                    item = item,
+                    onToggle = { onToggleItem(item.id) }
+                )
+            }
+        }
+
+        HorizontalDivider(color = DarkBorder, modifier = Modifier.padding(vertical = 8.dp))
+
+        // Rodapé com Total Selecionado e Botão de Confirmação
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(
+                    text = "${selectedItems.size} selecionados",
+                    fontSize = 11.sp,
+                    color = TextSecondary
+                )
+                Text(
+                    text = FinanceEngine.formatCurrency(selectedTotal),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Emerald400
+                )
+            }
+
+            Button(
+                onClick = onConfirmImport,
+                enabled = selectedItems.isNotEmpty() && !isImporting,
+                colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp)
+            ) {
+                if (isImporting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = DarkBackground,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        tint = DarkBackground,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
+                Text(
+                    text = "Confirmar Importação (${selectedItems.size} itens)",
+                    color = DarkBackground,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatementItemRow(
+    item: ParsedStatementItem,
+    onToggle: () -> Unit
+) {
+    val isIncome = item.type == TransactionType.INCOME
+    val amountFormatted = remember(item.amount) { FinanceEngine.formatCurrency(item.amount) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (item.isSelected) DarkSurfaceVariant else DarkBackground.copy(alpha = 0.6f))
+            .border(
+                width = 1.dp,
+                color = if (item.isSelected) Emerald500.copy(alpha = 0.35f) else DarkBorder,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clickable { onToggle() }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Checkbox(
+            checked = item.isSelected,
+            onCheckedChange = { onToggle() },
+            colors = CheckboxDefaults.colors(
+                checkedColor = Emerald500,
+                uncheckedColor = TextMuted,
+                checkmarkColor = DarkBackground
+            ),
+            modifier = Modifier.size(20.dp)
+        )
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.counterparty.ifBlank { item.description },
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (item.isSelected) TextPrimary else TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(3.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = item.date,
+                    fontSize = 10.sp,
+                    color = TextMuted
+                )
+
+                val catText = if (!item.subcategory.isNullOrBlank()) {
+                    "${item.category} › ${item.subcategory}"
+                } else {
+                    item.category
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Cyan500.copy(alpha = 0.12f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = catText,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Cyan400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                if (item.installmentNumber != null && item.installmentsTotal != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Amber500.copy(alpha = 0.15f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "${item.installmentNumber}/${item.installmentsTotal}",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Amber400
+                        )
+                    }
+                }
+
+                if (item.isIgnored && !item.ignoredReason.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Rose500.copy(alpha = 0.15f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = item.ignoredReason,
+                            fontSize = 9.sp,
+                            color = Rose400
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Text(
+            text = (if (isIncome) "+ " else "- ") + amountFormatted,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = when {
+                !item.isSelected -> TextMuted
+                isIncome -> Emerald400
+                else -> TextPrimary
+            }
         )
     }
 }

@@ -13,5 +13,6 @@ sealed class BottomNavItem(
     data object Transactions : BottomNavItem("transactions", "Extrato", Icons.Default.ReceiptLong)
     data object Receivables : BottomNavItem("receivables", "A Receber", Icons.Default.Payments)
     data object Cards : BottomNavItem("cards", "Cartões", Icons.Default.CreditCard)
-    data object GeminiChat : BottomNavItem("chat", "Copiloto IA", Icons.Default.AutoAwesome)
+    data object GeminiChat : BottomNavItem("chat", "Copiloto", Icons.Default.AutoAwesome)
+    data object Menu : BottomNavItem("menu", "Menu", Icons.Default.Menu)
 }

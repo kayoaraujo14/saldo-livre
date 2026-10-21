@@ -170,7 +170,6 @@ export type ToolName =
   | 'gerenciarRegrasEMemoria'
   | 'gerarGraficoFinanceiro'
 
-
 export interface ToolResult {
   response: Record<string, unknown>
   action?: ActionCardData
@@ -780,11 +779,6 @@ REGRAS DE FUNCIONAMENTO:
   4. EXECUÇÃO EM LOTE:
      - Chame SEMPRE a ferramenta "registrarTransacoesLote" preenchendo origemDocumento, metodoPagamentoPadrao e a lista completa de transações com cada campo tipo, metodoPagamento, categoria, contraparte e categoria_filtro!
 
-9. OPEN FINANCE BRASIL (INTEGRAÇÃO AUTOMÁTICA DE CONTAS):
-- Se o usuário perguntar sobre Open Finance ou como conectar seus bancos automaticamente:
-  - Explique que o Saldo Livre conta com suporte a conexão Open Finance (Pluggy.ai sob regulamentação do Banco Central).
-  - Oriente o usuário a clicar no botão "🏦 Open Finance" no topo do app para conectar contas do Nubank, Itaú, Inter, Bradesco e sincronizar extratos de forma 100% automática e contínua sem depender de arquivos PDF manuais.
-
 10. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER EXECUÇÃO NO SISTEMA (HUMAN-IN-THE-LOOP):
 - NUNCA assuma que você executa as ações no banco diretamente. Antes de efetivar alterações no banco de dados, o backend (Firestore) é bloqueado e as ferramentas SEMPRE retornam "aguardandoConfirmacao: true" em um estado de DRAFT (rascunho).
 - QUANDO A FERRAMENTA RETORNAR "aguardandoConfirmacao: true":
@@ -817,7 +811,6 @@ Tipos de gráficos suportados:
 - "bar": excelente para comparação entre categorias, orçamentos vs realizados, ou comparativo de gastos.
 - "line": excelente para evolução temporal, patrimônio acumulado ou comportamento do saldo diário.
 IMPORTANTE: Use sempre dados numéricos reais obtidos do contexto (NUNCA invente números). O valor deve ser um número simples (ex: 1500.50). Você também pode chamar a ferramenta "gerarGraficoFinanceiro".
-
 
 EXEMPLOS PRÁTICOS E PADRÕES BANCÁRIOS BRASIL (FEW-SHOT):
 
@@ -898,7 +891,6 @@ Chamar "gerenciarRegrasEMemoria" com:
 Respostas da IA:
 "🧠 Perfeito! Já memorizei essa regra. A partir de agora, qualquer compra no Zé Delivery será lançada automaticamente como Lazer e 100% sua!"`
 }
-
 
 /**
  * Constrói o histórico de mensagens garantindo as regras rígidas da API do Gemini:
@@ -1231,5 +1223,4 @@ export async function transcribeAudioWithGemini(opts: {
   if (lastError) throw lastError
   return ''
 }
-
 

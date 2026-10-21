@@ -107,7 +107,7 @@ fun CardsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header Summary Banner
-            item {
+            item(key = "cards_summary_banner", contentType = "cards_summary_banner") {
                 CardsSummaryBanner(
                     selectedMonth = uiState.selectedMonth,
                     totalInvoices = uiState.totalInvoicesAmount,
@@ -116,7 +116,7 @@ fun CardsScreen(
             }
 
             // Cards Section Title
-            item {
+            item(key = "cards_section_title", contentType = "cards_section_title") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -138,13 +138,14 @@ fun CardsScreen(
 
             // Cards List
             if (uiState.cardsWithInvoices.isEmpty()) {
-                item {
+                item(key = "empty_cards_placeholder", contentType = "empty_cards_placeholder") {
                     EmptyCardsPlaceholder(onAddNew = { viewModel.openNewCard() })
                 }
             } else {
                 items(
                     items = uiState.cardsWithInvoices,
-                    key = { it.card.id }
+                    key = { it.card.id },
+                    contentType = { "card_with_invoice_item" }
                 ) { item ->
                     val isExpanded = uiState.selectedCardDetailsId == item.card.id
 
@@ -158,7 +159,7 @@ fun CardsScreen(
                 }
             }
 
-            item {
+            item(key = "cards_bottom_spacer", contentType = "cards_bottom_spacer") {
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
@@ -368,19 +369,21 @@ private fun CardItemView(
     onDelete: () -> Unit
 ) {
     val card = item.card
-    val gradientColors = when (card.color) {
-        "violet" -> listOf(Color(0xFF5B21B6), Color(0xFF7C3AED))
-        "orange" -> listOf(Color(0xFFC2410C), Color(0xFFEA580C))
-        "slate" -> listOf(Color(0xFF1E293B), Color(0xFF334155))
-        "emerald" -> listOf(Color(0xFF065F46), Color(0xFF059669))
-        "cyan" -> listOf(Color(0xFF155E75), Color(0xFF0891B2))
-        "rose" -> listOf(Color(0xFF9F1239), Color(0xFFE11D48))
-        else -> listOf(Color(0xFF1E293B), Color(0xFF334155))
+    val gradientColors = remember(card.color) {
+        when (card.color) {
+            "violet" -> listOf(Color(0xFF5B21B6), Color(0xFF7C3AED))
+            "orange" -> listOf(Color(0xFFC2410C), Color(0xFFEA580C))
+            "slate" -> listOf(Color(0xFF1E293B), Color(0xFF334155))
+            "emerald" -> listOf(Color(0xFF065F46), Color(0xFF059669))
+            "cyan" -> listOf(Color(0xFF155E75), Color(0xFF0891B2))
+            "rose" -> listOf(Color(0xFF9F1239), Color(0xFFE11D48))
+            else -> listOf(Color(0xFF1E293B), Color(0xFF334155))
+        }
     }
 
-    val formattedInvoice = String.format(Locale("pt", "BR"), "R$ %,.2f", item.invoiceAmount)
-    val formattedLimit = String.format(Locale("pt", "BR"), "R$ %,.2f", item.limit)
-    val formattedAvailable = String.format(Locale("pt", "BR"), "R$ %,.2f", item.availableLimit)
+    val formattedInvoice = remember(item.invoiceAmount) { FinanceEngine.formatCurrency(item.invoiceAmount) }
+    val formattedLimit = remember(item.limit) { FinanceEngine.formatCurrency(item.limit) }
+    val formattedAvailable = remember(item.availableLimit) { FinanceEngine.formatCurrency(item.availableLimit) }
 
     Surface(
         color = DarkSurface,
@@ -724,7 +727,7 @@ private fun CardItemView(
 @Composable
 private fun CardTransactionRow(tx: Transaction) {
     val isExpense = tx.type == TransactionType.EXPENSE
-    val formattedAmount = String.format(Locale("pt", "BR"), "R$ %,.2f", tx.effectiveAmount)
+    val formattedAmount = remember(tx.effectiveAmount) { FinanceEngine.formatCurrency(tx.effectiveAmount) }
 
     Surface(
         color = DarkBackground.copy(alpha = 0.5f),

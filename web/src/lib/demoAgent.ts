@@ -246,14 +246,6 @@ export async function runDemoAgent(
     }
   }
 
-  // ---------------- Open Finance (Dúvidas e status) ----------------
-  if (/open finance|conectar banco|pluggy|integrar banco|sincronizar banco/i.test(n)) {
-    return {
-      text: `🏦 **Open Finance no Saldo Livre**\n\nVocê pode conectar seus bancos (Nubank, Itaú, Inter, Bradesco, Santander, C6 e outros) diretamente pelo **Open Finance Brasil**!\n\n**Como funciona:**\n1. Clique no botão **"🏦 Open Finance"** no topo do Saldo Livre.\n2. Escolha sua instituição financeira e autorize a leitura segura de extratos e faturas.\n3. O sistema sincroniza automaticamente todas as novas despesas e entradas sem você precisar baixar ou subir arquivos PDF manualmente!\n\n💡 *A conexão é 100% regulada pelo Banco Central e possui permissão exclusiva de leitura (somente extratos e faturas).*`,
-      actions,
-    }
-  }
-
   // ---------------- Regras / Memória do Usuário ----------------
   if (/aprenda|memoriz|lembre|guarde que|anote que/i.test(n)) {
     const cleanRule = message.replace(/^(aprenda que|lembre-se que|memorize que|guarde que|anote que|aprenda|lembre|memorize)\s*:?\s*/i, '').trim()

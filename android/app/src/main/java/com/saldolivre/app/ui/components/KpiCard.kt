@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -20,6 +21,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.ui.theme.*
 
+private val KpiCardShape = RoundedCornerShape(16.dp)
+private val KpiIconShape = RoundedCornerShape(10.dp)
+private val DefaultSurfaceBrush = Brush.verticalGradient(colors = listOf(DarkSurface, DarkSurface))
+
 @Composable
 fun KpiCard(
     title: String,
@@ -31,32 +36,31 @@ fun KpiCard(
     highlight: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
-    val shape = RoundedCornerShape(16.dp)
-
-    val backgroundBrush = if (highlight) {
-        Brush.verticalGradient(
-            colors = listOf(
-                accentColor.copy(alpha = 0.12f),
-                DarkSurface
+    val backgroundBrush = remember(highlight, accentColor) {
+        if (highlight) {
+            Brush.verticalGradient(
+                colors = listOf(
+                    accentColor.copy(alpha = 0.12f),
+                    DarkSurface
+                )
             )
-        )
-    } else {
-        Brush.verticalGradient(
-            colors = listOf(
-                DarkSurface,
-                DarkSurface
-            )
-        )
+        } else {
+            DefaultSurfaceBrush
+        }
     }
 
-    val borderColor = if (highlight) accentColor.copy(alpha = 0.45f) else DarkBorder
+    val borderColor = remember(highlight, accentColor) {
+        if (highlight) accentColor.copy(alpha = 0.45f) else DarkBorder
+    }
+    val iconBgColor = remember(accentColor) { accentColor.copy(alpha = 0.15f) }
+    val iconBorderColor = remember(accentColor) { accentColor.copy(alpha = 0.3f) }
 
     Box(
         modifier = modifier
-            .clip(shape)
+            .clip(KpiCardShape)
             .background(backgroundBrush)
-            .border(1.dp, borderColor, shape)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .border(1.dp, borderColor, KpiCardShape)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(16.dp)
     ) {
         Column(
@@ -80,8 +84,8 @@ fun KpiCard(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .background(accentColor.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                        .border(1.dp, accentColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
+                        .background(iconBgColor, KpiIconShape)
+                        .border(1.dp, iconBorderColor, KpiIconShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(

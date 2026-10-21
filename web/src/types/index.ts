@@ -500,30 +500,4 @@ export interface UserLearnedRule {
   createdAt: number
 }
 
-export interface OpenFinanceAccount {
-  id: string
-  institutionName: string
-  institutionCode: string
-  institutionColor?: string
-  type: 'checking' | 'credit_card' | 'savings' | 'investment'
-  accountNumber?: string
-  lastSyncAt: number
-  status: 'active' | 'syncing' | 'error' | 'disconnected'
-  balance?: number
-  currentInvoice?: number
-  invoiceDueDate?: string
-}
-
-export interface OpenFinanceConnection {
-  id: string
-  provider: 'pluggy' | 'belvo' | 'manual'
-  institutionName: string
-  institutionCode: string
-  institutionColor: string
-  status: 'connected' | 'syncing' | 'needs_reauth' | 'error'
-  connectedAt: number
-  lastSyncAt: number
-  accounts: OpenFinanceAccount[]
-}
-
 

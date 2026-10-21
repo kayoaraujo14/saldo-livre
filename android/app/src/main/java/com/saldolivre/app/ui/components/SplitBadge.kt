@@ -15,6 +15,14 @@ import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.ui.theme.*
 
+private val SplitBadgeShape = RoundedCornerShape(6.dp)
+private val MineSplitColors = Triple(DarkSurfaceVariant, TextSecondary, DarkBorder)
+private val Split50Colors = Triple(Purple500.copy(alpha = 0.15f), Purple400, Purple500.copy(alpha = 0.35f))
+private val PartnerSplitColors = Triple(Cyan500.copy(alpha = 0.15f), Cyan400, Cyan500.copy(alpha = 0.35f))
+private val FriendSplitColors = Triple(Emerald500.copy(alpha = 0.15f), Emerald400, Emerald500.copy(alpha = 0.35f))
+private val ExternalSplitColors = Triple(Amber500.copy(alpha = 0.15f), Amber400, Amber500.copy(alpha = 0.35f))
+private val CustomSplitColors = Triple(DarkSurfaceVariant, TextPrimary, DarkBorder)
+
 @Composable
 fun SplitBadge(
     splitType: SplitType?,
@@ -23,42 +31,18 @@ fun SplitBadge(
     if (splitType == null) return
 
     val (bgColor, textColor, borderColor) = when (splitType) {
-        SplitType.MINE -> Triple(
-            DarkSurfaceVariant,
-            TextSecondary,
-            DarkBorder
-        )
-        SplitType.SPLIT_50 -> Triple(
-            Purple500.copy(alpha = 0.15f),
-            Purple400,
-            Purple500.copy(alpha = 0.35f)
-        )
-        SplitType.PARTNER -> Triple(
-            Cyan500.copy(alpha = 0.15f),
-            Cyan400,
-            Cyan500.copy(alpha = 0.35f)
-        )
-        SplitType.FRIEND -> Triple(
-            Emerald500.copy(alpha = 0.15f),
-            Emerald400,
-            Emerald500.copy(alpha = 0.35f)
-        )
-        SplitType.EXTERNAL -> Triple(
-            Amber500.copy(alpha = 0.15f),
-            Amber400,
-            Amber500.copy(alpha = 0.35f)
-        )
-        SplitType.CUSTOM -> Triple(
-            DarkSurfaceVariant,
-            TextPrimary,
-            DarkBorder
-        )
+        SplitType.MINE -> MineSplitColors
+        SplitType.SPLIT_50 -> Split50Colors
+        SplitType.PARTNER -> PartnerSplitColors
+        SplitType.FRIEND -> FriendSplitColors
+        SplitType.EXTERNAL -> ExternalSplitColors
+        SplitType.CUSTOM -> CustomSplitColors
     }
 
     Box(
         modifier = modifier
-            .background(bgColor, RoundedCornerShape(6.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(6.dp))
+            .background(bgColor, SplitBadgeShape)
+            .border(1.dp, borderColor, SplitBadgeShape)
             .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
         Text(

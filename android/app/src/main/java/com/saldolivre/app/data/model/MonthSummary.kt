@@ -1,16 +1,21 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class CategoryExpense(
     val category: String,
     val amount: Double
 )
 
+@Immutable
 data class InvestmentSubcat(
     val subcategory: String,
     val amount: Double,
     val percentage: Int
 )
 
+@Immutable
 data class ReceivableItem(
     val transactionId: String,
     val description: String,
@@ -22,6 +27,7 @@ data class ReceivableItem(
     val reimbursed: Boolean = false
 )
 
+@Immutable
 data class MonthSummary(
     val monthKey: String = "", // YYYY-MM
     val income: Double = 0.0,

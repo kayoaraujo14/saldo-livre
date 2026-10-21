@@ -112,7 +112,7 @@ fun FutureProjectionsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Consolidated Summary Card
-            item {
+            item(key = "projections_consolidated_banner", contentType = "projections_consolidated_banner") {
                 ProjectionsConsolidatedBanner(
                     averageFreeBalance = uiState.averageFreeBalance,
                     totalIncome = uiState.totalProjectedIncome,
@@ -121,7 +121,11 @@ fun FutureProjectionsScreen(
             }
 
             // Month Projections List
-            items(uiState.projections, key = { it.monthKey }) { projection ->
+            items(
+                items = uiState.projections,
+                key = { it.monthKey },
+                contentType = { "month_projection_card" }
+            ) { projection ->
                 val isSelected = projection.monthKey == uiState.selectedMonth
                 val isCurrent = projection.monthKey == uiState.currentMonth
 
@@ -139,7 +143,7 @@ fun FutureProjectionsScreen(
                 )
             }
 
-            item {
+            item(key = "projections_disclaimer", contentType = "projections_disclaimer") {
                 Surface(
                     color = DarkSurface.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(12.dp),
@@ -156,7 +160,7 @@ fun FutureProjectionsScreen(
                 }
             }
 
-            item {
+            item(key = "projections_bottom_spacer", contentType = "projections_bottom_spacer") {
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
@@ -296,11 +300,11 @@ private fun MonthProjectionCard(
     onGenerateBills: () -> Unit
 ) {
     val isPositive = projection.projectedFreeBalance >= 0
-    val formattedIncome = String.format(Locale("pt", "BR"), "R$ %,.2f", projection.projectedIncome)
-    val formattedExpense = String.format(Locale("pt", "BR"), "R$ %,.2f", projection.projectedExpense)
-    val formattedFreeBalance = String.format(Locale("pt", "BR"), "R$ %,.2f", projection.projectedFreeBalance)
-    val formattedDailyLimit = projection.projectedDailyLimit?.let {
-        String.format(Locale("pt", "BR"), "R$ %,.2f", it)
+    val formattedIncome = remember(projection.projectedIncome) { FinanceEngine.formatCurrency(projection.projectedIncome) }
+    val formattedExpense = remember(projection.projectedExpense) { FinanceEngine.formatCurrency(projection.projectedExpense) }
+    val formattedFreeBalance = remember(projection.projectedFreeBalance) { FinanceEngine.formatCurrency(projection.projectedFreeBalance) }
+    val formattedDailyLimit = remember(projection.projectedDailyLimit) {
+        projection.projectedDailyLimit?.let { FinanceEngine.formatCurrency(it) }
     }
 
     val retentionPct = if (projection.projectedIncome > 0) {

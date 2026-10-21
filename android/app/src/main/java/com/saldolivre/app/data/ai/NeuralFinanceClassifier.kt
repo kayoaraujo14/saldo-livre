@@ -351,4 +351,9 @@ class NeuralFinanceClassifier(
             rulesPrefs?.edit()?.putStringSet(KEY_RULES_SET, current)?.apply()
         }
     }
+
+    fun syncLearnedRules(rules: List<String>) {
+        val cleaned = rules.map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        rulesPrefs?.edit()?.putStringSet(KEY_RULES_SET, cleaned)?.apply()
+    }
 }

@@ -3,6 +3,7 @@ package com.saldolivre.app.data.ai
 import android.content.Context
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.saldolivre.app.data.model.UserLearnedRule
@@ -15,6 +16,8 @@ class LearnedRulesManager(
     companion object {
         private const val PREFS_RULES = "saldo_livre_agent_rules_prefs"
         private const val KEY_RULES_PREFIX = "learned_rules_"
+        private const val COLLECTION_USERS = "users"
+        private const val SUBCOLLECTION_AGENT_RULES = "agent_rules"
     }
 
     private val gson = Gson()
@@ -40,32 +43,41 @@ class LearnedRulesManager(
         prefs?.edit()?.putString(key, json)?.apply()
     }
 
-    fun addRule(uid: String, ruleText: String): UserLearnedRule {
+    fun addRule(uid: String, ruleText: String, category: String = "Geral"): UserLearnedRule {
         val clean = ruleText.trim()
+        val now = System.currentTimeMillis()
+        val suffix = UUID.randomUUID().toString().replace("-", "").take(4)
         val rule = UserLearnedRule(
-            id = "rule_${UUID.randomUUID().toString().take(8)}",
+            id = "rule_${now}_$suffix",
             rule = clean,
-            createdAt = System.currentTimeMillis(),
+            category = category,
+            createdAt = now,
             active = true
         )
-        val current = getLocalRules(uid).toMutableList()
+        val current = getLocalRules(uid)
+            .filterNot { it.rule.equals(clean, ignoreCase = true) }
+            .toMutableList()
         current.add(0, rule)
         saveLocalRules(uid, current)
 
-        // Sincroniza com o Firestore
+        // Sincroniza no mesmo caminho da Web: /users/{uid}/agent_rules/{ruleId}
         if (uid.isNotBlank() && uid != "guest") {
             try {
-                firestore.collection("agent_rules").document(rule.id).set(
-                    mapOf(
-                        "id" to rule.id,
-                        "ownerUid" to uid,
-                        "rule" to rule.rule,
-                        "createdAt" to rule.createdAt,
-                        "active" to rule.active
-                    )
+                val payload = mapOf(
+                    "id" to rule.id,
+                    "rule" to rule.rule,
+                    "category" to rule.category,
+                    "createdAt" to rule.createdAt,
+                    "active" to rule.active,
+                    "ownerUid" to uid
                 )
+                firestore.collection(COLLECTION_USERS)
+                    .document(uid)
+                    .collection(SUBCOLLECTION_AGENT_RULES)
+                    .document(rule.id)
+                    .set(payload, SetOptions.merge())
             } catch (e: Exception) {
-                // Ignore sync errors
+                // Ignore sync errors gracefully
             }
         }
         return rule
@@ -74,16 +86,27 @@ class LearnedRulesManager(
     fun deleteRule(uid: String, ruleIdOrText: String) {
         val clean = ruleIdOrText.trim()
         val current = getLocalRules(uid).toMutableList()
-        val target = current.find { it.id == clean || it.rule.contains(clean, ignoreCase = true) }
-        if (target != null) {
-            current.remove(target)
+        val removed = current.filter { it.id == clean || it.rule.contains(clean, ignoreCase = true) }
+        if (removed.isNotEmpty()) {
+            current.removeAll(removed.toSet())
             saveLocalRules(uid, current)
+        }
 
-            if (uid.isNotBlank() && uid != "guest") {
+        if (uid.isNotBlank() && uid != "guest") {
+            val idsToDelete = if (removed.isNotEmpty()) removed.map { it.id } else listOf(clean)
+            for (targetId in idsToDelete) {
                 try {
-                    firestore.collection("agent_rules").document(target.id).delete()
+                    firestore.collection(COLLECTION_USERS)
+                        .document(uid)
+                        .collection(SUBCOLLECTION_AGENT_RULES)
+                        .document(targetId)
+                        .delete()
+                    // Limpa também eventual documento legado na coleção raiz
+                    firestore.collection(SUBCOLLECTION_AGENT_RULES)
+                        .document(targetId)
+                        .delete()
                 } catch (e: Exception) {
-                    // Ignore errors
+                    // Ignore delete errors
                 }
             }
         }
@@ -91,32 +114,71 @@ class LearnedRulesManager(
 
     fun subscribeCloudRules(uid: String, onUpdate: (List<UserLearnedRule>) -> Unit): ListenerRegistration? {
         if (uid.isBlank() || uid == "guest") return null
-        return try {
-            firestore.collection("agent_rules")
+
+        // Migra silenciosamente eventuais regras antigas salvas na coleção raiz /agent_rules para /users/{uid}/agent_rules
+        try {
+            firestore.collection(SUBCOLLECTION_AGENT_RULES)
                 .whereEqualTo("ownerUid", uid)
+                .get()
+                .addOnSuccessListener { legacySnap ->
+                    if (legacySnap != null && !legacySnap.isEmpty) {
+                        for (doc in legacySnap.documents) {
+                            val id = doc.getString("id") ?: doc.id
+                            val ruleText = doc.getString("rule")?.trim().orEmpty()
+                            if (ruleText.isNotBlank()) {
+                                val createdAt = (doc.get("createdAt") as? Number)?.toLong() ?: System.currentTimeMillis()
+                                val category = doc.getString("category") ?: "Geral"
+                                val active = doc.getBoolean("active") ?: true
+                                val payload = mapOf(
+                                    "id" to id,
+                                    "rule" to ruleText,
+                                    "category" to category,
+                                    "createdAt" to createdAt,
+                                    "active" to active,
+                                    "ownerUid" to uid
+                                )
+                                firestore.collection(COLLECTION_USERS)
+                                    .document(uid)
+                                    .collection(SUBCOLLECTION_AGENT_RULES)
+                                    .document(id)
+                                    .set(payload, SetOptions.merge())
+                                doc.reference.delete()
+                            }
+                        }
+                    }
+                }
+        } catch (e: Exception) {
+            // Ignore legacy migration errors
+        }
+
+        return try {
+            firestore.collection(COLLECTION_USERS)
+                .document(uid)
+                .collection(SUBCOLLECTION_AGENT_RULES)
                 .addSnapshotListener { snapshot, error ->
                     if (error == null && snapshot != null) {
                         val cloudRules = mutableListOf<UserLearnedRule>()
                         for (doc in snapshot.documents) {
                             val id = doc.getString("id") ?: doc.id
-                            val rule = doc.getString("rule") ?: ""
-                            val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+                            val rule = doc.getString("rule")?.trim().orEmpty()
+                            val category = doc.getString("category") ?: "Geral"
+                            val createdAt = (doc.get("createdAt") as? Number)?.toLong() ?: System.currentTimeMillis()
                             val active = doc.getBoolean("active") ?: true
                             if (rule.isNotBlank()) {
                                 cloudRules.add(
                                     UserLearnedRule(
                                         id = id,
                                         rule = rule,
+                                        category = category,
                                         createdAt = createdAt,
                                         active = active
                                     )
                                 )
                             }
                         }
-                        if (cloudRules.isNotEmpty()) {
-                            saveLocalRules(uid, cloudRules)
-                            onUpdate(cloudRules)
-                        }
+                        val sorted = cloudRules.sortedByDescending { it.createdAt }
+                        saveLocalRules(uid, sorted)
+                        onUpdate(sorted)
                     }
                 }
         } catch (e: Exception) {

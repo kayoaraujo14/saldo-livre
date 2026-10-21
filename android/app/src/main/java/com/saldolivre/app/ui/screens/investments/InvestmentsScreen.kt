@@ -47,6 +47,15 @@ fun InvestmentsScreen(
         if (uiState.historyFilter == "all") uiState.allInvestments
         else uiState.allInvestments.filter { (it.subcategory ?: "Outros Investimentos") == uiState.historyFilter }
     }
+    val safeAssets = remember(uiState.assets) {
+        uiState.assets.filter { it.bucketType == InvestmentBucketType.SAFE_RESERVE }
+    }
+    val riskAssets = remember(uiState.assets) {
+        uiState.assets.filter { it.bucketType == InvestmentBucketType.RISK_VARIABLE }
+    }
+    val formattedMonthLabel = remember(uiState.selectedMonth) {
+        FinanceEngine.formatMonthLabel(uiState.selectedMonth)
+    }
 
     LaunchedEffect(uiState.feedbackMessage) {
         uiState.feedbackMessage?.let { msg ->
@@ -92,7 +101,7 @@ fun InvestmentsScreen(
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = FinanceEngine.formatMonthLabel(uiState.selectedMonth),
+                                    text = formattedMonthLabel,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Purple400,
@@ -141,7 +150,7 @@ fun InvestmentsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. KPI Cards Grid
-            item {
+            item(key = "investments_kpi_grid", contentType = "investments_kpi_grid") {
                 InvestmentsKpiGrid(
                     monthInvested = uiState.totalInvestedThisMonth,
                     allInvested = uiState.totalInvestedAllTime,
@@ -158,7 +167,7 @@ fun InvestmentsScreen(
             }
 
             // 2. Tab Navigation Pills
-            item {
+            item(key = "investments_tab_pills", contentType = "investments_tab_pills") {
                 InvestmentsTabPills(
                     activeTab = uiState.activeTab,
                     onSelectTab = { viewModel.setTab(it) }
@@ -169,7 +178,7 @@ fun InvestmentsScreen(
             when (uiState.activeTab) {
                 InvestmentTab.OVERVIEW -> {
                     // Caixinhas & Reservas Seguras
-                    item {
+                    item(key = "safe_reserves_header", contentType = "section_header") {
                         SectionHeader(
                             title = "Caixinhas & Reservas Seguras",
                             subtitle = "Renda Fixa, Tesouro Selic e Reserva de Emergência",
@@ -178,8 +187,11 @@ fun InvestmentsScreen(
                         )
                     }
 
-                    val safeAssets = uiState.assets.filter { it.bucketType == InvestmentBucketType.SAFE_RESERVE }
-                    items(safeAssets, key = { it.subcategory }) { asset ->
+                    items(
+                        items = safeAssets,
+                        key = { "safe_${it.subcategory}" },
+                        contentType = { "investment_asset_card" }
+                    ) { asset ->
                         InvestmentAssetCard(
                             asset = asset,
                             onAddAporte = { viewModel.openAddAporte(asset) },
@@ -189,7 +201,7 @@ fun InvestmentsScreen(
                     }
 
                     // Investimentos de Risco & Renda Variável
-                    item {
+                    item(key = "risk_variable_header", contentType = "section_header") {
                         Spacer(modifier = Modifier.height(8.dp))
                         SectionHeader(
                             title = "Investimentos de Risco & Renda Variável",
@@ -199,8 +211,11 @@ fun InvestmentsScreen(
                         )
                     }
 
-                    val riskAssets = uiState.assets.filter { it.bucketType == InvestmentBucketType.RISK_VARIABLE }
-                    items(riskAssets, key = { it.subcategory }) { asset ->
+                    items(
+                        items = riskAssets,
+                        key = { "risk_${it.subcategory}" },
+                        contentType = { "investment_asset_card" }
+                    ) { asset ->
                         InvestmentAssetCard(
                             asset = asset,
                             onAddAporte = { viewModel.openAddAporte(asset) },
@@ -210,17 +225,17 @@ fun InvestmentsScreen(
                     }
 
                     // Lançamentos do Mês
-                    item {
+                    item(key = "month_investments_section", contentType = "month_investments_section") {
                         Spacer(modifier = Modifier.height(8.dp))
                         MonthInvestmentsSection(
                             monthTxs = uiState.monthInvestments,
-                            monthLabel = FinanceEngine.formatMonthLabel(uiState.selectedMonth)
+                            monthLabel = formattedMonthLabel
                         )
                     }
                 }
 
                 InvestmentTab.CALCULATOR -> {
-                    item {
+                    item(key = "compound_interest_simulator", contentType = "compound_interest_simulator") {
                         CompoundInterestSimulator(
                             onSimulate = { init, month, rate, years ->
                                 viewModel.simulateCompoundInterest(init, month, rate, years)
@@ -230,13 +245,13 @@ fun InvestmentsScreen(
                 }
 
                 InvestmentTab.RULE_50_30_20 -> {
-                    item {
+                    item(key = "rule_50_30_20_section", contentType = "rule_50_30_20_section") {
                         Rule503020Section(data = uiState.rule503020)
                     }
                 }
 
                 InvestmentTab.HISTORY -> {
-                    item {
+                    item(key = "history_filter_pills", contentType = "history_filter_pills") {
                         HistoryFilterPills(
                             currentFilter = uiState.historyFilter,
                             allAssets = uiState.assets,
@@ -245,18 +260,22 @@ fun InvestmentsScreen(
                     }
 
                     if (filteredHistory.isEmpty()) {
-                        item {
+                        item(key = "empty_history_box", contentType = "empty_history_box") {
                             EmptyHistoryBox()
                         }
                     } else {
-                        items(filteredHistory, key = { it.id }) { tx ->
+                        items(
+                            items = filteredHistory,
+                            key = { it.id },
+                            contentType = { "investment_history_item" }
+                        ) { tx ->
                             InvestmentHistoryItemCard(tx = tx)
                         }
                     }
                 }
             }
 
-            item {
+            item(key = "investments_bottom_spacer", contentType = "investments_bottom_spacer") {
                 Spacer(modifier = Modifier.height(40.dp))
             }
         }
@@ -1263,6 +1282,10 @@ private fun HistoryFilterPills(
 private fun InvestmentHistoryItemCard(tx: Transaction) {
     val shape = RoundedCornerShape(14.dp)
     val isRedemption = tx.type == TransactionType.INCOME
+    val formattedAmount = remember(tx.effectiveAmount, isRedemption) {
+        if (isRedemption) "-${FinanceEngine.formatCurrency(tx.effectiveAmount)}"
+        else "+${FinanceEngine.formatCurrency(tx.effectiveAmount)}"
+    }
 
     Card(
         shape = shape,
@@ -1300,7 +1323,7 @@ private fun InvestmentHistoryItemCard(tx: Transaction) {
             }
 
             Text(
-                text = if (isRedemption) "-${FinanceEngine.formatCurrency(tx.effectiveAmount)}" else "+${FinanceEngine.formatCurrency(tx.effectiveAmount)}",
+                text = formattedAmount,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isRedemption) Rose400 else Emerald400

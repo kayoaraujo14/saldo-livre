@@ -1,5 +1,6 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 
 enum class EstimationRule(val value: String) {
@@ -18,6 +19,7 @@ enum class EstimationRule(val value: String) {
     }
 }
 
+@Immutable
 data class RecurringBill(
     val id: String = "",
     val ownerUid: String = "",

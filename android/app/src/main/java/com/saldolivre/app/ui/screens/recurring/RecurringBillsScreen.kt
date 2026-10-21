@@ -61,9 +61,11 @@ fun RecurringBillsScreen(
             }
     }
 
-    val totalCount = uiState.bills.count { it.ownerUid == uiState.currentUser.uid }
-    val incomeCount = uiState.bills.count { it.ownerUid == uiState.currentUser.uid && it.type == TransactionType.INCOME }
-    val expenseCount = uiState.bills.count { it.ownerUid == uiState.currentUser.uid && it.type != TransactionType.INCOME }
+    val (totalCount, incomeCount, expenseCount) = remember(uiState.bills, uiState.currentUser.uid) {
+        val userBills = uiState.bills.filter { it.ownerUid == uiState.currentUser.uid }
+        val inc = userBills.count { it.type == TransactionType.INCOME }
+        Triple(userBills.size, inc, userBills.size - inc)
+    }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -135,7 +137,7 @@ fun RecurringBillsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. Renda Base / Salário Principal Card
-            item {
+            item(key = "base_salary_card", contentType = "base_salary_card") {
                 BaseSalaryCard(
                     monthlyIncome = uiState.currentUser.monthlyIncome,
                     isEditing = uiState.editingIncome,
@@ -148,7 +150,7 @@ fun RecurringBillsScreen(
             }
 
             // 2. Tabs Filter
-            item {
+            item(key = "filter_tabs_row", contentType = "filter_tabs_row") {
                 FilterTabsRow(
                     activeTab = uiState.activeTab,
                     totalCount = totalCount,
@@ -160,11 +162,15 @@ fun RecurringBillsScreen(
 
             // 3. Bills List
             if (myBills.isEmpty()) {
-                item {
+                item(key = "empty_recurring_state", contentType = "empty_recurring_state") {
                     EmptyRecurringState()
                 }
             } else {
-                items(myBills, key = { it.id }) { bill ->
+                items(
+                    items = myBills,
+                    key = { it.id },
+                    contentType = { "recurring_bill_item" }
+                ) { bill ->
                     RecurringBillItemCard(
                         bill = bill,
                         onToggleActive = { viewModel.toggleBillActive(bill) },
@@ -174,7 +180,7 @@ fun RecurringBillsScreen(
                 }
             }
 
-            item {
+            item(key = "recurring_bottom_spacer", contentType = "recurring_bottom_spacer") {
                 Spacer(modifier = Modifier.height(32.dp))
             }
         }
