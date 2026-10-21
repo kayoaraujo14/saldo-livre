@@ -62,6 +62,7 @@ export function Header({
     setMonth,
     generateBills,
     signOut,
+    exitDemo,
     switchProfile,
     pendingFriendRequests,
     pendingChargeGroups,
@@ -328,6 +329,19 @@ export function Header({
             </DropdownMenu>
             </div>
 
+            {mode === 'demo' && (
+              <button
+                type="button"
+                onClick={exitDemo}
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold hover:bg-amber-500/25 transition-all cursor-pointer"
+                title="Modo demonstração com dados simulados. Clique para conectar sua conta Google real"
+              >
+                <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
+                <span>Modo Demo</span>
+                <span className="text-[10px] text-amber-200/80 font-normal">· Conectar Google</span>
+              </button>
+            )}
+
             {/* User Profile Dropdown Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -349,7 +363,31 @@ export function Header({
                 <div className="px-2.5 py-2">
                   <p className="text-xs font-semibold text-white truncate">{profile?.displayName ?? 'Usuário'}</p>
                   <p className="text-[11px] text-slate-400 truncate">{profile?.email || 'Conta Pessoal'}</p>
+                  {mode === 'demo' ? (
+                    <div className="mt-1.5 flex items-center gap-1 text-[10px] text-amber-400 bg-amber-950/40 border border-amber-500/30 rounded px-1.5 py-0.5">
+                      <span className="size-1.5 rounded-full bg-amber-400" />
+                      <span>Modo Demonstração Ativo</span>
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 rounded px-1.5 py-0.5">
+                      <span className="size-1.5 rounded-full bg-emerald-400" />
+                      <span>Nuvem Firebase Conectada</span>
+                    </div>
+                  )}
                 </div>
+
+                {mode === 'demo' && (
+                  <>
+                    <DropdownMenuSeparator className="bg-slate-800 my-1" />
+                    <DropdownMenuItem
+                      onClick={exitDemo}
+                      className="flex items-center gap-2 px-2.5 py-2 text-xs text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 rounded-lg cursor-pointer font-semibold"
+                    >
+                      <Sparkles className="size-3.5 text-emerald-400" />
+                      <span>Conectar com Google (Firebase)</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
 
                 {mode === 'demo' && users.length > 1 && (
                   <>

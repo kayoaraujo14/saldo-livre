@@ -58,15 +58,26 @@ export function clearFirebaseConfig() {
   window.location.reload()
 }
 
+export const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyD6R12Yi9dVUQWiVkYCUplPh0-6Dsr-mhg',
+  authDomain: 'saldo-livre-c3ca3.firebaseapp.com',
+  projectId: 'saldo-livre-c3ca3',
+  storageBucket: 'saldo-livre-c3ca3.firebasestorage.app',
+  messagingSenderId: '251257095844',
+  appId: '1:251257095844:web:f53db2159f9f201f560831',
+}
+
 function resolveFirebaseConfig() {
   const env = import.meta.env
-  if (env.VITE_FIREBASE_API_KEY && env.VITE_FIREBASE_PROJECT_ID) {
+  const apiKey = (env.VITE_FIREBASE_API_KEY as string) || ''
+  const projectId = (env.VITE_FIREBASE_PROJECT_ID as string) || ''
+  if (apiKey && apiKey !== 'true' && projectId && projectId !== 'true') {
     return {
-      apiKey: env.VITE_FIREBASE_API_KEY as string,
-      authDomain: (env.VITE_FIREBASE_AUTH_DOMAIN as string) || `${env.VITE_FIREBASE_PROJECT_ID}.firebaseapp.com`,
-      projectId: env.VITE_FIREBASE_PROJECT_ID as string,
-      storageBucket: (env.VITE_FIREBASE_STORAGE_BUCKET as string) || `${env.VITE_FIREBASE_PROJECT_ID}.appspot.com`,
-      messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined,
+      apiKey,
+      authDomain: (env.VITE_FIREBASE_AUTH_DOMAIN as string) || `${projectId}.firebaseapp.com`,
+      projectId,
+      storageBucket: (env.VITE_FIREBASE_STORAGE_BUCKET as string) || `${projectId}.firebasestorage.app`,
+      messagingSenderId: (env.VITE_FIREBASE_MESSAGING_SENDER_ID as string) || '251257095844',
       appId: (env.VITE_FIREBASE_APP_ID as string) || '',
     }
   }
@@ -76,12 +87,12 @@ function resolveFirebaseConfig() {
       apiKey: stored.apiKey,
       authDomain: stored.authDomain || `${stored.projectId}.firebaseapp.com`,
       projectId: stored.projectId,
-      storageBucket: stored.storageBucket || `${stored.projectId}.appspot.com`,
+      storageBucket: stored.storageBucket || `${stored.projectId}.firebasestorage.app`,
       messagingSenderId: stored.messagingSenderId,
       appId: stored.appId || '',
     }
   }
-  return null
+  return DEFAULT_FIREBASE_CONFIG
 }
 
 export const firebaseConfig = resolveFirebaseConfig()

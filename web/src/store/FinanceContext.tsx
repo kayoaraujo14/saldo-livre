@@ -615,25 +615,26 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   // ---------------- Ações de sessão ----------------
   const signIn = useCallback(async () => {
-    if (mode === 'firebase') {
-      await fb.signInWithGoogle()
-    } else {
-      const u = demo.users[0]
-      if (u) {
-        setSessionUid(u.uid)
-        localStorage.setItem(SESSION_UID_KEY, u.uid)
-      }
-    }
-  }, [mode, demo.users])
+    localStorage.removeItem(FORCE_DEMO_KEY)
+    localStorage.removeItem(SESSION_UID_KEY)
+    setForceDemo(false)
+    setSessionUid(null)
+    await fb.signInWithGoogle()
+  }, [])
 
   const signOut = useCallback(async () => {
-    if (mode === 'firebase') {
-      await fb.signOutUser()
-    } else {
-      setSessionUid(null)
-      localStorage.removeItem(SESSION_UID_KEY)
+    localStorage.removeItem(FORCE_DEMO_KEY)
+    localStorage.removeItem(SESSION_UID_KEY)
+    setForceDemo(false)
+    setSessionUid(null)
+    if (fb.isFirebaseConfigured) {
+      try {
+        await fb.signOutUser()
+      } catch (err) {
+        console.warn('Erro ao encerrar sessão Firebase:', err)
+      }
     }
-  }, [mode])
+  }, [])
 
   const loginAsDemo = useCallback(
     (uid: string) => {
