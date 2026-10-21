@@ -605,7 +605,22 @@ export function subscribeChatSessions(uid: string, cb: (sessions: ChatSession[])
     return onSnapshot(
       q,
       (snap) => {
-        const list = snap.docs.map((d) => ({ ...(d.data() as ChatSession), id: d.id }))
+        const list: ChatSession[] = snap.docs.map((d) => {
+          const data = d.data() || {}
+          const rawMsgs = Array.isArray(data.messages)
+            ? data.messages
+            : (data.messages && typeof data.messages === 'object'
+                ? Object.values(data.messages)
+                : [])
+          return {
+            id: d.id,
+            title: data.title || 'Nova Conversa',
+            createdAt: Number(data.createdAt) || Date.now(),
+            updatedAt: Number(data.updatedAt) || Date.now(),
+            messages: rawMsgs.length > 0 ? rawMsgs : [],
+            pending_transactions: Array.isArray(data.pending_transactions) ? data.pending_transactions : undefined,
+          } as ChatSession
+        })
         list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
         cb(list)
       },

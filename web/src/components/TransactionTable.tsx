@@ -139,19 +139,22 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
 
   // Count badges
   const counts = useMemo(() => {
+    const txs = Array.isArray(monthTransactions) ? monthTransactions : []
+    const cardsList = Array.isArray(cards) ? cards : []
     return {
-      all: monthTransactions.length,
-      income: monthTransactions.filter((t: Transaction) => t.type === 'income').length,
-      expense: monthTransactions.filter((t: Transaction) => t.type !== 'income').length,
-      refund: monthTransactions.filter((t: Transaction) => t.category === 'Estorno' || t.totalAmount < 0 || effectiveAmount(t) < 0).length,
-      pending: monthTransactions.filter((t: Transaction) => t.status !== 'paid').length,
-      paid: monthTransactions.filter((t: Transaction) => t.status === 'paid').length,
-      shared: monthTransactions.filter((t: Transaction) => {
-        const card = cards.find((c) => c.id === t.cardId)
+      all: txs.length,
+      income: txs.filter((t: Transaction) => t && t.type === 'income').length,
+      expense: txs.filter((t: Transaction) => t && t.type !== 'income').length,
+      refund: txs.filter((t: Transaction) => t && (t.category === 'Estorno' || t.totalAmount < 0 || effectiveAmount(t) < 0)).length,
+      pending: txs.filter((t: Transaction) => t && t.status !== 'paid').length,
+      paid: txs.filter((t: Transaction) => t && t.status === 'paid').length,
+      shared: txs.filter((t: Transaction) => {
+        if (!t) return false
+        const card = cardsList.find((c) => c && c.id === t.cardId)
         return isSharedCard(card) || t.reserveCardId
       }).length,
-      third: monthTransactions.filter((t: Transaction) => (t.allocations || []).some((a) => a.type === 'EXTERNAL')).length,
-      friends_installments: monthTransactions.filter((t: Transaction) => Boolean(t.assignedFriendUid || t.installmentGroupId)).length,
+      third: txs.filter((t: Transaction) => (Array.isArray(t?.allocations) ? t.allocations : []).some((a) => a && a.type === 'EXTERNAL')).length,
+      friends_installments: txs.filter((t: Transaction) => t && Boolean(t.assignedFriendUid || t.installmentGroupId)).length,
     }
   }, [monthTransactions, cards])
 
@@ -727,7 +730,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             ))}
                           </SelectContent>
                         </Select>
-                        {CATEGORY_GROUPS[tx.category]?.subcategories && CATEGORY_GROUPS[tx.category].subcategories.length > 0 ? (
+                        {(CATEGORY_GROUPS[tx.category]?.subcategories?.length ?? 0) > 0 ? (
                           <Select
                             value={tx.subcategory || ''}
                             onValueChange={(sub) => {
@@ -809,7 +812,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                           </Select>
 
                           {/* Multi-participant custom allocations preview chips */}
-                          {split === 'custom' && tx.allocations && tx.allocations.length > 0 && (
+                          {split === 'custom' && Array.isArray(tx.allocations) && tx.allocations.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-1 max-w-[220px]">
                               {tx.allocations.map((a, i) => (
                                 <span

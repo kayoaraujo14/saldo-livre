@@ -160,7 +160,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const rules = syncedRules || []
+  const rules = Array.isArray(syncedRules) ? syncedRules : []
   const [newRuleInput, setNewRuleInput] = useState('')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -546,9 +546,10 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
   useEffect(() => {
     saveStoredSessions(currentUid, sessions)
     if (currentUid && currentUid !== 'guest') {
-      const active = sessions.find((s) => s.id === currentSessionId)
+      const active = (sessions || []).find((s) => s && s.id === currentSessionId)
+      const msgs = Array.isArray(active?.messages) ? active.messages : []
       // Only persist to Firestore if the session contains actual user activity
-      const hasContent = active && (active.messages.length > 1 || active.messages[0]?.id !== INITIAL_MESSAGE.id)
+      const hasContent = active && (msgs.length > 1 || (msgs[0] && msgs[0].id !== INITIAL_MESSAGE.id))
       if (hasContent) {
         fsSaveChatSession(currentUid, active)
       }
@@ -560,16 +561,18 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     if (!currentUid || currentUid === 'guest') return
 
     const unsubSessions = subscribeChatSessions(currentUid, (cloudSessions) => {
-      if (cloudSessions.length > 0) {
-        setSessions(cloudSessions)
-        saveStoredSessions(currentUid, cloudSessions)
+      const safeCloud = Array.isArray(cloudSessions) ? cloudSessions : []
+      if (safeCloud.length > 0) {
+        setSessions(safeCloud)
+        saveStoredSessions(currentUid, safeCloud)
 
         // Se a sessão atual for apenas uma inicial em branco, chaveia para a mais recente da nuvem
         setCurrentSessionId((prevId) => {
-          const current = sessions.find((s) => s.id === prevId)
-          const isBlank = !current || current.messages.length <= 1
-          if (isBlank && cloudSessions[0]?.id) {
-            return cloudSessions[0].id
+          const current = (sessions || []).find((s) => s && s.id === prevId)
+          const msgs = Array.isArray(current?.messages) ? current.messages : []
+          const isBlank = !current || msgs.length <= 1
+          if (isBlank && safeCloud[0]?.id) {
+            return safeCloud[0].id
           }
           return prevId
         })
@@ -723,7 +726,8 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
 
     // 1. Gráficos & Visualizações Financeiras
     list.push(`📊 Gerar gráfico de distribuição dos meus gastos em ${label}`)
-    if (invested > 0 || (summary?.byInvestmentSubcategory && summary.byInvestmentSubcategory.length > 0)) {
+    const invList = Array.isArray(summary?.byInvestmentSubcategory) ? summary.byInvestmentSubcategory : []
+    if (invested > 0 || invList.length > 0) {
       list.push(`📈 Criar gráfico de alocação da minha carteira de investimentos`)
     } else {
       list.push(`📊 Criar gráfico comparativo das categorias onde mais gastei`)
@@ -754,12 +758,12 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     }
 
     // 6. Contas Fixas vs Variáveis
-    const pendingBills = monthTransactions.filter(
-      (t) => t.type === 'expense' && t.status !== 'paid' && t.totalAmount > 0,
+    const pendingBills = (monthTransactions || []).filter(
+      (t) => t && t.type === 'expense' && t.status !== 'paid' && (Number(t.totalAmount) || 0) > 0,
     )
     if (pendingBills.length > 0) {
       const bill = pendingBills[0]
-      const cleanName = bill.description.replace(/\s*\(\d+\/\d+\)/, '').trim()
+      const cleanName = (bill.description || 'Conta').replace(/\s*\(\d+\/\d+\)/, '').trim()
       list.push(`⚡ Quanto falta pagar das minhas contas de ${label}?`)
       list.push(`A conta de ${cleanName} veio R$ ${effectiveAmount(bill)}, atualize para mim`)
     } else {
@@ -772,9 +776,12 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded, onOpenOpe
     }
 
     // 8. Fatura de Cartões
-    if (cards.length > 0) {
-      const card = cards[0]
-      list.push(`💳 Qual a previsão da fatura do cartão ${card.cardName} e compras ativas?`)
+    const cardsList = Array.isArray(cards) ? cards : []
+    if (cardsList.length > 0) {
+      const card = cardsList[0]
+      if (card?.cardName) {
+        list.push(`💳 Qual a previsão da fatura do cartão ${card.cardName} e compras ativas?`)
+      }
     }
 
     // 9. Projeção de Fluxo de Caixa Futuro
@@ -1320,7 +1327,7 @@ Atenção crítica:
           <div className="flex-1 overflow-y-auto py-3 space-y-2">
             {sessions.map((sess) => {
               const isActive = sess.id === currentSessionId
-              const msgCount = sess.messages.filter((m) => m.role === 'user').length
+              const msgCount = (sess.messages || []).filter((m) => m && m.role === 'user').length
               const timeFormatted = new Date(sess.updatedAt).toLocaleDateString('pt-BR', {
                 day: '2-digit',
                 month: 'short',

@@ -119,13 +119,23 @@ function freshDemo(): DemoState {
 }
 
 function loadDemo(): DemoState {
+  const fresh = freshDemo()
   try {
     const raw = localStorage.getItem(DEMO_KEY)
-    if (raw) return JSON.parse(raw) as DemoState
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      return {
+        users: Array.isArray(parsed?.users) && parsed.users.length ? parsed.users : fresh.users,
+        cards: Array.isArray(parsed?.cards) ? parsed.cards : fresh.cards,
+        recurring: Array.isArray(parsed?.recurring) ? parsed.recurring : fresh.recurring,
+        transactions: Array.isArray(parsed?.transactions) ? parsed.transactions : fresh.transactions,
+        friendships: Array.isArray(parsed?.friendships) ? parsed.friendships : fresh.friendships,
+      }
+    }
   } catch {
     /* ignora estado corrompido */
   }
-  return freshDemo()
+  return fresh
 }
 
 export interface ManualTransactionInput {
@@ -338,14 +348,14 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   }, [mode, authUser])
 
   // ---------------- Visão unificada ----------------
-  const transactions = mode === 'demo' ? demo.transactions : fbTx
-  const cards = mode === 'demo' ? demo.cards : fbCards
-  const recurring = mode === 'demo' ? demo.recurring : fbRecurring
-  const friendships = mode === 'demo' ? (demo.friendships || []) : fbFriendships
+  const transactions = mode === 'demo' ? (demo?.transactions || []) : (fbTx || [])
+  const cards = mode === 'demo' ? (demo?.cards || []) : (fbCards || [])
+  const recurring = mode === 'demo' ? (demo?.recurring || []) : (fbRecurring || [])
+  const friendships = mode === 'demo' ? (demo?.friendships || []) : (fbFriendships || [])
   const currentUid = mode === 'demo' ? sessionUid : (authUser?.uid ?? null)
 
   const users: UserProfile[] = useMemo(() => {
-    if (mode === 'demo') return demo.users
+    if (mode === 'demo') return demo?.users || []
     const map = new Map<string, UserProfile>()
     if (fbProfile) map.set(fbProfile.uid, fbProfile)
     const cardList = Array.isArray(fbCards) ? fbCards : []
