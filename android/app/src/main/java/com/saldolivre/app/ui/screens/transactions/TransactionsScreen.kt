@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -63,12 +65,16 @@ fun TransactionsScreen(
                             text = "Extrato Financeiro",
                             style = Typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = FinanceEngine.formatMonthLabel(uiState.selectedMonth),
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
@@ -98,7 +104,12 @@ fun TransactionsScreen(
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
                 placeholder = {
-                    Text(text = "Buscar por descrição, mercado, categoria...", color = TextMuted)
+                    Text(
+                        text = "Buscar por descrição, mercado, categoria...",
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 },
                 leadingIcon = {
                     Icon(
@@ -218,21 +229,32 @@ fun TransactionsScreen(
                 Text(
                     text = "${uiState.filteredTransactions.size} lançamentos",
                     style = Typography.labelLarge,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .padding(end = 8.dp)
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
                         text = "Entradas: ${FinanceEngine.formatCurrency(uiState.totalIncome)}",
                         fontSize = 12.sp,
                         color = Emerald400,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
                     )
                     Text(
                         text = "Saídas: ${FinanceEngine.formatCurrency(uiState.totalExpense)}",
                         fontSize = 12.sp,
                         color = Rose400,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
                     )
                 }
             }
@@ -278,11 +300,14 @@ fun TransactionsScreen(
                     text = tx.description,
                     style = Typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             },
             text = {
                 Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     DetailRow(label = "Valor Efetivo", value = FinanceEngine.formatCurrency(tx.effectiveAmount))
@@ -302,7 +327,14 @@ fun TransactionsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "Status Atual:", style = Typography.bodyMedium, color = TextSecondary)
+                        Text(
+                            text = "Status Atual:",
+                            style = Typography.bodyMedium,
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
                         StatusBadge(status = tx.status)
                     }
                 }
@@ -318,7 +350,12 @@ fun TransactionsScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = "Marcar como Pago", color = DarkBackground)
+                        Text(
+                            text = "Marcar como Pago",
+                            color = DarkBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             },
@@ -332,7 +369,7 @@ fun TransactionsScreen(
                 ) {
                     Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Excluir")
+                    Text(text = "Excluir", maxLines = 1)
                 }
             }
         )
@@ -362,15 +399,19 @@ fun TransactionsScreen(
                         text = "Excluir Lançamento",
                         style = Typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 },
                 text = {
-                    Text(
-                        text = "Deseja realmente excluir \"${tx.description}\"?",
-                        color = TextSecondary,
-                        style = Typography.bodyMedium
-                    )
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        Text(
+                            text = "Deseja realmente excluir \"${tx.description}\"?",
+                            color = TextSecondary,
+                            style = Typography.bodyMedium
+                        )
+                    }
                 },
                 confirmButton = {
                     Button(
@@ -380,12 +421,12 @@ fun TransactionsScreen(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Rose500)
                     ) {
-                        Text(text = "Excluir", color = TextPrimary)
+                        Text(text = "Excluir", color = TextPrimary, maxLines = 1)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { txToDelete = null }) {
-                        Text(text = "Cancelar", color = TextSecondary)
+                        Text(text = "Cancelar", color = TextSecondary, maxLines = 1)
                     }
                 }
             )
@@ -416,7 +457,8 @@ private fun FilterChipItem(
             text = label,
             fontSize = 12.sp,
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            color = textColor
+            color = textColor,
+            maxLines = 1
         )
     }
 }
@@ -425,9 +467,25 @@ private fun FilterChipItem(
 private fun DetailRow(label: String, value: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = label, style = Typography.bodyMedium, color = TextSecondary)
-        Text(text = value, style = Typography.labelLarge, color = TextPrimary)
+        Text(
+            text = label,
+            style = Typography.bodyMedium,
+            color = TextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        )
+        Text(
+            text = value,
+            style = Typography.labelLarge,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

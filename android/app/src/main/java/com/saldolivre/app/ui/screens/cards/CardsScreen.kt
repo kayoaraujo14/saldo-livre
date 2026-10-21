@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -69,7 +70,9 @@ fun CardsScreen(
                         text = "Cartões & Faturas",
                         style = Typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 },
                 actions = {
@@ -84,7 +87,13 @@ fun CardsScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Novo Cartão", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = "Novo Cartão",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             )
@@ -228,7 +237,10 @@ private fun CardsSummaryBanner(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
@@ -239,7 +251,9 @@ private fun CardsSummaryBanner(
                     Text(
                         text = "Faturas do Mês ($selectedMonth)",
                         style = Typography.labelMedium,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -252,6 +266,7 @@ private fun CardsSummaryBanner(
                         color = Cyan400,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
@@ -262,31 +277,46 @@ private fun CardsSummaryBanner(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                ) {
                     Text(
                         text = "Total Comprometido",
                         style = Typography.bodySmall,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = formattedInvoices,
                         style = Typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Rose400
+                        color = Rose400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(
                         text = "Limite Disponível",
                         style = Typography.bodySmall,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = formattedAvailable,
                         style = Typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Emerald400
+                        color = Emerald400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -309,12 +339,19 @@ private fun CardsSummaryBanner(
                     Text(
                         text = "$overallUsage% do limite total em uso",
                         fontSize = 11.sp,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
                     )
                     Text(
                         text = "Limite total: $formattedLimits",
                         fontSize = 11.sp,
-                        color = TextMuted
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -356,13 +393,15 @@ private fun CardItemView(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .heightIn(min = 176.dp)
                     .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                     .background(Brush.linearGradient(gradientColors))
                     .padding(18.dp)
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 140.dp),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     // Top: Card Name, Chip, Status Badge
@@ -373,7 +412,10 @@ private fun CardItemView(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.CreditCard,
@@ -385,7 +427,9 @@ private fun CardItemView(
                                 text = card.cardName,
                                 style = Typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
@@ -403,6 +447,7 @@ private fun CardItemView(
                                 color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                             )
                         }
@@ -464,7 +509,8 @@ private fun CardItemView(
                                     Text(
                                         text = "Compartilhado",
                                         fontSize = 10.sp,
-                                        color = Color.White
+                                        color = Color.White,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -477,25 +523,35 @@ private fun CardItemView(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.Bottom
                     ) {
-                        Column {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
+                        ) {
                             Text(
                                 text = "FATURA ATUAL",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White.copy(alpha = 0.8f)
+                                color = Color.White.copy(alpha = 0.8f),
+                                maxLines = 1
                             )
                             Text(
                                 text = formattedInvoice,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
                         Text(
                             text = "Titular: ${card.ownerName}",
                             fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.85f)
+                            color = Color.White.copy(alpha = 0.85f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 150.dp)
                         )
                     }
                 }
@@ -517,13 +573,20 @@ private fun CardItemView(
                         Text(
                             text = "Limite: $formattedLimit",
                             fontSize = 12.sp,
-                            color = TextSecondary
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
                         )
                         Text(
                             text = "Disponível: $formattedAvailable",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Emerald400
+                            color = Emerald400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -554,7 +617,10 @@ private fun CardItemView(
                         Text(
                             text = "Terceiros: ${card.frequentThirdParties.joinToString(", ")}",
                             fontSize = 11.sp,
-                            color = TextSecondary
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
@@ -570,6 +636,7 @@ private fun CardItemView(
                     // Toggle Details
                     Row(
                         modifier = Modifier
+                            .weight(1f, fill = false)
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { onToggleDetails() }
                             .padding(vertical = 4.dp, horizontal = 6.dp),
@@ -580,7 +647,10 @@ private fun CardItemView(
                             text = if (isExpanded) "Ocultar Lançamentos" else "Ver Lançamentos (${item.transactions.size})",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = Cyan400
+                            color = Cyan400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Icon(
                             imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -668,12 +738,18 @@ private fun CardTransactionRow(tx: Transaction) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp)
+            ) {
                 Text(
                     text = tx.description,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    color = TextPrimary
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -682,7 +758,8 @@ private fun CardTransactionRow(tx: Transaction) {
                     Text(
                         text = tx.dueDate,
                         fontSize = 10.sp,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1
                     )
 
                     tx.installmentTag?.let { tag ->
@@ -694,6 +771,7 @@ private fun CardTransactionRow(tx: Transaction) {
                                 text = tag,
                                 fontSize = 9.sp,
                                 color = TextSecondary,
+                                maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                             )
                         }
@@ -704,12 +782,15 @@ private fun CardTransactionRow(tx: Transaction) {
                     if (!thirdParty.isNullOrBlank()) {
                         Surface(
                             color = Amber500.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(4.dp)
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.weight(1f, fill = false)
                         ) {
                             Text(
                                 text = thirdParty,
                                 fontSize = 9.sp,
                                 color = Amber400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                             )
                         }
@@ -721,7 +802,9 @@ private fun CardTransactionRow(tx: Transaction) {
                 text = "${if (isExpense) "-" else "+"}$formattedAmount",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isExpense) Rose400 else Emerald400
+                color = if (isExpense) Rose400 else Emerald400,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

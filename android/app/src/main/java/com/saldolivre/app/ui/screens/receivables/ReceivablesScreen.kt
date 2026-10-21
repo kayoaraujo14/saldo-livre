@@ -8,7 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material3.*
@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -40,11 +41,17 @@ fun ReceivablesScreen(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Voltar", tint = TextPrimary)
+                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = TextPrimary)
                     }
                 },
                 title = {
-                    Text(text = "Valores a Receber", style = Typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Valores a Receber",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             )
         }
@@ -67,30 +74,72 @@ fun ReceivablesScreen(
                         .padding(20.dp)
                 ) {
                     Column {
-                        Text(text = "TOTAL A RECEBER NO MÊS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Purple400)
+                        Text(
+                            text = "TOTAL A RECEBER NO MÊS",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Purple400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = FinanceEngine.formatCurrency(summary.receivableTotal),
                             fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Purple400
+                            color = Purple400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.height(14.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column {
-                                Text(text = "Parceiro(a)", fontSize = 11.sp, color = TextMuted)
-                                Text(text = FinanceEngine.formatCurrency(summary.receivableFromPartner), style = Typography.labelLarge)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Parceiro(a)",
+                                    fontSize = 11.sp,
+                                    color = TextMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = FinanceEngine.formatCurrency(summary.receivableFromPartner),
+                                    style = Typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                            Column {
-                                Text(text = "Amigos da Rede", fontSize = 11.sp, color = TextMuted)
-                                Text(text = FinanceEngine.formatCurrency(summary.receivableFromFriends), style = Typography.labelLarge)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Amigos da Rede",
+                                    fontSize = 11.sp,
+                                    color = TextMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = FinanceEngine.formatCurrency(summary.receivableFromFriends),
+                                    style = Typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                            Column {
-                                Text(text = "Terceiros", fontSize = 11.sp, color = TextMuted)
-                                Text(text = FinanceEngine.formatCurrency(summary.receivableFromExternal), style = Typography.labelLarge)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Terceiros",
+                                    fontSize = 11.sp,
+                                    color = TextMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = FinanceEngine.formatCurrency(summary.receivableFromExternal),
+                                    style = Typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
@@ -102,7 +151,9 @@ fun ReceivablesScreen(
                     text = "Lançamentos Pendentes (${uiState.items.size})",
                     style = Typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -149,10 +200,28 @@ fun ReceivablesScreen(
                             Spacer(modifier = Modifier.width(12.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(text = item.name, style = Typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                Text(text = item.description, style = Typography.bodyMedium, color = TextSecondary)
+                                Text(
+                                    text = item.name,
+                                    style = Typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = item.description,
+                                    style = Typography.bodyMedium,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 item.cardName?.let {
-                                    Text(text = "Pago com $it", fontSize = 11.sp, color = TextMuted)
+                                    Text(
+                                        text = "Pago com $it",
+                                        fontSize = 11.sp,
+                                        color = TextMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
 
@@ -163,18 +232,25 @@ fun ReceivablesScreen(
                                     text = FinanceEngine.formatCurrency(item.amount),
                                     style = Typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = Purple400
+                                    color = Purple400,
+                                    maxLines = 1
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Button(
                                     onClick = { viewModel.markAsReimbursed(item) },
                                     colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.heightIn(min = 36.dp)
                                 ) {
                                     Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Emerald400, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text(text = "Dar baixa", fontSize = 11.sp, color = Emerald400)
+                                    Text(
+                                        text = "Dar baixa",
+                                        fontSize = 11.sp,
+                                        color = Emerald400,
+                                        maxLines = 1
+                                    )
                                 }
                             }
                         }

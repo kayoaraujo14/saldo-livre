@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -148,10 +150,19 @@ fun GeminiChatScreen(
             onDismissRequest = { showApiKeyDialog = false },
             containerColor = DarkSurface,
             title = {
-                Text(text = "Configurações do Copiloto IA", color = TextPrimary, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Configurações do Copiloto IA",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
                     Text(
                         text = "Informe suas chaves da API do Google Gemini (do Google AI Studio). Você pode colar múltiplas chaves separadas por vírgula para ativar o Load Balancing automático:",
                         fontSize = 12.sp,
@@ -198,7 +209,7 @@ fun GeminiChatScreen(
                                 CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Cyan400, strokeWidth = 2.dp)
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
-                            Text(text = "Testar Conexão", fontSize = 12.sp)
+                            Text(text = "Testar Conexão", fontSize = 12.sp, maxLines = 1)
                         }
 
                         if (isTestSuccess != null && testFeedback != null) {
@@ -206,7 +217,8 @@ fun GeminiChatScreen(
                                 text = if (isTestSuccess == true) "✓ OK" else "✕ Falhou",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isTestSuccess == true) Emerald400 else Rose400
+                                color = if (isTestSuccess == true) Emerald400 else Rose400,
+                                maxLines = 1
                             )
                         }
                     }
@@ -234,7 +246,7 @@ fun GeminiChatScreen(
                             FilterChip(
                                 selected = isSelected,
                                 onClick = { tempModel = model },
-                                label = { Text(model, fontSize = 11.sp) },
+                                label = { Text(model, fontSize = 11.sp, maxLines = 1) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = Emerald500.copy(alpha = 0.2f),
                                     selectedLabelColor = Emerald400
@@ -253,12 +265,18 @@ fun GeminiChatScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
                 ) {
-                    Text("Salvar Configurações", color = DarkBackground, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Salvar Configurações",
+                        color = DarkBackground,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showApiKeyDialog = false }) {
-                    Text("Cancelar", color = TextSecondary)
+                    Text("Cancelar", color = TextSecondary, maxLines = 1)
                 }
             }
         )
@@ -333,16 +351,20 @@ fun GeminiChatScreen(
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
                                 text = "Copiloto Saldo Livre",
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = uiState.connectionStatus ?: (if (uiState.apiKey.isNotBlank()) "Online • ${uiState.selectedModel}" else "Modo Local Offline"),
                                 fontSize = 10.sp,
-                                color = if (uiState.apiKey.isNotBlank()) Emerald400 else Amber400
+                                color = if (uiState.apiKey.isNotBlank()) Emerald400 else Amber400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -779,7 +801,8 @@ private fun ChatHistorySheetContent(
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (isCurrent) Emerald400 else TextPrimary,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                             if (isCurrent) {
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -787,14 +810,17 @@ private fun ChatHistorySheetContent(
                                     text = "• Atual",
                                     fontSize = 10.sp,
                                     color = Emerald400,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
                                 )
                             }
                         }
                         Text(
                             text = "$dateStr • ${session.messages.size} mensagens",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -939,6 +965,8 @@ fun ChatBubble(
 ) {
     val isUser = message.sender == MessageSender.USER
     val alignment = if (isUser) Alignment.End else Alignment.Start
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val maxBubbleWidth = (screenWidthDp * 0.85f).dp
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -950,6 +978,7 @@ fun ChatBubble(
             val isAudio = att.type.startsWith("audio/") || att.name.endsWith(".m4a")
             Row(
                 modifier = Modifier
+                    .widthIn(max = maxBubbleWidth)
                     .padding(bottom = 4.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(DarkSurfaceVariant)
@@ -968,7 +997,9 @@ fun ChatBubble(
                     text = att.name,
                     fontSize = 11.sp,
                     color = Emerald400,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -976,7 +1007,7 @@ fun ChatBubble(
         // Bolha de Texto Principal
         Box(
             modifier = Modifier
-                .widthIn(max = 320.dp)
+                .widthIn(max = maxBubbleWidth)
                 .clip(
                     RoundedCornerShape(
                         topStart = 16.dp,
@@ -1027,7 +1058,7 @@ fun ChatBubble(
             Spacer(modifier = Modifier.height(8.dp))
             Column(
                 modifier = Modifier
-                    .widthIn(max = 320.dp)
+                    .widthIn(max = maxBubbleWidth)
                     .clip(RoundedCornerShape(14.dp))
                     .background(DarkSurface)
                     .border(1.dp, if (card.isSuccess) Emerald500.copy(alpha = 0.5f) else Rose500.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
@@ -1045,7 +1076,10 @@ fun ChatBubble(
                         text = card.title,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (card.isSuccess) Emerald400 else Rose400
+                        color = if (card.isSuccess) Emerald400 else Rose400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                 }
 
@@ -1062,7 +1096,9 @@ fun ChatBubble(
                         text = card.newFreeBalance,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Emerald400
+                        color = Emerald400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -1080,7 +1116,14 @@ fun ChatBubble(
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(vertical = 4.dp)
                         ) {
-                            Text(text = "✓ Confirmar", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text(
+                                text = "✓ Confirmar",
+                                color = DarkBackground,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
                         OutlinedButton(
@@ -1090,7 +1133,12 @@ fun ChatBubble(
                             contentPadding = PaddingValues(vertical = 4.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose400)
                         ) {
-                            Text(text = "✕ Cancelar", fontSize = 11.sp)
+                            Text(
+                                text = "✕ Cancelar",
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 } else if (pending?.status == PendingActionStatus.CONFIRMED) {

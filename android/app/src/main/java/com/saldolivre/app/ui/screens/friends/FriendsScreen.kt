@@ -8,16 +8,20 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,6 +34,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -89,18 +94,22 @@ fun FriendsScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
                                 text = "Rede de Amizades",
                                 style = Typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "Conexões e aprovações de cartão",
                                 style = Typography.bodySmall,
                                 color = TextSecondary,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -297,7 +306,10 @@ private fun TabPillItem(
                 text = label,
                 fontSize = 11.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) selectedTextColor else TextSecondary
+                color = if (isSelected) selectedTextColor else TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
             )
             if (badgeCount > 0) {
                 Box(
@@ -455,12 +467,14 @@ private fun ChargeGroupCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(
                         text = group.baseDescription,
                         style = Typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(4.dp))
 
@@ -478,6 +492,8 @@ private fun ChargeGroupCard(
                                     color = Purple400,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
@@ -492,6 +508,8 @@ private fun ChargeGroupCard(
                                 color = if (group.friendSharePct < 100) Cyan400 else Amber400,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -503,14 +521,16 @@ private fun ChargeGroupCard(
                         text = formattedFriendShare,
                         style = Typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Amber400
+                        color = Amber400,
+                        maxLines = 1
                     )
                     if (group.isInstallment) {
                         Text(
                             text = "${group.installmentsCount}x de $formattedPerInstallment",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = TextSecondary
+                            color = TextSecondary,
+                            maxLines = 1
                         )
                     }
                 }
@@ -518,14 +538,17 @@ private fun ChargeGroupCard(
 
             // Info Details: Dates, Card, Sender
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = if (group.isInstallment) "Período: ${group.firstDueDate} até ${group.lastDueDate}" else "Vencimento: ${group.firstDueDate}",
                     fontSize = 11.sp,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    maxLines = 1
                 )
 
                 if (card != null) {
@@ -535,13 +558,26 @@ private fun ChargeGroupCard(
                         horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Icon(imageVector = Icons.Default.CreditCard, contentDescription = null, tint = Cyan400, modifier = Modifier.size(12.dp))
-                        Text(text = card.cardName, fontSize = 11.sp, color = TextPrimary)
+                        Text(
+                            text = card.cardName,
+                            fontSize = 11.sp,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
 
                 if (group.senderName.isNotBlank()) {
                     Text(text = "•", color = TextMuted)
-                    Text(text = "Por: ${group.senderName}", fontSize = 11.sp, color = Amber400, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = "Por: ${group.senderName}",
+                        fontSize = 11.sp,
+                        color = Amber400,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
@@ -565,7 +601,9 @@ private fun ChargeGroupCard(
                         text = if (isExpanded) "Ocultar cronograma" else "Ver cronograma das ${group.installmentsCount} parcelas",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Purple400
+                        color = Purple400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -594,18 +632,24 @@ private fun ChargeGroupCard(
                                     Text(
                                         text = "Parcela ${itx.installmentNumber ?: 1}/${group.installmentsCount}",
                                         fontSize = 11.sp,
-                                        color = TextSecondary
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
                                     )
                                     Text(
                                         text = itx.dueDate,
                                         fontSize = 11.sp,
-                                        color = TextMuted
+                                        color = TextMuted,
+                                        maxLines = 1,
+                                        modifier = Modifier.padding(horizontal = 8.dp)
                                     )
                                     Text(
                                         text = formattedItxShare,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Amber400
+                                        color = Amber400,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -625,7 +669,12 @@ private fun ChargeGroupCard(
                 Text(
                     text = if (group.isInstallment) "${group.installmentsCount} parcelas serão agendadas" else "Entra nas despesas do mês",
                     fontSize = 10.sp,
-                    color = TextMuted
+                    color = TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -635,11 +684,16 @@ private fun ChargeGroupCard(
                         border = androidx.compose.foundation.BorderStroke(1.dp, Rose500.copy(alpha = 0.4f)),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
+                        modifier = Modifier.heightIn(min = 32.dp)
                     ) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Recusar", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = "Recusar",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
                     }
 
                     Button(
@@ -647,11 +701,17 @@ private fun ChargeGroupCard(
                         colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.height(32.dp)
+                        modifier = Modifier.heightIn(min = 32.dp)
                     ) {
                         Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Aceitar ($formattedFriendShare)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Aceitar ($formattedFriendShare)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
@@ -699,7 +759,10 @@ private fun FriendsTabContent(
                             text = "Adicionar Novo Amigo por E-mail",
                             style = Typography.titleSmall,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                     }
 
@@ -711,7 +774,14 @@ private fun FriendsTabContent(
                         OutlinedTextField(
                             value = emailInput,
                             onValueChange = { emailInput = it },
-                            placeholder = { Text("email.do.amigo@exemplo.com", fontSize = 12.sp) },
+                            placeholder = {
+                                Text(
+                                    "email.do.amigo@exemplo.com",
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Send),
                             keyboardActions = KeyboardActions(onSend = {
@@ -741,11 +811,16 @@ private fun FriendsTabContent(
                             enabled = emailInput.isNotBlank() && !isSendingInvite,
                             colors = ButtonDefaults.buttonColors(containerColor = Purple500),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.height(50.dp)
+                            modifier = Modifier.heightIn(min = 50.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(text = if (isSendingInvite) "..." else "Convidar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (isSendingInvite) "..." else "Convidar",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
                         }
                     }
                 }
@@ -759,7 +834,9 @@ private fun FriendsTabContent(
                     text = "Convites Recebidos (${pendingRequests.size})",
                     style = Typography.titleSmall,
                     fontWeight = FontWeight.Bold,
-                    color = Amber400
+                    color = Amber400,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -777,26 +854,47 @@ private fun FriendsTabContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(text = req.requesterName, style = Typography.bodyMedium, fontWeight = FontWeight.Bold, color = TextPrimary)
-                            Text(text = req.requesterEmail, style = Typography.bodySmall, color = TextSecondary, fontSize = 11.sp)
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
+                        ) {
+                            Text(
+                                text = req.requesterName,
+                                style = Typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = req.requesterEmail,
+                                style = Typography.bodySmall,
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             TextButton(
                                 onClick = { onRespondRequest(req.friendshipId, false) },
                                 colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
                             ) {
-                                Text(text = "Recusar", fontSize = 11.sp)
+                                Text(text = "Recusar", fontSize = 11.sp, maxLines = 1)
                             }
                             Button(
                                 onClick = { onRespondRequest(req.friendshipId, true) },
                                 colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(30.dp)
+                                modifier = Modifier.heightIn(min = 32.dp)
                             ) {
-                                Text(text = "Aceitar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(text = "Aceitar", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             }
                         }
                     }
@@ -810,7 +908,9 @@ private fun FriendsTabContent(
                 text = "Amigos Conectados (${activeFriends.size})",
                 style = Typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
@@ -851,6 +951,9 @@ private fun FriendsTabContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
@@ -869,18 +972,22 @@ private fun FriendsTabContent(
                                 )
                             }
 
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = friend.friendName,
                                     style = Typography.bodyMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = friend.friendEmail,
                                     style = Typography.bodySmall,
                                     color = TextSecondary,
-                                    fontSize = 11.sp
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -899,7 +1006,13 @@ private fun FriendsTabContent(
                                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                                 ) {
                                     Icon(imageVector = Icons.Default.Verified, contentDescription = null, tint = Emerald400, modifier = Modifier.size(10.dp))
-                                    Text(text = "Conectado", fontSize = 10.sp, color = Emerald400, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "Conectado",
+                                        fontSize = 10.sp,
+                                        color = Emerald400,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
                                 }
                             }
 
@@ -940,6 +1053,7 @@ private fun StatementTabContent(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -971,7 +1085,10 @@ private fun StatementTabContent(
                         text = "A Receber de Amigos",
                         style = Typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Emerald400
+                        color = Emerald400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                 }
 
@@ -979,7 +1096,9 @@ private fun StatementTabContent(
                     text = formattedReceivable,
                     style = Typography.headlineMedium,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Emerald400
+                    color = Emerald400,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 Text(
@@ -1019,7 +1138,10 @@ private fun StatementTabContent(
                         text = "A Pagar para Amigos",
                         style = Typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Rose400
+                        color = Rose400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                 }
 
@@ -1027,7 +1149,9 @@ private fun StatementTabContent(
                     text = formattedPayable,
                     style = Typography.headlineMedium,
                     fontWeight = FontWeight.ExtraBold,
-                    color = Rose400
+                    color = Rose400,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 Text(

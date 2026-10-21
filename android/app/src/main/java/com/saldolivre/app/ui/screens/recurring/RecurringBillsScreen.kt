@@ -3,6 +3,7 @@ package com.saldolivre.app.ui.screens.recurring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -75,7 +77,7 @@ fun RecurringBillsScreen(
                 ),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Voltar")
+                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar")
                     }
                 },
                 title = {
@@ -84,12 +86,16 @@ fun RecurringBillsScreen(
                             text = "Moldes Recorrentes",
                             style = Typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "Previsões automáticas e salários",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
@@ -110,7 +116,12 @@ fun RecurringBillsScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Novo", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            text = "Novo",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
                     }
                 }
             )
@@ -256,7 +267,10 @@ private fun BaseSalaryCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -272,13 +286,15 @@ private fun BaseSalaryCard(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "RENDA BASE / SALÁRIO PRINCIPAL",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Emerald400,
-                            letterSpacing = 0.5.sp
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (!isEditing) {
                             Row(
@@ -289,12 +305,16 @@ private fun BaseSalaryCard(
                                     text = FinanceEngine.formatCurrency(monthlyIncome),
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.Black,
-                                    color = Emerald400
+                                    color = Emerald400,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Text(
                                     text = "/ mês",
                                     fontSize = 12.sp,
                                     color = TextMuted,
+                                    maxLines = 1,
                                     modifier = Modifier.padding(bottom = 2.dp)
                                 )
                             }
@@ -318,7 +338,12 @@ private fun BaseSalaryCard(
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Alterar", fontSize = 11.sp, color = TextSecondary)
+                        Text(
+                            text = "Alterar",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            maxLines = 1
+                        )
                     }
                 }
             }
@@ -543,7 +568,9 @@ private fun RecurringBillItemCard(
 
             // Badges Row
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -611,15 +638,21 @@ private fun RecurringBillItemCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 ) {
                     Text(
                         text = if (isIncome) "+${FinanceEngine.formatCurrency(bill.defaultAmount)}" else FinanceEngine.formatCurrency(bill.defaultAmount),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isIncome) Emerald400 else if (bill.active) TextPrimary else TextMuted
+                        color = if (isIncome) Emerald400 else if (bill.active) TextPrimary else TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    Text(text = "padrão", fontSize = 11.sp, color = TextMuted)
+                    Text(text = "padrão", fontSize = 11.sp, color = TextMuted, maxLines = 1)
                 }
 
                 Row(
@@ -785,17 +818,25 @@ private fun RecurringBillFormDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    ) {
                         Text(
                             text = if (initialBill.id.startsWith("new_")) "Novo Molde Recorrente" else "Editar Molde",
                             style = Typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "Configuração de automação mensal",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -832,14 +873,16 @@ private fun RecurringBillFormDialog(
                                     if (category == "Receita") category = "Moradia"
                                     subcategory = CategoryRegistry.get(category).subcategories.firstOrNull()
                                 }
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 10.dp, horizontal = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "Despesa",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = if (billType == TransactionType.EXPENSE) Amber400 else TextMuted
+                                color = if (billType == TransactionType.EXPENSE) Amber400 else TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
@@ -853,14 +896,16 @@ private fun RecurringBillFormDialog(
                                     category = "Receita"
                                     subcategory = CategoryRegistry.get("Receita").subcategories.firstOrNull()
                                 }
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 10.dp, horizontal = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "Entrada / Renda",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
-                                color = if (billType == TransactionType.INCOME) Emerald400 else TextMuted
+                                color = if (billType == TransactionType.INCOME) Emerald400 else TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -869,7 +914,13 @@ private fun RecurringBillFormDialog(
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },
-                        label = { Text(if (billType == TransactionType.INCOME) "Descrição da Entrada (Ex: Freelance, Renda Extra)" else "Descrição da Conta (Ex: Conta de Luz, Aluguel)") },
+                        label = {
+                            Text(
+                                text = if (billType == TransactionType.INCOME) "Descrição da Entrada (Ex: Freelance)" else "Descrição da Conta (Ex: Aluguel)",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = if (billType == TransactionType.INCOME) Emerald400 else Amber400,
@@ -890,7 +941,8 @@ private fun RecurringBillFormDialog(
                                 value = category,
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Categoria") },
+                                singleLine = true,
+                                label = { Text("Categoria", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategoryDropdown) },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = Amber400,
@@ -909,7 +961,14 @@ private fun RecurringBillFormDialog(
                             ) {
                                 availableCategories.forEach { cat ->
                                     DropdownMenuItem(
-                                        text = { Text(cat.name, color = TextPrimary) },
+                                        text = {
+                                            Text(
+                                                text = cat.name,
+                                                color = TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
                                         leadingIcon = {
                                             Icon(imageVector = cat.icon, contentDescription = null, tint = cat.color)
                                         },
@@ -934,7 +993,8 @@ private fun RecurringBillFormDialog(
                                 value = subcategory ?: "Nenhuma",
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Subcategoria") },
+                                singleLine = true,
+                                label = { Text("Subcategoria", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedSubcategoryDropdown) },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = if (billType == TransactionType.INCOME) Emerald400 else Amber400,
@@ -953,7 +1013,14 @@ private fun RecurringBillFormDialog(
                             ) {
                                 currentSubcategories.forEach { sub ->
                                     DropdownMenuItem(
-                                        text = { Text(sub, color = TextPrimary) },
+                                        text = {
+                                            Text(
+                                                text = sub,
+                                                color = TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
                                         onClick = {
                                             subcategory = sub
                                             expandedSubcategoryDropdown = false
@@ -978,7 +1045,13 @@ private fun RecurringBillFormDialog(
                                     dueDay = filtered
                                 }
                             },
-                            label = { Text(if (billType == TransactionType.INCOME) "Dia Receb." else "Dia Venc.") },
+                            label = {
+                                Text(
+                                    text = if (billType == TransactionType.INCOME) "Dia Receb." else "Dia Venc.",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -993,7 +1066,13 @@ private fun RecurringBillFormDialog(
                         OutlinedTextField(
                             value = defaultAmount,
                             onValueChange = { defaultAmount = it },
-                            label = { Text("Valor Base (R$)") },
+                            label = {
+                                Text(
+                                    text = "Valor Base (R$)",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -1020,7 +1099,8 @@ private fun RecurringBillFormDialog(
                             value = ruleLabel,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Regra de Estimativa") },
+                            singleLine = true,
+                            label = { Text("Regra de Estimativa", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedRuleDropdown) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Amber400,
@@ -1038,21 +1118,21 @@ private fun RecurringBillFormDialog(
                             modifier = Modifier.background(DarkSurface)
                         ) {
                             DropdownMenuItem(
-                                text = { Text("📌 Valor Fixo Padrão", color = TextPrimary) },
+                                text = { Text("📌 Valor Fixo Padrão", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = {
                                     estimationRule = EstimationRule.FIXED
                                     expandedRuleDropdown = false
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("📅 Último Mês Pago", color = TextPrimary) },
+                                text = { Text("📅 Último Mês Pago", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = {
                                     estimationRule = EstimationRule.LAST_MONTH
                                     expandedRuleDropdown = false
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("📊 Média dos Últimos 3 Meses", color = TextPrimary) },
+                                text = { Text("📊 Média dos Últimos 3 Meses", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = {
                                     estimationRule = EstimationRule.AVG_3_MONTHS
                                     expandedRuleDropdown = false
@@ -1076,7 +1156,8 @@ private fun RecurringBillFormDialog(
                                 value = splitLabel,
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Divisão Padrão") },
+                                singleLine = true,
+                                label = { Text("Divisão Padrão", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedSplitDropdown) },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = Amber400,
@@ -1094,14 +1175,21 @@ private fun RecurringBillFormDialog(
                                 modifier = Modifier.background(DarkSurface)
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("👤 100% Meu", color = TextPrimary) },
+                                    text = { Text("👤 100% Meu", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                     onClick = {
                                         splitType = SplitType.MINE
                                         expandedSplitDropdown = false
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("🤝 Dividido 50/50" + (partner?.let { " com ${it.displayName}" } ?: ""), color = TextPrimary) },
+                                    text = {
+                                        Text(
+                                            text = "🤝 Dividido 50/50" + (partner?.let { " com ${it.displayName}" } ?: ""),
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
                                     onClick = {
                                         splitType = SplitType.SPLIT_50
                                         expandedSplitDropdown = false
@@ -1126,7 +1214,8 @@ private fun RecurringBillFormDialog(
                             value = payLabel,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Meio de Pagamento / Cobrança") },
+                            singleLine = true,
+                            label = { Text("Meio de Pagamento / Cobrança", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedPaymentDropdown) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Amber400,
@@ -1144,19 +1233,19 @@ private fun RecurringBillFormDialog(
                             modifier = Modifier.background(DarkSurface)
                         ) {
                             DropdownMenuItem(
-                                text = { Text("⚡ Pix", color = TextPrimary) },
+                                text = { Text("⚡ Pix", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = { paymentMethod = PaymentMethod.PIX; expandedPaymentDropdown = false }
                             )
                             DropdownMenuItem(
-                                text = { Text("📄 Boleto Bancário", color = TextPrimary) },
+                                text = { Text("📄 Boleto Bancário", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = { paymentMethod = PaymentMethod.BILL; expandedPaymentDropdown = false }
                             )
                             DropdownMenuItem(
-                                text = { Text("🏦 Débito em Conta", color = TextPrimary) },
+                                text = { Text("🏦 Débito em Conta", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = { paymentMethod = PaymentMethod.DEBIT; expandedPaymentDropdown = false }
                             )
                             DropdownMenuItem(
-                                text = { Text("💳 Cartão de Crédito", color = TextPrimary) },
+                                text = { Text("💳 Cartão de Crédito", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = { paymentMethod = PaymentMethod.CREDIT_CARD; expandedPaymentDropdown = false }
                             )
                         }
@@ -1245,7 +1334,7 @@ private fun RecurringBillFormDialog(
                                     OutlinedTextField(
                                         value = startMonth,
                                         onValueChange = { startMonth = it },
-                                        label = { Text("Mês Inicial (AAAA-MM)") },
+                                        label = { Text("Mês Inicial", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                         singleLine = true,
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = Cyan400,
@@ -1265,7 +1354,8 @@ private fun RecurringBillFormDialog(
                                             value = "$installmentsCount meses",
                                             onValueChange = {},
                                             readOnly = true,
-                                            label = { Text("Parcelas") },
+                                            singleLine = true,
+                                            label = { Text("Parcelas", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedInstallmentsDropdown) },
                                             colors = OutlinedTextFieldDefaults.colors(
                                                 focusedBorderColor = Cyan400,
@@ -1273,7 +1363,9 @@ private fun RecurringBillFormDialog(
                                                 focusedTextColor = TextPrimary,
                                                 unfocusedTextColor = TextPrimary
                                             ),
-                                            modifier = Modifier.menuAnchor()
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .menuAnchor()
                                         )
                                         ExposedDropdownMenu(
                                             expanded = expandedInstallmentsDropdown,
@@ -1282,7 +1374,14 @@ private fun RecurringBillFormDialog(
                                         ) {
                                             listOf(2, 3, 4, 5, 6, 8, 10, 12, 18, 24, 36).forEach { n ->
                                                 DropdownMenuItem(
-                                                    text = { Text("$n parcelas ($n meses)", color = TextPrimary) },
+                                                    text = {
+                                                        Text(
+                                                            text = "$n parcelas ($n meses)",
+                                                            color = TextPrimary,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    },
                                                     onClick = {
                                                         installmentsCount = n
                                                         expandedInstallmentsDropdown = false
@@ -1326,7 +1425,12 @@ private fun RecurringBillFormDialog(
                             text = "Molde Ativo (gerar nos meses futuros)",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
                         )
                         Switch(
                             checked = active,

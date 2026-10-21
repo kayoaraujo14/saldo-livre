@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -80,18 +81,22 @@ fun FutureProjectionsScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
                                 text = "Projeção de Fluxo de Caixa",
                                 style = Typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "Próximos 6 meses simulados",
                                 style = Typography.bodySmall,
                                 color = TextSecondary,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -188,7 +193,12 @@ private fun ProjectionsConsolidatedBanner(
                     text = "MÉDIA PROJETADA (6 MESES)",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextSecondary
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 )
                 Surface(
                     color = if (isPositive) Emerald500.copy(alpha = 0.15f) else Rose500.copy(alpha = 0.15f),
@@ -199,6 +209,7 @@ private fun ProjectionsConsolidatedBanner(
                         color = if (isPositive) Emerald400 else Rose400,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
@@ -209,17 +220,21 @@ private fun ProjectionsConsolidatedBanner(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                Column {
+                Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "Saldo Livre Médio / Mês",
                         style = Typography.bodySmall,
-                        color = TextMuted
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = formattedAvg,
                         style = Typography.headlineMedium,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (isPositive) Emerald400 else Rose400
+                        color = if (isPositive) Emerald400 else Rose400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -230,13 +245,42 @@ private fun ProjectionsConsolidatedBanner(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text(text = "Total Entradas (6m)", fontSize = 10.sp, color = TextMuted)
-                    Text(text = "+$formattedIncome", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Emerald400)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Total Entradas (6m)",
+                        fontSize = 10.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "+$formattedIncome",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Emerald400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "Total Saídas (6m)", fontSize = 10.sp, color = TextMuted)
-                    Text(text = "-$formattedExpense", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Rose400)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Text(
+                        text = "Total Saídas (6m)",
+                        fontSize = 10.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "-$formattedExpense",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Rose400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
@@ -283,6 +327,9 @@ private fun MonthProjectionCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -290,7 +337,10 @@ private fun MonthProjectionCard(
                         text = projection.label,
                         style = Typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
 
                     if (isCurrent) {
@@ -303,6 +353,7 @@ private fun MonthProjectionCard(
                                 color = Emerald400,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -318,6 +369,7 @@ private fun MonthProjectionCard(
                                 color = Cyan400,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -330,7 +382,7 @@ private fun MonthProjectionCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Emerald400, modifier = Modifier.size(14.dp))
-                        Text(text = "Gerados", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Emerald400)
+                        Text(text = "Gerados", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Emerald400, maxLines = 1)
                     }
                 } else {
                     Row(
@@ -338,7 +390,7 @@ private fun MonthProjectionCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Amber400, modifier = Modifier.size(14.dp))
-                        Text(text = "Simulado", fontSize = 11.sp, color = TextSecondary)
+                        Text(text = "Simulado", fontSize = 11.sp, color = TextSecondary, maxLines = 1)
                     }
                 }
             }
@@ -361,19 +413,29 @@ private fun MonthProjectionCard(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(imageVector = Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Emerald400, modifier = Modifier.size(14.dp))
-                            Text(text = "Entradas Previstas", fontSize = 10.sp, color = TextSecondary)
+                            Text(
+                                text = "Entradas Previstas",
+                                fontSize = 10.sp,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                         Text(
                             text = "+$formattedIncome",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Emerald400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                         Text(
                             text = "${projection.incomeCount} fonte(s)",
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -391,19 +453,29 @@ private fun MonthProjectionCard(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(imageVector = Icons.AutoMirrored.Filled.TrendingDown, contentDescription = null, tint = Rose400, modifier = Modifier.size(14.dp))
-                            Text(text = "Saídas Previstas", fontSize = 10.sp, color = TextSecondary)
+                            Text(
+                                text = "Saídas Previstas",
+                                fontSize = 10.sp,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                         Text(
                             text = "-$formattedExpense",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                         Text(
                             text = "${projection.expenseCount} conta(s)",
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -422,23 +494,42 @@ private fun MonthProjectionCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(text = "Saldo Livre Estimado:", fontSize = 11.sp, color = TextSecondary)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = "Saldo Livre Estimado:",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Text(
                             text = formattedFreeBalance,
                             style = Typography.titleLarge,
                             fontWeight = FontWeight.Black,
-                            color = if (isPositive) Emerald400 else Rose400
+                            color = if (isPositive) Emerald400 else Rose400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(text = "Gasto Seguro:", fontSize = 11.sp, color = TextSecondary)
+                        Text(
+                            text = "Gasto Seguro:",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Text(
                             text = formattedDailyLimit?.let { "$it/dia" } ?: "—",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Cyan400
+                            color = Cyan400,
+                            maxLines = 1
                         )
                     }
                 }
@@ -450,8 +541,21 @@ private fun MonthProjectionCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(text = "Retenção de Saldo Livre", fontSize = 10.sp, color = TextSecondary)
-                    Text(text = "$retentionPct% livre", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                    Text(
+                        text = "Retenção de Saldo Livre",
+                        fontSize = 10.sp,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "$retentionPct% livre",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary,
+                        maxLines = 1
+                    )
                 }
 
                 LinearProgressIndicator(
@@ -476,14 +580,29 @@ private fun MonthProjectionCard(
                 if (!projection.isGenerated) {
                     TextButton(
                         onClick = onGenerateBills,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.weight(1f, fill = false)
                     ) {
                         Icon(imageVector = Icons.Default.Bolt, contentDescription = null, tint = Amber400, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Gerar Lançamentos", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber400)
+                        Text(
+                            text = "Gerar Lançamentos",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Amber400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 } else {
-                    Text(text = "Sincronizado", fontSize = 11.sp, color = TextMuted)
+                    Text(
+                        text = "Sincronizado",
+                        fontSize = 11.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
 
                 Button(
@@ -491,9 +610,14 @@ private fun MonthProjectionCard(
                     colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant, contentColor = TextPrimary),
                     shape = RoundedCornerShape(10.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(34.dp)
+                    modifier = Modifier.heightIn(min = 36.dp)
                 ) {
-                    Text(text = "Abrir Mês", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "Abrir Mês",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp))
                 }

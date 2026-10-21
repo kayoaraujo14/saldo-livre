@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -70,13 +71,16 @@ fun RecentActivityScreen(
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "Histórico Recente",
                                     style = Typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Box(
@@ -89,14 +93,17 @@ fun RecentActivityScreen(
                                         text = "${uiState.filteredItems.size} itens",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Cyan400
+                                        color = Cyan400,
+                                        maxLines = 1
                                     )
                                 }
                             }
                             Text(
                                 text = "Lançamentos por ordem de criação no sistema",
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -154,7 +161,9 @@ fun RecentActivityScreen(
                     Text(
                         text = "Buscar por descrição, terceiro, amigo, cartão...",
                         color = TextMuted,
-                        fontSize = 12.sp
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 },
                 leadingIcon = {
@@ -307,14 +316,17 @@ private fun MetricCard(
                 fontSize = 9.sp,
                 color = TextMuted,
                 fontWeight = FontWeight.Medium,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = value,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = color
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -394,6 +406,8 @@ private fun TimelineActivityCard(
                         style = Typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
 
@@ -403,7 +417,8 @@ private fun TimelineActivityCard(
                         text = "${if (item.isIncome) "+" else ""}${FinanceEngine.formatCurrency(item.amount)}",
                         style = Typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (item.isIncome) Emerald400 else if (item.isRefund) Cyan400 else Rose400
+                        color = if (item.isIncome) Emerald400 else if (item.isRefund) Cyan400 else Rose400,
+                        maxLines = 1
                     )
                 }
 
@@ -425,7 +440,9 @@ private fun TimelineActivityCard(
                         Text(
                             text = item.description,
                             fontSize = 10.sp,
-                            color = TextSecondary
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -441,7 +458,9 @@ private fun TimelineActivityCard(
                                 text = "💳 $cName",
                                 fontSize = 10.sp,
                                 color = Purple400,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     } ?: run {
@@ -454,7 +473,9 @@ private fun TimelineActivityCard(
                             Text(
                                 text = item.paymentMethodLabel,
                                 fontSize = 10.sp,
-                                color = TextMuted
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -472,7 +493,9 @@ private fun TimelineActivityCard(
                                 text = "🧑‍🤝‍🧑 $fName${if (item.friendSharePct != null) " (${item.friendSharePct.toInt()}%)" else ""}",
                                 fontSize = 10.sp,
                                 color = Purple400,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -489,7 +512,9 @@ private fun TimelineActivityCard(
                                 text = "🏷️ $tpName",
                                 fontSize = 10.sp,
                                 color = Amber400,
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -501,7 +526,9 @@ private fun TimelineActivityCard(
                         text = "Sua cota no Saldo Livre: ${FinanceEngine.formatCurrency(item.myImpact)}",
                         fontSize = 11.sp,
                         color = Emerald400,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -513,7 +540,12 @@ private fun TimelineActivityCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Schedule,
                             contentDescription = null,
@@ -524,7 +556,9 @@ private fun TimelineActivityCard(
                         Text(
                             text = item.formattedDate,
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -544,7 +578,8 @@ private fun TimelineActivityCard(
                                 text = item.competenceMonth,
                                 fontSize = 10.sp,
                                 color = Cyan400,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
 

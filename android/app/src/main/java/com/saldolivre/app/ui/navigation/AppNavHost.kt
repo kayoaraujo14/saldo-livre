@@ -5,6 +5,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -85,7 +86,14 @@ fun AppNavHost(
                                     contentDescription = item.title
                                 )
                             },
-                            label = { Text(text = item.title, style = Typography.labelSmall) },
+                            label = {
+                                Text(
+                                    text = item.title,
+                                    style = Typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = Emerald400,
                                 selectedTextColor = Emerald400,

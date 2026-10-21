@@ -10,7 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.model.*
@@ -49,7 +50,7 @@ fun TransactionFormScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Voltar",
                             tint = TextPrimary
                         )
@@ -60,7 +61,9 @@ fun TransactionFormScreen(
                         text = if (state.type == TransactionType.EXPENSE) "Nova Despesa" else "Nova Receita",
                         style = Typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             )
@@ -102,13 +105,15 @@ fun TransactionFormScreen(
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (state.type == TransactionType.EXPENSE) Rose500 else Color.Transparent)
                         .clickable { viewModel.onTypeChange(TransactionType.EXPENSE) }
-                        .padding(vertical = 10.dp),
+                        .padding(vertical = 10.dp, horizontal = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "💸 Despesa",
                         fontWeight = FontWeight.Bold,
-                        color = if (state.type == TransactionType.EXPENSE) DarkBackground else TextSecondary
+                        color = if (state.type == TransactionType.EXPENSE) DarkBackground else TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -118,13 +123,15 @@ fun TransactionFormScreen(
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (state.type == TransactionType.INCOME) Emerald500 else Color.Transparent)
                         .clickable { viewModel.onTypeChange(TransactionType.INCOME) }
-                        .padding(vertical = 10.dp),
+                        .padding(vertical = 10.dp, horizontal = 6.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "💰 Receita",
                         fontWeight = FontWeight.Bold,
-                        color = if (state.type == TransactionType.INCOME) DarkBackground else TextSecondary
+                        color = if (state.type == TransactionType.INCOME) DarkBackground else TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -257,12 +264,24 @@ fun TransactionFormScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
-                                    Text(text = card.cardName, style = Typography.titleMedium, color = TextPrimary)
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp)
+                                ) {
+                                    Text(
+                                        text = card.cardName,
+                                        style = Typography.titleMedium,
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                     Text(
                                         text = "Fecha dia ${card.closingDay} • Vence dia ${card.dueDay}",
                                         fontSize = 11.sp,
-                                        color = TextMuted
+                                        color = TextMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                                 if (isSelected) {
@@ -301,7 +320,8 @@ fun TransactionFormScreen(
                             text = "${split.emoji} ${split.label}",
                             fontSize = 12.sp,
                             color = if (isSelected) Purple400 else TextSecondary,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1
                         )
                     }
                 }
@@ -343,14 +363,16 @@ fun TransactionFormScreen(
                             .background(if (isSelected) DarkSurfaceVariant else DarkSurface)
                             .border(1.dp, if (isSelected) Emerald400 else DarkBorder, RoundedCornerShape(10.dp))
                             .clickable { viewModel.onStatusChange(status) }
-                            .padding(vertical = 10.dp),
+                            .padding(vertical = 10.dp, horizontal = 4.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = status.label,
                             fontSize = 12.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) Emerald400 else TextSecondary
+                            color = if (isSelected) Emerald400 else TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -363,7 +385,7 @@ fun TransactionFormScreen(
                 onClick = { viewModel.saveTransaction() },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .heightIn(min = 52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
                 shape = RoundedCornerShape(14.dp)
             ) {
@@ -371,7 +393,9 @@ fun TransactionFormScreen(
                     text = "Salvar Lançamento",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = DarkBackground
+                    color = DarkBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 

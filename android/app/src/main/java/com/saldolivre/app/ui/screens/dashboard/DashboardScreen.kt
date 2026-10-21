@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -74,48 +75,64 @@ fun DashboardScreen(
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Text(
                                 text = "Saldo Livre",
                                 style = Typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "Finanças Pessoais & Casal",
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 },
                 actions = {
-                    IconButton(onClick = onNavigateToImportStatement) {
+                    IconButton(
+                        onClick = onNavigateToImportStatement,
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.FileUpload,
                             contentDescription = "Importar Extrato",
-                            tint = Emerald400
+                            tint = Emerald400,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
-                    IconButton(onClick = onNavigateToRecentActivity) {
+                    IconButton(
+                        onClick = onNavigateToRecentActivity,
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.History,
                             contentDescription = "Histórico Recente",
-                            tint = Cyan400
+                            tint = Cyan400,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
-                    IconButton(onClick = onNavigateToFriends) {
+                    IconButton(
+                        onClick = onNavigateToFriends,
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Group,
                             contentDescription = "Rede de Amizades",
-                            tint = Purple400
+                            tint = Purple400,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
                     // Profile demo toggle button
-                    Box {
+                    Box(modifier = Modifier.padding(end = 4.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -123,7 +140,7 @@ fun DashboardScreen(
                                 .background(DarkSurfaceVariant)
                                 .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
                                 .clickable { showUserMenu = true }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Box(
                                 modifier = Modifier
@@ -142,7 +159,10 @@ fun DashboardScreen(
                             Text(
                                 text = uiState.currentUser.displayName.split(" ").firstOrNull() ?: "",
                                 style = Typography.labelLarge,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 72.dp)
                             )
                             Icon(
                                 imageVector = Icons.Default.ArrowDropDown,
@@ -296,7 +316,10 @@ fun DashboardScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.CalendarMonth,
@@ -308,7 +331,9 @@ fun DashboardScreen(
                                 text = "Projeção de Fluxo de Caixa (6 Meses)",
                                 style = Typography.bodySmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Icon(
@@ -358,7 +383,12 @@ fun DashboardScreen(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp,
-                                color = if (isNegative) Rose400 else Emerald400
+                                color = if (isNegative) Rose400 else Emerald400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
                             )
 
                             Box(
@@ -369,7 +399,9 @@ fun DashboardScreen(
                                 Text(
                                     text = "Receitas: ${FinanceEngine.formatCurrency(summary.income)}",
                                     fontSize = 11.sp,
-                                    color = TextSecondary
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -380,7 +412,9 @@ fun DashboardScreen(
                             text = FinanceEngine.formatCurrency(summary.freeBalance),
                             fontSize = 32.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isNegative) Rose400 else Emerald400
+                            color = if (isNegative) Rose400 else Emerald400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
 
                         Spacer(modifier = Modifier.height(14.dp))
@@ -401,7 +435,10 @@ fun DashboardScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 8.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Shield,
@@ -413,7 +450,9 @@ fun DashboardScreen(
                                     Text(
                                         text = "Disponível por Dia:",
                                         style = Typography.bodyMedium,
-                                        color = TextSecondary
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
@@ -421,7 +460,9 @@ fun DashboardScreen(
                                     text = if (dailyLimit != null) "${FinanceEngine.formatCurrency(dailyLimit)} /dia" else "—",
                                     style = Typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (dailyLimit != null && dailyLimit > 0) Cyan400 else Rose400
+                                    color = if (dailyLimit != null && dailyLimit > 0) Cyan400 else Rose400,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -507,7 +548,12 @@ fun DashboardScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Cartões", style = Typography.labelMedium)
+                        Text(
+                            text = "Cartões",
+                            style = Typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     OutlinedButton(
@@ -529,7 +575,12 @@ fun DashboardScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "A Receber", style = Typography.labelMedium)
+                        Text(
+                            text = "A Receber",
+                            style = Typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     OutlinedButton(
@@ -551,7 +602,12 @@ fun DashboardScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Recorrentes", style = Typography.labelMedium)
+                        Text(
+                            text = "Recorrentes",
+                            style = Typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }

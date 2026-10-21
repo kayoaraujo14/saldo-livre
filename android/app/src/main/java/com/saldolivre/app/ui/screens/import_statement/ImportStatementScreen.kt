@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
@@ -102,13 +104,16 @@ fun ImportStatementScreen(
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = "Importar Extrato",
                                     style = Typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Box(
@@ -121,14 +126,17 @@ fun ImportStatementScreen(
                                         text = "OFX • CSV • PDF",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Cyan400
+                                        color = Cyan400,
+                                        maxLines = 1
                                     )
                                 }
                             }
                             Text(
                                 text = "Leitura inteligente de lançamentos bancários",
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -162,17 +170,25 @@ fun ImportStatementScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp)
+                        ) {
                             Text(
                                 text = "$selectedCount selecionados",
                                 fontSize = 12.sp,
-                                color = TextSecondary
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = FinanceEngine.formatCurrency(selectedTotal),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
@@ -188,7 +204,7 @@ fun ImportStatementScreen(
                                 disabledContainerColor = DarkSurfaceVariant
                             ),
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.height(48.dp)
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             if (uiState.isProcessing) {
                                 CircularProgressIndicator(
@@ -205,7 +221,9 @@ fun ImportStatementScreen(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "Confirmar Importação",
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -312,7 +330,9 @@ fun ImportStatementScreen(
                                             text = card.cardName,
                                             fontSize = 12.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isSelected) Cyan400 else TextPrimary
+                                            color = if (isSelected) Cyan400 else TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -339,7 +359,10 @@ fun ImportStatementScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
                         Checkbox(
                             checked = allSelected,
                             onCheckedChange = { viewModel.toggleSelectAll(it) },
@@ -352,6 +375,8 @@ fun ImportStatementScreen(
                             text = if (allSelected) "Desmarcar Todos" else "Marcar Todos",
                             fontSize = 12.sp,
                             color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clickable { viewModel.toggleSelectAll(!allSelected) }
                         )
                     }
@@ -366,7 +391,9 @@ fun ImportStatementScreen(
                             Text(
                                 text = if (uiState.hideIgnored) "Ver $ignoredCount ocultos" else "Ocultar ignorados",
                                 fontSize = 11.sp,
-                                color = Amber400
+                                color = Amber400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
@@ -442,11 +469,13 @@ fun ImportStatementScreen(
                     text = "Colar Texto do Extrato",
                     style = Typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             },
             text = {
-                Column {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
                         text = "Copie e cole o extrato ou texto da fatura do seu banco aqui:",
                         fontSize = 12.sp,
@@ -458,7 +487,7 @@ fun ImportStatementScreen(
                         onValueChange = { pastedText = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(180.dp),
+                            .heightIn(min = 120.dp, max = 200.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
@@ -485,12 +514,12 @@ fun ImportStatementScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = Cyan500),
                     enabled = pastedText.isNotBlank()
                 ) {
-                    Text("Processar")
+                    Text("Processar", maxLines = 1)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { viewModel.setShowPasteDialog(false) }) {
-                    Text("Cancelar", color = TextMuted)
+                    Text("Cancelar", color = TextMuted, maxLines = 1)
                 }
             }
         )
@@ -541,13 +570,15 @@ fun ParsedItemCard(
                         text = item.date,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1
                     )
 
                     if (item.isIgnored) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Box(
                             modifier = Modifier
+                                .weight(1f, fill = false)
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(Amber500.copy(alpha = 0.15f))
                                 .padding(horizontal = 6.dp, vertical = 1.dp)
@@ -556,7 +587,9 @@ fun ParsedItemCard(
                                 text = item.ignoredReason ?: "Ignorado",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Amber400
+                                color = Amber400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -584,6 +617,7 @@ fun ParsedItemCard(
                     // Tag Categoria
                     Box(
                         modifier = Modifier
+                            .weight(1f, fill = false)
                             .clip(RoundedCornerShape(6.dp))
                             .background(categoryColor.copy(alpha = 0.15f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
@@ -610,7 +644,8 @@ fun ParsedItemCard(
                                 text = "${item.installmentNumber}/${item.installmentsTotal}",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Purple400
+                                color = Purple400,
+                                maxLines = 1
                             )
                         }
                     }
@@ -619,7 +654,9 @@ fun ParsedItemCard(
                     Text(
                         text = item.paymentMethod.label,
                         fontSize = 10.sp,
-                        color = TextMuted
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -632,7 +669,8 @@ fun ParsedItemCard(
                     text = (if (isExpense) "-" else "+") + FinanceEngine.formatCurrency(item.amount),
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (!item.isSelected) TextMuted else if (isExpense) Rose400 else Emerald400
+                    color = if (!item.isSelected) TextMuted else if (isExpense) Rose400 else Emerald400,
+                    maxLines = 1
                 )
             }
         }

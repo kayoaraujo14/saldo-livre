@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -77,6 +78,7 @@ fun TransactionItem(
                         style = Typography.titleMedium,
                         color = TextPrimary,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
 
@@ -91,7 +93,8 @@ fun TransactionItem(
                                 text = "${transaction.installmentNumber}/${transaction.installmentsTotal}",
                                 fontSize = 10.sp,
                                 color = TextMuted,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -106,7 +109,8 @@ fun TransactionItem(
                     Text(
                         text = transaction.dueDate.takeLast(5).replace("-", "/"),
                         style = Typography.labelSmall,
-                        color = TextMuted
+                        color = TextMuted,
+                        maxLines = 1
                     )
 
                     Text(
@@ -119,7 +123,9 @@ fun TransactionItem(
                         text = transaction.subcategory ?: transaction.category,
                         style = Typography.labelSmall,
                         color = TextSecondary,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
 
                     if (transaction.splitType != null) {
@@ -141,7 +147,9 @@ fun TransactionItem(
                     text = prefix + FinanceEngine.formatCurrency(transaction.effectiveAmount),
                     style = Typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = amountColor
+                    color = amountColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 Spacer(modifier = Modifier.height(4.dp))

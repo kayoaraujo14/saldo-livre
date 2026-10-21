@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -77,7 +78,10 @@ fun CardFormDialog(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.CreditCard,
@@ -89,7 +93,9 @@ fun CardFormDialog(
                             text = if (isNew) "Novo Cartão" else "Editar Cartão",
                             style = Typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -101,7 +107,11 @@ fun CardFormDialog(
                             text = "Titular: ${card.ownerName.ifBlank { "Você" }}",
                             color = TextSecondary,
                             fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .widthIn(max = 130.dp)
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -236,12 +246,14 @@ fun CardFormDialog(
                                     tint = Cyan400,
                                     modifier = Modifier.size(20.dp)
                                 )
-                                Column {
+                                Column(modifier = Modifier.padding(end = 8.dp)) {
                                     Text(
                                         text = "Compartilhar com ${partner.displayName}",
                                         style = Typography.bodyMedium,
                                         fontWeight = FontWeight.Medium,
-                                        color = TextPrimary
+                                        color = TextPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = "Permite que seu parceiro selecione este cartão ao lançar despesas",

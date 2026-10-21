@@ -83,6 +83,9 @@ fun DynamicChatChart(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -101,18 +104,22 @@ fun DynamicChatChart(
                         )
                     }
 
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = payload.title,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (!payload.description.isNullOrBlank()) {
                             Text(
                                 text = payload.description,
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -128,7 +135,8 @@ fun DynamicChatChart(
                         text = if (payload.type == ChartType.DONUT) "Distribuição" else "Comparativo",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Cyan400
+                        color = Cyan400,
+                        maxLines = 1
                     )
                 }
             }
@@ -235,7 +243,9 @@ private fun DonutCanvasView(
                 text = FinanceEngine.formatCurrency(activeItem?.value ?: total),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
 
             if (activeItem != null && total > 0) {
@@ -244,7 +254,8 @@ private fun DonutCanvasView(
                     text = String.format(java.util.Locale.US, "%.1f%%", pct),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = activeItem.color
+                    color = activeItem.color,
+                    maxLines = 1
                 )
             }
         }
@@ -282,6 +293,9 @@ private fun BarChartView(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -294,7 +308,9 @@ private fun BarChartView(
                             text = item.label,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -306,12 +322,14 @@ private fun BarChartView(
                             text = FinanceEngine.formatCurrency(item.value),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                            color = TextPrimary,
+                            maxLines = 1
                         )
                         Text(
                             text = String.format(java.util.Locale.US, "(%.0f%%)", pctOfTotal),
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1
                         )
                     }
                 }

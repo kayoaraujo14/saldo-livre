@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.ui.theme.*
@@ -70,7 +71,11 @@ fun KpiCard(
                     text = title,
                     style = Typography.bodyMedium,
                     color = TextSecondary,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 )
                 Box(
                     modifier = Modifier
@@ -94,7 +99,9 @@ fun KpiCard(
                 text = value,
                 style = Typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
-                color = if (highlight) accentColor else TextPrimary
+                color = if (highlight) accentColor else TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
 
             if (!subtitle.isNullOrBlank()) {
@@ -102,7 +109,9 @@ fun KpiCard(
                 Text(
                     text = subtitle,
                     style = Typography.labelSmall,
-                    color = TextMuted
+                    color = TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -58,26 +59,35 @@ fun MonthSelector(
 
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.clickable { onCurrentMonth() }
+            modifier = Modifier
+                .weight(1f)
+                .clickable { onCurrentMonth() }
+                .padding(horizontal = 4.dp)
         ) {
             Text(
                 text = label,
                 style = Typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = TextPrimary
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             if (isCurrent) {
                 Text(
                     text = "• MÊS ATUAL •",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Emerald400
+                    color = Emerald400,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             } else {
                 Text(
                     text = "Toque para voltar ao mês atual",
                     fontSize = 10.sp,
-                    color = TextMuted
+                    color = TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }

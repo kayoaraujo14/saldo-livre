@@ -71,13 +71,19 @@ fun InvestmentsScreen(
                     }
                 },
                 title = {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Text(
                                 text = "Investimentos & Patrimônio",
                                 style = Typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                             Box(
                                 modifier = Modifier
@@ -89,14 +95,17 @@ fun InvestmentsScreen(
                                     text = FinanceEngine.formatMonthLabel(uiState.selectedMonth),
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = Purple400
+                                    color = Purple400,
+                                    maxLines = 1
                                 )
                             }
                         }
                         Text(
                             text = "Caixinhas seguras, ativos de risco e evolução",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
@@ -113,7 +122,12 @@ fun InvestmentsScreen(
                     ) {
                         Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Aporte", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            text = "Aporte",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1
+                        )
                     }
                 }
             )
@@ -301,9 +315,22 @@ private fun SectionHeader(
         ) {
             Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
         }
-        Column {
-            Text(text = title, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text(text = subtitle, fontSize = 11.sp, color = TextMuted)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                fontSize = 11.sp,
+                color = TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -387,7 +414,17 @@ private fun InvestmentsKpiGrid(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "Meta Mensal", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Medium)
+                        Text(
+                            text = "Meta Mensal",
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 4.dp)
+                        )
                         Icon(imageVector = Icons.Default.TrackChanges, contentDescription = null, tint = Amber400, modifier = Modifier.size(16.dp))
                     }
 
@@ -398,7 +435,8 @@ private fun InvestmentsKpiGrid(
                                 onValueChange = onTargetInputChange,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 singleLine = true,
-                                modifier = Modifier.weight(1f).height(44.dp)
+                                textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = TextPrimary),
+                                modifier = Modifier.weight(1f)
                             )
                             IconButton(onClick = onSaveTarget, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Check, contentDescription = null, tint = Emerald400)
@@ -417,7 +455,12 @@ private fun InvestmentsKpiGrid(
                                 text = FinanceEngine.formatCurrency(target),
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 4.dp)
                             )
                             Icon(Icons.Default.Edit, contentDescription = null, tint = TextMuted, modifier = Modifier.size(12.dp))
                         }
@@ -434,7 +477,9 @@ private fun InvestmentsKpiGrid(
                         text = "${targetProgress.toInt()}% da meta atingida",
                         fontSize = 10.sp,
                         color = Amber400,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -466,7 +511,17 @@ private fun KpiItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = title, fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.Medium)
+                Text(
+                    text = title,
+                    fontSize = 11.sp,
+                    color = TextMuted,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 4.dp)
+                )
                 Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
             }
             Text(
@@ -566,7 +621,9 @@ private fun TabItem(
                 text = title,
                 fontSize = 11.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) Color.White else TextMuted
+                color = if (isSelected) Color.White else TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -643,23 +700,34 @@ private fun InvestmentAssetCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(text = "Saldo Atual", fontSize = 10.sp, color = TextMuted)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                ) {
+                    Text(text = "Saldo Atual", fontSize = 10.sp, color = TextMuted, maxLines = 1)
                     Text(
                         text = FinanceEngine.formatCurrency(asset.currentBalance),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "Total Aportado", fontSize = 10.sp, color = TextMuted)
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = "Total Aportado", fontSize = 10.sp, color = TextMuted, maxLines = 1)
                     Text(
                         text = FinanceEngine.formatCurrency(asset.totalInvestedAllTime),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -672,7 +740,10 @@ private fun InvestmentAssetCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -685,7 +756,9 @@ private fun InvestmentAssetCard(
                             else "${FinanceEngine.formatCurrency(asset.profitOrLoss)} (${asset.profitPercentage}%)",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isProfit) Emerald400 else Rose400
+                            color = if (isProfit) Emerald400 else Rose400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -693,7 +766,10 @@ private fun InvestmentAssetCard(
                         Text(
                             text = "+${FinanceEngine.formatCurrency(asset.totalInvestedThisMonth)} no mês",
                             fontSize = 10.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                     }
                 }
@@ -704,9 +780,9 @@ private fun InvestmentAssetCard(
                         onClick = onResgate,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(30.dp)
+                        modifier = Modifier.heightIn(min = 32.dp)
                     ) {
-                        Text("Resgatar", fontSize = 10.sp, color = TextSecondary)
+                        Text("Resgatar", fontSize = 10.sp, color = TextSecondary, maxLines = 1)
                     }
 
                     Button(
@@ -714,11 +790,11 @@ private fun InvestmentAssetCard(
                         colors = ButtonDefaults.buttonColors(containerColor = Emerald500, contentColor = Color.Black),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(30.dp)
+                        modifier = Modifier.heightIn(min = 32.dp)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
                         Spacer(modifier = Modifier.width(2.dp))
-                        Text("Aportar", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Aportar", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
             }
@@ -748,8 +824,18 @@ private fun MonthInvestmentsSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = "Lançamentos em $monthLabel", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Text(text = "${monthTxs.size} movimentação(ões)", fontSize = 11.sp, color = TextMuted)
+                Text(
+                    text = "Lançamentos em $monthLabel",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                )
+                Text(text = "${monthTxs.size} movimentação(ões)", fontSize = 11.sp, color = TextMuted, maxLines = 1)
             }
 
             if (monthTxs.isEmpty()) {
@@ -770,16 +856,34 @@ private fun MonthInvestmentsSection(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(text = tx.description, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                            Text(text = "${tx.dueDate} · ${tx.subcategory ?: "Investimentos"}", fontSize = 10.sp, color = TextMuted)
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
+                        ) {
+                            Text(
+                                text = tx.description,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${tx.dueDate} · ${tx.subcategory ?: "Investimentos"}",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                         Text(
                             text = if (tx.type == TransactionType.INCOME) "-${FinanceEngine.formatCurrency(tx.effectiveAmount)}"
                             else "+${FinanceEngine.formatCurrency(tx.effectiveAmount)}",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (tx.type == TransactionType.INCOME) Rose400 else Emerald400
+                            color = if (tx.type == TransactionType.INCOME) Rose400 else Emerald400,
+                            maxLines = 1
                         )
                     }
                 }
@@ -834,7 +938,7 @@ private fun CompoundInterestSimulator(
                     OutlinedTextField(
                         value = initialAmount,
                         onValueChange = { initialAmount = it },
-                        label = { Text("Aporte Inicial (R$)") },
+                        label = { Text("Aporte Inicial (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
@@ -842,7 +946,7 @@ private fun CompoundInterestSimulator(
                     OutlinedTextField(
                         value = monthlyContribution,
                         onValueChange = { monthlyContribution = it },
-                        label = { Text("Aporte Mensal (R$)") },
+                        label = { Text("Aporte Mensal (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
@@ -853,7 +957,7 @@ private fun CompoundInterestSimulator(
                     OutlinedTextField(
                         value = annualRate,
                         onValueChange = { annualRate = it },
-                        label = { Text("Taxa (% a.a.)") },
+                        label = { Text("Taxa (% a.a.)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
@@ -861,7 +965,7 @@ private fun CompoundInterestSimulator(
                     OutlinedTextField(
                         value = years,
                         onValueChange = { years = it },
-                        label = { Text("Prazo (anos)") },
+                        label = { Text("Prazo (anos)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
                         modifier = Modifier.weight(1f)
@@ -988,13 +1092,36 @@ private fun Rule503020Section(data: Rule503020Data) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(text = "Diagnóstico 50 / 30 / 20", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text(text = "Equilíbrio recomendado por educadores financeiros", fontSize = 11.sp, color = TextMuted)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                ) {
+                    Text(
+                        text = "Diagnóstico 50 / 30 / 20",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Equilíbrio recomendado por educadores financeiros",
+                        fontSize = 11.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "Renda Computada", fontSize = 10.sp, color = TextMuted)
-                    Text(text = FinanceEngine.formatCurrency(data.income), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Emerald400)
+                    Text(text = "Renda Computada", fontSize = 10.sp, color = TextMuted, maxLines = 1)
+                    Text(
+                        text = FinanceEngine.formatCurrency(data.income),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Emerald400,
+                        maxLines = 1
+                    )
                 }
             }
         }
@@ -1057,10 +1184,20 @@ private fun RulePillarCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Text(text = "Teto: ${FinanceEngine.formatCurrency(targetAmount)}", fontSize = 11.sp, color = TextMuted)
+                Text(
+                    text = title,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp)
+                )
+                Text(text = "Teto: ${FinanceEngine.formatCurrency(targetAmount)}", fontSize = 11.sp, color = TextMuted, maxLines = 1)
             }
-            Text(text = description, fontSize = 10.sp, color = TextMuted)
+            Text(text = description, fontSize = 10.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1212,15 +1349,26 @@ private fun AporteFormDialog(
                 .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
                 .padding(20.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(text = "Registrar Novo Aporte", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Registrar Novo Aporte",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
                 ExposedDropdownMenuBox(expanded = expandedDropdown, onExpandedChange = { expandedDropdown = it }) {
                     OutlinedTextField(
                         value = subcat,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Classe / Ativo") },
+                        singleLine = true,
+                        label = { Text("Classe / Ativo", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
                         modifier = Modifier.fillMaxWidth().menuAnchor()
                     )
@@ -1231,7 +1379,7 @@ private fun AporteFormDialog(
                     ) {
                         InvestmentsViewModel.ASSET_DEFINITIONS.forEach { (name, _, _) ->
                             DropdownMenuItem(
-                                text = { Text(name, color = TextPrimary) },
+                                text = { Text(name, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = { subcat = name; expandedDropdown = false }
                             )
                         }
@@ -1241,7 +1389,7 @@ private fun AporteFormDialog(
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it },
-                    label = { Text("Valor do Aporte (R$)") },
+                    label = { Text("Valor do Aporte (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -1250,8 +1398,8 @@ private fun AporteFormDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Descrição (Opcional)") },
-                    placeholder = { Text("Ex: Compra CDB 110%, Aporte Tesouro") },
+                    label = { Text("Descrição (Opcional)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    placeholder = { Text("Ex: Compra CDB 110%, Aporte Tesouro", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1259,14 +1407,14 @@ private fun AporteFormDialog(
                 OutlinedTextField(
                     value = date,
                     onValueChange = { date = it },
-                    label = { Text("Data (AAAA-MM-DD)") },
+                    label = { Text("Data (AAAA-MM-DD)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancelar", color = TextSecondary)
+                        Text("Cancelar", color = TextSecondary, maxLines = 1)
                     }
                     Button(
                         onClick = {
@@ -1276,7 +1424,7 @@ private fun AporteFormDialog(
                         colors = ButtonDefaults.buttonColors(containerColor = Emerald500, contentColor = Color.Black),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Confirmar", fontWeight = FontWeight.Bold)
+                        Text("Confirmar", fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
             }
@@ -1306,15 +1454,26 @@ private fun ResgateFormDialog(
                 .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
                 .padding(20.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(text = "Resgatar Aplicação", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Resgatar Aplicação",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
 
                 ExposedDropdownMenuBox(expanded = expandedDropdown, onExpandedChange = { expandedDropdown = it }) {
                     OutlinedTextField(
                         value = subcat,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Resgatar de") },
+                        singleLine = true,
+                        label = { Text("Resgatar de", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
                         modifier = Modifier.fillMaxWidth().menuAnchor()
                     )
@@ -1325,7 +1484,7 @@ private fun ResgateFormDialog(
                     ) {
                         InvestmentsViewModel.ASSET_DEFINITIONS.forEach { (name, _, _) ->
                             DropdownMenuItem(
-                                text = { Text(name, color = TextPrimary) },
+                                text = { Text(name, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 onClick = { subcat = name; expandedDropdown = false }
                             )
                         }
@@ -1335,7 +1494,7 @@ private fun ResgateFormDialog(
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { amount = it },
-                    label = { Text("Valor a Resgatar (R$)") },
+                    label = { Text("Valor a Resgatar (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -1344,15 +1503,15 @@ private fun ResgateFormDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Motivo / Descrição (Opcional)") },
-                    placeholder = { Text("Ex: Resgate para cobrir imprevisto") },
+                    label = { Text("Motivo / Descrição (Opcional)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    placeholder = { Text("Ex: Resgate para cobrir imprevisto", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancelar", color = TextSecondary)
+                        Text("Cancelar", color = TextSecondary, maxLines = 1)
                     }
                     Button(
                         onClick = {
@@ -1362,7 +1521,7 @@ private fun ResgateFormDialog(
                         colors = ButtonDefaults.buttonColors(containerColor = Rose500, contentColor = Color.White),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("Resgatar", fontWeight = FontWeight.Bold)
+                        Text("Resgatar", fontWeight = FontWeight.Bold, maxLines = 1)
                     }
                 }
             }
@@ -1387,8 +1546,18 @@ private fun EditBalanceDialog(
                 .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
                 .padding(20.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(text = "Ajustar Saldo Atual", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Ajustar Saldo Atual",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Text(
                     text = "Defina o saldo real atual para ${asset.subcategory}. Isso calculará a rentabilidade ou oscilação de mercado.",
                     fontSize = 12.sp,
