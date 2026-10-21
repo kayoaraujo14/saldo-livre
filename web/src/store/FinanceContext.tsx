@@ -349,7 +349,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     const map = new Map<string, UserProfile>()
     if (fbProfile) map.set(fbProfile.uid, fbProfile)
     for (const c of fbCards) {
-      for (const s of c.sharedWithUsers) {
+      for (const s of (c.sharedWithUsers || [])) {
         if (!map.has(s.uid)) {
           map.set(s.uid, {
             uid: s.uid,
@@ -361,8 +361,28 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         }
       }
     }
+    for (const f of (fbFriendships || [])) {
+      if (f.requesterUid && f.requesterName && !map.has(f.requesterUid)) {
+        map.set(f.requesterUid, {
+          uid: f.requesterUid,
+          email: f.requesterEmail,
+          displayName: f.requesterName,
+          photoURL: null,
+          monthlyIncome: 0,
+        })
+      }
+      if (f.recipientUid && f.recipientName && !map.has(f.recipientUid)) {
+        map.set(f.recipientUid, {
+          uid: f.recipientUid,
+          email: f.recipientEmail,
+          displayName: f.recipientName,
+          photoURL: null,
+          monthlyIncome: 0,
+        })
+      }
+    }
     return [...map.values()]
-  }, [mode, demo.users, fbProfile, fbCards])
+  }, [mode, demo.users, fbProfile, fbCards, fbFriendships])
 
   const profile: UserProfile | null = useMemo(() => {
     if (!currentUid) return null
@@ -1156,7 +1176,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   const saveCard = useCallback(
     async (card: Card) => {
-      const normalized: Card = { ...card, sharedWithUids: card.sharedWithUsers.map((u) => u.uid) }
+      const sharedWithUsers = Array.isArray(card.sharedWithUsers) ? card.sharedWithUsers : []
+      const normalized: Card = {
+        ...card,
+        sharedWithUsers,
+        sharedWithUids: sharedWithUsers.map((u) => u.uid),
+      }
       if (mode === 'demo') {
         commitDemo((s) => {
           const exists = s.cards.some((c) => c.id === card.id)

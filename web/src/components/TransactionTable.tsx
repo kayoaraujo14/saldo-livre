@@ -19,6 +19,7 @@ import {
   friendPctOf,
   friendShareOf,
   getThirdPartyInfo,
+  isSharedCard,
 } from '@/lib/finance'
 import { formatBRL, formatShortDate } from '@/lib/utils'
 import {
@@ -94,7 +95,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         if (tx.status !== 'paid') return false
       } else if (activeTab === 'shared_card') {
         const card = cards.find((c) => c.id === tx.cardId)
-        const isShared = card && (card.sharedWithUsers.length > 0 || card.sharedWithUids.length > 0)
+        const isShared = isSharedCard(card)
         if (!isShared && !tx.reserveCardId) return false
       } else if (activeTab === 'third_party') {
         const isThird = (tx.allocations || []).some((a) => a.type === 'EXTERNAL')
@@ -147,7 +148,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
       paid: monthTransactions.filter((t: Transaction) => t.status === 'paid').length,
       shared: monthTransactions.filter((t: Transaction) => {
         const card = cards.find((c) => c.id === t.cardId)
-        return (card && (card.sharedWithUsers.length > 0 || card.sharedWithUids.length > 0)) || t.reserveCardId
+        return isSharedCard(card) || t.reserveCardId
       }).length,
       third: monthTransactions.filter((t: Transaction) => (t.allocations || []).some((a) => a.type === 'EXTERNAL')).length,
       friends_installments: monthTransactions.filter((t: Transaction) => Boolean(t.assignedFriendUid || t.installmentGroupId)).length,

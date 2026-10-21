@@ -193,15 +193,93 @@ export async function findUserByEmail(email: string): Promise<UserProfile | null
 export const lookupUserByEmail = findUserByEmail
 
 // ------------------------------------------------------------------
-// Subscriptions (tempo real)
+// Subscriptions (tempo real) com Normalizadores Defensivos
 // ------------------------------------------------------------------
+export function normalizeCard(id: string, raw: any): Card {
+  const data = raw || {}
+  const sharedWithUsers = Array.isArray(data.sharedWithUsers) ? data.sharedWithUsers : []
+  const sharedWithUids = Array.isArray(data.sharedWithUids)
+    ? data.sharedWithUids
+    : sharedWithUsers.map((u: any) => u.uid).filter(Boolean)
+
+  return {
+    id,
+    cardName: data.cardName || 'Cartão',
+    closingDay: Number(data.closingDay) || 1,
+    dueDay: Number(data.dueDay) || 10,
+    ownerUid: data.ownerUid || '',
+    ownerName: data.ownerName || '',
+    sharedWithUids,
+    sharedWithUsers,
+    color: data.color || 'emerald',
+    frequentThirdParties: Array.isArray(data.frequentThirdParties) ? data.frequentThirdParties : [],
+  }
+}
+
+export function normalizeTransaction(id: string, raw: any): Transaction {
+  const data = raw || {}
+  return {
+    id,
+    createdByUid: data.createdByUid || '',
+    paidByUid: data.paidByUid || data.createdByUid || '',
+    cardId: data.cardId || null,
+    reserveCardId: data.reserveCardId || null,
+    recurringBillId: data.recurringBillId || null,
+    description: data.description || '',
+    category: data.category || 'Outros',
+    subcategory: data.subcategory || null,
+    type: data.type || 'expense',
+    paymentMethod: data.paymentMethod || 'credit_card',
+    status: data.status || 'confirmed',
+    estimatedAmount: data.estimatedAmount ?? null,
+    actualAmount: data.actualAmount ?? null,
+    totalAmount: Number(data.totalAmount) || 0,
+    dueDate: data.dueDate || '',
+    competenceMonth: data.competenceMonth || '',
+    visibleToUids: Array.isArray(data.visibleToUids) ? data.visibleToUids : [],
+    userImpact: (data.userImpact && typeof data.userImpact === 'object' && !Array.isArray(data.userImpact)) ? data.userImpact : {},
+    allocations: Array.isArray(data.allocations) ? data.allocations : [],
+    assignedFriendUid: data.assignedFriendUid || null,
+    assignedFriendName: data.assignedFriendName || null,
+    friendSharePct: data.friendSharePct ?? null,
+    acceptanceStatus: data.acceptanceStatus || null,
+    respondedAt: data.respondedAt ?? null,
+    installmentGroupId: data.installmentGroupId || null,
+    installmentNumber: data.installmentNumber ?? null,
+    installmentsTotal: data.installmentsTotal ?? null,
+    splitType: data.splitType || null,
+    createdAt: Number(data.createdAt) || Date.now(),
+  }
+}
+
+export function normalizeRecurringBill(id: string, raw: any): RecurringBill {
+  const data = raw || {}
+  return {
+    id,
+    ownerUid: data.ownerUid || '',
+    description: data.description || '',
+    category: data.category || 'Outros',
+    subcategory: data.subcategory || null,
+    dueDay: Number(data.dueDay) || 1,
+    defaultAmount: Number(data.defaultAmount) || Number(data.estimatedAmount) || 0,
+    estimationRule: data.estimationRule || 'fixed',
+    active: data.active !== false,
+    splitType: data.splitType,
+    paymentMethod: data.paymentMethod,
+    type: data.type,
+    startMonth: data.startMonth,
+    endMonth: data.endMonth,
+    installmentsCount: data.installmentsCount,
+  }
+}
+
 export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => void) {
   try {
     // array-contains sem outros filtros → não exige índice composto.
     const q = query(collection(ensure().db, COLLECTIONS.transactions), where('visibleToUids', 'array-contains', uid))
     return onSnapshot(
       q,
-      (snap) => cb(snap.docs.map((d) => ({ ...(d.data() as NewTransaction), id: d.id }))),
+      (snap) => cb(snap.docs.map((d) => normalizeTransaction(d.id, d.data()))),
       (err) => console.warn('Erro ao sincronizar transações do Firestore:', err)
     )
   } catch (err) {
@@ -223,7 +301,7 @@ export function subscribeCards(uid: string, cb: (cards: Card[]) => void) {
     const u1 = onSnapshot(
       query(collection(db, COLLECTIONS.cards), where('ownerUid', '==', uid)),
       (s) => {
-        owned = s.docs.map((d) => ({ ...(d.data() as Card), id: d.id }))
+        owned = s.docs.map((d) => normalizeCard(d.id, d.data()))
         emit()
       },
       (err) => console.warn('Erro ao sincronizar cartões próprios:', err)
@@ -231,7 +309,7 @@ export function subscribeCards(uid: string, cb: (cards: Card[]) => void) {
     const u2 = onSnapshot(
       query(collection(db, COLLECTIONS.cards), where('sharedWithUids', 'array-contains', uid)),
       (s) => {
-        shared = s.docs.map((d) => ({ ...(d.data() as Card), id: d.id }))
+        shared = s.docs.map((d) => normalizeCard(d.id, d.data()))
         emit()
       },
       (err) => console.warn('Erro ao sincronizar cartões compartilhados:', err)
@@ -251,7 +329,7 @@ export function subscribeRecurring(uid: string, cb: (bills: RecurringBill[]) => 
     const q = query(collection(ensure().db, COLLECTIONS.recurring), where('ownerUid', '==', uid))
     return onSnapshot(
       q,
-      (s) => cb(s.docs.map((d) => ({ ...(d.data() as RecurringBill), id: d.id }))),
+      (s) => cb(s.docs.map((d) => normalizeRecurringBill(d.id, d.data()))),
       (err) => console.warn('Erro ao sincronizar despesas recorrentes:', err)
     )
   } catch (err) {
@@ -314,8 +392,16 @@ export async function fsDeleteTransactionsBatch(ids: string[]) {
 export async function fsSaveCard(card: Card) {
   const { db } = ensure()
   const { id, ...data } = card
-  if (id && !id.startsWith('new_')) return setDoc(doc(db, COLLECTIONS.cards, id), stripUndefined(data))
-  await addDoc(collection(db, COLLECTIONS.cards), stripUndefined(data))
+  const payload = {
+    ...data,
+    sharedWithUsers: Array.isArray(data.sharedWithUsers) ? data.sharedWithUsers : [],
+    sharedWithUids: Array.isArray(data.sharedWithUids)
+      ? data.sharedWithUids
+      : (Array.isArray(data.sharedWithUsers) ? data.sharedWithUsers.map((u: any) => u.uid) : []),
+    frequentThirdParties: Array.isArray(data.frequentThirdParties) ? data.frequentThirdParties : [],
+  }
+  if (id && !id.startsWith('new_')) return setDoc(doc(db, COLLECTIONS.cards, id), stripUndefined(payload))
+  await addDoc(collection(db, COLLECTIONS.cards), stripUndefined(payload))
 }
 
 export function fsDeleteCard(id: string) {

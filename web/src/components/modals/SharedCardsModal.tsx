@@ -49,8 +49,8 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
     setCardName(card.cardName)
     setClosingDay(card.closingDay)
     setDueDay(card.dueDay)
-    setShareWithPartner(card.sharedWithUsers.length > 0)
-    setThirdPartiesInput(card.frequentThirdParties.join(', '))
+    setShareWithPartner((card.sharedWithUsers?.length ?? 0) > 0)
+    setThirdPartiesInput((card.frequentThirdParties || []).join(', '))
     setColor(card.color || 'violet')
   }
 
@@ -256,7 +256,7 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
             ) : (
               cards.map((card) => {
                 const isOwner = card.ownerUid === me?.uid
-                const isShared = card.sharedWithUsers.length > 0 || card.sharedWithUids.length > 0
+                const isShared = (card.sharedWithUsers?.length ?? 0) > 0 || (card.sharedWithUids?.length ?? 0) > 0
                 return (
                   <div
                     key={card.id}

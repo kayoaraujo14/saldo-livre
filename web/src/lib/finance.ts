@@ -879,11 +879,13 @@ export function projectFutureMonths(args: {
 // ------------------------------------------------------------------
 export function resolvePartner(meUid: string, cards: Card[], users: UserProfile[]): Party | null {
   for (const c of cards) {
-    if (c.ownerUid === meUid && c.sharedWithUsers.length) {
-      const s = c.sharedWithUsers[0]
+    const sharedWithUsers = Array.isArray(c.sharedWithUsers) ? c.sharedWithUsers : []
+    const sharedWithUids = Array.isArray(c.sharedWithUids) ? c.sharedWithUids : []
+    if (c.ownerUid === meUid && sharedWithUsers.length) {
+      const s = sharedWithUsers[0]
       return { uid: s.uid, name: users.find((u) => u.uid === s.uid)?.displayName ?? s.name }
     }
-    if (c.ownerUid !== meUid && c.sharedWithUids.includes(meUid)) {
+    if (c.ownerUid !== meUid && sharedWithUids.includes(meUid)) {
       return { uid: c.ownerUid, name: users.find((u) => u.uid === c.ownerUid)?.displayName ?? c.ownerName }
     }
   }
@@ -891,11 +893,14 @@ export function resolvePartner(meUid: string, cards: Card[], users: UserProfile[
 }
 
 export function accessibleCards(meUid: string, cards: Card[]) {
-  return cards.filter((c) => c.ownerUid === meUid || c.sharedWithUids.includes(meUid))
+  return cards.filter((c) => c.ownerUid === meUid || (Array.isArray(c.sharedWithUids) && c.sharedWithUids.includes(meUid)))
 }
 
 export function isSharedCard(card: Card | undefined) {
-  return !!card && card.sharedWithUsers.length > 0
+  if (!card) return false
+  const usersCount = Array.isArray(card.sharedWithUsers) ? card.sharedWithUsers.length : 0
+  const uidsCount = Array.isArray(card.sharedWithUids) ? card.sharedWithUids.length : 0
+  return usersCount > 0 || uidsCount > 0
 }
 
 /** Escolhe o cartão mais adequado para um lançamento. */
@@ -910,7 +915,7 @@ export function pickCard(meUid: string, cards: Card[], splitType: SplitType, hin
       if (other) return other
     }
   }
-  const ownShared = mine.find((c) => c.ownerUid === meUid && c.sharedWithUsers.length > 0)
+  const ownShared = mine.find((c) => c.ownerUid === meUid && isSharedCard(c))
   const own = mine.find((c) => c.ownerUid === meUid)
   if (splitType === 'split_50' || splitType === 'partner') return ownShared ?? own ?? mine[0]
   return own ?? mine[0]
