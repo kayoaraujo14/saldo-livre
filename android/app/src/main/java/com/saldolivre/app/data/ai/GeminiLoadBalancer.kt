@@ -103,6 +103,8 @@ class GeminiLoadBalancer(
     suspend fun executeWithResilience(
         userQuery: String,
         systemInstructionText: String,
+        attachmentBytes: ByteArray? = null,
+        mimeType: String? = null,
         onModelSwitched: ((newModel: String) -> Unit)? = null
     ): GeminiExecutionResult {
         val keys = getApiKeys()
@@ -145,7 +147,14 @@ class GeminiLoadBalancer(
                             systemInstruction = content { text(systemInstructionText) }
                         )
 
-                        val response: GenerateContentResponse = generativeModel.generateContent(userQuery)
+                        val contentPrompt = content {
+                            text(userQuery)
+                            if (attachmentBytes != null && !mimeType.isNullOrBlank()) {
+                                blob(mimeType, attachmentBytes)
+                            }
+                        }
+
+                        val response: GenerateContentResponse = generativeModel.generateContent(contentPrompt)
                         val text = response.text
 
                         if (!text.isNullOrBlank()) {
@@ -231,5 +240,19 @@ class GeminiLoadBalancer(
         }
 
         return Pair(false, "Falha ao conectar aos servidores do Gemini. Verifique sua chave ou conexão.")
+    }
+
+    /**
+     * Transcreve áudio com o Gemini Multimodal Audio
+     */
+    suspend fun transcribeAudio(audioBytes: ByteArray, mimeType: String = "audio/mp4"): String {
+        val prompt = "Por favor, transcreva o áudio falado em português do Brasil com máxima precisão. Retorne APENAS o texto da fala transcrita, sem pontuações artificiais ou comentários."
+        val result = executeWithResilience(
+            userQuery = prompt,
+            systemInstructionText = "Você é um transcritor de voz em português altamente especializado. Retorne apenas o texto que a pessoa falou.",
+            attachmentBytes = audioBytes,
+            mimeType = mimeType
+        )
+        return result.responseText.trim()
     }
 }
