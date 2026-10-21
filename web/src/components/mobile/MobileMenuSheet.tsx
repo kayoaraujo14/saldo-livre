@@ -11,8 +11,6 @@ import {
   ChevronRight,
   ShieldCheck,
   Sparkles,
-  Download,
-  CheckCircle2,
   Landmark,
   History,
   TrendingUp,
@@ -25,12 +23,9 @@ interface MobileMenuSheetProps {
   onOpenProjection: () => void
   onOpenFriends: () => void
   onGenerateBills: () => void
-  onOpenInstall?: () => void
   onOpenOpenFinance?: () => void
   onOpenRecentActivity?: () => void
   onOpenInvestments?: () => void
-  isInstalled?: boolean
-  canInstall?: boolean
   generating?: boolean
 }
 
@@ -41,12 +36,9 @@ export function MobileMenuSheet({
   onOpenProjection,
   onOpenFriends,
   onGenerateBills,
-  onOpenInstall,
   onOpenOpenFinance,
   onOpenRecentActivity,
   onOpenInvestments,
-  isInstalled,
-  canInstall = true,
   generating,
 }: MobileMenuSheetProps) {
   const {
@@ -76,43 +68,7 @@ export function MobileMenuSheet({
 
   return (
     <div className="space-y-3.5 pb-24 animate-in fade-in duration-200">
-      {/* 1. Install App Banner Card */}
-      {onOpenInstall && (canInstall || !isInstalled) && (
-        <div
-          onClick={onOpenInstall}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-md flex items-center justify-between gap-3 active:scale-[0.99] ${
-            isInstalled
-              ? 'bg-slate-900/60 border-emerald-500/30'
-              : 'bg-gradient-to-r from-emerald-950/40 via-slate-900/80 to-teal-950/30 border-emerald-500/40 shadow-emerald-950/30'
-          }`}
-        >
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="size-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-slate-950 font-bold flex items-center justify-center shrink-0 shadow-sm">
-              {isInstalled ? <CheckCircle2 className="size-5 stroke-[2.5]" /> : <Download className="size-5 stroke-[2.5]" />}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-sm font-bold text-white truncate">
-                  {isInstalled ? 'Aplicativo Instalado' : 'Instalar Aplicativo'}
-                </span>
-                {!isInstalled && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold shrink-0">
-                    PWA Nativo
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-400 truncate">
-                {isInstalled
-                  ? 'Você já tem o aplicativo na tela inicial'
-                  : 'Acesse em tela cheia direto da tela de início'}
-              </p>
-            </div>
-          </div>
-          <ChevronRight className="size-5 text-emerald-400 shrink-0 ml-2" />
-        </div>
-      )}
-
-      {/* 2. User Profile Card */}
+      {/* 1. User Profile Card */}
       <div className="glass-card rounded-2xl p-4 border border-white/[0.08] flex items-center justify-between min-w-0">
         <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
           <div className="size-11 rounded-2xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-base shadow-sm shrink-0">
@@ -354,9 +310,9 @@ export function MobileMenuSheet({
       {/* App version info */}
       <div className="text-center py-2 text-xs text-slate-400">
         <p className="font-semibold text-slate-400 flex items-center justify-center gap-1.5">
-          <Sparkles className="size-3 text-emerald-400" /> Saldo Livre App Nativo
+          <Sparkles className="size-3 text-emerald-400" /> Saldo Livre Web
         </p>
-        <p className="text-[11px] text-slate-400 mt-0.5">PWA Standalone · Gemini Flash Lite integrado</p>
+        <p className="text-[11px] text-slate-400 mt-0.5">Sincronizado em Nuvem · Gemini Flash Lite integrado</p>
       </div>
     </div>
   )

@@ -12,7 +12,6 @@ import { ApiKeyModal } from '@/components/modals/ApiKeyModal'
 import { TransactionModal } from '@/components/modals/TransactionModal'
 import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal'
 import { FriendsModal } from '@/components/modals/FriendsModal'
-import { InstallAppModal } from '@/components/modals/InstallAppModal'
 import { OpenFinanceModal } from '@/components/modals/OpenFinanceModal'
 import { RecentActivityModal } from '@/components/modals/RecentActivityModal'
 import { InvestmentsModal } from '@/components/modals/InvestmentsModal'
@@ -20,7 +19,6 @@ import { ScrollToTop } from '@/components/ui/ScrollToTop'
 import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
 import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
-import { usePwaInstall } from '@/hooks/usePwaInstall'
 import { Button } from '@/components/ui/button'
 import { Clock, ArrowRight, ReceiptText } from 'lucide-react'
 import type { Transaction } from '@/types'
@@ -40,8 +38,6 @@ function MainDashboard() {
     generateBills,
   } = useFinance()
 
-  const { canInstall, isInstalled, isIOS, promptInstall } = usePwaInstall()
-
   const [cardsModalOpen, setCardsModalOpen] = useState(false)
   const [recurringModalOpen, setRecurringModalOpen] = useState(false)
   const [receivablesModalOpen, setReceivablesModalOpen] = useState(false)
@@ -49,7 +45,6 @@ function MainDashboard() {
   const [txModalOpen, setTxModalOpen] = useState(false)
   const [projectionModalOpen, setProjectionModalOpen] = useState(false)
   const [friendsModalOpen, setFriendsModalOpen] = useState(false)
-  const [installModalOpen, setInstallModalOpen] = useState(false)
   const [openFinanceModalOpen, setOpenFinanceModalOpen] = useState(false)
   const [recentActivityModalOpen, setRecentActivityModalOpen] = useState(false)
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
@@ -274,9 +269,6 @@ function MainDashboard() {
               onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
               onOpenInvestments={() => setInvestmentsModalOpen(true)}
               onGenerateBills={handleGenerate}
-              onOpenInstall={() => setInstallModalOpen(true)}
-              isInstalled={isInstalled}
-              canInstall={canInstall}
               generating={generatingBills}
             />
           )}
@@ -312,13 +304,6 @@ function MainDashboard() {
       <FriendsModal
         open={friendsModalOpen}
         onOpenChange={setFriendsModalOpen}
-      />
-      <InstallAppModal
-        open={installModalOpen}
-        onOpenChange={setInstallModalOpen}
-        isIOS={isIOS}
-        isInstalled={isInstalled}
-        onPromptInstall={promptInstall}
       />
       <OpenFinanceModal
         open={openFinanceModalOpen}
