@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "description": "Saldo Livre - Gestão Financeira Pessoal & Cartões Compartilhados",
-  "workspaces": [
-    "web"
-  ],
   "scripts": {
     "build": "npm --prefix web run build",
     "dev": "npm --prefix web run dev",
