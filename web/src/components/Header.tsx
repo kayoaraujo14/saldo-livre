@@ -409,7 +409,7 @@ export function Header({
                                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
                             }`}
                           >
-                            {u.displayName.split(' ')[0]}
+                            {(u.displayName || 'Usuário').split(' ')[0]}
                           </button>
                         )
                       })}

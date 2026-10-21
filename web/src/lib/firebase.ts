@@ -30,7 +30,7 @@ import {
   writeBatch,
   type Firestore,
 } from 'firebase/firestore'
-import type { Card, ChatSession, Friendship, NewTransaction, RecurringBill, Transaction, UserLearnedRule, UserProfile } from '@/types'
+import type { Card, ChatSession, Friendship, NewTransaction, RecurringBill, SharedUser, Transaction, UserLearnedRule, UserProfile } from '@/types'
 import { stripUndefined } from './utils'
 
 const FIREBASE_CONFIG_STORAGE_KEY = 'saldo-livre:firebase-config'
@@ -197,10 +197,20 @@ export const lookupUserByEmail = findUserByEmail
 // ------------------------------------------------------------------
 export function normalizeCard(id: string, raw: any): Card {
   const data = raw || {}
-  const sharedWithUsers = Array.isArray(data.sharedWithUsers) ? data.sharedWithUsers : []
-  const sharedWithUids = Array.isArray(data.sharedWithUids)
-    ? data.sharedWithUids
-    : sharedWithUsers.map((u: any) => u.uid).filter(Boolean)
+  const rawSharedUsers = Array.isArray(data.sharedWithUsers)
+    ? data.sharedWithUsers
+    : (data.sharedWithUsers && typeof data.sharedWithUsers === 'object'
+        ? Object.values(data.sharedWithUsers)
+        : [])
+  const sharedWithUsers = rawSharedUsers.map((u: any) => {
+    if (typeof u === 'string') return { uid: u, name: 'Parceiro', email: '' }
+    if (u && typeof u === 'object') return { uid: u.uid || '', name: u.name || 'Parceiro', email: u.email || '' }
+    return null
+  }).filter(Boolean) as SharedUser[]
+  const rawSharedUids = Array.isArray(data.sharedWithUids) ? data.sharedWithUids : []
+  const sharedWithUids = rawSharedUids.length > 0
+    ? rawSharedUids.filter((x: any) => typeof x === 'string')
+    : sharedWithUsers.map(u => u.uid).filter(Boolean)
 
   return {
     id,
@@ -438,7 +448,20 @@ export function subscribeFriendships(uid: string, cb: (fs: Friendship[]) => void
     const u1 = onSnapshot(
       query(collection(db, COLLECTIONS.friendships), where('requesterUid', '==', uid)),
       (s) => {
-        list1 = s.docs.map((d) => ({ ...(d.data() as Friendship), id: d.id }))
+        list1 = s.docs.map((d) => {
+          const data = d.data() || {}
+          return {
+            id: d.id,
+            requesterUid: data.requesterUid || '',
+            requesterEmail: data.requesterEmail || '',
+            requesterName: data.requesterName || 'Amigo',
+            recipientUid: data.recipientUid || '',
+            recipientEmail: data.recipientEmail || '',
+            recipientName: data.recipientName || 'Amigo',
+            status: data.status || 'pending',
+            createdAt: Number(data.createdAt) || Date.now(),
+          }
+        })
         emit()
       },
       (err) => console.warn('Erro ao sincronizar convites de amizade enviados:', err)
@@ -447,7 +470,20 @@ export function subscribeFriendships(uid: string, cb: (fs: Friendship[]) => void
     const u2 = onSnapshot(
       query(collection(db, COLLECTIONS.friendships), where('recipientUid', '==', uid)),
       (s) => {
-        list2 = s.docs.map((d) => ({ ...(d.data() as Friendship), id: d.id }))
+        list2 = s.docs.map((d) => {
+          const data = d.data() || {}
+          return {
+            id: d.id,
+            requesterUid: data.requesterUid || '',
+            requesterEmail: data.requesterEmail || '',
+            requesterName: data.requesterName || 'Amigo',
+            recipientUid: data.recipientUid || '',
+            recipientEmail: data.recipientEmail || '',
+            recipientName: data.recipientName || 'Amigo',
+            status: data.status || 'pending',
+            createdAt: Number(data.createdAt) || Date.now(),
+          }
+        })
         emit()
       },
       (err) => console.warn('Erro ao sincronizar convites de amizade recebidos:', err)

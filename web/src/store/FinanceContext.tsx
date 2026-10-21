@@ -348,34 +348,46 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     if (mode === 'demo') return demo.users
     const map = new Map<string, UserProfile>()
     if (fbProfile) map.set(fbProfile.uid, fbProfile)
-    for (const c of fbCards) {
-      for (const s of (c.sharedWithUsers || [])) {
-        if (!map.has(s.uid)) {
-          map.set(s.uid, {
-            uid: s.uid,
-            email: s.email,
-            displayName: s.name,
-            photoURL: null,
-            monthlyIncome: 0,
-          })
-        }
-      }
-    }
-    for (const f of (fbFriendships || [])) {
-      if (f.requesterUid && f.requesterName && !map.has(f.requesterUid)) {
-        map.set(f.requesterUid, {
-          uid: f.requesterUid,
-          email: f.requesterEmail,
-          displayName: f.requesterName,
+    const cardList = Array.isArray(fbCards) ? fbCards : []
+    for (const c of cardList) {
+      if (!c) continue
+      const rawShared = Array.isArray(c.sharedWithUsers)
+        ? c.sharedWithUsers
+        : (c.sharedWithUsers && typeof c.sharedWithUsers === 'object'
+            ? Object.values(c.sharedWithUsers)
+            : [])
+      for (const item of (rawShared as any[])) {
+        if (!item) continue
+        const uid = typeof item === 'string' ? item : item.uid
+        if (!uid || map.has(uid)) continue
+        const email = typeof item === 'object' && item.email ? item.email : ''
+        const displayName = typeof item === 'object' && item.name ? item.name : 'Parceiro'
+        map.set(uid, {
+          uid,
+          email,
+          displayName,
           photoURL: null,
           monthlyIncome: 0,
         })
       }
-      if (f.recipientUid && f.recipientName && !map.has(f.recipientUid)) {
+    }
+    const friendshipsList = Array.isArray(fbFriendships) ? fbFriendships : []
+    for (const f of friendshipsList) {
+      if (!f) continue
+      if (f.requesterUid && !map.has(f.requesterUid)) {
+        map.set(f.requesterUid, {
+          uid: f.requesterUid,
+          email: f.requesterEmail || '',
+          displayName: f.requesterName || 'Amigo',
+          photoURL: null,
+          monthlyIncome: 0,
+        })
+      }
+      if (f.recipientUid && !map.has(f.recipientUid)) {
         map.set(f.recipientUid, {
           uid: f.recipientUid,
-          email: f.recipientEmail,
-          displayName: f.recipientName,
+          email: f.recipientEmail || '',
+          displayName: f.recipientName || 'Amigo',
           photoURL: null,
           monthlyIncome: 0,
         })
@@ -437,25 +449,28 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     const groups: PendingChargeGroup[] = []
     const seenGroups = new Set<string>()
 
-    for (const tx of rawPending) {
+    const txList = Array.isArray(rawPending) ? rawPending : []
+    for (const tx of txList) {
+      if (!tx) continue
       const gId = tx.installmentGroupId
       if (gId) {
         if (seenGroups.has(gId)) continue
         seenGroups.add(gId)
 
-        const items = rawPending
-          .filter((t) => t.installmentGroupId === gId)
+        const items = txList
+          .filter((t) => t && t.installmentGroupId === gId)
           .sort((a, b) => (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0))
 
         const primaryTx = items[0]
+        if (!primaryTx) continue
         const baseDesc = stripInstallmentSuffix(primaryTx.description)
         const sender = users.find((u) => u.uid === primaryTx.createdByUid)
         const friendPct = friendPctOf(primaryTx)
 
-        const totalAmount = round2(items.reduce((s, t) => s + t.totalAmount, 0))
+        const totalAmount = round2(items.reduce((s, t) => s + (Number(t.totalAmount) || 0), 0))
         const friendShareAmount = round2(items.reduce((s, t) => s + friendShareOf(t), 0))
 
-        const dates = items.map((t) => t.dueDate).sort()
+        const dates = items.map((t) => t.dueDate).filter(Boolean).sort()
         const firstDueDate = dates[0] || primaryTx.dueDate
         const lastDueDate = dates[dates.length - 1] || primaryTx.dueDate
 
@@ -920,12 +935,13 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
     for (const [, list] of groups) {
       if (list.length > 1) {
-        const months = new Set(list.map((t) => t.competenceMonth || t.dueDate.slice(0, 7)))
+        const months = new Set(list.map((t) => t.competenceMonth || (t.dueDate ? t.dueDate.slice(0, 7) : '')))
         if (months.size === 1) {
           const sorted = [...list].sort((a, b) => (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0))
           const first = sorted[0]
+          if (!first) continue
           const firstNum = first.installmentNumber ?? 1
-          const baseMonth = first.competenceMonth || first.dueDate.slice(0, 7) || currentMonthKey()
+          const baseMonth = first.competenceMonth || (first.dueDate ? first.dueDate.slice(0, 7) : '') || currentMonthKey()
 
           for (const t of sorted) {
             const num = t.installmentNumber ?? 1

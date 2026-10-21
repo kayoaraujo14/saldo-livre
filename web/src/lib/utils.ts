@@ -13,7 +13,8 @@ const brlCompact = new Intl.NumberFormat('pt-BR', {
 })
 
 export function formatBRL(value: number, compact = false) {
-  const v = Object.is(value, -0) ? 0 : value
+  const num = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  const v = Object.is(num, -0) ? 0 : num
   return compact ? brlCompact.format(v) : brl.format(v)
 }
 

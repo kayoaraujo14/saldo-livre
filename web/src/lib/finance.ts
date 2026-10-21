@@ -109,14 +109,18 @@ export function calculateCardInvoiceDates(
 // ------------------------------------------------------------------
 export function deriveImpact(allocations: Allocation[] = [], visibleToUids: string[] = []) {
   const impact: Record<string, number> = {}
-  for (const u of visibleToUids || []) impact[u] = 0
-  for (const a of allocations || []) {
-    if (a && a.type === 'PLATFORM_USER' && a.uid) {
-      // Quando alguém reembolsa, o impacto NÃO some, pois a pessoa que pagou a fatura
-      // original já pagou pro banco de qualquer forma, e quem foi reembolsado já enviou o dinheiro.
-      // O impacto deve sempre refletir o valor de cota de cada um na transação para o mês,
-      // para bater o orçamento (Saldo Livre) de cada usuário com precisão bancária.
-      impact[a.uid] = round2((impact[a.uid] ?? 0) + (a.amount || 0))
+  const rawVisible = Array.isArray(visibleToUids) ? visibleToUids : []
+  for (const u of rawVisible) {
+    if (u && typeof u === 'string') impact[u] = 0
+  }
+  const rawAllocs = Array.isArray(allocations)
+    ? allocations
+    : (allocations && typeof allocations === 'object'
+        ? Object.values(allocations)
+        : [])
+  for (const a of (rawAllocs as any[])) {
+    if (a && typeof a === 'object' && a.type === 'PLATFORM_USER' && a.uid) {
+      impact[a.uid] = round2((impact[a.uid] ?? 0) + (Number(a.amount) || 0))
     }
   }
   return impact
@@ -149,16 +153,23 @@ export function clampPct(pct: number | null | undefined) {
 
 /** Valor que cabe ao amigo numa cobrança de amigo (fallback: total, para dados legados). */
 export function friendShareOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount'>) {
-  if (!tx.assignedFriendUid) return 0
-  const allocs = (tx.allocations || []).filter((a) => a.uid === tx.assignedFriendUid)
-  if (!allocs.length) return tx.totalAmount || 0
-  return round2(allocs.reduce((s, a) => s + (a.amount || 0), 0))
+  if (!tx || !tx.assignedFriendUid) return 0
+  const rawAllocs = Array.isArray(tx.allocations)
+    ? tx.allocations
+    : (tx.allocations && typeof tx.allocations === 'object'
+        ? Object.values(tx.allocations)
+        : [])
+  const allocs = rawAllocs.filter((a: any) => a && typeof a === 'object' && a.uid === tx.assignedFriendUid)
+  if (!allocs.length) return Number(tx.totalAmount) || 0
+  return round2(allocs.reduce((s: number, a: any) => s + (Number(a.amount) || 0), 0))
 }
 
 export function friendPctOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>) {
-  if (tx.friendSharePct) return clampPct(tx.friendSharePct)
-  if (!tx.totalAmount) return 100
-  return clampPct((friendShareOf(tx) / tx.totalAmount) * 100)
+  if (!tx) return 100
+  if (tx.friendSharePct != null) return clampPct(tx.friendSharePct)
+  const total = Number(tx.totalAmount) || 0
+  if (!total) return 100
+  return clampPct((friendShareOf(tx) / total) * 100)
 }
 
 export function buildSplit(input: SplitInput) {
@@ -516,8 +527,13 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
       }
     }
 
-    const allocs = tx.allocations || []
-    const friendAlloc = tx.assignedFriendUid ? allocs.find((a) => a.uid === tx.assignedFriendUid) : undefined
+    const rawAllocs = Array.isArray(tx.allocations)
+      ? tx.allocations
+      : (tx.allocations && typeof tx.allocations === 'object'
+          ? Object.values(tx.allocations)
+          : [])
+    const allocs: any[] = (rawAllocs as any[]).filter((a: any) => a && typeof a === 'object')
+    const friendAlloc = tx.assignedFriendUid ? allocs.find((a: any) => a.uid === tx.assignedFriendUid) : undefined
     const friendOpen = tx.acceptanceStatus === 'accepted' && !(friendAlloc?.reimbursed ?? false)
 
     if (tx.paidByUid === uid) {
@@ -526,15 +542,15 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
       }
       for (const a of allocs) {
         if (a.reimbursed) continue
-        if (a.type === 'EXTERNAL') receivableFromExternal += (a.amount || 0)
-        else if (a.uid !== uid && a.uid !== tx.assignedFriendUid) receivableFromPartner += (a.amount || 0)
+        if (a.type === 'EXTERNAL') receivableFromExternal += (Number(a.amount) || 0)
+        else if (a.uid !== uid && a.uid !== tx.assignedFriendUid) receivableFromPartner += (Number(a.amount) || 0)
       }
     } else {
       if (tx.assignedFriendUid === uid && friendOpen) {
         payableToOthers += friendShareOf(tx)
       }
       for (const a of allocs) {
-        if (a.type === 'PLATFORM_USER' && a.uid === uid && !a.reimbursed && !tx.assignedFriendUid) payableToOthers += (a.amount || 0)
+        if (a.type === 'PLATFORM_USER' && a.uid === uid && !a.reimbursed && !tx.assignedFriendUid) payableToOthers += (Number(a.amount) || 0)
       }
     }
   }
@@ -878,15 +894,28 @@ export function projectFutureMonths(args: {
 // Parceiro(a) e cartões
 // ------------------------------------------------------------------
 export function resolvePartner(meUid: string, cards: Card[], users: UserProfile[]): Party | null {
-  for (const c of cards) {
-    const sharedWithUsers = Array.isArray(c.sharedWithUsers) ? c.sharedWithUsers : []
+  const cardList = Array.isArray(cards) ? cards : []
+  const userList = Array.isArray(users) ? users : []
+  for (const c of cardList) {
+    if (!c) continue
+    const sharedWithUsers = Array.isArray(c.sharedWithUsers)
+      ? c.sharedWithUsers
+      : (c.sharedWithUsers && typeof c.sharedWithUsers === 'object'
+          ? Object.values(c.sharedWithUsers)
+          : [])
     const sharedWithUids = Array.isArray(c.sharedWithUids) ? c.sharedWithUids : []
     if (c.ownerUid === meUid && sharedWithUsers.length) {
-      const s = sharedWithUsers[0]
-      return { uid: s.uid, name: users.find((u) => u.uid === s.uid)?.displayName ?? s.name }
+      const s: any = sharedWithUsers[0]
+      if (s) {
+        const sUid = typeof s === 'string' ? s : s.uid
+        const sName = typeof s === 'object' && s.name ? s.name : 'Parceiro'
+        const matched = userList.find((u) => u && u.uid === sUid)
+        return { uid: sUid || '', name: matched?.displayName || sName }
+      }
     }
     if (c.ownerUid !== meUid && sharedWithUids.includes(meUid)) {
-      return { uid: c.ownerUid, name: users.find((u) => u.uid === c.ownerUid)?.displayName ?? c.ownerName }
+      const matched = userList.find((u) => u && u.uid === c.ownerUid)
+      return { uid: c.ownerUid || '', name: matched?.displayName || c.ownerName || 'Parceiro' }
     }
   }
   return null
