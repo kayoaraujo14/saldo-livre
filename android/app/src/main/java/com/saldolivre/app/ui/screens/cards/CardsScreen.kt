@@ -250,7 +250,7 @@ private fun CardsSummaryBanner(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "Faturas do Mês ($selectedMonth)",
+                        text = "Faturas do Mês (${FinanceEngine.formatMonthLabel(selectedMonth)})",
                         style = Typography.labelMedium,
                         color = TextSecondary,
                         maxLines = 1,
@@ -759,7 +759,7 @@ private fun CardTransactionRow(tx: Transaction) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = tx.dueDate,
+                        text = FinanceEngine.formatFullDate(tx.dueDate),
                         fontSize = 10.sp,
                         color = TextSecondary,
                         maxLines = 1

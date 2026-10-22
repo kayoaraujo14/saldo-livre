@@ -358,9 +358,41 @@ class MockFinanceRepository(
     }
 
     override suspend fun markTransactionPaid(id: String) {
+        setTransactionStatus(id, TransactionStatus.PAID)
+    }
+
+    override suspend fun toggleTransactionStatus(id: String) {
         _transactions.update { current ->
             val updated = current.map { tx ->
-                if (tx.id == id) tx.copy(status = TransactionStatus.PAID) else tx
+                if (tx.id == id) {
+                    val newStatus = FinanceEngine.togglePaidStatus(tx.status)
+                    FinanceEngine.applyStatusPatch(tx, newStatus)
+                } else tx
+            }
+            persistTransactions(updated)
+            updated
+        }
+    }
+
+    override suspend fun cycleTransactionStatus(id: String) {
+        _transactions.update { current ->
+            val updated = current.map { tx ->
+                if (tx.id == id) {
+                    val newStatus = FinanceEngine.nextStatus(tx.status)
+                    FinanceEngine.applyStatusPatch(tx, newStatus)
+                } else tx
+            }
+            persistTransactions(updated)
+            updated
+        }
+    }
+
+    override suspend fun setTransactionStatus(id: String, status: TransactionStatus, actualAmount: Double?) {
+        _transactions.update { current ->
+            val updated = current.map { tx ->
+                if (tx.id == id) {
+                    FinanceEngine.applyStatusPatch(tx, status, actualAmount)
+                } else tx
             }
             persistTransactions(updated)
             updated

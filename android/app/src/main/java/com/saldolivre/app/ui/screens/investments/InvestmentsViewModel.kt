@@ -265,7 +265,8 @@ class InvestmentsViewModel(
         if (amount <= 0.0) return
         viewModelScope.launch {
             val user = _uiState.value.currentUser
-            val month = if (date.length >= 7) date.substring(0, 7) else _uiState.value.selectedMonth
+            val isoDate = FinanceEngine.parseInputDateToIso(date)
+            val month = if (isoDate.length >= 7) isoDate.substring(0, 7) else _uiState.value.selectedMonth
 
             val tx = Transaction(
                 id = "inv_tx_" + UUID.randomUUID().toString().take(8),
@@ -279,7 +280,7 @@ class InvestmentsViewModel(
                 status = TransactionStatus.PAID,
                 totalAmount = amount,
                 actualAmount = amount,
-                dueDate = date,
+                dueDate = isoDate,
                 competenceMonth = month,
                 visibleToUids = listOf(user.uid),
                 allocations = listOf(
@@ -313,7 +314,8 @@ class InvestmentsViewModel(
         if (amount <= 0.0) return
         viewModelScope.launch {
             val user = _uiState.value.currentUser
-            val month = if (date.length >= 7) date.substring(0, 7) else _uiState.value.selectedMonth
+            val isoDate = FinanceEngine.parseInputDateToIso(date)
+            val month = if (isoDate.length >= 7) isoDate.substring(0, 7) else _uiState.value.selectedMonth
 
             val tx = Transaction(
                 id = "res_tx_" + UUID.randomUUID().toString().take(8),
@@ -327,7 +329,7 @@ class InvestmentsViewModel(
                 status = TransactionStatus.PAID,
                 totalAmount = amount,
                 actualAmount = amount,
-                dueDate = date,
+                dueDate = isoDate,
                 competenceMonth = month,
                 visibleToUids = listOf(user.uid),
                 allocations = listOf(

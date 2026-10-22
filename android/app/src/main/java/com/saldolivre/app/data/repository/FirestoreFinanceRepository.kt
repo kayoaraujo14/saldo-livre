@@ -335,10 +335,39 @@ class FirestoreFinanceRepository(
     }
 
     override suspend fun markTransactionPaid(id: String) {
-        if (id.isNotBlank()) {
-            firestore.collection("transactions").document(id)
-                .update("status", TransactionStatus.PAID.value).await()
-        }
+        setTransactionStatus(id, TransactionStatus.PAID)
+    }
+
+    override suspend fun toggleTransactionStatus(id: String) {
+        if (id.isBlank()) return
+        val docRef = firestore.collection("transactions").document(id)
+        val snap = docRef.get().await()
+        if (!snap.exists()) return
+        val tx = parseTransaction(snap)
+        val newStatus = FinanceEngine.togglePaidStatus(tx.status)
+        val updatedTx = FinanceEngine.applyStatusPatch(tx, newStatus)
+        docRef.set(transactionToMap(updatedTx)).await()
+    }
+
+    override suspend fun cycleTransactionStatus(id: String) {
+        if (id.isBlank()) return
+        val docRef = firestore.collection("transactions").document(id)
+        val snap = docRef.get().await()
+        if (!snap.exists()) return
+        val tx = parseTransaction(snap)
+        val newStatus = FinanceEngine.nextStatus(tx.status)
+        val updatedTx = FinanceEngine.applyStatusPatch(tx, newStatus)
+        docRef.set(transactionToMap(updatedTx)).await()
+    }
+
+    override suspend fun setTransactionStatus(id: String, status: TransactionStatus, actualAmount: Double?) {
+        if (id.isBlank()) return
+        val docRef = firestore.collection("transactions").document(id)
+        val snap = docRef.get().await()
+        if (!snap.exists()) return
+        val tx = parseTransaction(snap)
+        val updatedTx = FinanceEngine.applyStatusPatch(tx, status, actualAmount)
+        docRef.set(transactionToMap(updatedTx)).await()
     }
 
     override suspend fun markAllocationReimbursed(transactionId: String, nameOrUid: String) {
@@ -367,15 +396,7 @@ class FirestoreFinanceRepository(
     }
 
     override suspend fun updateEstimatedWithActual(id: String, actualAmount: Double) {
-        val docRef = firestore.collection("transactions").document(id)
-        val rounded = FinanceEngine.round2(actualAmount)
-        docRef.update(
-            mapOf(
-                "actualAmount" to rounded,
-                "totalAmount" to rounded,
-                "status" to TransactionStatus.PENDING.value
-            )
-        ).await()
+        setTransactionStatus(id, TransactionStatus.PENDING, actualAmount)
     }
 
     override suspend fun generateBillsForMonth(monthKey: String): Pair<Int, Int> {

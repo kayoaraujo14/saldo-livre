@@ -24,6 +24,9 @@ interface FinanceRepository {
     suspend fun deleteInstallmentGroup(groupId: String): Int
     suspend fun updateInstallmentGroup(groupId: String, input: InstallmentGroupUpdateInput): Int
     suspend fun markTransactionPaid(id: String)
+    suspend fun toggleTransactionStatus(id: String)
+    suspend fun cycleTransactionStatus(id: String)
+    suspend fun setTransactionStatus(id: String, status: TransactionStatus, actualAmount: Double? = null)
     suspend fun markAllocationReimbursed(transactionId: String, nameOrUid: String)
     suspend fun updateEstimatedWithActual(id: String, actualAmount: Double)
     suspend fun generateBillsForMonth(monthKey: String): Pair<Int, Int>

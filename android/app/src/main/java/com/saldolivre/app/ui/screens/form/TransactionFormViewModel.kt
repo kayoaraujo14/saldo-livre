@@ -22,7 +22,7 @@ data class TransactionFormState(
     val selectedCardId: String? = null,
     val splitType: SplitType = SplitType.MINE,
     val externalName: String = "",
-    val dueDateText: String = FinanceEngine.todayKey(),
+    val dueDateText: String = FinanceEngine.todayFormatted(),
     val status: TransactionStatus = TransactionStatus.PENDING,
     val installmentsCount: Int = 1,
     val availableCards: List<Card> = emptyList(),
@@ -87,7 +87,7 @@ class TransactionFormViewModel(
                             selectedCardId = tx.cardId ?: current.selectedCardId,
                             splitType = inferredSplit,
                             externalName = extAlloc?.name ?: "",
-                            dueDateText = tx.dueDate,
+                            dueDateText = FinanceEngine.formatFullDate(tx.dueDate),
                             status = tx.status,
                             installmentsCount = tx.installmentsTotal ?: 1
                         )
@@ -180,6 +180,7 @@ class TransactionFormViewModel(
             val partner = allUsers.find { it.uid != user.uid }
             val card = current.availableCards.find { it.id == current.selectedCardId }
             val total = FinanceEngine.round2(amount)
+            val isoInputDate = FinanceEngine.parseInputDateToIso(current.dueDateText)
 
             if (current.isEditing && current.editingTx != null) {
                 val origTx = current.editingTx
@@ -204,7 +205,7 @@ class TransactionFormViewModel(
                                     pct = origTx.friendSharePct ?: 100.0
                                 )
                             } else null,
-                            date = if (current.dueDateText != origTx.dueDate) current.dueDateText else null,
+                            date = if (isoInputDate != origTx.dueDate) isoInputDate else null,
                             status = current.status
                         )
                     )
@@ -222,17 +223,16 @@ class TransactionFormViewModel(
                         )
                     )
                 } else {
-                    val dateChanged = current.dueDateText != origTx.dueDate ||
+                    val dateChanged = isoInputDate != origTx.dueDate ||
                             current.paymentMethod != origTx.paymentMethod ||
                             (current.paymentMethod == PaymentMethod.CREDIT_CARD && card?.id != origTx.cardId)
 
                     val (dueDate, competenceMonth) = if (dateChanged) {
                         if (current.paymentMethod == PaymentMethod.CREDIT_CARD) {
-                            FinanceEngine.calculateCardInvoiceDates(current.dueDateText, card)
+                            FinanceEngine.calculateCardInvoiceDates(isoInputDate, card)
                         } else {
-                            val cleanDate = current.dueDateText.trim()
-                            val month = if (cleanDate.length >= 7) cleanDate.take(7) else origTx.competenceMonth
-                            Pair(cleanDate, month)
+                            val month = if (isoInputDate.length >= 7) isoInputDate.take(7) else origTx.competenceMonth
+                            Pair(isoInputDate, month)
                         }
                     } else {
                         Pair(origTx.dueDate, origTx.competenceMonth)
@@ -377,9 +377,9 @@ class TransactionFormViewModel(
             } else {
                 // Transação individual
                 val (dueDate, competenceMonth) = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) {
-                    FinanceEngine.calculateCardInvoiceDates(current.dueDateText, card)
+                    FinanceEngine.calculateCardInvoiceDates(isoInputDate, card)
                 } else {
-                    Pair(current.dueDateText, current.dueDateText.take(7))
+                    Pair(isoInputDate, isoInputDate.take(7))
                 }
 
                 val split = FinanceEngine.buildSplit(

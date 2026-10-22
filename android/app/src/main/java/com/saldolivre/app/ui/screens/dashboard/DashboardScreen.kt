@@ -40,7 +40,7 @@ private val NegativeHeroBorder = Rose500.copy(alpha = 0.5f)
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onNavigateToTransactions: () -> Unit,
-    onNavigateToAddTransaction: () -> Unit,
+    onNavigateToChat: () -> Unit,
     onNavigateToReceivables: () -> Unit,
     onNavigateToInvestments: () -> Unit = {}
 ) {
@@ -109,14 +109,14 @@ fun DashboardScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = onNavigateToAddTransaction,
+                onClick = onNavigateToChat,
                 containerColor = Emerald500,
                 contentColor = DarkBackground,
                 shape = CircleShape
             ) {
                 Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Nova Transação"
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "Abrir Copiloto IA"
                 )
             }
         }
@@ -354,7 +354,8 @@ fun DashboardScreen(
                 ) { tx ->
                     TransactionItem(
                         transaction = tx,
-                        onClick = onNavigateToTransactions
+                        onClick = onNavigateToTransactions,
+                        onStatusClick = { viewModel.toggleTransactionStatus(tx.id) }
                     )
                 }
             }

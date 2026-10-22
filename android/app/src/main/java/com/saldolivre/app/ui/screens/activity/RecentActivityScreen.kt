@@ -586,7 +586,7 @@ private fun TimelineActivityCard(
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = item.competenceMonth,
+                                text = FinanceEngine.formatMonthLabel(item.competenceMonth),
                                 fontSize = 10.sp,
                                 color = Cyan400,
                                 fontWeight = FontWeight.Bold,

@@ -19,7 +19,12 @@ data class TransactionsUiState(
     val statusFilter: TransactionStatus? = null,
     val selectedCategory: String? = null,
     val totalExpense: Double = 0.0,
-    val totalIncome: Double = 0.0
+    val totalIncome: Double = 0.0,
+    val totalPaidExpense: Double = 0.0,
+    val totalPendingExpense: Double = 0.0,
+    val freeBalance: Double = 0.0,
+    val pendingCount: Int = 0,
+    val paidCount: Int = 0
 )
 
 class TransactionsViewModel(
@@ -34,21 +39,29 @@ class TransactionsViewModel(
             combine(
                 repository.currentUser,
                 repository.selectedMonth,
-                repository.getTransactions()
-            ) { user, month, allTxs ->
+                repository.getTransactions(),
+                repository.getMonthSummary()
+            ) { user, month, allTxs, summary ->
                 val monthTxs = allTxs.filter {
                     it.competenceMonth == month && it.visibleToUids.contains(user.uid)
                 }.sortedByDescending { it.dueDate }
 
                 val income = monthTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
                 val expense = monthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.effectiveAmount }
+                val paidCount = monthTxs.count { it.status == TransactionStatus.PAID }
+                val pendingCount = monthTxs.count { it.status != TransactionStatus.PAID }
 
                 _uiState.update { current ->
                     current.copy(
                         transactions = monthTxs,
                         selectedMonth = month,
                         totalIncome = FinanceEngine.round2(income),
-                        totalExpense = FinanceEngine.round2(expense)
+                        totalExpense = FinanceEngine.round2(expense),
+                        totalPaidExpense = summary.paid,
+                        totalPendingExpense = summary.committed,
+                        freeBalance = summary.freeBalance,
+                        pendingCount = pendingCount,
+                        paidCount = paidCount
                     )
                 }
                 applyFilters()
@@ -76,9 +89,41 @@ class TransactionsViewModel(
         applyFilters()
     }
 
+    fun previousMonth() {
+        val prev = FinanceEngine.shiftMonth(_uiState.value.selectedMonth, -1)
+        repository.setSelectedMonth(prev)
+    }
+
+    fun nextMonth() {
+        val next = FinanceEngine.shiftMonth(_uiState.value.selectedMonth, 1)
+        repository.setSelectedMonth(next)
+    }
+
+    fun currentMonth() {
+        repository.setSelectedMonth(FinanceEngine.currentMonthKey())
+    }
+
     fun markAsPaid(id: String) {
         viewModelScope.launch {
             repository.markTransactionPaid(id)
+        }
+    }
+
+    fun toggleStatus(id: String) {
+        viewModelScope.launch {
+            repository.toggleTransactionStatus(id)
+        }
+    }
+
+    fun cycleStatus(id: String) {
+        viewModelScope.launch {
+            repository.cycleTransactionStatus(id)
+        }
+    }
+
+    fun setStatus(id: String, status: TransactionStatus, actualAmount: Double? = null) {
+        viewModelScope.launch {
+            repository.setTransactionStatus(id, status, actualAmount)
         }
     }
 

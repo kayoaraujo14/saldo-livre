@@ -889,7 +889,7 @@ private fun MonthInvestmentsSection(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${tx.dueDate} · ${tx.subcategory ?: "Investimentos"}",
+                                text = "${FinanceEngine.formatFullDate(tx.dueDate)} · ${tx.subcategory ?: "Investimentos"}",
                                 fontSize = 10.sp,
                                 color = TextMuted,
                                 maxLines = 1,
@@ -1318,7 +1318,7 @@ private fun InvestmentHistoryItemCard(tx: Transaction) {
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(text = tx.description, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(text = "${tx.dueDate} · ${tx.subcategory ?: "Investimentos"}", fontSize = 11.sp, color = TextMuted)
+                    Text(text = "${FinanceEngine.formatFullDate(tx.dueDate)} · ${tx.subcategory ?: "Investimentos"}", fontSize = 11.sp, color = TextMuted)
                 }
             }
 
@@ -1360,7 +1360,7 @@ private fun AporteFormDialog(
     var subcat by remember { mutableStateOf(preselectedSubcat ?: "Renda Fixa (CDB / Tesouro / LCI / LCA)") }
     var amount by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf(FinanceEngine.todayKey()) }
+    var date by remember { mutableStateOf(FinanceEngine.todayFormatted()) }
     var expandedDropdown by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -1430,7 +1430,7 @@ private fun AporteFormDialog(
                 OutlinedTextField(
                     value = date,
                     onValueChange = { date = it },
-                    label = { Text("Data (AAAA-MM-DD)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    label = { Text("Data (DD/MM/AAAA)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1465,7 +1465,7 @@ private fun ResgateFormDialog(
     var subcat by remember { mutableStateOf(preselectedSubcat ?: "Reserva de Emergência") }
     var amount by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf(FinanceEngine.todayKey()) }
+    var date by remember { mutableStateOf(FinanceEngine.todayFormatted()) }
     var expandedDropdown by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {

@@ -52,8 +52,6 @@ fun AppNavHost(
     val bottomNavItems = listOf(
         BottomNavItem.Dashboard,
         BottomNavItem.Transactions,
-        BottomNavItem.Cards,
-        BottomNavItem.GeminiChat,
         BottomNavItem.Menu
     )
 
@@ -126,8 +124,8 @@ fun AppNavHost(
                             restoreState = true
                         }
                     },
-                    onNavigateToAddTransaction = { navController.navigate("add_transaction") },
-                    onNavigateToReceivables = { navController.navigate(BottomNavItem.Receivables.route) },
+                    onNavigateToChat = { navController.navigate("chat") },
+                    onNavigateToReceivables = { navController.navigate("receivables") },
                     onNavigateToInvestments = { navController.navigate("investments") }
                 )
             }
@@ -144,7 +142,7 @@ fun AppNavHost(
             }
 
             // 3. Cartões
-            composable(BottomNavItem.Cards.route) {
+            composable("cards") {
                 val cardsViewModel = viewModel { CardsViewModel(repository) }
                 CardsScreen(
                     viewModel = cardsViewModel,
@@ -152,8 +150,8 @@ fun AppNavHost(
                 )
             }
 
-            // 4. Copiloto IA Gemini
-            composable(BottomNavItem.GeminiChat.route) {
+            // 4. Copiloto IA Gemini (Tela Cheia sem BottomNav)
+            composable("chat") {
                 val chatViewModel = viewModel { GeminiChatViewModel(repository) }
                 GeminiChatScreen(
                     viewModel = chatViewModel,
@@ -166,30 +164,13 @@ fun AppNavHost(
                 val menuViewModel = viewModel { MenuViewModel(repository) }
                 MenuScreen(
                     viewModel = menuViewModel,
-                    onNavigateToReceivables = { navController.navigate(BottomNavItem.Receivables.route) },
-                    onNavigateToCards = {
-                        navController.navigate(BottomNavItem.Cards.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
+                    onNavigateToReceivables = { navController.navigate("receivables") },
+                    onNavigateToCards = { navController.navigate("cards") },
                     onNavigateToRecurringBills = { navController.navigate("recurring_bills") },
                     onNavigateToInvestments = { navController.navigate("investments") },
                     onNavigateToFriends = { navController.navigate("friends") },
                     onNavigateToProjections = { navController.navigate("projections") },
                     onNavigateToRecentActivity = { navController.navigate("recent_activity") },
-                    onNavigateToChat = {
-                        navController.navigate(BottomNavItem.GeminiChat.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
                     onLogout = onLogout
                 )
             }
@@ -234,7 +215,7 @@ fun AppNavHost(
             }
 
             // A Receber (Acessível via Menu e Card KPI)
-            composable(BottomNavItem.Receivables.route) {
+            composable("receivables") {
                 val receivablesViewModel = viewModel { ReceivablesViewModel(repository) }
                 ReceivablesScreen(
                     viewModel = receivablesViewModel,

@@ -3,18 +3,19 @@ package com.saldolivre.app.ui.screens.menu
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,12 +40,154 @@ fun MenuScreen(
     onNavigateToFriends: () -> Unit,
     onNavigateToProjections: () -> Unit,
     onNavigateToRecentActivity: () -> Unit,
-    onNavigateToChat: () -> Unit,
     onLogout: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val user = uiState.currentUser
     val partner = uiState.partnerUser
+
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+    var tempApiKey by remember(uiState.apiKey) { mutableStateOf(uiState.apiKey) }
+    var tempModel by remember(uiState.activeGeminiModel) { mutableStateOf(uiState.activeGeminiModel) }
+
+    if (showApiKeyDialog) {
+        var testFeedback by remember { mutableStateOf<String?>(null) }
+        var isTestSuccess by remember { mutableStateOf<Boolean?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showApiKeyDialog = false },
+            containerColor = DarkSurface,
+            title = {
+                Text(
+                    text = "Chave API do Gemini",
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text(
+                        text = "Informe suas chaves da API do Google Gemini (do Google AI Studio). Você pode colar múltiplas chaves separadas por vírgula para ativar o Load Balancing automático:",
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        lineHeight = 17.sp
+                    )
+                    OutlinedTextField(
+                        value = tempApiKey,
+                        onValueChange = {
+                            tempApiKey = it
+                            testFeedback = null
+                        },
+                        placeholder = { Text("AIzaSy... (uma ou mais chaves)", color = TextMuted, fontSize = 13.sp) },
+                        minLines = 2,
+                        maxLines = 4,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Emerald500,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val firstKey = tempApiKey.split(',', ';', '\n')
+                                    .map { it.trim() }
+                                    .firstOrNull { it.isNotBlank() } ?: ""
+                                viewModel.testConnection(firstKey) { outcome ->
+                                    isTestSuccess = outcome.first
+                                    testFeedback = outcome.second
+                                }
+                            },
+                            enabled = tempApiKey.isNotBlank() && !uiState.isTestingConnection,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan400)
+                        ) {
+                            if (uiState.isTestingConnection) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Cyan400, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text(text = "Testar Conexão", fontSize = 12.sp, maxLines = 1)
+                        }
+
+                        if (isTestSuccess != null && testFeedback != null) {
+                            Text(
+                                text = if (isTestSuccess == true) "✓ OK" else "✕ Falhou",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isTestSuccess == true) Emerald400 else Rose400,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    if (testFeedback != null) {
+                        Text(
+                            text = testFeedback!!,
+                            fontSize = 11.sp,
+                            color = if (isTestSuccess == true) Emerald400 else Rose400,
+                            lineHeight = 15.sp
+                        )
+                    }
+
+                    HorizontalDivider(color = DarkBorder)
+
+                    Text(text = "Modelo de IA Padrão:", fontSize = 12.sp, color = TextSecondary)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        MenuViewModel.AVAILABLE_MODELS.forEach { model ->
+                            val isSelected = tempModel == model
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { tempModel = model },
+                                label = { Text(model, fontSize = 11.sp, maxLines = 1) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = Emerald500.copy(alpha = 0.2f),
+                                    selectedLabelColor = Emerald400
+                                )
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.saveAiConfig(tempApiKey, tempModel)
+                        showApiKeyDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
+                ) {
+                    Text(
+                        "Salvar Configurações",
+                        color = DarkBackground,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showApiKeyDialog = false }) {
+                    Text("Cancelar", color = TextSecondary, maxLines = 1)
+                }
+            }
+        )
+    }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -478,15 +621,19 @@ fun MenuScreen(
 
                         MenuDivider()
 
-                        // Copiloto IA & Chave Gemini
+                        // Configuração exclusiva de Chave API do Gemini
                         MenuNavigationRow(
                             icon = Icons.Default.Key,
                             iconColor = Emerald400,
-                            title = "Copiloto & Chave API Gemini",
-                            subtitle = "Configurar chave de IA, memória viva e importar PDFs",
+                            title = "Configurar Chave API Gemini",
+                            subtitle = "Gerenciar chaves do Google AI Studio e modelo padrão",
                             badgeText = if (uiState.hasGeminiKey) uiState.activeGeminiModel else "Modo Local",
                             badgeColor = if (uiState.hasGeminiKey) Emerald500 else Cyan500,
-                            onClick = onNavigateToChat
+                            onClick = {
+                                tempApiKey = uiState.apiKey
+                                tempModel = uiState.activeGeminiModel
+                                showApiKeyDialog = true
+                            }
                         )
                     }
                 }

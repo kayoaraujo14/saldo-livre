@@ -219,20 +219,21 @@ fun LoginScreen(
                                     .height(50.dp),
                                 enabled = !uiState.isLoading,
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = TextPrimary,
-                                    contentColor = DarkBackground
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 if (uiState.isLoading) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
-                                        color = DarkBackground,
+                                        color = MaterialTheme.colorScheme.onPrimary,
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Text(
                                         text = "Conectando com o Google...",
+                                        color = MaterialTheme.colorScheme.onPrimary,
                                         fontWeight = FontWeight.SemiBold,
                                         fontSize = 14.sp
                                     )
@@ -257,6 +258,7 @@ fun LoginScreen(
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(
                                             text = "Entrar com Google",
+                                            color = MaterialTheme.colorScheme.onPrimary,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 14.sp
                                         )

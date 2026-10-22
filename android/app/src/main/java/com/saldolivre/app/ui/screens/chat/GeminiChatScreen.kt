@@ -31,12 +31,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -57,10 +62,7 @@ fun GeminiChatScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
 
-    var showApiKeyDialog by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
-    var tempApiKey by remember { mutableStateOf(uiState.apiKey) }
-    var tempModel by remember { mutableStateOf(uiState.selectedModel) }
 
     // Launcher para gravação de áudio (Permissão do Microfone)
     val audioPermissionLauncher = rememberLauncherForActivityResult(
@@ -243,147 +245,6 @@ fun GeminiChatScreen(
         )
     }
 
-    // Modal de Configuração de API Key & Modelo
-    if (showApiKeyDialog) {
-        var testFeedback by remember { mutableStateOf<String?>(null) }
-        var isTestSuccess by remember { mutableStateOf<Boolean?>(null) }
-
-        AlertDialog(
-            onDismissRequest = { showApiKeyDialog = false },
-            containerColor = DarkSurface,
-            title = {
-                Text(
-                    text = "Configurações do Copiloto IA",
-                    color = TextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "Informe suas chaves da API do Google Gemini (do Google AI Studio). Você pode colar múltiplas chaves separadas por vírgula para ativar o Load Balancing automático:",
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                        lineHeight = 17.sp
-                    )
-                    OutlinedTextField(
-                        value = tempApiKey,
-                        onValueChange = {
-                            tempApiKey = it
-                            testFeedback = null
-                        },
-                        placeholder = { Text("AIzaSy... (uma ou mais chaves)", color = TextMuted, fontSize = 13.sp) },
-                        minLines = 2,
-                        maxLines = 4,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Emerald500,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                val firstKey = tempApiKey.split(',', ';', '\n')
-                                    .map { it.trim() }
-                                    .firstOrNull { it.isNotBlank() } ?: ""
-                                viewModel.testConnection(firstKey) { outcome ->
-                                    isTestSuccess = outcome.first
-                                    testFeedback = outcome.second
-                                }
-                            },
-                            enabled = tempApiKey.isNotBlank() && !uiState.isTestingConnection,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan400)
-                        ) {
-                            if (uiState.isTestingConnection) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Cyan400, strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                            }
-                            Text(text = "Testar Conexão", fontSize = 12.sp, maxLines = 1)
-                        }
-
-                        if (isTestSuccess != null && testFeedback != null) {
-                            Text(
-                                text = if (isTestSuccess == true) "✓ OK" else "✕ Falhou",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isTestSuccess == true) Emerald400 else Rose400,
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    if (testFeedback != null) {
-                        Text(
-                            text = testFeedback!!,
-                            fontSize = 11.sp,
-                            color = if (isTestSuccess == true) Emerald400 else Rose400,
-                            lineHeight = 15.sp
-                        )
-                    }
-
-                    HorizontalDivider(color = DarkBorder)
-
-                    Text(text = "Modelo de IA Padrão:", fontSize = 12.sp, color = TextSecondary)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        GeminiChatViewModel.AVAILABLE_MODELS.forEach { model ->
-                            val isSelected = tempModel == model
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { tempModel = model },
-                                label = { Text(model, fontSize = 11.sp, maxLines = 1) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Emerald500.copy(alpha = 0.2f),
-                                    selectedLabelColor = Emerald400
-                                )
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.onApiKeyChange(tempApiKey)
-                        viewModel.onModelChange(tempModel)
-                        showApiKeyDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
-                ) {
-                    Text(
-                        "Salvar Configurações",
-                        color = DarkBackground,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showApiKeyDialog = false }) {
-                    Text("Cancelar", color = TextSecondary, maxLines = 1)
-                }
-            }
-        )
-    }
-
     // Modal de Confirmação para Limpar Chat Atual
     if (showClearConfirmDialog) {
         AlertDialog(
@@ -417,109 +278,201 @@ fun GeminiChatScreen(
     }
 
     Scaffold(
+        containerColor = DarkBackground,
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkSurface,
-                    titleContentColor = TextPrimary
-                ),
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Voltar",
-                            tint = TextPrimary
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color(0xFF131D31), DarkBackground)
                         )
-                    }
-                },
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
+                    )
+            ) {
+                TopAppBar(
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                        titleContentColor = TextPrimary
+                    ),
+                    navigationIcon = {
+                        IconButton(
+                            onClick = onNavigateBack,
                             modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(Emerald500, Cyan500)
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
+                                .padding(start = 6.dp)
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(DarkSurfaceVariant.copy(alpha = 0.7f))
                         ) {
                             Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = DarkBackground,
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Voltar",
+                                tint = TextPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Text(
-                                text = "Copiloto Saldo Livre",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                    },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(start = 4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .shadow(8.dp, RoundedCornerShape(12.dp), spotColor = Emerald400)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(Emerald400, Cyan500)
+                                        )
+                                    )
+                                    .border(
+                                        1.dp,
+                                        Color.White.copy(alpha = 0.25f),
+                                        RoundedCornerShape(12.dp)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = DarkBackground,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f, fill = false)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "Copiloto Smart",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = TextPrimary,
+                                        letterSpacing = 0.2.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Emerald500.copy(alpha = 0.16f))
+                                            .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = "IA",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Emerald400
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .clip(CircleShape)
+                                            .background(if (uiState.apiKey.isNotBlank()) Emerald400 else Amber400)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = uiState.connectionStatus ?: (if (uiState.apiKey.isNotBlank()) "Ativo • ${uiState.selectedModel}" else "Motor Neural Local"),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (uiState.apiKey.isNotBlank()) Emerald400 else Amber400,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    actions = {
+                        // Botão 1: Histórico de Conversas (Sessões)
+                        IconButton(
+                            onClick = { viewModel.setHistoryOpen(true) },
+                            modifier = Modifier
+                                .padding(horizontal = 2.dp)
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DarkSurfaceVariant.copy(alpha = 0.6f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = "Histórico de conversas",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(18.dp)
                             )
-                            Text(
-                                text = uiState.connectionStatus ?: (if (uiState.apiKey.isNotBlank()) "Online • ${uiState.selectedModel}" else "Modo Local Offline"),
-                                fontSize = 10.sp,
-                                color = if (uiState.apiKey.isNotBlank()) Emerald400 else Amber400,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        }
+
+                        // Botão 2: Regras Aprendidas (Memória Viva)
+                        IconButton(
+                            onClick = { viewModel.setRulesOpen(true) },
+                            modifier = Modifier
+                                .padding(horizontal = 2.dp)
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (uiState.learnedRules.isNotEmpty()) Amber500.copy(alpha = 0.14f)
+                                    else DarkSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lightbulb,
+                                contentDescription = "Memória e Regras do Agente",
+                                tint = if (uiState.learnedRules.isNotEmpty()) Amber400 else TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        // Botão 3: Limpar conversa atual
+                        IconButton(
+                            onClick = { showClearConfirmDialog = true },
+                            modifier = Modifier
+                                .padding(start = 2.dp, end = 6.dp)
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DarkSurfaceVariant.copy(alpha = 0.6f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Limpar conversa",
+                                tint = TextMuted,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
-                },
-                actions = {
-                    // Botão 1: Histórico de Conversas (Sessões)
-                    IconButton(onClick = { viewModel.setHistoryOpen(true) }) {
-                        Icon(
-                            imageVector = Icons.Default.History,
-                            contentDescription = "Histórico de conversas",
-                            tint = TextSecondary
+                )
+                // Linha sutil luminosa separando o cabeçalho smart
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Emerald500.copy(alpha = 0.35f),
+                                    Cyan500.copy(alpha = 0.35f),
+                                    Color.Transparent
+                                )
+                            )
                         )
-                    }
-
-                    // Botão 2: Regras Aprendidas (Memória Viva)
-                    IconButton(onClick = { viewModel.setRulesOpen(true) }) {
-                        Icon(
-                            imageVector = Icons.Default.Lightbulb,
-                            contentDescription = "Memória e Regras do Agente",
-                            tint = if (uiState.learnedRules.isNotEmpty()) Amber400 else TextSecondary
-                        )
-                    }
-
-                    // Botão 3: Chaves e Modelos
-                    IconButton(onClick = {
-                        tempApiKey = uiState.apiKey
-                        tempModel = uiState.selectedModel
-                        showApiKeyDialog = true
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Key,
-                            contentDescription = "Configurações de IA",
-                            tint = if (uiState.apiKey.isNotBlank()) Emerald400 else TextMuted
-                        )
-                    }
-
-                    // Botão 4: Limpar conversa atual
-                    IconButton(onClick = { showClearConfirmDialog = true }) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Limpar conversa",
-                            tint = TextMuted
-                        )
-                    }
-                }
-            )
+                )
+            }
         }
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(DarkBackground)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(DarkBackground, Color(0xFF0B1120), DarkBackground)
+                    )
+                )
         ) {
             // Lista de Mensagens do Chat
             LazyColumn(
@@ -527,9 +480,9 @@ fun GeminiChatScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                contentPadding = PaddingValues(vertical = 12.dp)
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+                contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp)
             ) {
                 items(uiState.messages) { msg ->
                     ChatBubble(
@@ -541,50 +494,80 @@ fun GeminiChatScreen(
 
                 if (uiState.isTyping) {
                     item {
+                        val thinkingShape = RoundedCornerShape(
+                            topStart = 6.dp,
+                            topEnd = 20.dp,
+                            bottomStart = 20.dp,
+                            bottomEnd = 20.dp
+                        )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(DarkSurfaceVariant)
-                                .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                                .shadow(6.dp, thinkingShape, spotColor = Cyan500.copy(alpha = 0.25f))
+                                .clip(thinkingShape)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(Color(0xFF152238), DarkSurfaceVariant)
+                                    )
+                                )
+                                .border(
+                                    1.dp,
+                                    Brush.horizontalGradient(
+                                        listOf(Emerald500.copy(alpha = 0.45f), Cyan500.copy(alpha = 0.3f))
+                                    ),
+                                    thinkingShape
+                                )
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(16.dp),
                                 color = Emerald400,
                                 strokeWidth = 2.dp
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = if (uiState.isTranscribingAudio) "Transcrevendo mensagem de voz..." else "Copiloto analisando suas finanças...",
-                                fontSize = 12.sp,
-                                color = TextSecondary,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = if (uiState.isTranscribingAudio) "Transcrevendo mensagem de voz..." else "Copiloto processando análise...",
+                                    fontSize = 12.sp,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Sincronizado com seu Saldo Livre em tempo real",
+                                    fontSize = 10.sp,
+                                    color = Cyan400
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Chips de Sugestões Rápidas Dinâmicas (Scroll Horizontal + Botão de Rotação)
+            // Chips de Sugestões Rápidas Dinâmicas (Smart Prompts)
             if (uiState.displayedSuggestions.isNotEmpty()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
                         onClick = { viewModel.onRotateSuggestions() },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(DarkSurfaceVariant.copy(alpha = 0.8f))
+                            .border(1.dp, DarkBorder, CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Girar sugestões",
-                            tint = TextMuted,
-                            modifier = Modifier.size(16.dp)
+                            tint = Emerald400,
+                            modifier = Modifier.size(15.dp)
                         )
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Row(
                         modifier = Modifier
@@ -593,21 +576,33 @@ fun GeminiChatScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         uiState.displayedSuggestions.forEach { prompt ->
+                            val chipShape = RoundedCornerShape(20.dp)
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(DarkSurfaceVariant)
-                                    .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
+                                    .clip(chipShape)
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(Color(0xFF162235), DarkSurfaceVariant)
+                                        )
+                                    )
+                                    .border(
+                                        1.dp,
+                                        Brush.horizontalGradient(
+                                            listOf(Emerald500.copy(alpha = 0.3f), Cyan500.copy(alpha = 0.2f))
+                                        ),
+                                        chipShape
+                                    )
                                     .clickable {
                                         viewModel.sendMessage(overrideText = prompt)
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    .padding(horizontal = 14.dp, vertical = 8.dp)
                             ) {
                                 Text(
                                     text = prompt,
                                     fontSize = 11.sp,
-                                    color = TextSecondary,
-                                    fontWeight = FontWeight.Medium
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Medium,
+                                    letterSpacing = 0.1.sp
                                 )
                             }
                         }
@@ -623,11 +618,15 @@ fun GeminiChatScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 4.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkSurfaceVariant)
-                        .border(1.dp, Emerald500.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color(0xFF132530), DarkSurfaceVariant)
+                            )
+                        )
+                        .border(1.dp, Emerald500.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -636,7 +635,7 @@ fun GeminiChatScreen(
                         tint = Emerald400,
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = att.name,
@@ -685,18 +684,35 @@ fun GeminiChatScreen(
                 }
             }
 
-            // Barra de Gravação de Voz Ativa OU Barra de Input Normal
-            Surface(
-                color = DarkSurface,
-                tonalElevation = 4.dp,
-                modifier = Modifier.fillMaxWidth()
+            // Dock Flutuante Smart (Gravação de Voz Ativa OU Barra de Comando Inteligente)
+            val dockShape = RoundedCornerShape(28.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .shadow(10.dp, dockShape, spotColor = Emerald500.copy(alpha = 0.25f))
+                    .clip(dockShape)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF1A253A), DarkSurface)
+                        )
+                    )
+                    .border(
+                        1.dp,
+                        if (uiState.inputText.isNotBlank() || uiState.isRecordingAudio) {
+                            Brush.horizontalGradient(listOf(Emerald500.copy(alpha = 0.6f), Cyan500.copy(alpha = 0.5f)))
+                        } else {
+                            Brush.horizontalGradient(listOf(DarkBorder, DarkBorder))
+                        },
+                        dockShape
+                    )
             ) {
                 if (uiState.isRecordingAudio) {
                     // BARRA DE GRAVAÇÃO DE VOZ ATIVA
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -711,7 +727,7 @@ fun GeminiChatScreen(
                             val sec = uiState.recordingSeconds
                             val timerStr = String.format(Locale.getDefault(), "%02d:%02d", sec / 60, sec % 60)
                             Text(
-                                text = "Gravando áudio... $timerStr",
+                                text = "Ouvindo comando de voz... $timerStr",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Rose400
@@ -741,7 +757,9 @@ fun GeminiChatScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(CircleShape)
-                                    .background(Emerald500)
+                                    .background(
+                                        Brush.linearGradient(listOf(Emerald400, Cyan500))
+                                    )
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
@@ -753,58 +771,66 @@ fun GeminiChatScreen(
                         }
                     }
                 } else {
-                    // BARRA DE INPUT NORMAL DOCKED
+                    // BARRA DE COMANDO SMART
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Botão de Anexo (PDF / OFX / CSV / TXT / Imagem)
                         IconButton(
                             onClick = { filePickerLauncher.launch("*/*") },
-                            modifier = Modifier.size(38.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.AttachFile,
                                 contentDescription = "Anexar extrato PDF, OFX, CSV ou TXT",
                                 tint = if (uiState.pendingAttachment != null) Emerald400 else TextSecondary,
-                                modifier = Modifier.size(21.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
                         // Botão para Colar Texto de Extrato / Fatura
                         IconButton(
                             onClick = { viewModel.setShowPasteStatementDialog(true) },
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentPaste,
                                 contentDescription = "Colar texto de fatura ou extrato",
                                 tint = TextSecondary,
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        // Campo de Texto
-                        OutlinedTextField(
+                        // Campo de Texto Integrado e Limpo
+                        TextField(
                             value = uiState.inputText,
                             onValueChange = { viewModel.onInputTextChange(it) },
-                            placeholder = { Text(text = "Pergunte ou lance um gasto...", color = TextMuted, fontSize = 13.sp) },
+                            placeholder = {
+                                Text(
+                                    text = "Pergunte à IA ou digite um gasto...",
+                                    color = TextMuted,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(24.dp),
                             maxLines = 4,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Emerald500,
-                                unfocusedBorderColor = DarkBorder,
-                                focusedContainerColor = DarkBackground,
-                                unfocusedContainerColor = DarkBackground,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                disabledIndicatorColor = Color.Transparent,
                                 focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
+                                unfocusedTextColor = TextPrimary,
+                                cursorColor = Emerald400
                             )
                         )
-
-                        Spacer(modifier = Modifier.width(6.dp))
 
                         // Botão de Microfone (Voz)
                         IconButton(
@@ -815,17 +841,19 @@ fun GeminiChatScreen(
                                     audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(38.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Mic,
                                 contentDescription = "Falar por áudio",
                                 tint = Emerald400,
-                                modifier = Modifier.size(22.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
-                        // Botão de Enviar
+                        Spacer(modifier = Modifier.width(4.dp))
+
+                        // Botão de Enviar Smart
                         val canSend = (uiState.inputText.isNotBlank() || uiState.pendingAttachment != null) && !uiState.isTyping
                         IconButton(
                             onClick = { viewModel.sendMessage() },
@@ -834,14 +862,14 @@ fun GeminiChatScreen(
                                 .size(42.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (canSend) Emerald500
-                                    else Emerald500.copy(alpha = 0.3f)
+                                    if (canSend) Brush.linearGradient(listOf(Emerald400, Cyan500))
+                                    else Brush.linearGradient(listOf(DarkSurfaceVariant, DarkSurfaceVariant))
                                 )
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Send,
                                 contentDescription = "Enviar",
-                                tint = DarkBackground,
+                                tint = if (canSend) DarkBackground else TextMuted,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -1089,8 +1117,34 @@ private fun LearnedRulesSheetContent(
 }
 
 // -------------------------------------------------------------
-// BOLHA DE MENSAGEM DO CHAT
+// BOLHA DE MENSAGEM SMART DO CHAT
 // -------------------------------------------------------------
+private fun parseSmartMarkdownText(text: String, isUser: Boolean): AnnotatedString {
+    val boldColor = if (isUser) Color.White else Emerald400
+    return buildAnnotatedString {
+        var idx = 0
+        while (idx < text.length) {
+            val startBold = text.indexOf("**", idx)
+            if (startBold == -1) {
+                append(text.substring(idx))
+                break
+            }
+            val endBold = text.indexOf("**", startBold + 2)
+            if (endBold == -1) {
+                append(text.substring(idx))
+                break
+            }
+            if (startBold > idx) {
+                append(text.substring(idx, startBold))
+            }
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = boldColor)) {
+                append(text.substring(startBold + 2, endBold))
+            }
+            idx = endBold + 2
+        }
+    }
+}
+
 @Composable
 fun ChatBubble(
     message: ChatMessage,
@@ -1100,12 +1154,66 @@ fun ChatBubble(
     val isUser = message.sender == MessageSender.USER
     val alignment = if (isUser) Alignment.End else Alignment.Start
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    val maxBubbleWidth = (screenWidthDp * 0.85f).dp
+    val maxBubbleWidth = (screenWidthDp * if (isUser) 0.82f else 0.90f).dp
+    val timeStr = remember(message.timestamp) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
+    }
+    val formattedText = remember(message.text, isUser) {
+        parseSmartMarkdownText(message.text, isUser)
+    }
+
+    val bubbleShape = remember(isUser) {
+        RoundedCornerShape(
+            topStart = if (isUser) 22.dp else 6.dp,
+            topEnd = if (isUser) 6.dp else 22.dp,
+            bottomStart = 22.dp,
+            bottomEnd = 22.dp
+        )
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = alignment
     ) {
+        // Cabeçalho Smart para Respostas da IA
+        if (!isUser) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(listOf(Emerald400, Cyan500))
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = DarkBackground,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Copiloto Smart",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Emerald400,
+                    letterSpacing = 0.2.sp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "• $timeStr",
+                    fontSize = 10.sp,
+                    color = TextMuted
+                )
+            }
+        }
+
         // Tag de Anexo se o usuário enviou arquivo ou áudio
         if (message.attachment != null) {
             val att = message.attachment
@@ -1113,103 +1221,139 @@ fun ChatBubble(
             Row(
                 modifier = Modifier
                     .widthIn(max = maxBubbleWidth)
-                    .padding(bottom = 4.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .padding(bottom = 6.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(DarkSurfaceVariant)
-                    .border(1.dp, Emerald500.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                    .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
                     imageVector = if (isAudio) Icons.Default.Audiotrack else Icons.Default.Description,
                     contentDescription = null,
                     tint = Emerald400,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(15.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = att.name,
                     fontSize = 11.sp,
                     color = Emerald400,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
 
-        // Bolha de Texto Principal
+        // Bolha de Texto Principal com Gradiente, Sombra Sutil e Bordas Dinâmicas
         Box(
             modifier = Modifier
                 .widthIn(max = maxBubbleWidth)
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isUser) 16.dp else 4.dp,
-                        bottomEnd = if (isUser) 4.dp else 16.dp
-                    )
+                .shadow(
+                    elevation = if (isUser) 4.dp else 8.dp,
+                    shape = bubbleShape,
+                    spotColor = if (isUser) Emerald500.copy(alpha = 0.3f) else Cyan500.copy(alpha = 0.22f)
                 )
+                .clip(bubbleShape)
                 .background(
-                    if (isUser) Brush.linearGradient(listOf(Emerald600, Color(0xFF047857)))
-                    else Brush.linearGradient(listOf(DarkSurfaceVariant, DarkSurface))
+                    if (isUser) {
+                        Brush.linearGradient(
+                            listOf(Emerald500, Color(0xFF059669), Color(0xFF047857))
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF17253B), Color(0xFF111B2D))
+                        )
+                    }
                 )
                 .border(
-                    1.dp,
-                    if (isUser) Emerald500.copy(alpha = 0.4f) else DarkBorder,
-                    RoundedCornerShape(16.dp)
+                    width = 1.dp,
+                    brush = if (isUser) {
+                        Brush.linearGradient(
+                            listOf(Color.White.copy(alpha = 0.28f), Emerald400.copy(alpha = 0.4f))
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            listOf(Emerald500.copy(alpha = 0.35f), Cyan500.copy(alpha = 0.22f), DarkBorder)
+                        )
+                    },
+                    shape = bubbleShape
                 )
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             Text(
-                text = message.text,
-                fontSize = 13.sp,
+                text = formattedText,
+                fontSize = 13.5.sp,
                 color = if (isUser) Color.White else TextPrimary,
-                lineHeight = 18.sp
+                lineHeight = 20.sp,
+                letterSpacing = 0.15.sp
             )
         }
 
         // Gráfico Dinâmico Renderizado
         if (message.chartPayload != null) {
-            Spacer(modifier = Modifier.height(8.dp))
+            val chartShape = RoundedCornerShape(20.dp)
+            Spacer(modifier = Modifier.height(10.dp))
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.95f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkSurfaceVariant)
-                    .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-                    .padding(12.dp)
+                    .fillMaxWidth(0.96f)
+                    .shadow(6.dp, chartShape, spotColor = Cyan500.copy(alpha = 0.2f))
+                    .clip(chartShape)
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF152236), DarkSurface))
+                    )
+                    .border(
+                        1.dp,
+                        Brush.linearGradient(listOf(Cyan500.copy(alpha = 0.35f), DarkBorder)),
+                        chartShape
+                    )
+                    .padding(14.dp)
             ) {
                 DynamicChatChart(payload = message.chartPayload)
             }
         }
 
-        // Card de Ação Interativo / Informativo
+        // Card de Ação Interativo / Informativo Smart
         if (message.actionCard != null) {
             val card = message.actionCard
             val pending = card.pendingAction
+            val actionShape = RoundedCornerShape(18.dp)
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             Column(
                 modifier = Modifier
                     .widthIn(max = maxBubbleWidth)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(DarkSurface)
-                    .border(1.dp, if (card.isSuccess) Emerald500.copy(alpha = 0.5f) else Rose500.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
-                    .padding(12.dp)
+                    .shadow(6.dp, actionShape, spotColor = if (card.isSuccess) Emerald500.copy(alpha = 0.25f) else Rose500.copy(alpha = 0.25f))
+                    .clip(actionShape)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF162436), DarkSurface)
+                        )
+                    )
+                    .border(
+                        1.dp,
+                        if (card.isSuccess) {
+                            Brush.linearGradient(listOf(Emerald400.copy(alpha = 0.55f), Cyan500.copy(alpha = 0.3f)))
+                        } else {
+                            Brush.linearGradient(listOf(Rose400.copy(alpha = 0.55f), DarkBorder))
+                        },
+                        actionShape
+                    )
+                    .padding(14.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = if (card.isSuccess) Icons.Default.CheckCircle else Icons.Default.Close,
                         contentDescription = null,
                         tint = if (card.isSuccess) Emerald400 else Rose400,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = card.title,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         color = if (card.isSuccess) Emerald400 else Rose400,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1217,15 +1361,16 @@ fun ChatBubble(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = card.description, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(text = card.description, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
 
                 if (!card.detail.isNullOrBlank()) {
-                    Text(text = card.detail, fontSize = 11.sp, color = TextSecondary)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = card.detail, fontSize = 11.sp, color = TextSecondary, lineHeight = 16.sp)
                 }
 
                 if (!card.newFreeBalance.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = card.newFreeBalance,
                         fontSize = 11.sp,
@@ -1238,7 +1383,7 @@ fun ChatBubble(
 
                 // Botões de Confirmação Interativa se a ação for pendente
                 if (pending != null && pending.status == PendingActionStatus.PENDING) {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1246,9 +1391,9 @@ fun ChatBubble(
                         Button(
                             onClick = { onConfirmAction?.invoke(pending) },
                             colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 4.dp)
+                            contentPadding = PaddingValues(vertical = 6.dp)
                         ) {
                             Text(
                                 text = "✓ Confirmar",
@@ -1262,9 +1407,9 @@ fun ChatBubble(
 
                         OutlinedButton(
                             onClick = { onCancelAction?.invoke(pending) },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 4.dp),
+                            contentPadding = PaddingValues(vertical = 6.dp),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose400)
                         ) {
                             Text(
@@ -1276,24 +1421,25 @@ fun ChatBubble(
                         }
                     }
                 } else if (pending?.status == PendingActionStatus.CONFIRMED) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "✓ Lançamento confirmado no Saldo Livre", fontSize = 10.sp, color = Emerald400)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "✓ Lançamento confirmado no Saldo Livre", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Emerald400)
                 } else if (pending?.status == PendingActionStatus.CANCELLED) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = "✕ Ação cancelada", fontSize = 10.sp, color = Rose400)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "✕ Ação cancelada", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Rose400)
                 }
             }
         }
 
-        // Horário da Mensagem
-        Spacer(modifier = Modifier.height(3.dp))
-        val timeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
-        Text(
-            text = timeStr,
-            fontSize = 9.sp,
-            color = TextMuted,
-            modifier = Modifier.padding(horizontal = 4.dp)
-        )
+        // Horário da Mensagem do Usuário (para IA já consta no cabeçalho smart)
+        if (isUser) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = timeStr,
+                fontSize = 10.sp,
+                color = TextMuted,
+                modifier = Modifier.padding(horizontal = 6.dp)
+            )
+        }
     }
 }
 
@@ -1632,7 +1778,7 @@ private fun StatementItemRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = item.date,
+                    text = FinanceEngine.formatFullDate(item.date),
                     fontSize = 10.sp,
                     color = TextMuted
                 )

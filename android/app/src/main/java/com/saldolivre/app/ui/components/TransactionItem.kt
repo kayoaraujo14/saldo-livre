@@ -33,7 +33,8 @@ private val InstallmentBadgeShape = RoundedCornerShape(4.dp)
 fun TransactionItem(
     transaction: Transaction,
     modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    onStatusClick: (() -> Unit)? = null
 ) {
     val categoryDetail = remember(transaction.category) {
         CategoryRegistry.get(transaction.category)
@@ -45,21 +46,23 @@ fun TransactionItem(
         categoryDetail.color.copy(alpha = 0.35f)
     }
     val isIncome = transaction.type == TransactionType.INCOME
+    val isPaid = transaction.status == com.saldolivre.app.data.model.TransactionStatus.PAID
     val shortDate = remember(transaction.dueDate) {
-        transaction.dueDate.takeLast(5).replace("-", "/")
+        FinanceEngine.formatShortDate(transaction.dueDate)
     }
     val formattedAmount = remember(transaction.effectiveAmount, isIncome) {
         val prefix = if (isIncome) "+ " else "- "
         prefix + FinanceEngine.formatCurrency(transaction.effectiveAmount)
     }
     val amountColor = if (isIncome) Emerald400 else TextPrimary
+    val itemBorderColor = if (isPaid) Emerald500.copy(alpha = 0.25f) else DarkBorder
 
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(TransactionItemShape)
             .background(DarkSurface)
-            .border(1.dp, DarkBorder, TransactionItemShape)
+            .border(1.dp, itemBorderColor, TransactionItemShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(14.dp)
     ) {
@@ -138,8 +141,18 @@ fun TransactionItem(
                         color = TextMuted
                     )
 
+                    val categoryWithSubcategory = remember(transaction.category, transaction.subcategory) {
+                        if (!transaction.subcategory.isNullOrBlank() &&
+                            !transaction.subcategory.equals(transaction.category, ignoreCase = true)
+                        ) {
+                            "${transaction.category} › ${transaction.subcategory}"
+                        } else {
+                            transaction.category
+                        }
+                    }
+
                     Text(
-                        text = transaction.subcategory ?: transaction.category,
+                        text = categoryWithSubcategory,
                         style = Typography.labelSmall,
                         color = TextSecondary,
                         maxLines = 1,
@@ -170,7 +183,11 @@ fun TransactionItem(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                StatusBadge(status = transaction.status)
+                StatusBadge(
+                    status = transaction.status,
+                    isIncome = isIncome,
+                    onClick = onStatusClick
+                )
             }
         }
     }

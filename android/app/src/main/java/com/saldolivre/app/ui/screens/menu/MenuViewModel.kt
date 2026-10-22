@@ -27,7 +27,9 @@ data class MenuUiState(
     val acceptedFriendsCount: Int = 0,
     val pendingAlertsCount: Int = 0,
     val hasGeminiKey: Boolean = false,
+    val apiKey: String = "",
     val activeGeminiModel: String = "gemini-3-flash",
+    val isTestingConnection: Boolean = false,
     val isGeneratingBills: Boolean = false,
     val generateFeedback: String? = null
 )
@@ -38,6 +40,10 @@ class MenuViewModel(
 
     private val appContext = runCatching { SaldoLivreApplication.instance }.getOrNull()
     private val loadBalancer = GeminiLoadBalancer(appContext)
+
+    companion object {
+        val AVAILABLE_MODELS = GeminiLoadBalancer.DEFAULT_MODELS_POOL
+    }
 
     private val _uiState = MutableStateFlow(MenuUiState())
     val uiState: StateFlow<MenuUiState> = _uiState.asStateFlow()
@@ -101,11 +107,35 @@ class MenuViewModel(
                     acceptedFriendsCount = acceptedFriends.size,
                     pendingAlertsCount = pendingFriendReqs + pendingCharges,
                     hasGeminiKey = keys.isNotEmpty(),
+                    apiKey = keys.joinToString(", "),
                     activeGeminiModel = loadBalancer.getSelectedModel()
                 )
             }.collect { state ->
                 _uiState.value = state
             }
+        }
+    }
+
+    fun saveAiConfig(keyInput: String, model: String) {
+        val trimmed = keyInput.trim()
+        loadBalancer.saveApiKeys(trimmed)
+        loadBalancer.setSelectedModel(model)
+        val keys = loadBalancer.getApiKeys()
+        _uiState.update {
+            it.copy(
+                hasGeminiKey = keys.isNotEmpty(),
+                apiKey = keys.joinToString(", "),
+                activeGeminiModel = loadBalancer.getSelectedModel()
+            )
+        }
+    }
+
+    fun testConnection(testKey: String, onResult: (Pair<Boolean, String>) -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTestingConnection = true) }
+            val outcome = loadBalancer.testConnection(testKey)
+            _uiState.update { it.copy(isTestingConnection = false) }
+            onResult(outcome)
         }
     }
 

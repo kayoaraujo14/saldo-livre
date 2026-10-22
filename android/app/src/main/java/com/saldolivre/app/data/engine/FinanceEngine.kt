@@ -41,6 +41,100 @@ object FinanceEngine {
         return String.format(Locale.US, "%04d-%02d-%02d", now.year, now.monthValue, now.dayOfMonth)
     }
 
+    /**
+     * Formata a data atual no padrão brasileiro completo DD/MM/YYYY.
+     */
+    fun todayFormatted(): String = formatFullDate(todayKey())
+
+    /**
+     * Formata uma data (YYYY-MM-DD ou DD/MM/YYYY) para exibição curta no padrão brasileiro DD/MM.
+     */
+    fun formatShortDate(dateStr: String?): String {
+        if (dateStr.isNullOrBlank()) return ""
+        val clean = dateStr.trim()
+        if (clean.contains("-")) {
+            val parts = clean.split("-")
+            if (parts.size >= 3) {
+                val day = parts[2].take(2).padStart(2, '0')
+                val month = parts[1].padStart(2, '0')
+                return "$day/$month"
+            } else if (parts.size == 2) {
+                return "${parts[1].padStart(2, '0')}/${parts[0]}"
+            }
+        }
+        if (clean.contains("/")) {
+            val parts = clean.split("/")
+            if (parts.size >= 2) {
+                return "${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}"
+            }
+        }
+        return clean
+    }
+
+    /**
+     * Formata uma data (YYYY-MM-DD ou DD/MM/YYYY) para exibição completa no padrão brasileiro DD/MM/YYYY.
+     */
+    fun formatFullDate(dateStr: String?): String {
+        if (dateStr.isNullOrBlank()) return ""
+        val clean = dateStr.trim()
+        if (clean.contains("-")) {
+            val parts = clean.split("-")
+            if (parts.size >= 3) {
+                val year = parts[0]
+                val month = parts[1].padStart(2, '0')
+                val day = parts[2].take(2).padStart(2, '0')
+                return "$day/$month/$year"
+            } else if (parts.size == 2) {
+                return "${parts[1].padStart(2, '0')}/${parts[0]}"
+            }
+        }
+        if (clean.contains("/")) {
+            val parts = clean.split("/")
+            if (parts.size == 3) {
+                val day = parts[0].padStart(2, '0')
+                val month = parts[1].padStart(2, '0')
+                val year = parts[2]
+                return "$day/$month/$year"
+            }
+        }
+        return clean
+    }
+
+    /**
+     * Converte uma data informada pelo usuário (DD/MM/YYYY, DD/MM ou YYYY-MM-DD) para ISO YYYY-MM-DD.
+     */
+    fun parseInputDateToIso(dateInput: String?): String {
+        if (dateInput.isNullOrBlank()) return todayKey()
+        val clean = dateInput.trim()
+        if (clean.matches(fullDateRegex)) return clean
+        if (clean.contains("/")) {
+            val parts = clean.split("/")
+            if (parts.size == 3) {
+                val day = parts[0].padStart(2, '0')
+                val month = parts[1].padStart(2, '0')
+                val year = if (parts[2].length == 2) "20${parts[2]}" else parts[2].padStart(4, '0')
+                return "$year-$month-$day"
+            } else if (parts.size == 2) {
+                val day = parts[0].padStart(2, '0')
+                val month = parts[1].padStart(2, '0')
+                val year = LocalDate.now().year
+                return String.format(Locale.US, "%04d-%s-%s", year, month, day)
+            }
+        }
+        if (clean.contains("-")) {
+            val parts = clean.split("-")
+            if (parts.size == 3) {
+                return if (parts[0].length == 4) {
+                    "${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}"
+                } else {
+                    val year = if (parts[2].length == 2) "20${parts[2]}" else parts[2].padStart(4, '0')
+                    "$year-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}"
+                }
+            }
+        }
+        return todayKey()
+    }
+
     fun daysInMonth(monthKey: String): Int {
         return try {
             val parts = monthKey.split("-")
@@ -108,8 +202,9 @@ object FinanceEngine {
         explicitDueDate: String? = null,
         explicitMonth: String? = null
     ): Pair<String, String> {
-        if (!explicitDueDate.isNullOrBlank() && explicitDueDate.matches(fullDateRegex)) {
-            val cleanDue = explicitDueDate.trim()
+        val normalizedPurchaseDate = parseInputDateToIso(purchaseDate)
+        if (!explicitDueDate.isNullOrBlank()) {
+            val cleanDue = parseInputDateToIso(explicitDueDate)
             val cleanMonth = if (!explicitMonth.isNullOrBlank() && explicitMonth.matches(yearMonthRegex)) {
                 explicitMonth.trim()
             } else {
@@ -119,12 +214,12 @@ object FinanceEngine {
         }
 
         if (card == null || card.closingDay <= 0 || card.dueDay <= 0) {
-            val m = if (purchaseDate.length >= 7) purchaseDate.substring(0, 7) else currentMonthKey()
-            return Pair(purchaseDate, m)
+            val m = if (normalizedPurchaseDate.length >= 7) normalizedPurchaseDate.substring(0, 7) else currentMonthKey()
+            return Pair(normalizedPurchaseDate, m)
         }
 
         try {
-            val parts = purchaseDate.split("-")
+            val parts = normalizedPurchaseDate.split("-")
             val year = parts[0].toInt()
             val month = parts[1].toInt()
             val day = parts[2].toInt()
@@ -334,6 +429,71 @@ object FinanceEngine {
             allocations = allocations,
             userImpact = deriveImpact(allocations, visibleList),
             visibleToUids = visibleList
+        )
+    }
+
+    val STATUS_ORDER: List<TransactionStatus> = listOf(
+        TransactionStatus.ESTIMATED,
+        TransactionStatus.PENDING,
+        TransactionStatus.PAID
+    )
+
+    fun nextStatus(status: TransactionStatus): TransactionStatus {
+        val idx = STATUS_ORDER.indexOf(status).coerceAtLeast(0)
+        return STATUS_ORDER[(idx + 1) % STATUS_ORDER.size]
+    }
+
+    fun togglePaidStatus(status: TransactionStatus): TransactionStatus {
+        return if (status == TransactionStatus.PAID) TransactionStatus.PENDING else TransactionStatus.PAID
+    }
+
+    fun rescaleSplit(tx: Transaction, newTotal: Double): Transaction {
+        val allocs = tx.allocations
+        val oldTotal = allocs.sumOf { it.amount }
+        val roundedTotal = round2(newTotal)
+        val newAllocs = when {
+            allocs.isEmpty() -> emptyList()
+            oldTotal <= 0.0 -> {
+                val each = round2(roundedTotal / allocs.size)
+                allocs.map { it.copy(amount = each) }
+            }
+            else -> {
+                val ratio = roundedTotal / oldTotal
+                var acc = 0.0
+                allocs.mapIndexed { idx, a ->
+                    if (idx == allocs.lastIndex) {
+                        a.copy(amount = round2(roundedTotal - acc))
+                    } else {
+                        val amt = round2(a.amount * ratio)
+                        acc += amt
+                        a.copy(amount = amt)
+                    }
+                }
+            }
+        }
+        return tx.copy(
+            totalAmount = roundedTotal,
+            allocations = newAllocs,
+            userImpact = deriveImpact(newAllocs, tx.visibleToUids)
+        )
+    }
+
+    fun applyStatusPatch(tx: Transaction, newStatus: TransactionStatus, customActualAmount: Double? = null): Transaction {
+        val resolvedActual = when {
+            customActualAmount != null && customActualAmount > 0.0 -> round2(customActualAmount)
+            newStatus == TransactionStatus.PAID && tx.actualAmount == null -> round2(tx.estimatedAmount ?: tx.totalAmount)
+            else -> tx.actualAmount
+        }
+        val base = if (customActualAmount != null && customActualAmount > 0.0) {
+            rescaleSplit(tx, customActualAmount)
+        } else if (resolvedActual != null && resolvedActual != tx.totalAmount) {
+            rescaleSplit(tx, resolvedActual)
+        } else {
+            tx
+        }
+        return base.copy(
+            status = newStatus,
+            actualAmount = resolvedActual
         )
     }
 

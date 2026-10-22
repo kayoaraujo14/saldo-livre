@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.ui.theme.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TransactionFormScreen(
     viewModel: TransactionFormViewModel,
@@ -338,17 +338,17 @@ fun TransactionFormScreen(
                 )
             )
 
-            // Due Date Input (YYYY-MM-DD)
+            // Due Date Input (DD/MM/YYYY)
             OutlinedTextField(
                 value = state.dueDateText,
                 onValueChange = { viewModel.onDueDateChange(it) },
                 label = {
                     Text(
-                        if (state.type == TransactionType.INCOME) "Data de Recebimento (AAAA-MM-DD)"
-                        else "Data de Vencimento / Compra (AAAA-MM-DD)"
+                        if (state.type == TransactionType.INCOME) "Data de Recebimento (DD/MM/AAAA)"
+                        else "Data de Vencimento / Compra (DD/MM/AAAA)"
                     )
                 },
-                placeholder = { Text("Ex: 2026-10-21") },
+                placeholder = { Text("Ex: 21/10/2026") },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
@@ -370,62 +370,126 @@ fun TransactionFormScreen(
                 )
             )
 
-            // Category Selector
-            Text(text = "Categoria", style = Typography.titleMedium, color = TextPrimary)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                CategoryRegistry.CATEGORIES.forEach { cat ->
-                    val isSelected = state.category == cat.name
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isSelected) cat.color.copy(alpha = 0.2f) else DarkSurface)
-                            .border(1.dp, if (isSelected) cat.color else DarkBorder, RoundedCornerShape(10.dp))
-                            .clickable { viewModel.onCategoryChange(cat.name) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = cat.name,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) cat.color else TextSecondary
-                        )
-                    }
+            // Category & Subcategory Selector
+            val currentCategoryDetail = remember(state.category) { CategoryRegistry.get(state.category) }
+            val subcategoriesList = remember(currentCategoryDetail, state.subcategory) {
+                val base = currentCategoryDetail.subcategories
+                if (!state.subcategory.isNullOrBlank() && state.subcategory !in base) {
+                    listOf(state.subcategory!!) + base
+                } else {
+                    base
                 }
             }
 
-            // Subcategory Selector
-            val currentCategoryDetail = remember(state.category) { CategoryRegistry.get(state.category) }
-            if (currentCategoryDetail.subcategories.isNotEmpty()) {
-                Text(text = "Subcategoria", style = Typography.titleMedium, color = TextPrimary)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(DarkSurface)
+                    .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Categoria Principal",
+                        style = Typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(currentCategoryDetail.color.copy(alpha = 0.15f))
+                            .border(1.dp, currentCategoryDetail.color.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = state.category + (state.subcategory?.let { " › $it" } ?: ""),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = currentCategoryDetail.color,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    currentCategoryDetail.subcategories.forEach { sub ->
-                        val isSelected = state.subcategory == sub
+                    CategoryRegistry.CATEGORIES.forEach { cat ->
+                        val isSelected = state.category == cat.name
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) Cyan500.copy(alpha = 0.2f) else DarkSurface)
-                                .border(1.dp, if (isSelected) Cyan400 else DarkBorder, RoundedCornerShape(10.dp))
-                                .clickable { viewModel.onSubcategoryChange(sub) }
+                                .background(if (isSelected) cat.color.copy(alpha = 0.2f) else DarkBackground)
+                                .border(1.dp, if (isSelected) cat.color else DarkBorder, RoundedCornerShape(10.dp))
+                                .clickable { viewModel.onCategoryChange(cat.name) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = sub,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) Cyan400 else TextSecondary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = cat.icon,
+                                    contentDescription = null,
+                                    tint = if (isSelected) cat.color else TextSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = cat.name,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) cat.color else TextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (subcategoriesList.isNotEmpty()) {
+                    HorizontalDivider(color = DarkBorder.copy(alpha = 0.6f))
+
+                    Text(
+                        text = "Subcategoria (${state.category})",
+                        style = Typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary
+                    )
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        subcategoriesList.forEach { sub ->
+                            val isSelected = state.subcategory == sub
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSelected) Cyan500.copy(alpha = 0.2f) else DarkBackground)
+                                    .border(1.dp, if (isSelected) Cyan400 else DarkBorder, RoundedCornerShape(10.dp))
+                                    .clickable { viewModel.onSubcategoryChange(sub) }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = sub,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) Cyan400 else TextSecondary
+                                )
+                            }
                         }
                     }
                 }

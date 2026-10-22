@@ -77,6 +77,12 @@ class DashboardViewModel(
         }
     }
 
+    fun toggleTransactionStatus(id: String) {
+        viewModelScope.launch {
+            repository.toggleTransactionStatus(id)
+        }
+    }
+
     fun generateBills() {
         viewModelScope.launch {
             repository.generateBillsForMonth(_uiState.value.selectedMonth)

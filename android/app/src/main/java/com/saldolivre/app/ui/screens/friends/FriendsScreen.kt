@@ -549,7 +549,11 @@ private fun ChargeGroupCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (group.isInstallment) "Período: ${group.firstDueDate} até ${group.lastDueDate}" else "Vencimento: ${group.firstDueDate}",
+                    text = if (group.isInstallment) {
+                        "Período: ${FinanceEngine.formatFullDate(group.firstDueDate)} até ${FinanceEngine.formatFullDate(group.lastDueDate)}"
+                    } else {
+                        "Vencimento: ${FinanceEngine.formatFullDate(group.firstDueDate)}"
+                    },
                     fontSize = 11.sp,
                     color = TextSecondary,
                     maxLines = 1
@@ -642,7 +646,7 @@ private fun ChargeGroupCard(
                                         modifier = Modifier.weight(1f)
                                     )
                                     Text(
-                                        text = itx.dueDate,
+                                        text = FinanceEngine.formatFullDate(itx.dueDate),
                                         fontSize = 11.sp,
                                         color = TextMuted,
                                         maxLines = 1,
