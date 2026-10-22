@@ -960,7 +960,7 @@ class GeminiChatViewModel(
         val lastAssistant = _uiState.value.messages.lastOrNull { it.sender == MessageSender.ASSISTANT }
         val activePending = lastAssistant?.actionCard?.pendingAction
         if (activePending != null && activePending.status == PendingActionStatus.PENDING && rawInput.isNotBlank() && attachment == null) {
-            val isAffirmative = Regex("""^(sim|confirmo|confirmar|pode|pode lançar|pode lancar|pode salvar|ok|beleza|positivo|isso|correto|executar|pode sim|claro|com certeza)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
+            val isAffirmative = Regex("""^(sim|confirmo|confirma|confirmar|pode|pode lançar|pode lancar|pode salvar|pode cadastrar|pode registrar|ok|beleza|positivo|isso|correto|executar|pode sim|claro|com certeza|salvar|registra|lança|lanca)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
             val isNegative = Regex("""^(não|nao|cancela|cancelar|esquece|esqueça|deixa pra lá|deixa pra la|abortar|errado|não quero|nao quero)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
 
             if (isAffirmative) {
@@ -1175,6 +1175,12 @@ class GeminiChatViewModel(
             - Cite valores formatados em moeda brasileira (ex: R$ 45,00).
             - Seja DIRETO, OBJETIVO e acolhedor.
 
+            CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE CADASTRAR NOVAS TRANSAÇÕES (HUMAN-IN-THE-LOOP):
+            - Ao receber comandos para cadastrar novas despesas ou receitas (individuais ou parceladas), NUNCA afirme que o lançamento já foi salvo ou gravado no banco de dados.
+            - Explique de forma clara e objetiva que você preparou o lançamento com as informações identificadas (descrição, valor, categoria, mês de competência da fatura, vencimento, cartão, divisão) e peça para o usuário conferir e confirmar no botão abaixo se está tudo conforme desejado antes de gravar no banco de dados.
+            - Exemplo de resposta: "Preparei o lançamento de **R$ 45,00** em **Padaria** no débito para **Novembro de 2026**. Por favor, confira os dados abaixo e confirme para salvar no seu Saldo Livre."
+            - O sistema renderizará automaticamente os botões interativos de "✓ Confirmar" e "✕ Cancelar". A gravação real no Cloud Firestore ocorrerá APENAS quando o usuário confirmar explicitamente.
+
             EXECUÇÃO DE OPERAÇÕES NO BANCO DE DADOS (CRUD COMPLETO):
             Sempre que o usuário solicitar qualquer operação de criação, edição, exclusão, consulta ou gerenciamento, você DEVE explicar brevemente e OBRIGATORIAMENTE INCLUIR NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com a ação correspondente:
 
@@ -1330,7 +1336,16 @@ class GeminiChatViewModel(
                 val toolResult = toolsEngine.executeFromJson(jsonObj)
 
                 val cleanText = rawResponse.replace(match.value, "").trim()
-                val finalText = if (cleanText.isNotBlank()) {
+                val isPending = toolResult.actionCard?.pendingAction != null
+                val claimsSaved = Regex("""cadastrad[oa] com sucesso|registrad[oa] com sucesso|salv[oa] com sucesso""", RegexOption.IGNORE_CASE).containsMatchIn(cleanText)
+
+                val finalText = if (isPending) {
+                    if (cleanText.isNotBlank() && !claimsSaved) {
+                        cleanText
+                    } else {
+                        toolResult.text
+                    }
+                } else if (cleanText.isNotBlank()) {
                     cleanText
                 } else {
                     toolResult.text
@@ -1350,8 +1365,13 @@ class GeminiChatViewModel(
         // o motor de ferramentas local processa para garantir a execução no banco de dados!
         val offlineResult = toolsEngine.processNaturalLanguageOffline(userQuery)
         if (offlineResult.actionCard != null || offlineResult.chartPayload != null) {
+            val finalText = if (offlineResult.actionCard?.pendingAction != null) {
+                offlineResult.text
+            } else {
+                "${rawResponse.trim()}\n\n${offlineResult.text}".trim()
+            }
             return AgentResponse(
-                text = "${rawResponse.trim()}\n\n${offlineResult.text}",
+                text = finalText,
                 actionCard = offlineResult.actionCard,
                 chartPayload = offlineResult.chartPayload
             )

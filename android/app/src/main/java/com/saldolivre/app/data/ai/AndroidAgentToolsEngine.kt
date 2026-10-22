@@ -149,7 +149,8 @@ class AndroidAgentToolsEngine(
         currentInstallment: Int = 1,
         totalInstallments: Int = 1,
         customCompetenceMonth: String? = null,
-        customDueDate: String? = null
+        customDueDate: String? = null,
+        confirmed: Boolean = false
     ): ToolExecutionResult {
         if (amount <= 0.0) {
             return ToolExecutionResult(text = "⚠️ O valor da transação deve ser maior que zero.")
@@ -201,6 +202,79 @@ class AndroidAgentToolsEngine(
         )
 
         val cleanDesc = FinanceEngine.stripInstallmentSuffix(description)
+        val isInstallment = totalInstallments > 1
+        val cardText = if (matchedCard != null) " • Cartão ${matchedCard.cardName}" else ""
+        val myImpact = splitResult.userImpact[user.uid] ?: amount
+
+        // SE AINDA NÃO CONFIRMADO PELO USUÁRIO: Gera rascunho com pedido de confirmação interativo
+        if (!confirmed) {
+            val before = repository.getMonthSummary().first()
+            val netDiff = if (type == TransactionType.INCOME) amount else -myImpact
+            val estimatedAfter = FinanceEngine.round2(before.freeBalance + netDiff)
+            val actionTitle = "${if (type == TransactionType.INCOME) "Receita" else "Despesa"}: $cleanDesc"
+
+            val confirmMessage = if (isInstallment) {
+                "Entendi que você deseja cadastrar uma despesa parcelada: **\"$cleanDesc\"** em **${totalInstallments}x de ${FinanceEngine.formatCurrency(amount)}** (total de ${FinanceEngine.formatCurrency(amount * totalInstallments)})${if (matchedCard != null) " no cartão **${matchedCard.cardName}**" else ""} a partir de **${FinanceEngine.monthLabel(finalCompetenceMonth)}**.\n\n" +
+                        "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
+                        "• **Divisão**: ${splitType.label} (Seu impacto: ${FinanceEngine.formatCurrency(myImpact)}/mês)\n" +
+                        "• **Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
+                        "Por favor, confirme se os dados estão corretos para registrar no Saldo Livre."
+            } else {
+                val typeName = if (type == TransactionType.INCOME) "receita" else "despesa"
+                "Entendi que você deseja cadastrar uma $typeName: **\"$cleanDesc\"** no valor de **${FinanceEngine.formatCurrency(amount)}**${if (matchedCard != null) " no cartão **${matchedCard.cardName}**" else ""} para **${FinanceEngine.monthLabel(finalCompetenceMonth)}** (vencimento: ${FinanceEngine.formatShortDate(finalDueDate)}).\n\n" +
+                        "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
+                        "• **Método**: ${effectiveMethod.label}\n" +
+                        "• **Divisão**: ${splitType.label} (Seu impacto: ${FinanceEngine.formatCurrency(myImpact)})\n" +
+                        "• **Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
+                        "Por favor, confirme se os dados estão corretos para registrar no Saldo Livre."
+            }
+
+            val pendingAction = PendingAction(
+                id = "act_" + UUID.randomUUID().toString().take(8),
+                toolName = "CREATE_TRANSACTION",
+                title = "Confirmar $actionTitle",
+                description = if (isInstallment) {
+                    "$cleanDesc — ${totalInstallments}x de ${FinanceEngine.formatCurrency(amount)}"
+                } else {
+                    "$cleanDesc — ${FinanceEngine.formatCurrency(amount)}"
+                },
+                detail = "$finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}$cardText • ${splitType.label}",
+                args = mapOf(
+                    "description" to cleanDesc,
+                    "amount" to amount,
+                    "type" to if (type == TransactionType.INCOME) "income" else "expense",
+                    "category" to finalCat,
+                    "subcategory" to finalSubcat,
+                    "paymentMethod" to effectiveMethod.name,
+                    "cardName" to matchedCard?.cardName,
+                    "splitType" to splitType.name,
+                    "friendName" to friendName,
+                    "friendEmail" to friendEmail,
+                    "thirdPartyName" to thirdPartyName,
+                    "currentInstallment" to currentInstallment,
+                    "totalInstallments" to totalInstallments,
+                    "competenceMonth" to finalCompetenceMonth,
+                    "dueDate" to finalDueDate,
+                    "confirmed" to true
+                ),
+                status = PendingActionStatus.PENDING
+            )
+
+            return ToolExecutionResult(
+                text = confirmMessage,
+                actionCard = ActionCardData(
+                    title = "Confirmar $actionTitle",
+                    description = if (isInstallment) {
+                        "$cleanDesc — ${totalInstallments}x de ${FinanceEngine.formatCurrency(amount)}"
+                    } else {
+                        "$cleanDesc — ${FinanceEngine.formatCurrency(amount)}"
+                    },
+                    detail = "$finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}$cardText • ${splitType.label}",
+                    newFreeBalance = "Saldo Livre previsto: ${FinanceEngine.formatCurrency(before.freeBalance)} → ${FinanceEngine.formatCurrency(estimatedAfter)}",
+                    pendingAction = pendingAction
+                )
+            )
+        }
 
         if (totalInstallments > 1) {
             val groupId = "inst_" + UUID.randomUUID().toString().take(8)
@@ -261,7 +335,6 @@ class AndroidAgentToolsEngine(
             )
 
             val summaryNow = repository.getMonthSummary().first()
-            val cardText = if (matchedCard != null) " • Cartão ${matchedCard.cardName}" else ""
 
             return ToolExecutionResult(
                 text = "✅ **Compra parcelada cadastrada com sucesso!**\n\n" +
@@ -315,8 +388,6 @@ class AndroidAgentToolsEngine(
             )
 
             val summaryNow = repository.getMonthSummary().first()
-            val cardText = if (matchedCard != null) " • Cartão ${matchedCard.cardName}" else ""
-            val myImpact = splitResult.userImpact[user.uid] ?: amount
 
             val typeLabel = if (type == TransactionType.INCOME) "Receita" else "Despesa"
 
@@ -352,6 +423,9 @@ class AndroidAgentToolsEngine(
         val thirdPartyName = jsonObj.get("thirdPartyName")?.asString
         val competenceMonth = jsonObj.get("competenceMonth")?.asString
         val dueDate = jsonObj.get("dueDate")?.asString
+        val confirmed = jsonObj.get("confirmed")?.asBoolean
+            ?: jsonObj.get("__confirmed")?.asBoolean
+            ?: false
 
         val installmentsObj = jsonObj.getAsJsonObject("installments")
         val currentInstallment = installmentsObj?.get("current")?.asInt ?: 1
@@ -383,7 +457,8 @@ class AndroidAgentToolsEngine(
             currentInstallment = currentInstallment,
             totalInstallments = totalInstallments,
             customCompetenceMonth = competenceMonth,
-            customDueDate = dueDate
+            customDueDate = dueDate,
+            confirmed = confirmed
         )
     }
 
@@ -396,6 +471,10 @@ class AndroidAgentToolsEngine(
         if (array == null || array.size() == 0) {
             return ToolExecutionResult(text = "⚠️ Nenhuma transação encontrada no lote para registrar.")
         }
+
+        val confirmed = jsonObj.get("confirmed")?.asBoolean
+            ?: jsonObj.get("__confirmed")?.asBoolean
+            ?: false
 
         val user = repository.currentUser.value
         val defaultMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
@@ -442,6 +521,40 @@ class AndroidAgentToolsEngine(
 
         if (createdList.isEmpty()) {
             return ToolExecutionResult(text = "⚠️ Não foi possível processar as transações do lote.")
+        }
+
+        if (!confirmed) {
+            val before = repository.getMonthSummary().first()
+            val netDiff = totalIncomes - totalExpenses
+            val estimatedAfter = FinanceEngine.round2(before.freeBalance + netDiff)
+
+            val pendingAction = PendingAction(
+                id = "act_" + UUID.randomUUID().toString().take(8),
+                toolName = "BATCH_TRANSACTIONS",
+                title = "Confirmar Lote (${createdList.size} itens)",
+                description = "${createdList.size} transações prontas para lançamento",
+                detail = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
+                args = mapOf(
+                    "transactionsJson" to array.toString(),
+                    "confirmed" to true
+                ),
+                status = PendingActionStatus.PENDING
+            )
+
+            return ToolExecutionResult(
+                text = "Identifiquei **${createdList.size} lançamentos** para cadastro em lote:\n\n" +
+                        (if (totalIncomes > 0) "• 🟢 **Receitas**: ${FinanceEngine.formatCurrency(totalIncomes)}\n" else "") +
+                        (if (totalExpenses > 0) "• 🔴 **Despesas**: ${FinanceEngine.formatCurrency(totalExpenses)}\n" else "") +
+                        "• **Saldo Livre previsto**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
+                        "Por favor, confirme se deseja registrar todos esses lançamentos no seu Saldo Livre.",
+                actionCard = ActionCardData(
+                    title = "Confirmar Lote (${createdList.size} lançamentos)",
+                    description = "${createdList.size} itens preparados",
+                    detail = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
+                    newFreeBalance = "Saldo Livre previsto: ${FinanceEngine.formatCurrency(before.freeBalance)} → ${FinanceEngine.formatCurrency(estimatedAfter)}",
+                    pendingAction = pendingAction
+                )
+            )
         }
 
         repository.addTransactions(createdList)
@@ -1261,12 +1374,32 @@ class AndroidAgentToolsEngine(
         return when (action.toolName) {
             "CREATE_TRANSACTION", "registrarTransacao" -> {
                 val desc = args["description"] as? String ?: args["descricao"] as? String ?: "Lançamento"
-                val amount = (args["amount"] as? Number)?.toDouble() ?: (args["valorTotal"] as? Number)?.toDouble() ?: 0.0
+                val amount = (args["amount"] as? Number)?.toDouble() ?: (args["amount"] as? String)?.toDoubleOrNull()
+                    ?: (args["valorTotal"] as? Number)?.toDouble() ?: (args["valorTotal"] as? String)?.toDoubleOrNull() ?: 0.0
                 val type = if ((args["type"] as? String)?.equals("income", ignoreCase = true) == true) TransactionType.INCOME else TransactionType.EXPENSE
                 val cat = args["category"] as? String ?: args["categoria"] as? String
                 val sub = args["subcategory"] as? String ?: args["subcategoria"] as? String
                 val payMethod = PaymentMethod.from(args["paymentMethod"] as? String ?: args["metodoPagamento"] as? String)
                 val cardName = args["cardName"] as? String ?: args["cartao"] as? String
+
+                val splitTypeStr = args["splitType"] as? String ?: args["tipoDivisao"] as? String
+                val splitType = when (splitTypeStr?.uppercase()) {
+                    "SPLIT_50", "CASAL_50_50" -> SplitType.SPLIT_50
+                    "PARTNER", "PARCEIRO" -> SplitType.PARTNER
+                    "FRIEND", "AMIGO" -> SplitType.FRIEND
+                    "EXTERNAL", "TERCEIRO" -> SplitType.EXTERNAL
+                    "CUSTOM", "PERSONALIZADA" -> SplitType.CUSTOM
+                    else -> SplitType.MINE
+                }
+                val friendName = args["friendName"] as? String ?: args["nomeAmigo"] as? String
+                val friendEmail = args["friendEmail"] as? String ?: args["emailAmigo"] as? String
+                val thirdPartyName = args["thirdPartyName"] as? String ?: args["nomeTerceiro"] as? String
+                val currentInst = (args["currentInstallment"] as? Number)?.toInt() ?: (args["currentInstallment"] as? String)?.toIntOrNull()
+                    ?: (args["parcelaAtual"] as? Number)?.toInt() ?: (args["parcelaAtual"] as? String)?.toIntOrNull() ?: 1
+                val totalInst = (args["totalInstallments"] as? Number)?.toInt() ?: (args["totalInstallments"] as? String)?.toIntOrNull()
+                    ?: (args["totalParcelas"] as? Number)?.toInt() ?: (args["totalParcelas"] as? String)?.toIntOrNull() ?: 1
+                val compMonth = args["competenceMonth"] as? String ?: args["mesFatura"] as? String ?: args["mesCompetenciaFatura"] as? String
+                val dueDate = args["dueDate"] as? String ?: args["dataVencimento"] as? String
 
                 executeCreateTransaction(
                     description = desc,
@@ -1275,8 +1408,30 @@ class AndroidAgentToolsEngine(
                     category = cat,
                     subcategory = sub,
                     paymentMethod = payMethod,
-                    cardName = cardName
+                    cardName = cardName,
+                    splitType = splitType,
+                    friendName = friendName,
+                    friendEmail = friendEmail,
+                    thirdPartyName = thirdPartyName,
+                    currentInstallment = currentInst,
+                    totalInstallments = totalInst,
+                    customCompetenceMonth = compMonth,
+                    customDueDate = dueDate,
+                    confirmed = true
                 )
+            }
+            "BATCH_TRANSACTIONS", "registrarTransacoesLote" -> {
+                val jsonString = args["transactionsJson"] as? String
+                if (!jsonString.isNullOrBlank()) {
+                    val array = gson.fromJson(jsonString, JsonArray::class.java)
+                    val jsonObj = JsonObject().apply {
+                        add("transactions", array)
+                        addProperty("confirmed", true)
+                    }
+                    executeBatchFromJson(jsonObj)
+                } else {
+                    ToolExecutionResult(text = "⚠️ Não foi possível recuperar as transações do lote.")
+                }
             }
             "EDIT_TRANSACTION", "editarTransacoes" -> {
                 val term = args["searchTerm"] as? String ?: args["termoBusca"] as? String
