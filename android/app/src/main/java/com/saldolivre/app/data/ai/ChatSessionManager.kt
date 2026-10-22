@@ -334,7 +334,7 @@ class ChatSessionManager(
             val (cleanText, extractedChart) = extractChartFromMarkdown(rawContent)
 
             val attachment = parseAttachment(map["attachment"])
-            val actionCard = parseActionCard(map["actionCard"], map["actions"])
+            val actions = parseActionCardsList(map["actions"] ?: map["actionCard"])
             val timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
 
             result.add(
@@ -342,7 +342,8 @@ class ChatSessionManager(
                     id = id,
                     sender = sender,
                     text = cleanText.ifBlank { rawContent },
-                    actionCard = actionCard,
+                    actions = actions,
+                    actionCard = actions?.firstOrNull(),
                     chartPayload = extractedChart,
                     attachment = attachment,
                     timestamp = timestamp

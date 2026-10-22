@@ -24,14 +24,45 @@ data class PendingAction(
     var status: PendingActionStatus = PendingActionStatus.PENDING
 )
 
+data class ActionCardLine(
+    val label: String,
+    val value: String,
+    val tone: String? = null
+)
+
 data class ActionCardData(
+    val kind: String = "confirmation",
     val title: String,
-    val description: String,
+    val description: String? = null,
     val detail: String? = null,
     val newFreeBalance: String? = null,
     val isSuccess: Boolean = true,
-    val pendingAction: PendingAction? = null
-)
+    val lines: List<ActionCardLine> = emptyList(),
+    val pendingAction: PendingAction? = null,
+    val pendingTransactions: List<Map<String, Any?>>? = null
+) {
+    constructor(
+        title: String,
+        description: String? = null,
+        detail: String? = null,
+        newFreeBalance: String? = null,
+        isSuccess: Boolean = true,
+        pendingAction: PendingAction? = null
+    ) : this(
+        kind = if (pendingAction != null) "confirmation" else "report",
+        title = title,
+        description = description,
+        detail = detail,
+        newFreeBalance = newFreeBalance,
+        isSuccess = isSuccess,
+        lines = listOfNotNull(
+            description?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Detalhe", it) },
+            detail?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Info", it) }
+        ),
+        pendingAction = pendingAction,
+        pendingTransactions = null
+    )
+}
 
 data class ChatAttachment(
     val name: String,
@@ -45,6 +76,7 @@ data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val sender: MessageSender,
     val text: String,
+    val actions: List<ActionCardData>? = null,
     val actionCard: ActionCardData? = null,
     val chartPayload: ChartPayload? = null,
     val attachment: ChatAttachment? = null,
