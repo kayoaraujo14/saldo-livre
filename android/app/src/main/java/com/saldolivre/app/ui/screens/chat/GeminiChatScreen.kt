@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -61,8 +63,6 @@ fun GeminiChatScreen(
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val context = LocalContext.current
-
-    var showClearConfirmDialog by remember { mutableStateOf(false) }
 
     // Launcher para gravação de áudio (Permissão do Microfone)
     val audioPermissionLauncher = rememberLauncherForActivityResult(
@@ -183,100 +183,6 @@ fun GeminiChatScreen(
         }
     }
 
-    // Modal para Colar Texto de Extrato / Fatura Diretamente no Chat
-    if (uiState.showPasteStatementDialog) {
-        AlertDialog(
-            onDismissRequest = { viewModel.setShowPasteStatementDialog(false) },
-            containerColor = DarkSurface,
-            title = {
-                Text(
-                    text = "Colar Fatura ou Extrato",
-                    color = TextPrimary,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "Cole abaixo as linhas da sua fatura (Nubank, Itaú, Inter, C6, CSV ou OFX). O Copiloto irá identificar e categorizar todos os lançamentos para sua revisão.",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
-                    OutlinedTextField(
-                        value = uiState.pasteStatementText,
-                        onValueChange = { viewModel.onPasteStatementTextChange(it) },
-                        placeholder = {
-                            Text(
-                                text = "Ex:\n10 MAR Ifood *Restaurante R$ 48,90\n12 MAR Uber *Trip R$ 22,50\n15 MAR Supermercado Extra 1/2 R$ 180,00",
-                                fontSize = 11.sp,
-                                color = TextMuted
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(170.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Emerald500,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { viewModel.onParseRawStatementText() },
-                    enabled = uiState.pasteStatementText.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
-                ) {
-                    Text(
-                        text = "Analisar Lançamentos",
-                        color = DarkBackground,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.setShowPasteStatementDialog(false) }) {
-                    Text("Cancelar", color = TextSecondary)
-                }
-            }
-        )
-    }
-
-    // Modal de Confirmação para Limpar Chat Atual
-    if (showClearConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirmDialog = false },
-            containerColor = DarkSurface,
-            title = { Text(text = "Limpar Conversa?", color = TextPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    text = "Deseja reiniciar a conversa atual? Seus dados financeiros e lançamentos gravados não serão afetados.",
-                    fontSize = 13.sp,
-                    color = TextSecondary
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.clearHistory()
-                        showClearConfirmDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Rose500)
-                ) {
-                    Text("Limpar", color = TextPrimary, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirmDialog = false }) {
-                    Text("Cancelar", color = TextSecondary)
-                }
-            }
-        )
-    }
-
     Scaffold(
         containerColor = DarkBackground,
         topBar = {
@@ -352,21 +258,6 @@ fun GeminiChatScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Emerald500.copy(alpha = 0.16f))
-                                            .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                                            .padding(horizontal = 5.dp, vertical = 1.dp)
-                                    ) {
-                                        Text(
-                                            text = "IA",
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Emerald400
-                                        )
-                                    }
                                 }
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -374,14 +265,14 @@ fun GeminiChatScreen(
                                         modifier = Modifier
                                             .size(6.dp)
                                             .clip(CircleShape)
-                                            .background(if (uiState.apiKey.isNotBlank()) Emerald400 else Amber400)
+                                            .background(Emerald400)
                                     )
                                     Spacer(modifier = Modifier.width(5.dp))
                                     Text(
-                                        text = uiState.connectionStatus ?: (if (uiState.apiKey.isNotBlank()) "Ativo • ${uiState.selectedModel}" else "Motor Neural Local"),
+                                        text = "Online",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = if (uiState.apiKey.isNotBlank()) Emerald400 else Amber400,
+                                        color = Emerald400,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -411,7 +302,7 @@ fun GeminiChatScreen(
                         IconButton(
                             onClick = { viewModel.setRulesOpen(true) },
                             modifier = Modifier
-                                .padding(horizontal = 2.dp)
+                                .padding(start = 2.dp, end = 6.dp)
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(
@@ -423,23 +314,6 @@ fun GeminiChatScreen(
                                 imageVector = Icons.Default.Lightbulb,
                                 contentDescription = "Memória e Regras do Agente",
                                 tint = if (uiState.learnedRules.isNotEmpty()) Amber400 else TextSecondary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        // Botão 3: Limpar conversa atual
-                        IconButton(
-                            onClick = { showClearConfirmDialog = true },
-                            modifier = Modifier
-                                .padding(start = 2.dp, end = 6.dp)
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(DarkSurfaceVariant.copy(alpha = 0.6f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Limpar conversa",
-                                tint = TextMuted,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -487,6 +361,7 @@ fun GeminiChatScreen(
                 items(uiState.messages) { msg ->
                     ChatBubble(
                         message = msg,
+                        isActionInProgress = uiState.isTyping,
                         onConfirmAction = { viewModel.confirmPendingAction(it) },
                         onCancelAction = { viewModel.cancelPendingAction(it) }
                     )
@@ -536,73 +411,6 @@ fun GeminiChatScreen(
                                     text = "Sincronizado com seu Saldo Livre em tempo real",
                                     fontSize = 10.sp,
                                     color = Cyan400
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Chips de Sugestões Rápidas Dinâmicas (Smart Prompts)
-            if (uiState.displayedSuggestions.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { viewModel.onRotateSuggestions() },
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(DarkSurfaceVariant.copy(alpha = 0.8f))
-                            .border(1.dp, DarkBorder, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Girar sugestões",
-                            tint = Emerald400,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        uiState.displayedSuggestions.forEach { prompt ->
-                            val chipShape = RoundedCornerShape(20.dp)
-                            Box(
-                                modifier = Modifier
-                                    .clip(chipShape)
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            listOf(Color(0xFF162235), DarkSurfaceVariant)
-                                        )
-                                    )
-                                    .border(
-                                        1.dp,
-                                        Brush.horizontalGradient(
-                                            listOf(Emerald500.copy(alpha = 0.3f), Cyan500.copy(alpha = 0.2f))
-                                        ),
-                                        chipShape
-                                    )
-                                    .clickable {
-                                        viewModel.sendMessage(overrideText = prompt)
-                                    }
-                                    .padding(horizontal = 14.dp, vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = prompt,
-                                    fontSize = 11.sp,
-                                    color = TextPrimary,
-                                    fontWeight = FontWeight.Medium,
-                                    letterSpacing = 0.1.sp
                                 )
                             }
                         }
@@ -791,26 +599,13 @@ fun GeminiChatScreen(
                             )
                         }
 
-                        // Botão para Colar Texto de Extrato / Fatura
-                        IconButton(
-                            onClick = { viewModel.setShowPasteStatementDialog(true) },
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentPaste,
-                                contentDescription = "Colar texto de fatura ou extrato",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
                         // Campo de Texto Integrado e Limpo
                         TextField(
                             value = uiState.inputText,
                             onValueChange = { viewModel.onInputTextChange(it) },
                             placeholder = {
                                 Text(
-                                    text = "Pergunte à IA ou digite um gasto...",
+                                    text = "Mensagem ou lançamento...",
                                     color = TextMuted,
                                     fontSize = 13.sp,
                                     maxLines = 1,
@@ -1148,6 +943,7 @@ private fun parseSmartMarkdownText(text: String, isUser: Boolean): AnnotatedStri
 @Composable
 fun ChatBubble(
     message: ChatMessage,
+    isActionInProgress: Boolean = false,
     onConfirmAction: ((PendingAction) -> Unit)? = null,
     onCancelAction: ((PendingAction) -> Unit)? = null
 ) {
@@ -1314,17 +1110,50 @@ fun ChatBubble(
             }
         }
 
-        // Card de Ação Interativo / Informativo Smart
+        // Card de Ação Interativo / Confirmação de Lançamento Smart
         if (message.actionCard != null) {
             val card = message.actionCard
-            val pending = card.pendingAction
+            val pending = card.pendingAction ?: if (card.title.contains("Confirmar", ignoreCase = true)) {
+                val parts = card.description.split("—", "-")
+                val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
+                val amountPart = parts.getOrNull(1)?.trim() ?: ""
+                val parsedAmount = Regex("""[\d.,]+""").find(amountPart)?.value
+                    ?.replace(".", "")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+                if (parsedAmount > 0.0) {
+                    val detailParts = card.detail?.split("•")?.map { it.trim() }
+                    val catSubcat = detailParts?.firstOrNull()?.split("›")?.map { it.trim() }
+                    PendingAction(
+                        id = "act_" + (card.title + card.description).hashCode().toString().take(8),
+                        toolName = "CREATE_TRANSACTION",
+                        title = card.title,
+                        description = card.description,
+                        detail = card.detail,
+                        args = mapOf(
+                            "description" to descPart,
+                            "amount" to parsedAmount,
+                            "category" to catSubcat?.firstOrNull(),
+                            "subcategory" to catSubcat?.getOrNull(1),
+                            "type" to "expense",
+                            "confirmed" to true
+                        ),
+                        status = PendingActionStatus.PENDING
+                    )
+                } else null
+            } else null
+            val isPendingAction = pending != null && pending.status == PendingActionStatus.PENDING
             val actionShape = RoundedCornerShape(18.dp)
 
             Spacer(modifier = Modifier.height(10.dp))
             Column(
                 modifier = Modifier
                     .widthIn(max = maxBubbleWidth)
-                    .shadow(6.dp, actionShape, spotColor = if (card.isSuccess) Emerald500.copy(alpha = 0.25f) else Rose500.copy(alpha = 0.25f))
+                    .shadow(
+                        elevation = if (isPendingAction) 8.dp else 4.dp,
+                        shape = actionShape,
+                        spotColor = if (isPendingAction) Emerald400.copy(alpha = 0.35f)
+                            else if (card.isSuccess) Emerald500.copy(alpha = 0.2f)
+                            else Rose500.copy(alpha = 0.2f)
+                    )
                     .clip(actionShape)
                     .background(
                         Brush.verticalGradient(
@@ -1333,8 +1162,12 @@ fun ChatBubble(
                     )
                     .border(
                         1.dp,
-                        if (card.isSuccess) {
-                            Brush.linearGradient(listOf(Emerald400.copy(alpha = 0.55f), Cyan500.copy(alpha = 0.3f)))
+                        if (isPendingAction) {
+                            Brush.linearGradient(
+                                listOf(Emerald400.copy(alpha = 0.7f), Cyan500.copy(alpha = 0.45f))
+                            )
+                        } else if (card.isSuccess) {
+                            Brush.linearGradient(listOf(Emerald400.copy(alpha = 0.45f), Cyan500.copy(alpha = 0.2f)))
                         } else {
                             Brush.linearGradient(listOf(Rose400.copy(alpha = 0.55f), DarkBorder))
                         },
@@ -1342,90 +1175,238 @@ fun ChatBubble(
                     )
                     .padding(14.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (card.isSuccess) Icons.Default.CheckCircle else Icons.Default.Close,
-                        contentDescription = null,
-                        tint = if (card.isSuccess) Emerald400 else Rose400,
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
+                // Header com Título e Badge de Status
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isPendingAction) Emerald500.copy(alpha = 0.2f)
+                                else if (card.isSuccess) Emerald500.copy(alpha = 0.15f)
+                                else Rose500.copy(alpha = 0.15f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isPendingAction) Icons.AutoMirrored.Filled.ReceiptLong
+                                else if (card.isSuccess) Icons.Default.CheckCircle
+                                else Icons.Default.Close,
+                            contentDescription = null,
+                            tint = if (card.isSuccess || isPendingAction) Emerald400 else Rose400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = card.title,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (card.isSuccess) Emerald400 else Rose400,
+                        color = if (card.isSuccess || isPendingAction) Emerald400 else Rose400,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    if (isPendingAction) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Amber500.copy(alpha = 0.16f))
+                                .border(1.dp, Amber500.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Aguardando",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Amber400
+                            )
+                        }
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(text = card.description, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                Spacer(modifier = Modifier.height(10.dp))
 
+                // Descrição principal destacada
+                Text(
+                    text = card.description,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+
+                // Detalhes da transação (Categoria, Método, Divisão)
                 if (!card.detail.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(text = card.detail, fontSize = 11.sp, color = TextSecondary, lineHeight = 16.sp)
-                }
-
-                if (!card.newFreeBalance.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = card.newFreeBalance,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Emerald400,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = card.detail,
+                        fontSize = 11.5.sp,
+                        color = TextSecondary,
+                        lineHeight = 16.sp
                     )
                 }
 
-                // Botões de Confirmação Interativa se a ação for pendente
-                if (pending != null && pending.status == PendingActionStatus.PENDING) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Impacto no Saldo Livre
+                if (!card.newFreeBalance.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DarkSurfaceVariant.copy(alpha = 0.7f))
+                            .border(1.dp, Emerald500.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 7.dp)
                     ) {
-                        Button(
-                            onClick = { onConfirmAction?.invoke(pending) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "✓ Confirmar",
-                                color = DarkBackground,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier.size(14.dp)
                             )
-                        }
-
-                        OutlinedButton(
-                            onClick = { onCancelAction?.invoke(pending) },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 6.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose400)
-                        ) {
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "✕ Cancelar",
+                                text = card.newFreeBalance,
                                 fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Emerald400,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
+                }
+
+                // Botões Explícitos de Confirmação Interativa
+                if (isPendingAction && pending != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Botão Cancelar
+                        OutlinedButton(
+                            onClick = { onCancelAction?.invoke(pending) },
+                            enabled = !isActionInProgress,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            border = BorderStroke(1.dp, Rose500.copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Rose400,
+                                disabledContentColor = Rose400.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Rose400
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Cancelar",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
+                        }
+
+                        // Botão Confirmar
+                        Button(
+                            onClick = { onConfirmAction?.invoke(pending) },
+                            enabled = !isActionInProgress,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Emerald500,
+                                disabledContainerColor = Emerald500.copy(alpha = 0.4f)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .height(44.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                            elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+                        ) {
+                            if (isActionInProgress) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = DarkBackground,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = DarkBackground
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Confirmar",
+                                    color = DarkBackground,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 12.5.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
                 } else if (pending?.status == PendingActionStatus.CONFIRMED) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "✓ Lançamento confirmado no Saldo Livre", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Emerald400)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Emerald500.copy(alpha = 0.12f))
+                            .border(1.dp, Emerald500.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Emerald400,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Lançamento confirmado no Saldo Livre",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Emerald400
+                        )
+                    }
                 } else if (pending?.status == PendingActionStatus.CANCELLED) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "✕ Ação cancelada", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = Rose400)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Rose500.copy(alpha = 0.1f))
+                            .border(1.dp, Rose500.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = Rose400,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Ação cancelada pelo usuário",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Rose400
+                        )
+                    }
                 }
             }
         }

@@ -1,9 +1,11 @@
 package com.saldolivre.app.data.ai
 
 import android.content.Context
+import com.saldolivre.app.data.model.PaymentMethod
 import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.TransactionType
 import java.text.Normalizer
+import java.time.LocalDate
 import java.util.Locale
 
 data class CategoryGuess(
@@ -23,7 +25,10 @@ data class ExtractedIntent(
     val splitType: SplitType,
     val thirdPartyName: String?,
     val currentInstallment: Int = 1,
-    val totalInstallments: Int = 1
+    val totalInstallments: Int = 1,
+    val dueDate: String? = null,
+    val competenceMonth: String? = null,
+    val paymentMethod: PaymentMethod = PaymentMethod.PIX
 )
 
 class NeuralFinanceClassifier(
@@ -158,7 +163,7 @@ class NeuralFinanceClassifier(
     fun parseAmount(text: String): Double? {
         val m1 = Regex("""r\$\s*([\d.]+(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)""", RegexOption.IGNORE_CASE).find(text)
         val m2 = Regex("""([\d.]+(?:,\d{1,2})?)\s*(?:reais|conto|pila)""", RegexOption.IGNORE_CASE).find(text)
-        val m3 = Regex("""\b(?:de|por|valor)\s+([\d.]+(?:,\d{1,2})?)\b""", RegexOption.IGNORE_CASE).find(text)
+        val m3 = Regex("""\b(?:no\s+valor\s+de|no\s+valor|valor\s+de|no\s+total\s+de|no\s+total|total\s+de|de|por|valor)\s+([\d.]+(?:,\d{1,2})?)\b""", RegexOption.IGNORE_CASE).find(text)
         val m4 = Regex("""\b\d+(?:[.,]\d{1,2})?\b""").find(text)
 
         val raw = m1?.groupValues?.get(1) ?: m2?.groupValues?.get(1) ?: m3?.groupValues?.get(1) ?: m4?.value
@@ -178,14 +183,16 @@ class NeuralFinanceClassifier(
     /**
      * Classifica categoria e subcategoria com base em regras neurais e pesos semânticos.
      */
-    fun guessCategoryAndSubcategory(text: String, amount: Double? = null): CategoryGuess {
-        if (amount != null && amount < 0) {
+    fun guessCategoryAndSubcategory(text: String, @Suppress("UNUSED_PARAMETER") amount: Double? = null): CategoryGuess {
+        val normText = normalize(text)
+
+        // Se o texto explicitamente indicar estorno/reembolso
+        if (Regex("""\b(estorno|reembolso|devolu[cç][aã]o|cr[eé]dito na fatura)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText)) {
             return CategoryGuess("Estorno", "Crédito na Fatura", 1.0f)
         }
 
         // Verifica regras memorizadas do usuário primeiro
         val learned = getLearnedRules()
-        val normText = normalize(text)
         for (rule in learned) {
             val normRule = normalize(rule)
             if (normRule.contains("=") || normRule.contains("e categoria") || normRule.contains("coloque em")) {
@@ -215,25 +222,163 @@ class NeuralFinanceClassifier(
     }
 
     /**
-     * Extrai o nome do estabelecimento comercial ou contraparte da frase
+     * Extrai o nome do estabelecimento comercial ou contraparte da frase,
+     * limpando valores, datas temporais e verbos de comando com máxima precisão.
      */
     fun extractDescription(text: String): String {
-        val clean = text.trim()
+        var clean = text.trim()
+        if (clean.isBlank()) return "Lançamento Financeiro"
 
-        val placeMatch = Regex("""\b(?:na|no|em|com)\s+(?:a\s+|o\s+)?([A-Za-zÀ-ÿ][\wÀ-ÿ'’ ]{2,30}?)(?=\s+(?:de|por|no|na|dividid|50|com|r\$|hoje|ontem)|[.,!?]|$)""", RegexOption.IGNORE_CASE).find(clean)
-        val leadMatch = Regex("""^([A-Za-zÀ-ÿ][\wÀ-ÿ ]{2,40}?)\s+(?:de|por)\s+r?\$?\s*\d""", RegexOption.IGNORE_CASE).find(clean)
+        // 0. Detecção inteligente de estabelecimento ("na Two Brothers", "no Forte Alencar", "no Outback")
+        val placeRegex = Regex(
+            """\b(?:na|no|em|no restaurante|na lanchonete|na pizzaria|no posto|no mercado|no supermercado|na loja|no shopping|na farm[aá]cia|no bar|no caf[eé])\s+([A-Za-z0-9À-ÿ\s'&]+?)(?=\s+(?:no\s+valor|no\s+total|por|de\s+\d|r?\$|\d+\s*reais|ontem|hoje|via|no\s+cart|em\s+\d+x|$))""",
+            RegexOption.IGNORE_CASE
+        )
+        val placeMatch = placeRegex.find(clean)
+        val candidatePlace = placeMatch?.groupValues?.get(1)?.trim()
 
-        val badWords = Regex("""cart[aã]o|cr[eé]dito|meu|minha|compartilhado|pix|d[eé]bito|gastei|paguei|comprei|usei""", RegexOption.IGNORE_CASE)
+        // 1. Remove valores monetários completos com seus gatilhos
+        clean = clean.replace(
+            Regex("""\b(?:no\s+valor\s+de|no\s+valor|no\s+total\s+de|no\s+total|valor\s+de|total\s+de|por|de)?\s*r?\$?\s*\d+(?:[.,]\d{1,2})?\s*(?:reais|conto|pila|centavos)?\b""", RegexOption.IGNORE_CASE),
+            " "
+        )
 
-        if (leadMatch != null && !badWords.containsMatchIn(leadMatch.groupValues[1])) {
-            return leadMatch.groupValues[1].trim().replaceFirstChar { it.uppercase() }
+        // 1.1 Remove contagens numéricas soltas antes de substantivos de produtos (ex: "2 pizzas", "3 cervejas")
+        clean = clean.replace(
+            Regex("""\b\d+\s+(?=pizzas?|lanches?|hamb[uú]rguers?|cervejas?|refrigerantes?|itens?|produtos?|unidades?|garrafas?|latas?|refei[cç][õo]es|almo[cç]os|pratos)\b""", RegexOption.IGNORE_CASE),
+            " "
+        )
+
+        // 2. Remove parcelas (ex: "em 3x", "3x", "1/10")
+        clean = clean.replace(Regex("""\b(?:em\s+)?\d+\s*x\b""", RegexOption.IGNORE_CASE), " ")
+        clean = clean.replace(Regex("""\b\d+/\d+\b"""), " ")
+
+        // 3. Remove divisões (ex: "dividido com fulano", "meio a meio", "50/50")
+        clean = clean.replace(Regex("""\b(meio a meio|50/50|50 50|dividido(?:\s+com\s+\w+)?|dividi|com meu parceiro|com minha parceira)\b""", RegexOption.IGNORE_CASE), " ")
+
+        // 4. Remove formas de pagamento (ex: "no cartão de crédito", "no débito", "via pix", "em dinheiro")
+        clean = clean.replace(Regex("""\b(?:no|via|em|pelo|com|de)?\s*(?:cart[aã]o(?: de cr[eé]dito| de d[eé]bito)?|cr[eé]dito|d[eé]bito|pix|dinheiro|boleto)\b""", RegexOption.IGNORE_CASE), " ")
+
+        // 5. Remove palavras temporais (ex: "ontem", "hoje", "anteontem", "amanhã")
+        clean = clean.replace(Regex("""\b(ontem|anteontem|hoje|amanh[aã]|nesta semana|semana passada|m[eê]s passado|agora pouco|agora a pouco)\b""", RegexOption.IGNORE_CASE), " ")
+
+        // 6. Normaliza múltiplos espaços e dá TRIM antes de processar prefixos com ^
+        clean = clean.replace(Regex("""\s+"""), " ").trim()
+
+        // 7. Remove frases meta e verbos de relato do início (ex: "eu falei que", "avisei que", "disse que", "eu pedi", "gastei", etc.)
+        val speechPrefixRegex = Regex("""^(?:ol[aá]|ei|por favor|copiloto|agente|saldo livre|eu\s+)?(?:falei\s+que|disse\s+que|avisei\s+que|mandei|lembrei\s+que|quero\s+que\s+voc[eê]\s+(?:lance|registre|cadastre)|anote\s+a[íi]|anota\s+a[íi]|registre\s+a[íi])\s*""", RegexOption.IGNORE_CASE)
+        while (speechPrefixRegex.containsMatchIn(clean)) {
+            clean = clean.replace(speechPrefixRegex, "").trim()
         }
-        if (placeMatch != null && !badWords.containsMatchIn(placeMatch.groupValues[1])) {
-            return placeMatch.groupValues[1].trim().replaceFirstChar { it.uppercase() }
+
+        val verbPrefixRegex = Regex("""^(?:eu\s+)?(?:almo[cç]o|almo[cç]ei|jantar|jantei|lanche|lanchei|caf[eé]|abasteci|abastecer|pedi|pedir|comi|comer|comprei|comprar|gastei|gastar|paguei|pagar|coloquei|coloque|anote|anota|anotei|registre|registra|registrei|lance|lanca|lança|lancei|cadastre|cadastra|cadastrei|assinei|assinar|usei|usar|adicione|adiciona|adicionei|fui\s+no|fui\s+na|fui\s+ao|fui\s+a)\b\s*""", RegexOption.IGNORE_CASE)
+        while (verbPrefixRegex.containsMatchIn(clean)) {
+            clean = clean.replace(verbPrefixRegex, "").trim()
         }
+
+        // 8. Remove preposições e artigos soltos no início (ex: "no", "na", "em", "um", "uma", "o", "a", "de", "do", "da")
+        val articlePrefixRegex = Regex("""^(?:um|uma|uns|umas|o|a|os|as|no|na|nos|nas|em|de|do|da|dos|das|pro|pra|para)\b\s*""", RegexOption.IGNORE_CASE)
+        while (articlePrefixRegex.containsMatchIn(clean)) {
+            clean = clean.replace(articlePrefixRegex, "").trim()
+        }
+
+        // 9. Remove ruídos no final (ex: "no valor", "no total", etc.)
+        val trailingNoiseRegex = Regex("""\s*\b(?:no\s+valor\s+de|no\s+valor|valor\s+de|valor|no\s+total\s+de|no\s+total|total|no\s+fim|e\s+paguei|e\s+deu|e\s+ficou|e\s+foi|reais|conto|pila|no|na|em|de|do|da|para|pro|pra)\s*$""", RegexOption.IGNORE_CASE)
+        while (trailingNoiseRegex.containsMatchIn(clean)) {
+            clean = clean.replace(trailingNoiseRegex, "").trim()
+        }
+
+        // 10. Se após a limpeza restar uma estrutura "produto na/no estabelecimento", extrai o estabelecimento
+        if (clean.contains(Regex("""\b(?:na|no|em)\b""", RegexOption.IGNORE_CASE))) {
+            val splitPlace = clean.split(Regex("""\b(?:na|no|em)\b""", RegexOption.IGNORE_CASE))
+            if (splitPlace.size >= 2) {
+                val place = splitPlace[1].trim()
+                if (place.isNotBlank()) {
+                    clean = place
+                }
+            }
+        } else if (!candidatePlace.isNullOrBlank() && candidatePlace.length in 2..40 && (clean.isBlank() || clean.equals("pizza", true) || clean.equals("pizzas", true) || clean.length < 3)) {
+            clean = candidatePlace
+        }
+
+        // Remove pontuações residuais e espaços duplos
+        clean = clean.replace(Regex("""[.,;:!?]+"""), " ").replace(Regex("""\s+"""), " ").trim()
+
+        if (clean.isNotBlank() && clean.length >= 2) {
+            return clean.split(" ").joinToString(" ") { word ->
+                if (word.lowercase(Locale.ROOT) in listOf("de", "do", "da", "dos", "das", "e", "em", "no", "na")) {
+                    word.lowercase(Locale.ROOT)
+                } else {
+                    word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                }
+            }
+        }
+
+        val subcat = guessCategoryAndSubcategory(text).subcategory
+        if (!subcat.isNullOrBlank()) return subcat
 
         val catGuess = guessCategory(text)
         return if (catGuess == "Outros") "Lançamento Financeiro" else catGuess
+    }
+
+    /**
+     * Detecta datas relativas (ontem, hoje, etc.) ou explícitas (DD/MM, dia X)
+     * Retorna Pair(dueDate YYYY-MM-DD, competenceMonth YYYY-MM)
+     */
+    fun detectDates(text: String): Pair<String, String>? {
+        val lower = text.lowercase()
+        val now = LocalDate.now()
+
+        val targetDate: LocalDate? = when {
+            lower.contains("anteontem") -> now.minusDays(2)
+            lower.contains("ontem") -> now.minusDays(1)
+            lower.contains("hoje") -> now
+            lower.contains("amanhã") || lower.contains("amanha") -> now.plusDays(1)
+            else -> {
+                // Procura datas numéricas como "dia 15", "15/10", "15/10/2026"
+                val explicitDateMatch = Regex("""\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b""").find(text)
+                if (explicitDateMatch != null) {
+                    val day = explicitDateMatch.groupValues[1].toIntOrNull() ?: now.dayOfMonth
+                    val month = explicitDateMatch.groupValues[2].toIntOrNull() ?: now.monthValue
+                    val yearStr = explicitDateMatch.groupValues[3]
+                    val year = if (!yearStr.isNullOrBlank()) {
+                        if (yearStr.length == 2) 2000 + yearStr.toInt() else yearStr.toInt()
+                    } else now.year
+                    runCatching { LocalDate.of(year, month, day) }.getOrNull()
+                } else {
+                    val dayMatch = Regex("""\b(?:no\s+)?dia\s+(\d{1,2})\b""", RegexOption.IGNORE_CASE).find(text)
+                    if (dayMatch != null) {
+                        val day = dayMatch.groupValues[1].toIntOrNull()
+                        if (day != null && day in 1..31) {
+                            runCatching {
+                                val maxDay = now.lengthOfMonth()
+                                LocalDate.of(now.year, now.monthValue, day.coerceAtMost(maxDay))
+                            }.getOrNull()
+                        } else null
+                    } else null
+                }
+            }
+        }
+
+        return targetDate?.let { date ->
+            val due = String.format(Locale.US, "%04d-%02d-%02d", date.year, date.monthValue, date.dayOfMonth)
+            val comp = String.format(Locale.US, "%04d-%02d", date.year, date.monthValue)
+            Pair(due, comp)
+        }
+    }
+
+    /**
+     * Detecta o método de pagamento da frase
+     */
+    fun detectPaymentMethod(text: String): PaymentMethod {
+        val lower = text.lowercase()
+        return when {
+            lower.contains("crédito") || lower.contains("credito") || lower.contains("cartão") || lower.contains("cartao") || lower.contains("fatura") -> PaymentMethod.CREDIT_CARD
+            lower.contains("débito") || lower.contains("debito") -> PaymentMethod.DEBIT
+            lower.contains("boleto") -> PaymentMethod.BILL
+            lower.contains("pix") -> PaymentMethod.PIX
+            else -> PaymentMethod.PIX
+        }
     }
 
     /**
@@ -290,10 +435,12 @@ class NeuralFinanceClassifier(
     fun parseNaturalIntent(text: String): ExtractedIntent? {
         val amount = parseAmount(text) ?: return null
         val txType = detectTransactionType(text)
-        val guess = guessCategoryAndSubcategory(text, if (txType == TransactionType.INCOME) amount else -amount)
+        val guess = guessCategoryAndSubcategory(text, amount)
         val desc = extractDescription(text)
         val (splitType, thirdParty) = detectSplitType(text)
-        val isCreditCard = text.contains("cartão", ignoreCase = true) ||
+        val paymentMethod = detectPaymentMethod(text)
+        val isCreditCard = paymentMethod == PaymentMethod.CREDIT_CARD ||
+                text.contains("cartão", ignoreCase = true) ||
                 text.contains("cartao", ignoreCase = true) ||
                 text.contains("crédito", ignoreCase = true) ||
                 text.contains("credito", ignoreCase = true) ||
@@ -310,6 +457,7 @@ class NeuralFinanceClassifier(
         }
 
         val installments = detectInstallments(text)
+        val dateInfo = detectDates(text)
 
         return ExtractedIntent(
             description = desc,
@@ -322,7 +470,10 @@ class NeuralFinanceClassifier(
             splitType = splitType,
             thirdPartyName = thirdParty,
             currentInstallment = installments?.first ?: 1,
-            totalInstallments = installments?.second ?: 1
+            totalInstallments = installments?.second ?: 1,
+            dueDate = dateInfo?.first,
+            competenceMonth = dateInfo?.second,
+            paymentMethod = paymentMethod
         )
     }
 

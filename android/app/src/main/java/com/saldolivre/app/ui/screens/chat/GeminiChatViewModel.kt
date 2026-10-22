@@ -184,10 +184,21 @@ class GeminiChatViewModel(
                     } else {
                         cloudSessions.find { it.id == state.currentSessionId } ?: cloudSessions.first()
                     }
+
+                    // Preserva pendingActions locais que ainda estão aguardando confirmação
+                    val mergedMessages = targetActive.messages.map { cloudMsg ->
+                        val localMatch = state.messages.find { it.id == cloudMsg.id }
+                        if (localMatch?.actionCard?.pendingAction != null && cloudMsg.actionCard?.pendingAction == null) {
+                            cloudMsg.copy(actionCard = cloudMsg.actionCard?.copy(pendingAction = localMatch.actionCard.pendingAction))
+                        } else {
+                            cloudMsg
+                        }
+                    }
+
                     state.copy(
                         sessions = cloudSessions,
                         currentSessionId = targetActive.id,
-                        messages = targetActive.messages
+                        messages = mergedMessages
                     )
                 }
             }
@@ -366,6 +377,7 @@ class GeminiChatViewModel(
                 _uiState.update { it.copy(recordingSeconds = seconds) }
             }
             speechManager?.onFinalTranscript = { finalText, audioBytes ->
+                _uiState.update { it.copy(isRecordingAudio = false, recordingSeconds = 0) }
                 processFinalVoiceTranscript(finalText, audioBytes)
             }
         }
@@ -867,9 +879,12 @@ class GeminiChatViewModel(
 
     fun confirmPendingAction(pendingAction: PendingAction) {
         val currentMsgs = _uiState.value.messages.map { msg ->
-            if (msg.actionCard?.pendingAction?.id == pendingAction.id) {
+            val card = msg.actionCard
+            val matchById = card?.pendingAction?.id == pendingAction.id
+            val matchByContent = card?.title == pendingAction.title && card.description == pendingAction.description
+            if (card != null && (matchById || matchByContent)) {
                 msg.copy(
-                    actionCard = msg.actionCard.copy(
+                    actionCard = card.copy(
                         pendingAction = pendingAction.copy(status = PendingActionStatus.CONFIRMED)
                     )
                 )
@@ -901,9 +916,12 @@ class GeminiChatViewModel(
 
     fun cancelPendingAction(pendingAction: PendingAction) {
         val currentMsgs = _uiState.value.messages.map { msg ->
-            if (msg.actionCard?.pendingAction?.id == pendingAction.id) {
+            val card = msg.actionCard
+            val matchById = card?.pendingAction?.id == pendingAction.id
+            val matchByContent = card?.title == pendingAction.title && card.description == pendingAction.description
+            if (card != null && (matchById || matchByContent)) {
                 msg.copy(
-                    actionCard = msg.actionCard.copy(
+                    actionCard = card.copy(
                         pendingAction = pendingAction.copy(status = PendingActionStatus.CANCELLED)
                     )
                 )
@@ -958,7 +976,32 @@ class GeminiChatViewModel(
 
         // 2. Verifica se há uma ação pendente de confirmação no último card
         val lastAssistant = _uiState.value.messages.lastOrNull { it.sender == MessageSender.ASSISTANT }
-        val activePending = lastAssistant?.actionCard?.pendingAction
+        var activePending = lastAssistant?.actionCard?.pendingAction
+        if (activePending == null && lastAssistant?.actionCard?.title?.contains("Confirmar", ignoreCase = true) == true) {
+            val card = lastAssistant.actionCard
+            val desc = card.description
+            val parts = desc.split("—", "-")
+            val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
+            val amountPart = parts.getOrNull(1)?.trim() ?: ""
+            val parsedAmount = Regex("""[\d.,]+""").find(amountPart)?.value
+                ?.replace(".", "")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+            if (parsedAmount > 0.0) {
+                activePending = PendingAction(
+                    id = "act_" + (card.title + card.description).hashCode().toString().take(8),
+                    toolName = "CREATE_TRANSACTION",
+                    title = card.title,
+                    description = card.description,
+                    detail = card.detail,
+                    args = mapOf(
+                        "description" to descPart,
+                        "amount" to parsedAmount,
+                        "category" to card.detail?.split("•")?.firstOrNull()?.trim(),
+                        "confirmed" to true
+                    ),
+                    status = PendingActionStatus.PENDING
+                )
+            }
+        }
         if (activePending != null && activePending.status == PendingActionStatus.PENDING && rawInput.isNotBlank() && attachment == null) {
             val isAffirmative = Regex("""^(sim|confirmo|confirma|confirmar|pode|pode lançar|pode lancar|pode salvar|pode cadastrar|pode registrar|ok|beleza|positivo|isso|correto|executar|pode sim|claro|com certeza|salvar|registra|lança|lanca)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
             val isNegative = Regex("""^(não|nao|cancela|cancelar|esquece|esqueça|deixa pra lá|deixa pra la|abortar|errado|não quero|nao quero)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
@@ -1066,14 +1109,14 @@ class GeminiChatViewModel(
                 )
 
                 _uiState.update {
-                    it.copy(connectionStatus = "Ativo • ${result.modelUsed} (${result.keyUsedMasked})")
+                    it.copy(connectionStatus = "Online")
                 }
 
                 if (result.responseText.isNotBlank()) {
                     return processGeminiResponseAndExecuteActions(result.responseText, query)
                 }
             } catch (e: Exception) {
-                // Em caso de erro de rede ou quota, cai no fallback inteligente
+                android.util.Log.e("GeminiChat", "executeGeminiOrFallback falhou, acionando fallback local: ${e.message}", e)
             }
         }
 
@@ -1172,8 +1215,34 @@ class GeminiChatViewModel(
             DIRETRIZES DE ASSERTIVIDADE E ZERO ALUCINAÇÃO:
             - NUNCA invente dados, lançamentos ou saldos que não constem nos dados reais informados.
             - Sempre que uma despesa ou comando do usuário corresponder a uma regra aprendida, APLIQUE-A IMEDIATAMENTE!
+            - Na descrição das transações ("description"), extraia ESTRITAMENTE o nome do produto, serviço ou do estabelecimento/marca oficial (ex: "Two Brothers", "Subway", "Uber", "Pão de Açúcar", "Posto Shell"). NUNCA inclua frases faladas como "eu comprei", "almoço no", "jantar no", "pedi", "gastei", "comprei", "eu falei que", "no valor de", valores em reais ou datas no campo description.
+            - CORREÇÃO FONÉTICA INTELIGENTE: Corrija termos falados ou erros comuns de transcrição fonética para os nomes corretos de estabelecimentos e marcas (ex: "two brothers", "forte alencar", "ifood", "starbucks", "outback", "mercado livre").
+            - Calcule datas relativas com precisão: se hoje é ${FinanceEngine.todayKey()}, "ontem" refere-se ao dia anterior.
             - Cite valores formatados em moeda brasileira (ex: R$ 45,00).
             - Seja DIRETO, OBJETIVO e acolhedor.
+
+            EXEMPLOS PRÁTICOS DE EXTRAÇÃO DE VOZ E COMANDOS:
+            - Usuário: "ontem eu comprei 2 pizzas na two brothers no valor de 73 reais via pix"
+              -> description: "Two Brothers"
+              -> amount: 73.0
+              -> type: "expense"
+              -> category: "Alimentação"
+              -> subcategory: "Delivery & Lanches"
+              -> paymentMethod: "pix"
+              -> dueDate: dia de ontem
+            - Usuário: "almoço no Forte Alencar de 45 reais"
+              -> description: "Forte Alencar"
+              -> amount: 45.0
+              -> category: "Alimentação"
+              -> subcategory: "Restaurante"
+            - Usuário: "localizar uma despesa específica Forte Alencar" ou "onde gastei no Forte Alencar"
+              -> DEVE GERAR AÇÃO:
+              ```json
+              {
+                "action": "QUERY_TRANSACTIONS",
+                "searchTerm": "Forte Alencar"
+              }
+              ```
 
             CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE CADASTRAR NOVAS TRANSAÇÕES (HUMAN-IN-THE-LOOP):
             - Ao receber comandos para cadastrar novas despesas ou receitas (individuais ou parceladas), NUNCA afirme que o lançamento já foi salvo ou gravado no banco de dados.
@@ -1326,8 +1395,9 @@ class GeminiChatViewModel(
         rawResponse: String,
         userQuery: String
     ): AgentResponse {
-        val jsonRegex = Regex("""```json\s*(\{[\s\S]*?\})\s*```""")
-        val match = jsonRegex.find(rawResponse)
+        val jsonRegex = Regex("""```(?:json)?\s*(\{[\s\S]*?\})\s*```""", RegexOption.IGNORE_CASE)
+        val rawJsonRegex = Regex("""(\{\s*"action"\s*:\s*"[A-Z_]+"[^}]*?\})""")
+        val match = jsonRegex.find(rawResponse) ?: rawJsonRegex.find(rawResponse)
 
         if (match != null) {
             try {
@@ -1364,8 +1434,12 @@ class GeminiChatViewModel(
         // Se o Gemini não gerou bloco JSON mas o usuário solicitou uma ação de CRUD,
         // o motor de ferramentas local processa para garantir a execução no banco de dados!
         val offlineResult = toolsEngine.processNaturalLanguageOffline(userQuery)
-        if (offlineResult.actionCard != null || offlineResult.chartPayload != null) {
+        val isDefaultFallback = offlineResult.text.startsWith("Estou pronto para ajudar! Você pode me pedir para:")
+
+        if (!isDefaultFallback || offlineResult.actionCard != null || offlineResult.chartPayload != null) {
             val finalText = if (offlineResult.actionCard?.pendingAction != null) {
+                offlineResult.text
+            } else if (!isDefaultFallback) {
                 offlineResult.text
             } else {
                 "${rawResponse.trim()}\n\n${offlineResult.text}".trim()

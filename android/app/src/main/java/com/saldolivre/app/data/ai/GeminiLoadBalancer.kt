@@ -25,13 +25,12 @@ class GeminiLoadBalancer(
         const val PREF_KEY_MODEL = "saldo_livre_gemini_model"
 
         val DEFAULT_MODELS_POOL = listOf(
-            "gemini-3-flash",
-            "gemini-2.5-pro",
+            "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
             "gemini-3.1-flash-lite",
-            "gemini-2.5-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro"
+            "gemini-pro-latest"
         )
     }
 
@@ -63,8 +62,8 @@ class GeminiLoadBalancer(
 
     fun getSelectedModel(): String {
         val saved = prefs?.getString(PREF_KEY_MODEL, null)
-        if (saved.isNullOrBlank() || saved == "gemini-1.5-flash" || saved == "gemini-2.0-flash") {
-            return "gemini-3-flash"
+        if (saved.isNullOrBlank() || saved == "gemini-1.5-flash" || saved == "gemini-2.0-flash" || saved == "gemini-3-flash" || saved == "gemini-2.5-flash" || saved == "gemini-2.5-pro") {
+            return "gemini-3.5-flash"
         }
         return saved
     }
@@ -85,9 +84,7 @@ class GeminiLoadBalancer(
         )
 
         return if (analysisRegex.containsMatchIn(userQuery)) {
-            "gemini-2.5-pro"
-        } else if (preferredModel == "gemini-2.5-pro") {
-            "gemini-3-flash"
+            "gemini-pro-latest"
         } else {
             preferredModel
         }
@@ -136,6 +133,7 @@ class GeminiLoadBalancer(
             for (candidateModel in modelCandidates) {
                 for (attempt in 0..1) {
                     try {
+                        android.util.Log.d("GeminiLB", "Chamando modelo $candidateModel com chave ${candidateKey.take(6)}...")
                         val generativeModel = GenerativeModel(
                             modelName = candidateModel,
                             apiKey = candidateKey,
@@ -158,6 +156,7 @@ class GeminiLoadBalancer(
                         val text = response.text
 
                         if (!text.isNullOrBlank()) {
+                            android.util.Log.i("GeminiLB", "Sucesso com modelo $candidateModel! Resposta tamanho=${text.length}")
                             if (candidateModel != initialModel) {
                                 onModelSwitched?.invoke(candidateModel)
                             }
@@ -175,6 +174,7 @@ class GeminiLoadBalancer(
                         }
                     } catch (e: Exception) {
                         lastException = e
+                        android.util.Log.e("GeminiLB", "Tentativa com modelo $candidateModel falhou: ${e.message}")
                         val errLower = (e.message ?: "").lowercase()
 
                         val isRateLimit = errLower.contains("429") ||
@@ -217,7 +217,7 @@ class GeminiLoadBalancer(
             return Pair(false, "Chave da API não fornecida.")
         }
 
-        val pool = listOf(getSelectedModel(), "gemini-3-flash", "gemini-2.5-pro", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash")
+        val pool = listOf(getSelectedModel(), "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest")
         for (model in pool) {
             try {
                 val generativeModel = GenerativeModel(

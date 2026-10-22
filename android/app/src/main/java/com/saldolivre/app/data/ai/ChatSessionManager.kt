@@ -13,6 +13,8 @@ import com.saldolivre.app.data.model.ChatAttachment
 import com.saldolivre.app.data.model.ChatMessage
 import com.saldolivre.app.data.model.ChatSession
 import com.saldolivre.app.data.model.MessageSender
+import com.saldolivre.app.data.model.PendingAction
+import com.saldolivre.app.data.model.PendingActionStatus
 import com.saldolivre.app.ui.screens.chat.ChartDataItem
 import com.saldolivre.app.ui.screens.chat.ChartPayload
 import com.saldolivre.app.ui.screens.chat.ChartType
@@ -197,13 +199,28 @@ class ChatSessionManager(
                     "lines" to lines
                 )
             )
-            map["actionCard"] = mapOf(
+            val pendingMap = msg.actionCard.pendingAction?.let { pa ->
+                mapOf(
+                    "id" to pa.id,
+                    "toolName" to pa.toolName,
+                    "title" to pa.title,
+                    "description" to pa.description,
+                    "detail" to pa.detail,
+                    "args" to pa.args,
+                    "status" to pa.status.name
+                )
+            }
+            val cardMap = mutableMapOf<String, Any?>(
                 "title" to msg.actionCard.title,
                 "description" to msg.actionCard.description,
                 "detail" to msg.actionCard.detail,
                 "newFreeBalance" to msg.actionCard.newFreeBalance,
                 "isSuccess" to msg.actionCard.isSuccess
             )
+            if (pendingMap != null) {
+                cardMap["pendingAction"] = pendingMap
+            }
+            map["actionCard"] = cardMap
         }
 
         return map
@@ -357,12 +374,73 @@ class ChatSessionManager(
             val title = (directMap["title"] as? String).orEmpty()
             val desc = (directMap["description"] as? String).orEmpty()
             if (title.isNotBlank() || desc.isNotBlank()) {
+                val pendingMap = directMap["pendingAction"] as? Map<*, *>
+                var pendingAction = if (pendingMap != null) {
+                    val pId = (pendingMap["id"] as? String) ?: UUID.randomUUID().toString()
+                    val toolName = (pendingMap["toolName"] as? String).orEmpty()
+                    val pTitle = (pendingMap["title"] as? String).orEmpty()
+                    val pDesc = (pendingMap["description"] as? String).orEmpty()
+                    val pDetail = pendingMap["detail"] as? String
+                    @Suppress("UNCHECKED_CAST")
+                    val pArgs = (pendingMap["args"] as? Map<String, Any?>) ?: emptyMap()
+                    val statusStr = (pendingMap["status"] as? String).orEmpty()
+                    val pStatus = try {
+                        PendingActionStatus.valueOf(statusStr)
+                    } catch (_: Exception) {
+                        PendingActionStatus.PENDING
+                    }
+                    PendingAction(
+                        id = pId,
+                        toolName = if (toolName.isNotBlank()) toolName else "CREATE_TRANSACTION",
+                        title = if (pTitle.isNotBlank()) pTitle else title,
+                        description = if (pDesc.isNotBlank()) pDesc else desc,
+                        detail = pDetail,
+                        args = pArgs,
+                        status = pStatus
+                    )
+                } else null
+
+                // Fallback de resiliência: se não tinha pendingAction serializado mas é um card de confirmação pendente:
+                if (pendingAction == null && title.contains("Confirmar", ignoreCase = true)) {
+                    val parts = desc.split("—", "-")
+                    val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
+                    val amountPart = parts.getOrNull(1)?.trim() ?: ""
+                    val parsedAmount = Regex("""[\d.,]+""").find(amountPart)?.value
+                        ?.replace(".", "")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+
+                    val detailStr = (directMap["detail"] as? String).orEmpty()
+                    val detailParts = detailStr.split("•").map { it.trim() }
+                    val catSubcat = detailParts.firstOrNull()?.split("›")?.map { it.trim() }
+                    val category = catSubcat?.firstOrNull()
+                    val subcategory = catSubcat?.getOrNull(1)
+
+                    if (parsedAmount > 0.0) {
+                        pendingAction = PendingAction(
+                            id = "act_" + (title + desc).hashCode().toString().take(8),
+                            toolName = "CREATE_TRANSACTION",
+                            title = title,
+                            description = desc,
+                            detail = detailStr.ifBlank { null },
+                            args = mapOf(
+                                "description" to descPart,
+                                "amount" to parsedAmount,
+                                "category" to category,
+                                "subcategory" to subcategory,
+                                "type" to "expense",
+                                "confirmed" to true
+                            ),
+                            status = PendingActionStatus.PENDING
+                        )
+                    }
+                }
+
                 return ActionCardData(
                     title = title.ifBlank { "Ação Executada" },
                     description = desc,
                     detail = directMap["detail"] as? String,
                     newFreeBalance = directMap["newFreeBalance"] as? String,
-                    isSuccess = (directMap["isSuccess"] as? Boolean) ?: true
+                    isSuccess = (directMap["isSuccess"] as? Boolean) ?: true,
+                    pendingAction = pendingAction
                 )
             }
         }

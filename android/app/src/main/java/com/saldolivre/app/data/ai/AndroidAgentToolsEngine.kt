@@ -169,10 +169,12 @@ class AndroidAgentToolsEngine(
         val effectiveMethod = if (isCreditCard) PaymentMethod.CREDIT_CARD else paymentMethod
 
         val today = FinanceEngine.todayKey()
+        val baseDate = customDueDate?.takeIf { it.isNotBlank() } ?: today
         val (calcDueDate, calcCompetenceMonth) = if (isCreditCard && matchedCard != null) {
-            FinanceEngine.calculateCardInvoiceDates(today, matchedCard)
+            FinanceEngine.calculateCardInvoiceDates(baseDate, matchedCard)
         } else {
-            Pair(today, repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() })
+            val fallbackCompMonth = if (baseDate.length >= 7) baseDate.substring(0, 7) else repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+            Pair(baseDate, customCompetenceMonth?.takeIf { it.isNotBlank() } ?: fallbackCompMonth)
         }
 
         val finalCompetenceMonth = customCompetenceMonth?.takeIf { it.isNotBlank() } ?: calcCompetenceMonth
@@ -183,7 +185,7 @@ class AndroidAgentToolsEngine(
         var finalSubcat = subcategory?.takeIf { it.isNotBlank() }
 
         if (finalCat == null) {
-            val guess = neuralClassifier.guessCategoryAndSubcategory(description, if (type == TransactionType.INCOME) amount else -amount)
+            val guess = neuralClassifier.guessCategoryAndSubcategory(description, amount)
             finalCat = if (type == TransactionType.INCOME) "Receita" else guess.category
             finalSubcat = guess.subcategory ?: finalSubcat
         }
@@ -410,7 +412,8 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeCreateFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val desc = jsonObj.get("description")?.asString ?: "Lançamento via Copiloto"
+        var desc = jsonObj.get("description")?.asString ?: "Lançamento via Copiloto"
+        desc = neuralClassifier.extractDescription(desc).ifBlank { desc }
         val amount = jsonObj.get("amount")?.asDouble ?: 0.0
         val typeStr = jsonObj.get("type")?.asString ?: "expense"
         val category = jsonObj.get("category")?.asString
@@ -972,7 +975,7 @@ class AndroidAgentToolsEngine(
         val user = repository.currentUser.value
         val activeMonth = month ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
 
-        val filtered = all.filter { t ->
+        var filtered = all.filter { t ->
             if (!month.isNullOrBlank() && t.competenceMonth != activeMonth) return@filter false
             if (!category.isNullOrBlank() && !t.category.equals(category, ignoreCase = true)) return@filter false
             if (!subcategory.isNullOrBlank() && !(t.subcategory?.contains(subcategory, ignoreCase = true) == true)) return@filter false
@@ -981,11 +984,23 @@ class AndroidAgentToolsEngine(
             true
         }.sortedByDescending { it.dueDate }
 
+        // Se o usuário procurou por um termo específico sem fixar mês e não encontrou no mês ativo, busca no histórico completo!
+        if (filtered.isEmpty() && !searchTerm.isNullOrBlank() && month == null) {
+            filtered = all.filter { t ->
+                matchesSearch(t.description, searchTerm) || matchesSearch(t.category, searchTerm)
+            }.sortedByDescending { it.dueDate }
+        }
+
         if (filtered.isEmpty()) {
             return ToolExecutionResult(
                 text = "🔍 Não encontrei nenhuma transação com os filtros aplicados" +
                         (if (!searchTerm.isNullOrBlank()) " (\"$searchTerm\")" else "") +
-                        " em ${FinanceEngine.monthLabel(activeMonth)}."
+                        " em ${FinanceEngine.monthLabel(activeMonth)}.",
+                actionCard = ActionCardData(
+                    title = "Nenhum lançamento encontrado",
+                    description = if (!searchTerm.isNullOrBlank()) "Busca: \"$searchTerm\"" else "Nenhum resultado",
+                    detail = "Filtro: ${FinanceEngine.monthLabel(activeMonth)}"
+                )
             )
         }
 
@@ -1146,7 +1161,7 @@ class AndroidAgentToolsEngine(
                 if (desc.isNullOrBlank() || amt <= 0.0) {
                     return ToolExecutionResult(text = "⚠️ Informe o nome e o valor da conta recorrente.")
                 }
-                val guessed = neuralClassifier.guessCategoryAndSubcategory(desc, -amt)
+                val guessed = neuralClassifier.guessCategoryAndSubcategory(desc, amt)
                 val newBill = RecurringBill(
                     id = "rec_" + UUID.randomUUID().toString().take(8),
                     ownerUid = user.uid,
@@ -1590,10 +1605,16 @@ class AndroidAgentToolsEngine(
             }
         }
 
-        // 7. Consulta de Gastos (ex: "quanto gastei no mercado", "quais compras fiz esse mês")
-        val queryRegex = Regex("""^(?:quanto gastei|quais(?: foram)?(?: as| os)? (?:compras|gastos|despesas|lançamentos)|mostrar(?: os)? (?:gastos|despesas)|listar(?: os)? (?:gastos|despesas))\b""", RegexOption.IGNORE_CASE)
+        // 7. Consulta de Gastos e Localização de Despesas
+        val queryRegex = Regex(
+            """^(?:quanto gastei|quais(?: foram)?(?: as| os)? (?:compras|gastos|despesas|lançamentos)|mostrar(?: os)? (?:gastos|despesas|lançamentos)|listar(?: os)? (?:gastos|despesas|lançamentos)|localiz(?:ar|e|a)(?: uma| um| a| o)?(?: despesa| gasto| compra| lan[çc]amento)?(?: espec[íi]fic[ao])?|busc(?:ar|a|que)(?: uma| um| a| o)?(?: despesa| gasto| compra| lan[çc]amento)?(?: espec[íi]fic[ao])?|procur(?:ar|e|a)(?: uma| um| a| o)?(?: despesa| gasto| compra| lan[çc]amento)?(?: espec[íi]fic[ao])?|encontr(?:ar|e|a)(?: uma| um| a| o)?(?: despesa| gasto| compra| lan[çc]amento)?(?: espec[íi]fic[ao])?|pesquis(?:ar|e|a)(?: uma| um| a| o)?(?: despesa| gasto| compra| lan[çc]amento)?(?: espec[íi]fic[ao])?|consult(?:ar|e|a)(?: uma| um| a| o)?(?: despesa| gasto| compra| lan[çc]amento)?(?: espec[íi]fic[ao])?|gastos(?: de| do| da| no| na| em)?|compras(?: de| do| da| no| na| em)?|despesas(?: de| do| da| no| na| em)?|onde gastei)\b""",
+            RegexOption.IGNORE_CASE
+        )
         if (queryRegex.containsMatchIn(trimmed)) {
-            val searchPart = trimmed.replace(queryRegex, "").replace(Regex("""\b(?:em|no|na|com|de)\b""", RegexOption.IGNORE_CASE), "").trim()
+            val searchPart = trimmed.replace(queryRegex, "")
+                .replace(Regex("""["'“”‘’]"""), "")
+                .replace(Regex("""^\s*(?:de|por|em|no|na|nos|nas|com|para|chamad[ao]|com o nome|do|da|dos|das)\s+""", RegexOption.IGNORE_CASE), "")
+                .trim()
             return executeQueryTransactions(searchTerm = searchPart.ifBlank { null })
         }
 
@@ -1616,12 +1637,14 @@ class AndroidAgentToolsEngine(
                 type = intent.type,
                 category = intent.category,
                 subcategory = intent.subcategory,
-                paymentMethod = if (intent.isCreditCard) PaymentMethod.CREDIT_CARD else PaymentMethod.PIX,
+                paymentMethod = if (intent.isCreditCard) PaymentMethod.CREDIT_CARD else intent.paymentMethod,
                 cardName = card?.cardName,
                 splitType = intent.splitType,
                 thirdPartyName = intent.thirdPartyName,
                 currentInstallment = intent.currentInstallment,
-                totalInstallments = intent.totalInstallments
+                totalInstallments = intent.totalInstallments,
+                customCompetenceMonth = intent.competenceMonth,
+                customDueDate = intent.dueDate
             )
         }
 
