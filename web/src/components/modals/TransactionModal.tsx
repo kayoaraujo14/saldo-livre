@@ -665,6 +665,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   setCategory('Receita')
                   setSplitType('mine')
                   setIsInstallment(false)
+                  setStatus('paid')
                 }}
                 className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
                   type === 'income'
@@ -843,47 +844,45 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
               </>
             )}
 
-            {/* Status (Se despesa) */}
-            {!isIncomeType && (
-              <div className="space-y-1.5 sm:col-span-2">
-                <label className="text-xs font-semibold text-slate-300">Status do Lançamento</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setStatus('pending')}
-                    className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
-                      status === 'pending'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    🟠 A Pagar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatus('paid')}
-                    className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
-                      status === 'paid'
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    🟢 Já Pago
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStatus('estimated')}
-                    className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
-                      status === 'estimated'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
-                        : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    🟡 Estimado
-                  </button>
-                </div>
+            {/* Status do Lançamento */}
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="text-xs font-semibold text-slate-300">Status do Lançamento</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStatus('pending')}
+                  className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
+                    status === 'pending'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  🟠 Pendente
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatus('paid')}
+                  className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
+                    status === 'paid'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  🟢 Pago
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatus('estimated')}
+                  className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer text-center ${
+                    status === 'estimated'
+                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  🟡 Estimado
+                </button>
               </div>
-            )}
+            </div>
           </div>
 
           {/* 3. PAGAMENTO E CARTÃO (SE DESPESA) */}

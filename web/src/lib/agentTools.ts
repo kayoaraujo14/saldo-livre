@@ -1598,7 +1598,7 @@ async function atualizar(env: AgentEnv, args: Record<string, unknown>): Promise<
       { label: 'Conta', value: tx.description },
       { label: 'Valor Atual → Novo Valor', value: `${money(effectiveAmount(tx))} → ${money(value)}` },
       { label: 'Impacto Previsto no Saldo', value: diffSaldo >= 0 ? `+${money(diffSaldo)}` : `−${money(Math.abs(diffSaldo))}`, tone: diffSaldo >= 0 ? ('positive' as const) : ('negative' as const) },
-      { label: 'Novo Status', value: newStatus === 'paid' ? 'Pago' : 'A Pagar' },
+      { label: 'Novo Status', value: newStatus === 'paid' ? 'Pago' : 'Pendente' },
       ...(newDueDate ? [{ label: 'Novo Vencimento', value: formatShortDate(newDueDate) }] : []),
       { label: 'Saldo Livre em ' + monthLabel(tx.competenceMonth), value: `${money(before.freeBalance)} → ${money(fakeAfter.freeBalance)}` },
     ]
@@ -1607,7 +1607,7 @@ async function atualizar(env: AgentEnv, args: Record<string, unknown>): Promise<
       response: {
         ok: true,
         aguardandoConfirmacao: true,
-        mensagem: `Entendi que você deseja atualizar a conta "${tx.description}" para o valor real de ${money(value)} (${newStatus === 'paid' ? 'Pago' : 'A Pagar'}). Por favor, confirme no botão abaixo se está correto para atualizar no seu Saldo Livre.`,
+        mensagem: `Entendi que você deseja atualizar a conta "${tx.description}" para o valor real de ${money(value)} (${newStatus === 'paid' ? 'Pago' : 'Pendente'}). Por favor, confirme no botão abaixo se está correto para atualizar no seu Saldo Livre.`,
         conta: tx.description,
         valorReal: value,
         status: newStatus,
@@ -1656,7 +1656,7 @@ async function atualizar(env: AgentEnv, args: Record<string, unknown>): Promise<
       lines: [
         { label: 'Valor', value: `${money(effectiveAmount(tx))} → ${money(value)}` },
         { label: 'Impacto no Saldo', value: diffSaldo >= 0 ? `+${money(diffSaldo)}` : `−${money(Math.abs(diffSaldo))}`, tone: diffSaldo >= 0 ? 'positive' : 'negative' },
-        { label: 'Status', value: newStatus === 'paid' ? 'Pago' : 'A Pagar' },
+        { label: 'Status', value: newStatus === 'paid' ? 'Pago' : 'Pendente' },
         { label: 'Vencimento', value: formatShortDate(updated.dueDate) },
         {
           label: 'Saldo Livre',

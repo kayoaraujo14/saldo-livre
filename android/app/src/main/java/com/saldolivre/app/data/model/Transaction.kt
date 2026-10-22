@@ -37,10 +37,10 @@ enum class PaymentMethod(val value: String, val label: String) {
 
 enum class TransactionStatus(val value: String, val label: String) {
     @SerializedName("estimated")
-    ESTIMATED("estimated", "Previsão"),
+    ESTIMATED("estimated", "Estimado"),
 
     @SerializedName("pending")
-    PENDING("pending", "A Pagar"),
+    PENDING("pending", "Pendente"),
 
     @SerializedName("paid")
     PAID("paid", "Pago");

@@ -196,9 +196,9 @@ fun TransactionsScreen(
                     }
                 )
 
-                // Status: Previsão
+                // Status: Estimado
                 FilterChipItem(
-                    label = "Previsões",
+                    label = "Estimados",
                     isSelected = uiState.statusFilter == TransactionStatus.ESTIMATED,
                     onClick = {
                         viewModel.setStatusFilter(
@@ -207,7 +207,7 @@ fun TransactionsScreen(
                     }
                 )
 
-                // Status: A Pagar
+                // Status: Pendente
                 FilterChipItem(
                     label = "Pendentes (${uiState.pendingCount})",
                     isSelected = uiState.statusFilter == TransactionStatus.PENDING,
@@ -220,7 +220,7 @@ fun TransactionsScreen(
 
                 // Status: Pago
                 FilterChipItem(
-                    label = "Confirmados / Pagos (${uiState.paidCount})",
+                    label = "Pagos (${uiState.paidCount})",
                     isSelected = uiState.statusFilter == TransactionStatus.PAID,
                     onClick = {
                         viewModel.setStatusFilter(
@@ -474,9 +474,9 @@ fun TransactionsScreen(
                         TransactionStatus.entries.forEach { st ->
                             val isSelected = tx.status == st
                             val chipLabel = when (st) {
-                                TransactionStatus.ESTIMATED -> "Previsão"
-                                TransactionStatus.PENDING -> if (isIncome) "A Receber" else "Pendente"
-                                TransactionStatus.PAID -> if (isIncome) "Na Conta" else "Pago"
+                                TransactionStatus.ESTIMATED -> "Estimado"
+                                TransactionStatus.PENDING -> "Pendente"
+                                TransactionStatus.PAID -> "Pago"
                             }
                             val activeColor = when (st) {
                                 TransactionStatus.PAID -> Emerald500

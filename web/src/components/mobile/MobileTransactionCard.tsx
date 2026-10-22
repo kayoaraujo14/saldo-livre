@@ -9,6 +9,7 @@ import {
   RotateCcw,
   CheckCircle2,
   Clock,
+  Sparkles,
   Layers,
   ArrowDownLeft,
 } from 'lucide-react'
@@ -43,21 +44,6 @@ export function MobileTransactionCard({
 
   // Status visual configurations
   const getStatusBadge = () => {
-    if (isIncome) {
-      if (tx.status === 'paid') {
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-            <CheckCircle2 className="size-2.5" /> Na Conta
-          </span>
-        )
-      }
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-          <Clock className="size-2.5" /> A Receber
-        </span>
-      )
-    }
-
     if (tx.status === 'paid') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
@@ -69,14 +55,14 @@ export function MobileTransactionCard({
     if (tx.status === 'pending') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-          <Clock className="size-2.5" /> A Pagar
+          <Clock className="size-2.5" /> Pendente
         </span>
       )
     }
 
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-        Estimado
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+        <Sparkles className="size-2.5" /> Estimado
       </span>
     )
   }

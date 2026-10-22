@@ -464,39 +464,18 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                       <button
                         type="button"
                         onClick={() => cycleStatus(tx)}
-                        title={
-                          tx.type === 'income'
-                            ? 'Clique para alternar: Previsto → A Receber → Na Conta'
-                            : 'Clique para alternar: Estimado → A Pagar → Pago'
-                        }
+                        title="Clique para alternar: Estimado → Pendente → Pago"
                         className="cursor-pointer transition-transform hover:scale-105 active:scale-95"
                       >
-                        {tx.type === 'income' ? (
-                          tx.status === 'estimated' ? (
-                            <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 gap-1 font-medium">
-                              <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
-                              🟡 Previsto
-                            </Badge>
-                          ) : tx.status === 'pending' ? (
-                            <Badge variant="outline" className="text-[10px] bg-orange-500/10 text-orange-300 border-orange-500/30 gap-1 font-medium">
-                              <span className="size-1.5 rounded-full bg-orange-400" />
-                              🟠 A Receber
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30 gap-1 font-medium">
-                              <span className="size-1.5 rounded-full bg-emerald-400" />
-                              🟢 Na Conta
-                            </Badge>
-                          )
-                        ) : tx.status === 'estimated' ? (
-                          <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 gap-1 font-medium">
-                            <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        {tx.status === 'estimated' ? (
+                          <Badge variant="outline" className="text-[10px] bg-cyan-500/10 text-cyan-300 border-cyan-500/30 gap-1 font-medium">
+                            <span className="size-1.5 rounded-full bg-cyan-400 animate-pulse" />
                             Estimado
                           </Badge>
                         ) : tx.status === 'pending' ? (
-                          <Badge variant="outline" className="text-[10px] bg-orange-500/10 text-orange-300 border-orange-500/30 gap-1 font-medium">
-                            <span className="size-1.5 rounded-full bg-orange-400" />
-                            A Pagar
+                          <Badge variant="outline" className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 gap-1 font-medium">
+                            <span className="size-1.5 rounded-full bg-amber-400" />
+                            Pendente
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/30 gap-1 font-medium">

@@ -49,9 +49,9 @@ fun StatusBadge(
     }
 
     val label = when (status) {
-        TransactionStatus.PAID -> if (isIncome) "Confirmado • Na Conta" else "Confirmado • Pago"
-        TransactionStatus.PENDING -> if (isIncome) "Pendente • A Receber" else "Pendente • A Pagar"
-        TransactionStatus.ESTIMATED -> if (isIncome) "Previsto" else "Previsão"
+        TransactionStatus.PAID -> "Pago"
+        TransactionStatus.PENDING -> "Pendente"
+        TransactionStatus.ESTIMATED -> "Estimado"
     }
 
     Row(
