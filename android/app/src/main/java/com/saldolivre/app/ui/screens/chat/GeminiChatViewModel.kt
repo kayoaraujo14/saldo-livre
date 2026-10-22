@@ -8,6 +8,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.saldolivre.app.SaldoLivreApplication
+import com.saldolivre.app.data.ai.AndroidAgentToolsEngine
 import com.saldolivre.app.data.ai.AndroidSpeechManager
 import com.saldolivre.app.data.ai.ChatSessionManager
 import com.saldolivre.app.data.ai.GeminiExecutionResult
@@ -72,6 +73,12 @@ class GeminiChatViewModel(
     private val neuralClassifier = NeuralFinanceClassifier(appContext)
     private val sessionManager = ChatSessionManager(appContext)
     private val rulesManager = LearnedRulesManager(appContext)
+    private val toolsEngine = AndroidAgentToolsEngine(
+        repository = repository,
+        neuralClassifier = neuralClassifier,
+        rulesManager = rulesManager,
+        context = appContext
+    )
     private var speechManager: AndroidSpeechManager? = null
     private var sessionsListener: ListenerRegistration? = null
     private var rulesListener: ListenerRegistration? = null
@@ -873,10 +880,11 @@ class GeminiChatViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isTyping = true) }
             try {
-                executeConfirmedAction(pendingAction)
+                val toolResult = toolsEngine.executeConfirmedAction(pendingAction)
                 val successMsg = ChatMessage(
                     sender = MessageSender.ASSISTANT,
-                    text = "✅ **Ação confirmada e executada com sucesso!**\n\nConcluí a operação **\"${pendingAction.title}\"** e atualizei seus lançamentos e o cálculo do seu Saldo Livre."
+                    text = toolResult.text.ifBlank { "✅ **Ação confirmada e executada com sucesso!**\n\nConcluí a operação **\"${pendingAction.title}\"** e atualizei seus lançamentos e o cálculo do seu Saldo Livre." },
+                    actionCard = toolResult.actionCard
                 )
                 updateActiveSessionMessages(_uiState.value.messages + successMsg)
             } catch (e: Exception) {
@@ -906,56 +914,6 @@ class GeminiChatViewModel(
             text = "❌ **Ação cancelada.** Nada foi alterado no seu Saldo Livre. Se quiser ajustar algum detalhe, basta me avisar!"
         )
         updateActiveSessionMessages(currentMsgs + cancelMsg)
-    }
-
-    private suspend fun executeConfirmedAction(action: PendingAction) {
-        val user = repository.currentUser.value
-        val args = action.args
-
-        when (action.toolName) {
-            "CREATE_TRANSACTION" -> {
-                val desc = args["description"] as? String ?: "Lançamento via Copiloto"
-                val amount = (args["amount"] as? Number)?.toDouble() ?: 0.0
-                val category = args["category"] as? String ?: "Outros"
-                val subcategory = args["subcategory"] as? String
-                val payMethodStr = args["paymentMethod"] as? String ?: "pix"
-                val isCredit = payMethodStr == "credit_card"
-
-                val tx = Transaction(
-                    id = "tx_" + UUID.randomUUID().toString().take(8),
-                    createdByUid = user.uid,
-                    paidByUid = user.uid,
-                    cardId = args["cardId"] as? String,
-                    description = desc,
-                    category = category,
-                    subcategory = subcategory,
-                    type = if ((args["type"] as? String)?.equals("income", ignoreCase = true) == true) TransactionType.INCOME else TransactionType.EXPENSE,
-                    paymentMethod = if (isCredit) PaymentMethod.CREDIT_CARD else PaymentMethod.from(payMethodStr),
-                    status = if (isCredit) TransactionStatus.PENDING else TransactionStatus.PAID,
-                    actualAmount = amount,
-                    totalAmount = amount,
-                    dueDate = args["dueDate"] as? String ?: FinanceEngine.todayKey(),
-                    competenceMonth = args["competenceMonth"] as? String ?: FinanceEngine.currentMonthKey(),
-                    visibleToUids = listOf(user.uid),
-                    userImpact = mapOf(user.uid to amount),
-                    allocations = emptyList()
-                )
-                repository.addTransaction(tx)
-            }
-            "UPDATE_ESTIMATED" -> {
-                val txId = args["transactionId"] as? String ?: ""
-                val actual = (args["actualAmount"] as? Number)?.toDouble() ?: 0.0
-                if (txId.isNotBlank()) {
-                    repository.updateEstimatedWithActual(txId, actual)
-                }
-            }
-            "DELETE_TRANSACTION" -> {
-                val txId = args["transactionId"] as? String ?: ""
-                if (txId.isNotBlank()) {
-                    repository.deleteTransaction(txId)
-                }
-            }
-        }
     }
 
     // -------------------------------------------------------------
@@ -1112,14 +1070,14 @@ class GeminiChatViewModel(
                 }
 
                 if (result.responseText.isNotBlank()) {
-                    return processGeminiResponseAndExecuteActions(result.responseText, user, cards, transactions)
+                    return processGeminiResponseAndExecuteActions(result.responseText, query)
                 }
             } catch (e: Exception) {
                 // Em caso de erro de rede ou quota, cai no fallback inteligente
             }
         }
 
-        return processLocalFallback(query, user, summary, cards, recurringBills, transactions)
+        return processLocalFallback(query)
     }
 
     private fun buildSystemInstruction(
@@ -1151,7 +1109,7 @@ class GeminiChatViewModel(
         val recentTxsDesc = if (transactions.isEmpty()) {
             "LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento."
         } else {
-            val sorted = transactions.sortedByDescending { it.dueDate }.take(25)
+            val sorted = transactions.sortedByDescending { it.dueDate }.take(30)
             "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS (${sorted.size} itens):\n" +
                     sorted.joinToString("\n") {
                         val subText = if (!it.subcategory.isNullOrBlank()) "${it.category} › ${it.subcategory}" else it.category
@@ -1185,7 +1143,7 @@ class GeminiChatViewModel(
         }
 
         return """
-            Você é o "Copiloto Saldo Livre", um agente financeiro pessoal brasileiro, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
+            Você é o "Copiloto Saldo Livre", o agente financeiro de inteligência artificial pessoal brasileiro mais avançado, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
 
             CONTEXTO ATUAL:
             - Usuário logado: ${user.displayName} (UID: ${user.uid}).
@@ -1211,54 +1169,122 @@ class GeminiChatViewModel(
             REGRAS E PREFERÊNCIAS APRENDIDAS DO USUÁRIO (MEMÓRIA VIVA):
             $learnedRulesDesc
 
-            ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
-            Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, inclua no final o bloco JSON com "LEARN_RULE" ou "DELETE_RULE"!
-
             DIRETRIZES DE ASSERTIVIDADE E ZERO ALUCINAÇÃO:
-            - NUNCA invente ou presuma números, lançamentos, dívidas ou saldos que não constem nos dados reais informados acima.
-            - Se faltar parâmetro obrigatório, pergunte diretamente ao usuário.
+            - NUNCA invente dados, lançamentos ou saldos que não constem nos dados reais informados.
+            - Sempre que uma despesa ou comando do usuário corresponder a uma regra aprendida, APLIQUE-A IMEDIATAMENTE!
             - Cite valores formatados em moeda brasileira (ex: R$ 45,00).
-            - Seja DIRETO, OBJETIVO e SUCINTO.
+            - Seja DIRETO, OBJETIVO e acolhedor.
 
-            EXECUÇÃO DE AÇÕES FINANCEIRAS:
-            Quando o usuário solicitar o registro de um gasto/receita, atualização de conta, geração de gráfico ou memorização de regra, forneça sua resposta em texto natural e INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com uma das seguintes ações:
+            EXECUÇÃO DE OPERAÇÕES NO BANCO DE DADOS (CRUD COMPLETO):
+            Sempre que o usuário solicitar qualquer operação de criação, edição, exclusão, consulta ou gerenciamento, você DEVE explicar brevemente e OBRIGATORIAMENTE INCLUIR NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com a ação correspondente:
 
-            a) Criar Lançamento:
+            1. Cadastrar Transação (Despesa, Receita ou Parcelamento):
             ```json
             {
               "action": "CREATE_TRANSACTION",
-              "description": "<descrição>",
-              "amount": 50.0,
+              "description": "Supermercado Pão de Açúcar",
+              "amount": 150.0,
               "type": "expense",
               "category": "Alimentação",
-              "subcategory": "Restaurante",
+              "subcategory": "Supermercado",
               "paymentMethod": "credit_card",
-              "cardName": "<nome do cartão se houver>",
+              "cardName": "Nubank",
               "splitType": "MINE",
               "friendName": null,
-              "installments": { "current": 1, "total": 1 }
+              "installments": { "current": 1, "total": 1 },
+              "competenceMonth": "2026-11",
+              "dueDate": "2026-11-10"
             }
             ```
 
-            b) Atualizar Conta Prevista:
+            2. Cadastrar em Lote (Múltiplos Lançamentos):
             ```json
             {
-              "action": "UPDATE_ESTIMATED",
-              "transactionId": "<id da transação>",
-              "actualAmount": 245.50
+              "action": "BATCH_TRANSACTIONS",
+              "transactions": [
+                { "description": "iFood", "amount": 45.0, "type": "expense", "category": "Alimentação", "paymentMethod": "credit_card" },
+                { "description": "Salário", "amount": 5000.0, "type": "income", "category": "Receita", "paymentMethod": "pix" }
+              ]
             }
             ```
 
-            c) Excluir Lançamento:
+            3. Editar / Corrigir Lançamento Existente:
+            ```json
+            {
+              "action": "EDIT_TRANSACTION",
+              "searchTerm": "Padaria",
+              "newAmount": 25.0,
+              "newCategory": "Alimentação",
+              "newSubcategory": "Padaria & Café",
+              "newDescription": "Padaria Real",
+              "newStatus": "paid",
+              "newCompetenceMonth": "2026-11",
+              "newDueDate": "2026-11-15"
+            }
+            ```
+
+            4. Excluir Lançamento do Banco de Dados:
             ```json
             {
               "action": "DELETE_TRANSACTION",
-              "transactionId": "<id da transação>",
-              "description": "<nome do item>"
+              "searchTerm": "Burger King",
+              "amount": 50.0,
+              "deleteAllInstallments": false
             }
             ```
 
-            d) Gerar Gráfico de Análise Financeira:
+            5. Atualizar Conta Prevista / Estimada (Luz, Água, Internet, etc.):
+            ```json
+            {
+              "action": "UPDATE_ESTIMATED",
+              "searchTerm": "Luz",
+              "actualAmount": 180.0,
+              "status": "paid"
+            }
+            ```
+
+            6. Consultar e Filtrar Lançamentos:
+            ```json
+            {
+              "action": "QUERY_TRANSACTIONS",
+              "searchTerm": "Uber",
+              "category": null,
+              "month": "2026-10"
+            }
+            ```
+
+            7. Gerenciar Cartões de Crédito:
+            ```json
+            {
+              "action": "MANAGE_CARDS",
+              "operation": "adicionar",
+              "cardName": "Inter Black",
+              "closingDay": 5,
+              "dueDay": 12
+            }
+            ```
+
+            8. Gerenciar Contas Recorrentes:
+            ```json
+            {
+              "action": "MANAGE_RECURRING",
+              "operation": "adicionar",
+              "description": "Netflix",
+              "amount": 55.90,
+              "dueDay": 15,
+              "category": "Assinaturas"
+            }
+            ```
+
+            9. Expandir Parcelamentos do Mês:
+            ```json
+            {
+              "action": "EXPAND_INSTALLMENTS",
+              "month": "2026-11"
+            }
+            ```
+
+            10. Gerar Gráfico de Análise:
             ```json
             {
               "action": "GENERATE_CHART",
@@ -1272,15 +1298,15 @@ class GeminiChatViewModel(
             }
             ```
 
-            e) Aprender Nova Regra (Memória Viva):
+            11. Memorizar Nova Regra (Memória Viva):
             ```json
             {
               "action": "LEARN_RULE",
-              "rule": "<regra aprendida>"
+              "rule": "Todo gasto no Zé Delivery é Lazer e 100% meu"
             }
             ```
 
-            f) Esquecer Regra da Memória:
+            12. Esquecer Regra da Memória:
             ```json
             {
               "action": "DELETE_RULE",
@@ -1292,343 +1318,54 @@ class GeminiChatViewModel(
 
     private suspend fun processGeminiResponseAndExecuteActions(
         rawResponse: String,
-        user: UserProfile,
-        cards: List<Card>,
-        transactions: List<Transaction>
+        userQuery: String
     ): AgentResponse {
         val jsonRegex = Regex("""```json\s*(\{[\s\S]*?\})\s*```""")
         val match = jsonRegex.find(rawResponse)
-
-        var actionCard: ActionCardData? = null
-        var chartPayload: ChartPayload? = null
-        val cleanText = if (match != null) {
-            rawResponse.replace(match.value, "").trim()
-        } else {
-            rawResponse.trim()
-        }
 
         if (match != null) {
             try {
                 val jsonString = match.groupValues[1]
                 val jsonObj = gson.fromJson(jsonString, JsonObject::class.java)
-                val action = jsonObj.get("action")?.asString ?: ""
+                val toolResult = toolsEngine.executeFromJson(jsonObj)
 
-                when (action) {
-                    "CREATE_TRANSACTION" -> {
-                        val desc = jsonObj.get("description")?.asString ?: "Lançamento via Copiloto IA"
-                        val amount = jsonObj.get("amount")?.asDouble ?: 0.0
-                        val typeStr = jsonObj.get("type")?.asString ?: "expense"
-                        val category = jsonObj.get("category")?.asString ?: "Outros"
-                        val subcategory = jsonObj.get("subcategory")?.asString
-                        val payMethodStr = jsonObj.get("paymentMethod")?.asString ?: "pix"
-                        val cardName = jsonObj.get("cardName")?.asString ?: ""
-                        val splitTypeStr = jsonObj.get("splitType")?.asString ?: "MINE"
-
-                        val matchedCard = if (cardName.isNotBlank()) {
-                            cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
-                        } else null
-
-                        val isCreditCard = payMethodStr == "credit_card" || matchedCard != null
-                        val effectiveCard = matchedCard ?: if (isCreditCard) cards.firstOrNull() else null
-                        val paymentMethod = if (isCreditCard) PaymentMethod.CREDIT_CARD else PaymentMethod.from(payMethodStr)
-                        val txType = if (typeStr.equals("income", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
-
-                        val today = FinanceEngine.todayKey()
-                        val (dueDate, competenceMonth) = if (isCreditCard && effectiveCard != null) {
-                            FinanceEngine.calculateCardInvoiceDates(today, effectiveCard)
-                        } else {
-                            Pair(today, FinanceEngine.currentMonthKey())
-                        }
-
-                        val splitType = when (splitTypeStr.uppercase()) {
-                            "SPLIT_50", "CASAL_50_50" -> SplitType.SPLIT_50
-                            "PARTNER", "PARCEIRO" -> SplitType.PARTNER
-                            "FRIEND", "AMIGO" -> SplitType.FRIEND
-                            "EXTERNAL", "TERCEIRO" -> SplitType.EXTERNAL
-                            else -> SplitType.MINE
-                        }
-
-                        val partner = repository.allUsers.find { it.uid != user.uid }
-                        val splitResult = FinanceEngine.buildSplit(
-                            splitType = splitType,
-                            total = amount,
-                            myUid = user.uid,
-                            myName = user.displayName,
-                            partnerUid = partner?.uid,
-                            partnerName = partner?.displayName,
-                            payerUid = user.uid
-                        )
-
-                        val installmentsObj = jsonObj.getAsJsonObject("installments")
-                        val totalInstallments = installmentsObj?.get("total")?.asInt ?: 1
-                        val currentInstallment = installmentsObj?.get("current")?.asInt ?: 1
-
-                        if (totalInstallments > 1) {
-                            val groupId = "inst_" + UUID.randomUUID().toString().take(8)
-                            val baseDesc = FinanceEngine.stripInstallmentSuffix(desc)
-                            val installmentList = mutableListOf<Transaction>()
-
-                            for (i in 1..totalInstallments) {
-                                val monthOffset = i - currentInstallment
-                                val targetMonth = FinanceEngine.shiftMonth(competenceMonth, monthOffset)
-                                val targetDueDate = if (isCreditCard && effectiveCard != null) {
-                                    FinanceEngine.dateInMonth(targetMonth, effectiveCard.dueDay)
-                                } else {
-                                    FinanceEngine.dateInMonth(targetMonth, 10)
-                                }
-
-                                val status = if (monthOffset < 0) TransactionStatus.PAID else TransactionStatus.PENDING
-
-                                installmentList.add(
-                                    Transaction(
-                                        id = "tx_" + UUID.randomUUID().toString().take(8),
-                                        createdByUid = user.uid,
-                                        paidByUid = user.uid,
-                                        cardId = effectiveCard?.id,
-                                        description = FinanceEngine.formatInstallmentDesc(baseDesc, i, totalInstallments),
-                                        category = category,
-                                        subcategory = subcategory,
-                                        type = txType,
-                                        paymentMethod = paymentMethod,
-                                        status = status,
-                                        actualAmount = amount,
-                                        totalAmount = amount,
-                                        dueDate = targetDueDate,
-                                        competenceMonth = targetMonth,
-                                        visibleToUids = splitResult.visibleToUids,
-                                        userImpact = splitResult.userImpact,
-                                        allocations = splitResult.allocations,
-                                        splitType = splitType,
-                                        installmentGroupId = groupId,
-                                        installmentNumber = i,
-                                        installmentsTotal = totalInstallments
-                                    )
-                                )
-                            }
-                            repository.addTransactions(installmentList)
-                        } else {
-                            val tx = Transaction(
-                                id = "tx_" + UUID.randomUUID().toString().take(8),
-                                createdByUid = user.uid,
-                                paidByUid = user.uid,
-                                cardId = effectiveCard?.id,
-                                description = desc,
-                                category = category,
-                                subcategory = subcategory,
-                                type = txType,
-                                paymentMethod = paymentMethod,
-                                status = if (isCreditCard) TransactionStatus.PENDING else TransactionStatus.PAID,
-                                actualAmount = amount,
-                                totalAmount = amount,
-                                dueDate = dueDate,
-                                competenceMonth = competenceMonth,
-                                visibleToUids = splitResult.visibleToUids,
-                                userImpact = splitResult.userImpact,
-                                allocations = splitResult.allocations,
-                                splitType = splitType
-                            )
-                            repository.addTransaction(tx)
-                        }
-
-                        val summaryNow = repository.getMonthSummary().first()
-                        val cardNote = if (isCreditCard && effectiveCard != null) " • Cartão ${effectiveCard.cardName}" else ""
-                        val instNote = if (totalInstallments > 1) " • Parcelado em $totalInstallments vezes" else ""
-
-                        actionCard = ActionCardData(
-                            title = if (txType == TransactionType.INCOME) "Receita Registrada" else "Despesa Registrada",
-                            description = "$desc — R$ ${FinanceEngine.round2(amount)}",
-                            detail = "$category${if (!subcategory.isNullOrBlank()) " › $subcategory" else ""}$cardNote$instNote",
-                            newFreeBalance = "Saldo Livre Atual: R$ ${FinanceEngine.round2(summaryNow.freeBalance)}"
-                        )
-                    }
-
-                    "UPDATE_ESTIMATED" -> {
-                        val txId = jsonObj.get("transactionId")?.asString ?: ""
-                        val actualAmount = jsonObj.get("actualAmount")?.asDouble ?: 0.0
-                        if (txId.isNotBlank()) {
-                            repository.updateEstimatedWithActual(txId, actualAmount)
-                            val summaryNow = repository.getMonthSummary().first()
-                            actionCard = ActionCardData(
-                                title = "Conta Prevista Atualizada",
-                                description = "Valor real fixado em R$ ${FinanceEngine.round2(actualAmount)}",
-                                newFreeBalance = "Saldo Livre Atual: R$ ${FinanceEngine.round2(summaryNow.freeBalance)}"
-                            )
-                        }
-                    }
-
-                    "DELETE_TRANSACTION" -> {
-                        val txId = jsonObj.get("transactionId")?.asString ?: ""
-                        val itemDesc = jsonObj.get("description")?.asString ?: "Lançamento"
-                        if (txId.isNotBlank()) {
-                            repository.deleteTransaction(txId)
-                            val summaryNow = repository.getMonthSummary().first()
-                            actionCard = ActionCardData(
-                                title = "Lançamento Excluído",
-                                description = "$itemDesc removido do histórico",
-                                newFreeBalance = "Saldo Livre Atual: R$ ${FinanceEngine.round2(summaryNow.freeBalance)}"
-                            )
-                        }
-                    }
-
-                    "GENERATE_CHART" -> {
-                        val chartTypeStr = jsonObj.get("chartType")?.asString ?: "donut"
-                        val title = jsonObj.get("title")?.asString ?: "Análise Financeira"
-                        val description = jsonObj.get("description")?.asString
-                        val dataArray = jsonObj.getAsJsonArray("data")
-
-                        val items = mutableListOf<ChartDataItem>()
-                        if (dataArray != null) {
-                            for (elem in dataArray) {
-                                val obj = elem.asJsonObject
-                                val label = obj.get("label")?.asString ?: "Outros"
-                                val value = obj.get("value")?.asDouble ?: 0.0
-                                val colorHex = obj.get("colorHex")?.asString ?: "#10B981"
-                                val color = try {
-                                    Color(android.graphics.Color.parseColor(colorHex))
-                                } catch (e: Exception) {
-                                    Emerald500
-                                }
-                                items.add(ChartDataItem(label = label, value = value, color = color))
-                            }
-                        }
-
-                        if (items.isNotEmpty()) {
-                            chartPayload = ChartPayload(
-                                type = if (chartTypeStr.equals("bar", ignoreCase = true)) ChartType.BAR else ChartType.DONUT,
-                                title = title,
-                                description = description,
-                                data = items
-                            )
-                        }
-                    }
-
-                    "LEARN_RULE" -> {
-                        val rule = jsonObj.get("rule")?.asString ?: ""
-                        if (rule.isNotBlank()) {
-                            onAddRule(rule)
-                            actionCard = ActionCardData(
-                                title = "Nova Preferência Aprendida 🧠",
-                                description = rule,
-                                detail = "Memorizado no Copiloto Saldo Livre"
-                            )
-                        }
-                    }
-
-                    "DELETE_RULE" -> {
-                        val rule = jsonObj.get("rule")?.asString ?: ""
-                        if (rule.isNotBlank()) {
-                            onDeleteRule(rule)
-                            actionCard = ActionCardData(
-                                title = "Preferência Removida da Memória",
-                                description = rule
-                            )
-                        }
-                    }
+                val cleanText = rawResponse.replace(match.value, "").trim()
+                val finalText = if (cleanText.isNotBlank()) {
+                    cleanText
+                } else {
+                    toolResult.text
                 }
-            } catch (e: Exception) {
-                // Ignore parsing errors and keep natural language text
+
+                return AgentResponse(
+                    text = finalText,
+                    actionCard = toolResult.actionCard,
+                    chartPayload = toolResult.chartPayload
+                )
+            } catch (_: Exception) {
+                // Se falhar o parse do JSON do modelo, tenta processar via NLP local
             }
         }
 
-        return AgentResponse(text = cleanText, actionCard = actionCard, chartPayload = chartPayload)
+        // Se o Gemini não gerou bloco JSON mas o usuário solicitou uma ação de CRUD,
+        // o motor de ferramentas local processa para garantir a execução no banco de dados!
+        val offlineResult = toolsEngine.processNaturalLanguageOffline(userQuery)
+        if (offlineResult.actionCard != null || offlineResult.chartPayload != null) {
+            return AgentResponse(
+                text = "${rawResponse.trim()}\n\n${offlineResult.text}",
+                actionCard = offlineResult.actionCard,
+                chartPayload = offlineResult.chartPayload
+            )
+        }
+
+        return AgentResponse(text = rawResponse.trim())
     }
 
-    private suspend fun processLocalFallback(
-        query: String,
-        user: UserProfile,
-        summary: MonthSummary,
-        cards: List<Card>,
-        recurringBills: List<RecurringBill>,
-        transactions: List<Transaction>
-    ): AgentResponse {
-        val lower = query.lowercase().trim()
-
-        if (lower.contains("saldo livre") || lower.contains("saldo")) {
-            val free = FinanceEngine.round2(summary.freeBalance)
-            return AgentResponse(
-                text = "Seu **Saldo Livre real** neste momento é de **R$ $free**.\n\n" +
-                        "• **Total de Receitas**: R$ ${FinanceEngine.round2(summary.income)}\n" +
-                        "• **Total Comprometido**: R$ ${FinanceEngine.round2(summary.committed)}\n" +
-                        (if (summary.dailyLimit != null && summary.dailyLimit > 0) "• **Limite Diário Seguro**: R$ ${FinanceEngine.round2(summary.dailyLimit)}/dia\n" else "")
-            )
-        }
-
-        if (lower.contains("limite diário") || lower.contains("limite diario") || lower.contains("posso gastar hoje")) {
-            val daily = summary.dailyLimit
-            return if (daily != null && daily > 0) {
-                AgentResponse(
-                    text = "Seu **Limite Diário Seguro** é de **R$ ${FinanceEngine.round2(daily)}/dia**.\n\n" +
-                            "Restam **${summary.daysRemaining} dias** até o final do mês. Gastando dentro desse valor por dia, você encerra o mês com Saldo Livre positivo!"
-                )
-            } else {
-                AgentResponse(
-                    text = "Atenção: Seu Saldo Livre está comprometido ou encerrado para o mês atual. Recomendamos evitar gastos não essenciais."
-                )
-            }
-        }
-
-        // Tenta classificar intenção com a Rede Neural local
-        val intent = neuralClassifier.parseNaturalIntent(query)
-        if (intent != null && intent.amount > 0) {
-            val isCredit = intent.isCreditCard
-            val effectiveCard = if (isCredit) {
-                cards.find { it.cardName.contains(intent.cardNameHint ?: "", ignoreCase = true) } ?: cards.firstOrNull()
-            } else null
-
-            val today = FinanceEngine.todayKey()
-            val (dueDate, competenceMonth) = if (isCredit && effectiveCard != null) {
-                FinanceEngine.calculateCardInvoiceDates(today, effectiveCard)
-            } else {
-                Pair(today, FinanceEngine.currentMonthKey())
-            }
-
-            val partner = repository.allUsers.find { it.uid != user.uid }
-            val splitResult = FinanceEngine.buildSplit(
-                splitType = intent.splitType,
-                total = intent.amount,
-                myUid = user.uid,
-                myName = user.displayName,
-                partnerUid = partner?.uid,
-                partnerName = partner?.displayName,
-                payerUid = user.uid
-            )
-
-            val tx = Transaction(
-                id = "tx_" + UUID.randomUUID().toString().take(8),
-                createdByUid = user.uid,
-                paidByUid = user.uid,
-                cardId = effectiveCard?.id,
-                description = intent.description,
-                category = intent.category,
-                subcategory = intent.subcategory,
-                type = intent.type,
-                paymentMethod = if (isCredit) PaymentMethod.CREDIT_CARD else PaymentMethod.PIX,
-                status = if (isCredit) TransactionStatus.PENDING else TransactionStatus.PAID,
-                actualAmount = intent.amount,
-                totalAmount = intent.amount,
-                dueDate = dueDate,
-                competenceMonth = competenceMonth,
-                visibleToUids = splitResult.visibleToUids,
-                userImpact = splitResult.userImpact,
-                allocations = splitResult.allocations,
-                splitType = intent.splitType
-            )
-            repository.addTransaction(tx)
-
-            val summaryNow = repository.getMonthSummary().first()
-            return AgentResponse(
-                text = "Cadastrei **${intent.description}** no valor de **R$ ${FinanceEngine.round2(intent.amount)}** na categoria **${intent.category}${if (intent.subcategory != null) " › ${intent.subcategory}" else ""}**.",
-                actionCard = ActionCardData(
-                    title = "Lançamento Registrado",
-                    description = "${intent.description} — R$ ${FinanceEngine.round2(intent.amount)}",
-                    detail = intent.category + (if (effectiveCard != null) " • Cartão ${effectiveCard.cardName}" else ""),
-                    newFreeBalance = "Saldo Livre Atual: R$ ${FinanceEngine.round2(summaryNow.freeBalance)}"
-                )
-            )
-        }
-
+    private suspend fun processLocalFallback(query: String): AgentResponse {
+        val toolResult = toolsEngine.processNaturalLanguageOffline(query)
         return AgentResponse(
-            text = "Estou conectado em modo local. Você pode me pedir para lançar despesas (ex: *\"Gastei 55 no mercado\"*), consultar seu Saldo Livre ou conectar sua chave do Google Gemini no ícone 🔑 para inteligência generativa completa!"
+            text = toolResult.text,
+            actionCard = toolResult.actionCard,
+            chartPayload = toolResult.chartPayload
         )
     }
 }
