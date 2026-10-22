@@ -1198,11 +1198,11 @@ CONTEXTO ATUAL:
 - Cartões cadastrados: ${cardsDesc}.
 - Amigos na plataforma: ${friendsDesc}.
 
-${summaryDesc}
+${summaryDescText}
 
 ${recentTxsDesc}
 
-${pendingTxsDesc}
+${pendingTxsDescText}
 
 
 EXECUÇÃO DE OPERAÇÕES NO BANCO DE DADOS (CRUD COMPLETO):
@@ -1520,7 +1520,6 @@ Sempre que o usuário pedir uma análise visual, comparativo, projeção gráfic
             return AgentResponse(
                 text = finalText,
                 actions = offlineResult.actions,
-                actionCard = offlineResult.actions?.firstOrNull(),
                 chartPayload = offlineResult.chartPayload
             )
         }
