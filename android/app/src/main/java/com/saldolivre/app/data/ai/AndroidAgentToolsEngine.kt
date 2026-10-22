@@ -20,6 +20,7 @@ import java.util.UUID
 data class ToolExecutionResult(
     val text: String,
     val actionCard: ActionCardData? = null,
+    val actions: List<ActionCardData>? = actionCard?.let { listOf(it) },
     val chartPayload: ChartPayload? = null
 )
 
