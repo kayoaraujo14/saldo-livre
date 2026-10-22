@@ -25,43 +25,53 @@ data class PendingAction(
 )
 
 data class ActionCardLine(
-    val label: String,
-    val value: String,
+    val label: String = "",
+    val value: String = "",
     val tone: String? = null
 )
 
+/**
+ * Card de ação exibido no chat. Compatível com o formato da Web
+ * (`{ kind, title, lines[], pendingAction?, pending_transactions? }`) e com o formato
+ * legado do Android (`title`, `description`, `detail`, `newFreeBalance`).
+ *
+ * Todos os parâmetros têm valor padrão para que o Gson consiga usar o construtor vazio
+ * e preserve os defaults ao desserializar sessões antigas salvas localmente.
+ */
 data class ActionCardData(
-    val kind: String = "confirmation",
-    val title: String,
-    val description: String? = null,
+    val title: String = "",
+    val description: String = "",
     val detail: String? = null,
     val newFreeBalance: String? = null,
     val isSuccess: Boolean = true,
-    val lines: List<ActionCardLine> = emptyList(),
     val pendingAction: PendingAction? = null,
+    /** 'created' | 'updated' | 'report' | 'error' | 'confirmation' (mesmo enum da Web) */
+    val kind: String = when {
+        pendingAction != null -> "confirmation"
+        !isSuccess -> "error"
+        else -> "created"
+    },
+    /** Linhas estruturadas (label/value/tone) — idênticas às exibidas na Web. */
+    val lines: List<ActionCardLine> = emptyList(),
     val pendingTransactions: List<Map<String, Any?>>? = null
 ) {
-    constructor(
-        title: String,
-        description: String? = null,
-        detail: String? = null,
-        newFreeBalance: String? = null,
-        isSuccess: Boolean = true,
-        pendingAction: PendingAction? = null
-    ) : this(
-        kind = if (pendingAction != null) "confirmation" else "report",
-        title = title,
-        description = description,
-        detail = detail,
-        newFreeBalance = newFreeBalance,
-        isSuccess = isSuccess,
-        lines = listOfNotNull(
-            description?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Detalhe", it) },
-            detail?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Info", it) }
-        ),
-        pendingAction = pendingAction,
-        pendingTransactions = null
-    )
+    /**
+     * Linhas a exibir/sincronizar. Se o card veio da Web, usa `lines`; caso contrário,
+     * deriva a partir dos campos legados do Android.
+     */
+    fun resolvedLines(): List<ActionCardLine> {
+        // Gson pode deixar campos não-nulos como null ao ler JSON antigo; por isso a defesa extra.
+        @Suppress("USELESS_ELVIS", "SENSELESS_COMPARISON")
+        val explicit = (lines ?: emptyList()).filter { it != null && !it.value.isNullOrBlank() }
+        if (explicit.isNotEmpty()) return explicit
+        @Suppress("USELESS_ELVIS")
+        val desc = description ?: ""
+        return listOfNotNull(
+            desc.takeIf { it.isNotBlank() }?.let { ActionCardLine("Resumo", it) },
+            detail?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Detalhes", it) },
+            newFreeBalance?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Saldo", it, "positive") }
+        )
+    }
 }
 
 data class ChatAttachment(
@@ -81,7 +91,16 @@ data class ChatMessage(
     val chartPayload: ChartPayload? = null,
     val attachment: ChatAttachment? = null,
     val timestamp: Long = System.currentTimeMillis()
-)
+) {
+    /**
+     * Todos os cards de ação da mensagem (paridade com `message.actions[]` da Web).
+     * Mantém compatibilidade com mensagens antigas que só possuem `actionCard`.
+     */
+    fun allActionCards(): List<ActionCardData> {
+        val list = actions?.filterNotNull().orEmpty()
+        return if (list.isNotEmpty()) list else listOfNotNull(actionCard)
+    }
+}
 
 data class ChatSession(
     val id: String = "sess_${System.currentTimeMillis()}",

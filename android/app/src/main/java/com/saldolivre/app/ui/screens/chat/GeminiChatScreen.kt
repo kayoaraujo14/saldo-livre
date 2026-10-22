@@ -1110,9 +1110,9 @@ fun ChatBubble(
             }
         }
 
-        // Card de Ação Interativo / Confirmação de Lançamento Smart
-        if (message.actionCard != null) {
-            val card = message.actionCard
+        // Cards de Ação Interativos / Confirmação de Lançamento Smart (suporta múltiplos cards igual à Web)
+        val actionCards = message.allActionCards()
+        for (card in actionCards) {
             val pending = card.pendingAction ?: if (card.title.contains("Confirmar", ignoreCase = true)) {
                 val parts = card.description.split("—", "-")
                 val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
@@ -1230,23 +1230,61 @@ fun ChatBubble(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Descrição principal destacada
-                Text(
-                    text = card.description,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
+                @Suppress("USELESS_ELVIS")
+                val structuredLines = (card.lines ?: emptyList()).filter { it.value.isNotBlank() }
+                if (structuredLines.isNotEmpty() && card.newFreeBalance.isNullOrBlank()) {
+                    // Renderização de linhas estruturadas vindas da Web (label / value / tone)
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        for (line in structuredLines) {
+                            val valueColor = when (line.tone) {
+                                "positive" -> Emerald400
+                                "negative" -> Rose400
+                                else -> TextPrimary
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                if (line.label.isNotBlank()) {
+                                    Text(
+                                        text = "${line.label}:",
+                                        fontSize = 11.5.sp,
+                                        color = TextSecondary,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                }
+                                Text(
+                                    text = line.value,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = valueColor,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Descrição principal destacada
+                    if (card.description.isNotBlank()) {
+                        Text(
+                            text = card.description,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    }
 
-                // Detalhes da transação (Categoria, Método, Divisão)
-                if (!card.detail.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = card.detail,
-                        fontSize = 11.5.sp,
-                        color = TextSecondary,
-                        lineHeight = 16.sp
-                    )
+                    // Detalhes da transação (Categoria, Método, Divisão)
+                    if (!card.detail.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = card.detail,
+                            fontSize = 11.5.sp,
+                            color = TextSecondary,
+                            lineHeight = 16.sp
+                        )
+                    }
                 }
 
                 // Impacto no Saldo Livre

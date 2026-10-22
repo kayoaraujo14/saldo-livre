@@ -9,6 +9,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 import com.saldolivre.app.data.model.ActionCardData
+import com.saldolivre.app.data.model.ActionCardLine
 import com.saldolivre.app.data.model.ChatAttachment
 import com.saldolivre.app.data.model.ChatMessage
 import com.saldolivre.app.data.model.ChatSession
@@ -181,50 +182,65 @@ class ChatSessionManager(
             map["attachment"] = attMap
         }
 
-        if (msg.actionCard != null) {
-            val lines = mutableListOf<Map<String, String>>()
-            if (msg.actionCard.description.isNotBlank()) {
-                lines.add(mapOf("label" to "Resumo", "value" to msg.actionCard.description))
-            }
-            if (!msg.actionCard.detail.isNullOrBlank()) {
-                lines.add(mapOf("label" to "Detalhes", "value" to msg.actionCard.detail))
-            }
-            if (!msg.actionCard.newFreeBalance.isNullOrBlank()) {
-                lines.add(mapOf("label" to "Saldo", "value" to msg.actionCard.newFreeBalance, "tone" to "positive"))
-            }
-            map["actions"] = listOf(
-                mapOf(
-                    "kind" to if (msg.actionCard.isSuccess) "created" else "error",
-                    "title" to msg.actionCard.title,
-                    "lines" to lines
-                )
-            )
-            val pendingMap = msg.actionCard.pendingAction?.let { pa ->
-                mapOf(
-                    "id" to pa.id,
-                    "toolName" to pa.toolName,
-                    "title" to pa.title,
-                    "description" to pa.description,
-                    "detail" to pa.detail,
-                    "args" to pa.args,
-                    "status" to pa.status.name
-                )
-            }
+        val cards = msg.allActionCards()
+        if (cards.isNotEmpty()) {
+            // Formato Web (message.actions[]): todos os cards, com kind/title/lines/pendingAction
+            map["actions"] = cards.map { card -> serializeActionCardForWeb(card) }
+
+            // Formato Android legado (actionCard): mantém o primeiro card com o pendingAction completo
+            val first = cards.first()
             val cardMap = mutableMapOf<String, Any?>(
-                "title" to msg.actionCard.title,
-                "description" to msg.actionCard.description,
-                "detail" to msg.actionCard.detail,
-                "newFreeBalance" to msg.actionCard.newFreeBalance,
-                "isSuccess" to msg.actionCard.isSuccess
+                "title" to first.title,
+                "description" to first.description,
+                "detail" to first.detail,
+                "newFreeBalance" to first.newFreeBalance,
+                "isSuccess" to first.isSuccess,
+                "kind" to first.kind
             )
-            if (pendingMap != null) {
-                cardMap["pendingAction"] = pendingMap
-            }
+            first.pendingAction?.let { cardMap["pendingAction"] = serializePendingAction(it) }
             map["actionCard"] = cardMap
+
+            val pendingTxs = cards.flatMap { it.pendingTransactions.orEmpty() }
+            if (pendingTxs.isNotEmpty()) {
+                map["pending_transactions"] = pendingTxs
+            }
         }
 
         return map
     }
+
+    private fun serializeActionCardForWeb(card: ActionCardData): Map<String, Any?> {
+        val linesMaps = card.resolvedLines().map { line ->
+            val l = mutableMapOf<String, Any?>("label" to line.label, "value" to line.value)
+            if (!line.tone.isNullOrBlank()) l["tone"] = line.tone
+            l
+        }
+        val webMap = mutableMapOf<String, Any?>(
+            "kind" to card.kind.ifBlank { if (card.isSuccess) "created" else "error" },
+            "title" to card.title,
+            "lines" to linesMaps
+        )
+        card.pendingAction?.let { pa ->
+            val pMap = serializePendingAction(pa).toMutableMap()
+            pMap["lines"] = linesMaps
+            webMap["pendingAction"] = pMap
+        }
+        if (!card.pendingTransactions.isNullOrEmpty()) {
+            webMap["pending_transactions"] = card.pendingTransactions
+        }
+        return webMap
+    }
+
+    private fun serializePendingAction(pa: PendingAction): Map<String, Any?> = mapOf(
+        "id" to pa.id,
+        "toolName" to pa.toolName,
+        "title" to pa.title,
+        "description" to pa.description,
+        "detail" to pa.detail,
+        "args" to pa.args,
+        // Web usa 'pending' | 'confirmed' | 'cancelled' em minúsculas
+        "status" to pa.status.name.lowercase()
+    )
 
     fun deleteSession(uid: String, sessionId: String) {
         val current = getLocalSessions(uid).filter { it.id != sessionId }
@@ -334,7 +350,7 @@ class ChatSessionManager(
             val (cleanText, extractedChart) = extractChartFromMarkdown(rawContent)
 
             val attachment = parseAttachment(map["attachment"])
-            val actions = parseActionCardsList(map["actions"] ?: map["actionCard"])
+            val actions = parseActionCardsList(map["actionCard"], map["actions"])
             val timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
 
             result.add(
@@ -368,9 +384,173 @@ class ChatSessionManager(
         )
     }
 
+    /**
+     * Converte os cards de ação vindos do Firestore em [ActionCardData].
+     * - `actions` (formato Web): lista completa de cards `{ kind, title, lines[], pendingAction?, pending_transactions? }`.
+     * - `actionCard` (formato Android): card único com `pendingAction` completo e executável.
+     * Quando ambos existem (mensagens gravadas pelo Android), o `actionCard` substitui o primeiro card
+     * da lista para preservar o pendingAction com os argumentos nativos.
+     */
+    private fun parseActionCardsList(rawActionCard: Any?, rawWebActions: Any?): List<ActionCardData>? {
+        val webCards: List<ActionCardData> = when (rawWebActions) {
+            is List<*> -> rawWebActions.mapNotNull { parseWebActionCard(it) }
+            is Map<*, *> -> listOfNotNull(parseWebActionCard(rawWebActions))
+            else -> emptyList()
+        }
+        val androidCard = parseAndroidActionCard(rawActionCard)
 
+        val result = when {
+            androidCard != null && webCards.isNotEmpty() -> {
+                val firstWeb = webCards.first()
+                val merged = androidCard.copy(
+                    kind = if (androidCard.pendingAction != null) "confirmation" else firstWeb.kind,
+                    lines = firstWeb.lines,
+                    pendingTransactions = androidCard.pendingTransactions ?: firstWeb.pendingTransactions
+                )
+                listOf(merged) + webCards.drop(1)
+            }
+            androidCard != null -> listOf(androidCard)
+            else -> webCards
+        }
+        return result.ifEmpty { null }
+    }
 
-    private fun extractChartFromMarkdown(content: String): Pair<String, ChartPayload?> {
+    private fun parsePendingStatus(raw: Any?): PendingActionStatus {
+        val s = (raw as? String).orEmpty()
+        return PendingActionStatus.values().firstOrNull { it.name.equals(s, ignoreCase = true) }
+            ?: PendingActionStatus.PENDING
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun parsePendingTransactions(raw: Any?): List<Map<String, Any?>>? {
+        val list = raw as? List<*> ?: return null
+        val parsed = list.mapNotNull { (it as? Map<*, *>)?.let { m -> m.entries.associate { e -> e.key.toString() to e.value } } }
+        return parsed.ifEmpty { null }
+    }
+
+    private fun parseLines(raw: Any?): List<ActionCardLine> {
+        val list = raw as? List<*> ?: return emptyList()
+        return list.mapNotNull { lineObj ->
+            val lMap = lineObj as? Map<*, *> ?: return@mapNotNull null
+            val label = lMap["label"]?.toString().orEmpty()
+            val value = lMap["value"]?.toString().orEmpty()
+            if (value.isBlank() && label.isBlank()) null
+            else ActionCardLine(label = label, value = value, tone = lMap["tone"] as? String)
+        }
+    }
+
+    private fun parsePendingActionMap(
+        pendingMap: Map<*, *>,
+        fallbackTitle: String,
+        fallbackDesc: String,
+        fallbackDetail: String?
+    ): PendingAction {
+        val toolName = (pendingMap["toolName"] as? String).orEmpty()
+        val pTitle = (pendingMap["title"] as? String).orEmpty()
+        val pDesc = (pendingMap["description"] as? String).orEmpty()
+        @Suppress("UNCHECKED_CAST")
+        val pArgs = (pendingMap["args"] as? Map<String, Any?>) ?: emptyMap()
+        return PendingAction(
+            id = (pendingMap["id"] as? String)?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
+            toolName = toolName.ifBlank { "CREATE_TRANSACTION" },
+            title = pTitle.ifBlank { fallbackTitle },
+            description = pDesc.ifBlank { fallbackDesc },
+            detail = (pendingMap["detail"] as? String) ?: fallbackDetail,
+            args = pArgs,
+            status = parsePendingStatus(pendingMap["status"])
+        )
+    }
+
+    /** Formato Android direto (campo `actionCard`). */
+    private fun parseAndroidActionCard(raw: Any?): ActionCardData? {
+        val directMap = raw as? Map<*, *> ?: return null
+        val title = (directMap["title"] as? String).orEmpty()
+        val desc = (directMap["description"] as? String).orEmpty()
+        if (title.isBlank() && desc.isBlank()) return null
+        val detail = directMap["detail"] as? String
+
+        var pendingAction = (directMap["pendingAction"] as? Map<*, *>)?.let {
+            parsePendingActionMap(it, title, desc, detail)
+        }
+
+        // Fallback de resiliência: card de confirmação pendente sem pendingAction serializado
+        if (pendingAction == null && title.contains("Confirmar", ignoreCase = true)) {
+            val parts = desc.split("—", "-")
+            val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
+            val amountPart = parts.getOrNull(1)?.trim() ?: ""
+            val parsedAmount = Regex("""[\d.,]+""").find(amountPart)?.value
+                ?.replace(".", "")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+
+            val detailParts = detail.orEmpty().split("•").map { it.trim() }
+            val catSubcat = detailParts.firstOrNull()?.split("›")?.map { it.trim() }
+
+            if (parsedAmount > 0.0) {
+                pendingAction = PendingAction(
+                    id = "act_" + (title + desc).hashCode().toString().take(8),
+                    toolName = "CREATE_TRANSACTION",
+                    title = title,
+                    description = desc,
+                    detail = detail?.ifBlank { null },
+                    args = mapOf(
+                        "description" to descPart,
+                        "amount" to parsedAmount,
+                        "category" to catSubcat?.firstOrNull(),
+                        "subcategory" to catSubcat?.getOrNull(1),
+                        "type" to "expense",
+                        "confirmed" to true
+                    ),
+                    status = PendingActionStatus.PENDING
+                )
+            }
+        }
+
+        val isSuccess = (directMap["isSuccess"] as? Boolean) ?: true
+        return ActionCardData(
+            title = title.ifBlank { "Ação Executada" },
+            description = desc,
+            detail = detail,
+            newFreeBalance = directMap["newFreeBalance"] as? String,
+            isSuccess = isSuccess,
+            pendingAction = pendingAction,
+            kind = (directMap["kind"] as? String)?.takeIf { it.isNotBlank() }
+                ?: if (pendingAction != null) "confirmation" else if (isSuccess) "created" else "error",
+            pendingTransactions = parsePendingTransactions(directMap["pending_transactions"])
+        )
+    }
+
+    /** Formato Web (item de `actions[]`). */
+    private fun parseWebActionCard(raw: Any?): ActionCardData? {
+        val action = raw as? Map<*, *> ?: return null
+        val title = (action["title"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+        val kind = (action["kind"] as? String)?.takeIf { it.isNotBlank() } ?: "report"
+        val lines = parseLines(action["lines"])
+
+        val description = lines.firstOrNull()?.let { if (it.label.isNotBlank()) "${it.label}: ${it.value}" else it.value }.orEmpty()
+        val detail = if (lines.size > 1) {
+            lines.drop(1).joinToString(" • ") { if (it.label.isNotBlank()) "${it.label}: ${it.value}" else it.value }
+        } else null
+
+        val pendingMap = action["pendingAction"] as? Map<*, *>
+        val pendingAction = pendingMap?.let { parsePendingActionMap(it, title, description.ifBlank { title }, detail) }
+
+        @Suppress("UNCHECKED_CAST")
+        val pendingTxs = parsePendingTransactions(action["pending_transactions"])
+            ?: parsePendingTransactions(pendingMap?.get("pending_transactions"))
+            ?: parsePendingTransactions((pendingMap?.get("args") as? Map<String, Any?>)?.get("pending_transactions"))
+
+        return ActionCardData(
+            title = title,
+            description = description.ifBlank { title },
+            detail = detail,
+            isSuccess = !kind.equals("error", ignoreCase = true),
+            pendingAction = pendingAction,
+            kind = kind,
+            lines = lines,
+            pendingTransactions = pendingTxs
+        )
+    }
+
+    fun extractChartFromMarkdown(content: String): Pair<String, ChartPayload?> {
         if (!content.contains("```chart")) return Pair(content, null)
         val regex = Regex("""```chart\s*(\{[\s\S]*?\})\s*```""")
         val match = regex.find(content) ?: return Pair(content, null)
@@ -378,7 +558,7 @@ class ChatSessionManager(
         val cleanText = content.replace(match.value, "").trim()
         return try {
             val jsonObj = gson.fromJson(match.groupValues[1], JsonObject::class.java)
-            val typeStr = jsonObj.get("type")?.asString ?: "donut"
+            val typeStr = jsonObj.get("type")?.asString ?: jsonObj.get("chartType")?.asString ?: "donut"
             val title = jsonObj.get("title")?.asString ?: "Análise Financeira"
             val description = jsonObj.get("description")?.asString
             val dataArray = jsonObj.getAsJsonArray("data")

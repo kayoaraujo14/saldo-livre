@@ -107,24 +107,29 @@ class AndroidAgentToolsEngine(
     // -------------------------------------------------------------
 
     suspend fun executeFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val action = jsonObj.get("action")?.asString ?: ""
+        val action = jsonObj.get("action")?.asString ?: jsonObj.get("toolName")?.asString ?: ""
         return when (action) {
-            "CREATE_TRANSACTION" -> executeCreateFromJson(jsonObj)
-            "BATCH_TRANSACTIONS" -> executeBatchFromJson(jsonObj)
-            "EDIT_TRANSACTION" -> executeEditFromJson(jsonObj)
-            "DELETE_TRANSACTION" -> executeDeleteFromJson(jsonObj)
-            "UPDATE_ESTIMATED" -> executeUpdateEstimatedFromJson(jsonObj)
-            "QUERY_TRANSACTIONS" -> executeQueryFromJson(jsonObj)
-            "MANAGE_CARDS" -> executeManageCardsFromJson(jsonObj)
-            "MANAGE_RECURRING" -> executeManageRecurringFromJson(jsonObj)
-            "EXPAND_INSTALLMENTS" -> executeExpandInstallmentsFromJson(jsonObj)
-            "GENERATE_CHART" -> executeGenerateChartFromJson(jsonObj)
-            "LEARN_RULE" -> {
-                val rule = jsonObj.get("rule")?.asString ?: ""
-                executeLearnRule(rule)
+            "CREATE_TRANSACTION", "registrarTransacao" -> executeCreateFromJson(jsonObj)
+            "BATCH_TRANSACTIONS", "registrarTransacoesLote" -> executeBatchFromJson(jsonObj)
+            "EDIT_TRANSACTION", "editarTransacoes" -> executeEditFromJson(jsonObj)
+            "DELETE_TRANSACTION", "excluirTransacoes" -> executeDeleteFromJson(jsonObj)
+            "UPDATE_ESTIMATED", "atualizarContaPrevista" -> executeUpdateEstimatedFromJson(jsonObj)
+            "QUERY_TRANSACTIONS", "consultarTransacoes" -> executeQueryFromJson(jsonObj)
+            "MANAGE_CARDS", "gerenciarCartoes" -> executeManageCardsFromJson(jsonObj)
+            "MANAGE_RECURRING", "gerenciarContasRecorrentes" -> executeManageRecurringFromJson(jsonObj)
+            "EXPAND_INSTALLMENTS", "expandirParcelamentos" -> executeExpandInstallmentsFromJson(jsonObj)
+            "GENERATE_CHART", "gerarGraficoFinanceiro" -> executeGenerateChartFromJson(jsonObj)
+            "LEARN_RULE", "gerenciarRegrasEMemoria" -> {
+                val op = jsonObj.get("acao")?.asString ?: jsonObj.get("operation")?.asString ?: "aprender"
+                val rule = jsonObj.get("rule")?.asString ?: jsonObj.get("regra")?.asString ?: ""
+                if (op.equals("esquecer", ignoreCase = true) || op.equals("delete", ignoreCase = true)) {
+                    executeDeleteRule(rule)
+                } else {
+                    executeLearnRule(rule)
+                }
             }
             "DELETE_RULE" -> {
-                val rule = jsonObj.get("rule")?.asString ?: ""
+                val rule = jsonObj.get("rule")?.asString ?: jsonObj.get("regra")?.asString ?: ""
                 executeDeleteRule(rule)
             }
             else -> ToolExecutionResult(text = "Ação desconhecida solicitada: $action")
@@ -471,7 +476,7 @@ class AndroidAgentToolsEngine(
     // -------------------------------------------------------------
 
     private suspend fun executeBatchFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val array = jsonObj.getAsJsonArray("transactions")
+        val array = jsonObj.getAsJsonArray("transactions") ?: jsonObj.getAsJsonArray("transacoes")
         if (array == null || array.size() == 0) {
             return ToolExecutionResult(text = "⚠️ Nenhuma transação encontrada no lote para registrar.")
         }
@@ -481,25 +486,52 @@ class AndroidAgentToolsEngine(
             ?: false
 
         val user = repository.currentUser.value
-        val defaultMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val defaultMonth = jsonObj.get("mesFaturaPadrao")?.asString
+            ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val defaultPayMethod = jsonObj.get("metodoPagamentoPadrao")?.asString ?: "pix"
         val createdList = mutableListOf<Transaction>()
+        val pendingTxMaps = mutableListOf<Map<String, Any?>>()
         var totalExpenses = 0.0
         var totalIncomes = 0.0
 
         for (elem in array) {
             if (!elem.isJsonObject) continue
             val item = elem.asJsonObject
-            val desc = item.get("description")?.asString ?: "Item de Lote"
-            val amt = item.get("amount")?.asDouble ?: 0.0
+            val filterStatus = item.get("categoria_filtro")?.asString ?: "valida"
+            val desc = item.get("description")?.asString
+                ?: item.get("descricao")?.asString
+                ?: item.get("contraparte")?.asString
+                ?: "Item de Lote"
+            val rawAmt = item.get("amount")?.asDouble
+                ?: item.get("valorTotal")?.asDouble
+                ?: item.get("valor_exato")?.asDouble
+                ?: item.get("valor")?.asDouble
+                ?: 0.0
+            val amt = kotlin.math.abs(rawAmt)
             if (amt <= 0.0) continue
 
-            val typeStr = item.get("type")?.asString ?: "expense"
-            val isIncome = typeStr.equals("income", ignoreCase = true)
-            val cat = item.get("category")?.asString ?: if (isIncome) "Receita" else "Outros"
-            val subcat = item.get("subcategory")?.asString
-            val payMethodStr = item.get("paymentMethod")?.asString ?: "pix"
-            val dt = item.get("date")?.asString ?: FinanceEngine.todayKey()
-            val comp = item.get("competenceMonth")?.asString ?: defaultMonth
+            val typeStr = item.get("type")?.asString ?: item.get("tipo")?.asString ?: if (rawAmt < 0) "income" else "expense"
+            val isIncome = typeStr.equals("income", ignoreCase = true) || rawAmt < 0
+            val cat = item.get("category")?.asString ?: item.get("categoria")?.asString ?: if (isIncome) "Receita" else "Outros"
+            val subcat = item.get("subcategory")?.asString ?: item.get("subcategoria")?.asString
+            val payMethodStr = item.get("paymentMethod")?.asString ?: item.get("metodoPagamento")?.asString ?: defaultPayMethod
+            val dt = item.get("date")?.asString ?: item.get("data")?.asString ?: item.get("dataVencimento")?.asString ?: FinanceEngine.todayKey()
+            val comp = item.get("competenceMonth")?.asString ?: item.get("mesFatura")?.asString ?: defaultMonth
+
+            pendingTxMaps.add(
+                mapOf(
+                    "data" to dt,
+                    "tipo" to if (isIncome) "income" else "expense",
+                    "valor_exato" to amt,
+                    "contraparte" to desc,
+                    "categoria_filtro" to filterStatus,
+                    "categoria" to cat,
+                    "subcategoria" to subcat,
+                    "metodoPagamento" to payMethodStr,
+                    "motivoIgnorado" to item.get("motivoIgnorado")?.asString
+                )
+            )
+            if (filterStatus.equals("ignorada", ignoreCase = true)) continue
 
             val tx = Transaction(
                 id = "tx_" + UUID.randomUUID().toString().take(8),
@@ -540,6 +572,7 @@ class AndroidAgentToolsEngine(
                 detail = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
                 args = mapOf(
                     "transactionsJson" to array.toString(),
+                    "pending_transactions" to pendingTxMaps,
                     "confirmed" to true
                 ),
                 status = PendingActionStatus.PENDING
@@ -556,7 +589,8 @@ class AndroidAgentToolsEngine(
                     description = "${createdList.size} itens preparados",
                     detail = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
                     newFreeBalance = "Saldo Livre previsto: ${FinanceEngine.formatCurrency(before.freeBalance)} → ${FinanceEngine.formatCurrency(estimatedAfter)}",
-                    pendingAction = pendingAction
+                    pendingAction = pendingAction,
+                    pendingTransactions = pendingTxMaps
                 )
             )
         }
@@ -1438,10 +1472,17 @@ class AndroidAgentToolsEngine(
             }
             "BATCH_TRANSACTIONS", "registrarTransacoesLote" -> {
                 val jsonString = args["transactionsJson"] as? String
-                if (!jsonString.isNullOrBlank()) {
-                    val array = gson.fromJson(jsonString, JsonArray::class.java)
+                val rawList = args["transacoes"] ?: args["pending_transactions"] ?: args["transactions"]
+                val array: JsonArray? = when {
+                    !jsonString.isNullOrBlank() -> gson.fromJson(jsonString, JsonArray::class.java)
+                    rawList is List<*> -> gson.toJsonTree(rawList).asJsonArray
+                    else -> null
+                }
+                if (array != null && array.size() > 0) {
                     val jsonObj = JsonObject().apply {
                         add("transactions", array)
+                        (args["mesFaturaPadrao"] as? String)?.let { addProperty("mesFaturaPadrao", it) }
+                        (args["metodoPagamentoPadrao"] as? String)?.let { addProperty("metodoPagamentoPadrao", it) }
                         addProperty("confirmed", true)
                     }
                     executeBatchFromJson(jsonObj)

@@ -307,10 +307,14 @@ class GeminiChatViewModel(
                         val clean = userPromptForTitle.trim()
                         title = if (clean.length > 32) clean.take(30) + "..." else clean
                     }
+                    val latestPendingTxs = newMessages.lastOrNull { msg ->
+                        msg.allActionCards().any { !it.pendingTransactions.isNullOrEmpty() }
+                    }?.allActionCards()?.flatMap { it.pendingTransactions.orEmpty() }.orEmpty()
                     val updatedSession = s.copy(
                         title = title,
                         updatedAt = System.currentTimeMillis(),
-                        messages = newMessages
+                        messages = newMessages,
+                        pendingTransactions = if (latestPendingTxs.isNotEmpty()) latestPendingTxs else s.pendingTransactions
                     )
                     sessionManager.saveSession(userUid, updatedSession)
                     updatedSession
@@ -877,29 +881,47 @@ class GeminiChatViewModel(
     // AÇÕES INTERATIVAS PENDENTES (CONFIRMAR / CANCELAR)
     // -------------------------------------------------------------
 
-    fun confirmPendingAction(pendingAction: PendingAction) {
-        val currentMsgs = _uiState.value.messages.map { msg ->
-            val card = msg.actions?.firstOrNull() ?: msg.actionCard
-            val matchById = card?.pendingAction?.id == pendingAction.id
-            val matchByContent = card?.title == pendingAction.title && card.description == pendingAction.description
-            if (card != null && (matchById || matchByContent)) {
-                msg.copy(
-                    actions = listOf(card.copy(
-                        pendingAction = pendingAction.copy(status = PendingActionStatus.CONFIRMED)
-                    )
+    /**
+     * Atualiza o status do pendingAction no card correspondente (em qualquer posição de `actions`),
+     * mantendo `actionCard` sincronizado para compatibilidade com mensagens legadas.
+     */
+    private fun markPendingActionStatus(
+        messages: List<ChatMessage>,
+        pendingAction: PendingAction,
+        newStatus: PendingActionStatus
+    ): List<ChatMessage> = messages.map { msg ->
+        val cards = msg.allActionCards()
+        var changed = false
+        val updatedCards = cards.map { card ->
+            val matchById = card.pendingAction?.id == pendingAction.id
+            val matchByContent = card.title == pendingAction.title && card.description == pendingAction.description
+            if (matchById || matchByContent) {
+                changed = true
+                card.copy(
+                    pendingAction = (card.pendingAction ?: pendingAction).copy(status = newStatus)
                 )
-            } else msg
+            } else card
         }
+        if (changed) {
+            msg.copy(actions = updatedCards, actionCard = updatedCards.firstOrNull())
+        } else msg
+    }
+
+    fun confirmPendingAction(pendingAction: PendingAction) {
+        val currentMsgs = markPendingActionStatus(_uiState.value.messages, pendingAction, PendingActionStatus.CONFIRMED)
         updateActiveSessionMessages(currentMsgs)
 
         viewModelScope.launch {
             _uiState.update { it.copy(isTyping = true) }
             try {
                 val toolResult = toolsEngine.executeConfirmedAction(pendingAction)
+                val resultCards = toolResult.actions ?: toolResult.actionCard?.let { listOf(it) }
                 val successMsg = ChatMessage(
                     sender = MessageSender.ASSISTANT,
                     text = toolResult.text.ifBlank { "✅ **Ação confirmada e executada com sucesso!**\n\nConcluí a operação **\"${pendingAction.title}\"** e atualizei seus lançamentos e o cálculo do seu Saldo Livre." },
-                    actions = toolResult.actions ?: toolResult.actionCard?.let { listOf(it) }
+                    actions = resultCards,
+                    actionCard = resultCards?.firstOrNull(),
+                    chartPayload = toolResult.chartPayload
                 )
                 updateActiveSessionMessages(_uiState.value.messages + successMsg)
             } catch (e: Exception) {
@@ -915,18 +937,7 @@ class GeminiChatViewModel(
     }
 
     fun cancelPendingAction(pendingAction: PendingAction) {
-        val currentMsgs = _uiState.value.messages.map { msg ->
-            val card = msg.actions?.firstOrNull() ?: msg.actionCard
-            val matchById = card?.pendingAction?.id == pendingAction.id
-            val matchByContent = card?.title == pendingAction.title && card.description == pendingAction.description
-            if (card != null && (matchById || matchByContent)) {
-                msg.copy(
-                    actions = listOf(card.copy(
-                        pendingAction = pendingAction.copy(status = PendingActionStatus.CANCELLED)
-                    )
-                )
-            } else msg
-        }
+        val currentMsgs = markPendingActionStatus(_uiState.value.messages, pendingAction, PendingActionStatus.CANCELLED)
         val cancelMsg = ChatMessage(
             sender = MessageSender.ASSISTANT,
             text = "❌ **Ação cancelada.** Nada foi alterado no seu Saldo Livre. Se quiser ajustar algum detalhe, basta me avisar!"
@@ -976,9 +987,13 @@ class GeminiChatViewModel(
 
         // 2. Verifica se há uma ação pendente de confirmação no último card
         val lastAssistant = _uiState.value.messages.lastOrNull { it.sender == MessageSender.ASSISTANT }
-        var activePending = (lastAssistant?.actions?.firstOrNull() ?: lastAssistant?.actionCard)?.pendingAction
-        if (activePending == null && (lastAssistant?.actions?.firstOrNull() ?: lastAssistant?.actionCard)?.title?.contains("Confirmar", ignoreCase = true) == true) {
-            val card = lastAssistant.actions?.firstOrNull() ?: lastAssistant.actionCard
+        val lastCards = lastAssistant?.allActionCards().orEmpty()
+        var activePending = lastCards.firstNotNullOfOrNull { c ->
+            c.pendingAction?.takeIf { it.status == PendingActionStatus.PENDING }
+        } ?: lastCards.firstOrNull()?.pendingAction
+        val lastCard = lastCards.firstOrNull()
+        if (activePending == null && lastCard != null && lastCard.title.contains("Confirmar", ignoreCase = true)) {
+            val card = lastCard
             val desc = card.description
             val parts = desc.split("—", "-")
             val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
@@ -1179,34 +1194,101 @@ class GeminiChatViewModel(
 
 
 
+        // Bloco de dados financeiros (paridade com `summaryDesc` da Web)
+        val summaryDescText = """
+DADOS FINANCEIROS REAIS DO USUÁRIO EM ${FinanceEngine.monthLabel(selectedMonth).uppercase()} ($selectedMonth):
+- Saldo Livre Real: R$ ${FinanceEngine.round2(summary.freeBalance)}
+- Limite Diário Seguro: $dailyLimitDesc
+- Total de Receitas: R$ ${FinanceEngine.round2(summary.income)}
+- Total Comprometido: R$ ${FinanceEngine.round2(summary.committed)} (Já Pago: R$ ${FinanceEngine.round2(summary.paid)}, A Pagar/Pendente: R$ ${FinanceEngine.round2(summary.committed - summary.paid)})
+- Valores a Receber: R$ ${FinanceEngine.round2(summary.receivableTotal)} (Parceiro: R$ ${FinanceEngine.round2(summary.receivableFromPartner)}, Amigos: R$ ${FinanceEngine.round2(summary.receivableFromFriends)}, Terceiros: R$ ${FinanceEngine.round2(summary.receivableFromExternal)})
+- Gastos por Categoria neste mês:
+  $byCategoryDesc
+- Total Investido no Mês: R$ ${FinanceEngine.round2(summary.totalInvested)}$byInvestmentDesc
+- Contas recorrentes ativas: $recurringDesc
+""".trim()
+
+        // Lote pendente de confirmação (memória estruturada de estado — paridade com `pendingTxsDesc` da Web)
+        val currentSession = _uiState.value.sessions.find { it.id == _uiState.value.currentSessionId }
+        val pendingTxs: List<Map<String, Any?>> = currentSession?.pendingTransactions?.takeIf { it.isNotEmpty() }
+            ?: _uiState.value.messages
+                .lastOrNull { msg -> msg.allActionCards().any { !it.pendingTransactions.isNullOrEmpty() } }
+                ?.allActionCards()
+                ?.flatMap { it.pendingTransactions.orEmpty() }
+                .orEmpty()
+
+        fun pendingStr(m: Map<String, Any?>, vararg keys: String): String =
+            keys.firstNotNullOfOrNull { k -> m[k]?.toString()?.takeIf { it.isNotBlank() } }.orEmpty()
+
+        fun pendingAmount(m: Map<String, Any?>): Double =
+            listOf("valor_exato", "valorTotal", "amount", "valor").firstNotNullOfOrNull { k ->
+                when (val v = m[k]) {
+                    is Number -> v.toDouble()
+                    is String -> v.replace(",", ".").toDoubleOrNull()
+                    else -> null
+                }
+            } ?: 0.0
+
+        val pendingTxsDescText = if (pendingTxs.isNotEmpty()) {
+            val valid = pendingTxs.filter { pendingStr(it, "categoria_filtro").ifBlank { "valida" } == "valida" }
+            val isIncome: (Map<String, Any?>) -> Boolean = { pendingStr(it, "tipo", "type").equals("income", ignoreCase = true) }
+            val totalIncome = valid.filter(isIncome).sumOf { pendingAmount(it) }
+            val totalExpense = valid.filterNot(isIncome).sumOf { pendingAmount(it) }
+            val itemsDesc = pendingTxs.mapIndexed { idx, t ->
+                val tipoLabel = if (isIncome(t)) "🟢 ENTRADA" else "🔴 SAÍDA"
+                val motivo = pendingStr(t, "motivoIgnorado").let { if (it.isNotBlank()) " ($it)" else "" }
+                "${idx + 1}. [${pendingStr(t, "data", "date")}] $tipoLabel | Contraparte: ${pendingStr(t, "contraparte", "description", "descricao")} | " +
+                    "R$ ${FinanceEngine.round2(pendingAmount(t))} | Categoria: ${pendingStr(t, "categoria", "category").ifBlank { "Geral" }} | " +
+                    "Filtro: ${pendingStr(t, "categoria_filtro").ifBlank { "valida" }}$motivo"
+            }.joinToString("\n")
+            """
+TRANSAÇÕES PENDENTES DE CONFIRMAÇÃO DO EXTRATO/LOTE (MEMÓRIA ESTRUTURADA DE ESTADO):
+Existe atualmente salvo no estado da sessão um lote de ${pendingTxs.size} transações extraídas do extrato/fatura:
+$itemsDesc
+
+TOTAIS VALIDADOS CALCULADOS PELO SISTEMA (DETERMINÍSTICO):
+- Receitas/Entradas válidas: ${valid.count(isIncome)} itens somando R$ ${FinanceEngine.round2(totalIncome)}
+- Despesas/Saídas válidas: ${valid.count { !isIncome(it) }} itens somando R$ ${FinanceEngine.round2(totalExpense)}
+
+SE O USUÁRIO PERGUNTAR "quais foram as transações?", "enumere os itens" ou qualquer pergunta sobre as movimentações do extrato, responda EXCLUSIVAMENTE a partir da lista estruturada acima! É expressamente proibido inventar valores ou contrapartes!
+""".trim()
+        } else {
+            "TRANSAÇÕES PENDENTES DE CONFIRMAÇÃO DO EXTRATO/LOTE: Nenhum lote pendente de confirmação no momento."
+        }
+
         val partner = repository.allUsers.find { it.uid != user.uid }
         val activeRules = _uiState.value.learnedRules.filter { it.active }
         val learnedRulesDesc = if (activeRules.isNotEmpty()) {
             activeRules.mapIndexed { idx: Int, r: UserLearnedRule -> "${idx + 1}. ${r.rule}" }.joinToString("\n")
         } else {
-            "Nenhuma regra memorizada ainda. Você pode aprender novas regras sempre que o usuário pedir (\"Aprenda que...\", \"Lembre-se que...\")."
+            "Nenhuma regra memorizada ainda. Você pode aprender novas regras sempre que o usuário pedir (\"Aprenda que...\", \"Lembre-se que...\", \"Sempre que eu falar X faça Y\")."
         }
 
         return """
 Você é o "Copiloto Saldo Livre", um agente financeiro pessoal brasileiro, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
 
 CONTEXTO ATUAL:
-- Usuário logado: ${user.displayName}.
+- Usuário logado: ${user.displayName} (UID: ${user.uid}).
 - Parceiro(a) vinculado(a): ${partner?.displayName ?: "nenhum"}.
 - Hoje é: ${FinanceEngine.todayKey()}.
-- Mês em análise na tela: ${FinanceEngine.monthLabel(selectedMonth)} (${selectedMonth}).
-- Cartões cadastrados: ${cardsDesc}.
-- Amigos na plataforma: ${friendsDesc}.
+- Mês em análise na tela: ${FinanceEngine.monthLabel(selectedMonth)} ($selectedMonth).
+- Cartões cadastrados: $cardsDesc.
+- Amigos na plataforma: $friendsDesc.
 
-${summaryDescText}
+$summaryDescText
 
-${recentTxsDesc}
+$recentTxsDesc
 
-${pendingTxsDescText}
+$pendingTxsDescText
 
+REGRAS E PREFERÊNCIAS APRENDIDAS DO USUÁRIO (MEMÓRIA VIVA):
+$learnedRulesDesc
+
+ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
+Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, use OBRIGATORIAMENTE a ação LEARN_RULE ou DELETE_RULE.
 
 EXECUÇÃO DE OPERAÇÕES NO BANCO DE DADOS (CRUD COMPLETO):
-Sempre que você precisar realizar uma ação ou chamar uma função descrita acima (como registrarTransacao, consultarTransacoes, etc), você DEVE explicar brevemente ao usuário e OBRIGATORIAMENTE INCLUIR NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com a ação correspondente!
+Sempre que você precisar realizar uma ação, explique brevemente ao usuário e OBRIGATORIAMENTE INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com a ação correspondente! Você pode incluir MAIS DE UM bloco JSON na mesma resposta quando o usuário solicitar múltiplas ações.
 
 1. Cadastrar Transação (Despesa, Receita ou Parcelamento):
 ```json
@@ -1221,6 +1303,8 @@ Sempre que você precisar realizar uma ação ou chamar uma função descrita ac
   "cardName": "Nubank",
   "splitType": "MINE",
   "friendName": null,
+  "friendEmail": null,
+  "thirdPartyName": null,
   "installments": { "current": 1, "total": 1 },
   "competenceMonth": "2026-11",
   "dueDate": "2026-11-10"
@@ -1232,8 +1316,8 @@ Sempre que você precisar realizar uma ação ou chamar uma função descrita ac
 {
   "action": "BATCH_TRANSACTIONS",
   "transactions": [
-    { "description": "iFood", "amount": 45.0, "type": "expense", "category": "Alimentação", "paymentMethod": "credit_card" },
-    { "description": "Salário", "amount": 5000.0, "type": "income", "category": "Receita", "paymentMethod": "pix" }
+    { "description": "iFood", "amount": 45.0, "type": "expense", "category": "Alimentação", "subcategory": "Delivery & Lanches", "paymentMethod": "credit_card", "date": "2026-10-05", "competenceMonth": "2026-11" },
+    { "description": "Salário", "amount": 5000.0, "type": "income", "category": "Receita", "subcategory": "Salário Principal", "paymentMethod": "pix", "date": "2026-10-05", "competenceMonth": "2026-10" }
   ]
 }
 ```
@@ -1242,10 +1326,18 @@ Sempre que você precisar realizar uma ação ou chamar uma função descrita ac
 ```json
 {
   "action": "EDIT_TRANSACTION",
+  "transactionId": "id_da_transacao_se_conhecido",
   "searchTerm": "Padaria",
+  "month": "2026-10",
   "newAmount": 25.0,
+  "newDescription": "Padaria Real",
   "newCategory": "Alimentação",
-  "newSubcategory": "Padaria & Café"
+  "newSubcategory": "Padaria & Café",
+  "newStatus": "paid",
+  "newPaymentMethod": "debit",
+  "newSplitType": "MINE",
+  "newCompetenceMonth": "2026-11",
+  "newDueDate": "2026-11-15"
 }
 ```
 
@@ -1253,22 +1345,61 @@ Sempre que você precisar realizar uma ação ou chamar uma função descrita ac
 ```json
 {
   "action": "DELETE_TRANSACTION",
+  "transactionId": "id_da_transacao_se_conhecido",
   "searchTerm": "Burger King",
-  "amount": 50.0
+  "amount": 50.0,
+  "month": "2026-10",
+  "deleteAllInstallments": false
 }
 ```
 
-5. Consultar e Filtrar Lançamentos:
+5. Atualizar Conta Prevista / Estimada (Luz, Água, Internet, etc.):
+```json
+{
+  "action": "UPDATE_ESTIMATED",
+  "searchTerm": "Luz",
+  "actualAmount": 180.0,
+  "status": "paid"
+}
+```
+
+6. Consultar e Filtrar Lançamentos:
 ```json
 {
   "action": "QUERY_TRANSACTIONS",
   "searchTerm": "Uber",
   "category": null,
-  "month": "2026-10"
+  "subcategory": null,
+  "month": "2026-10",
+  "status": null
 }
 ```
 
-6. Expandir Parcelamentos do Mês:
+7. Gerenciar Cartões de Crédito (operation: "listar" | "adicionar" | "excluir"):
+```json
+{
+  "action": "MANAGE_CARDS",
+  "operation": "adicionar",
+  "cardName": "Inter Black",
+  "closingDay": 5,
+  "dueDay": 12
+}
+```
+
+8. Gerenciar Contas Recorrentes / Assinaturas (operation: "listar" | "adicionar" | "pausar" | "ativar" | "excluir"):
+```json
+{
+  "action": "MANAGE_RECURRING",
+  "operation": "adicionar",
+  "description": "Netflix",
+  "amount": 55.90,
+  "dueDay": 15,
+  "category": "Assinaturas",
+  "subcategory": "Streaming de Vídeo (Netflix/Max/Disney)"
+}
+```
+
+9. Expandir Parcelamentos do Mês:
 ```json
 {
   "action": "EXPAND_INSTALLMENTS",
@@ -1276,12 +1407,13 @@ Sempre que você precisar realizar uma ação ou chamar uma função descrita ac
 }
 ```
 
-7. Gerar Gráfico de Análise:
+10. Gerar Gráfico de Análise (chartType: "donut" | "bar"):
 ```json
 {
   "action": "GENERATE_CHART",
   "chartType": "donut",
   "title": "Distribuição de Gastos",
+  "description": "Despesas por categoria",
   "data": [
     { "label": "Alimentação", "value": 450.0, "colorHex": "#10B981" },
     { "label": "Transporte", "value": 180.0, "colorHex": "#3B82F6" }
@@ -1289,7 +1421,7 @@ Sempre que você precisar realizar uma ação ou chamar uma função descrita ac
 }
 ```
 
-8. Memorizar Regra:
+11. Memorizar Nova Regra (Memória Viva):
 ```json
 {
   "action": "LEARN_RULE",
@@ -1297,34 +1429,32 @@ Sempre que você precisar realizar uma ação ou chamar uma função descrita ac
 }
 ```
 
-
-REGRAS E PREFERÊNCIAS APRENDIDAS DO USUÁRIO (MEMÓRIA VIVA):
-${learnedRulesDesc}
-
-ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
-Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, chame OBRIGATORIAMENTE a ferramenta "gerenciarRegrasEMemoria"!
+12. Esquecer Regra da Memória:
+```json
+{
+  "action": "DELETE_RULE",
+  "rule": "<regra a esquecer>"
+}
+```
 
 REGRAS DE FUNCIONAMENTO:
 
 1. CARTÕES DE CRÉDITO, FATURA E MÊS DE COMPETÊNCIA:
 - Compras no cartão de crédito comprometem a renda do MÊS DE VENCIMENTO DA FATURA (competenceMonth), e NÃO a data em que a compra foi feita!
 - Se o usuário disser que os gastos virão para a fatura com vencimento em determinado dia/mês (ex: "vence 14/11" ou "fatura de novembro"):
-  Defina obrigatoriamente: dataVencimento = "2026-11-14" e mesFatura = "2026-11"! O orçamento que deve ser comprometido é novembro, e não outubro!
+  Defina obrigatoriamente: dueDate = "2026-11-14" e competenceMonth = "2026-11"! O orçamento que deve ser comprometido é novembro, e não outubro!
 - Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay).
 
-2. AMIGOS NA REDE E DIVISÃO DE CONTAS (PORCENTAGEM, VALORES ESPECÍFICOS E MULTI-PESSOAS):
-- Se o usuário disser que um gasto é de um amigo na plataforma (ex: "KAYO", "kayoaraujo2002@gmail.com"):
-  * Identifique o amigo (emailAmigo = "kayoaraujo2002@gmail.com", nomeAmigo = "Kayo").
-  * Se for 100% do amigo: use tipoDivisao = "AMIGO" (ou porcentagemAmigo = 100).
-  * Se o usuário disser que dividiu com o amigo em porcentagem ou valor (ex: "almoço R$ 150 onde Kayo paga 40% e eu 60%", "Kayo paga R$ 50", "dividi com Kayo meio a meio"):
-    Preencha porcentagemAmigo: 40 (ou valorAmigo: 50). O sistema calcula os valores exatos, aloca a cota correta de cada um, gera a cobrança com aceite mútuo para o amigo e desconta do Saldo Livre do usuário apenas a parte dele!
-  * Se a despesa for dividida entre mais de 2 pessoas (ex: "Eu, Kayo e minha Mãe"):
-    Preencha divisoesPersonalizadas com cada participante (nome, email se amigo, porcentagem ou valor).
+2. AMIGOS NA REDE E DIVISÃO DE CONTAS:
+- Se o usuário disser que um gasto é de um amigo na plataforma (consulte "Amigos na plataforma" acima):
+  * Identifique o amigo e preencha friendName e friendEmail.
+  * Se for 100% do amigo: use splitType = "FRIEND".
+- Se for dividido meio a meio com o(a) parceiro(a): splitType = "SPLIT_50". Se for 100% do parceiro: splitType = "PARTNER".
 - Se for pessoa sem conta na plataforma (ex: "Mãe", "Pai", "Irmão"):
-  Use tipoDivisao = "TERCEIRO" com nomeTerceiro = "Mãe".
+  Use splitType = "EXTERNAL" com thirdPartyName = "Mãe".
 
-3. ESTORNOS E REEMBOLSOS (VALORES NEGATIVOS):
-- Se o gasto for negativo (ex: "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"), defina obrigatoriamente categoria = "Estorno" e envie o valor negativo (ex: -8.40). Trata-se de estorno/crédito na fatura que alivia o Saldo Livre.
+3. ESTORNOS E REEMBOLSOS:
+- Se o gasto for um estorno/crédito (ex: "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"), registre com category = "Estorno", type = "income" e amount POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o Saldo Livre.
 
 4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
 - O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:
@@ -1342,111 +1472,72 @@ REGRAS DE FUNCIONAMENTO:
   * Cartão Terceiros: Compras de Amigos, Compras de Familiares, Outros Terceiros.
   * Estorno: Crédito na Fatura, Devolução / Cancelamento, Cashback Recebido.
   * Outros: Tarifas Bancárias & Juros, Impostos & Taxas Governamentais, Doações & Caridade, Diversos.
-- Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)"; "Financiamento Habitacional / Caixa" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Financiamento Imobiliário"; "Financiamento Carro" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Financiamento Veicular"; "Empréstimo Pessoal Nubank" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Empréstimo Pessoal"; "Amortização de Parcela" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Amortização de Financiamento").
-- Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), chame "consultarTransacoes" com subcategoria ou utilize o relatório do mês, gerando respostas comparativas detalhadas com clareza.
+- Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "category" e "subcategory" de acordo com o estabelecimento (ex: "iFood" -> Alimentação › Delivery & Lanches; "Pão de Açúcar" -> Alimentação › Supermercado; "Uber" -> Transporte › Aplicativos (Uber/99); "Financiamento Caixa" -> Financiamentos & Empréstimos › Financiamento Imobiliário).
+- Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), use QUERY_TRANSACTIONS com subcategory ou os dados do mês acima, gerando respostas comparativas detalhadas com clareza.
 
 5. COMPRAS PARCELADAS:
-- Notações como "9/12", "2/6" ou "10/12" indicam compras parceladas. Preencha parcelaAtual e totalParcelas (ex: parcelaAtual: 9, totalParcelas: 12).
-- O sistema aloca AUTOMATICAMENTE toda a série de parcelas no banco de dados pelos meses correspondentes (passadas como pagas, atual e futuras como pendentes).
-- AO EDITAR CATEGORIA OU SUBCATEGORIA DE COMPRA PARCELADA: passe APENAS termoBusca, novaCategoria e novaSubcategoria. NUNCA passe novoMesFatura nem novaDataVencimento, pois cada parcela tem sua própria data e mês cronológico individual!
-- IMPORTANTE: Confirme a operação de forma simples e direta no mês atual. NÃO fique gerando previsões ou projeções detalhadas de meses futuros ao final da resposta a menos que o usuário peça especificamente.
-- Se o usuário pedir para gerar, expandir ou sincronizar as parcelas passadas e futuras de compras já existentes:
-  Chame a ferramenta "expandirParcelamentos" com mes: "2026-11"!
+- Notações como "9/12", "2/6" ou "10/12" indicam compras parceladas. Preencha installments.current e installments.total (ex: { "current": 9, "total": 12 }).
+- O sistema aloca AUTOMATICAMENTE toda a série de parcelas pelos meses correspondentes (passadas como pagas, atual e futuras como pendentes).
+- AO EDITAR CATEGORIA OU SUBCATEGORIA DE COMPRA PARCELADA: passe APENAS searchTerm, newCategory e newSubcategory. NUNCA passe newCompetenceMonth nem newDueDate, pois cada parcela tem sua própria data!
+- Confirme a operação de forma simples e direta no mês atual. NÃO gere projeções de meses futuros a menos que o usuário peça.
+- Se o usuário pedir para gerar, expandir ou sincronizar as parcelas de compras já existentes: use EXPAND_INSTALLMENTS.
 
-5. REGISTRO EM LOTE:
-- Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE a ferramenta "registrarTransacoesLote". Isso processa todas as despesas em uma única chamada rápida!
+6. REGISTRO EM LOTE:
+- Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE BATCH_TRANSACTIONS (uma única ação com todos os itens).
 
-6. EDIÇÃO E EXCLUSÃO CIRÚRGICA DE TRANSAÇÕES (NUNCA EXCLUA EM LOTE SEM PEDIDO EXPLÍCITO):
-- Para alterar categoria ou subcategoria de uma despesa (avulsa ou parcelada):
-  Chame "editarTransacoes" passando termoBusca, novaCategoria e novaSubcategoria (NUNCA passe novoMesFatura nem novaDataVencimento a menos que o usuário peça expressamente para mudar o vencimento!).
-- Para excluir um lançamento específico que o usuário pediu (ex: "exclua o almoço de R$ 30", "apague o Supermercado", "delete a compra X"):
-  * Consulte os "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS" listados acima no contexto.
-  * Localize a transação correspondente e passe SEMPRE o ID específico em ids: ["id_da_transacao"]!
-  * Se não tiver o ID, passe o termoBusca COM O NOME EXATO DO ESTABELECIMENTO e o valor: XX.XX em reais para desambiguação sem erros!
-  * Defina SEMPRE limiteQuantidade: 1 para exclusão de item individual.
-  * NUNCA use palavras genéricas como "compra", "despesa" ou "gasto" em termoBusca!
-  * NUNCA defina apenasRecentes: true ou tudoDoMes: true a menos que o usuário peça expressamente com palavras como: "desfazer último lote", "limpar todos os recentes" ou "apagar tudo do mês"!
-- Se o usuário pedir para mover despesas avulsas cadastradas por engano para outro mês/fatura:
-  Chame "editarTransacoes" com mesOrigem, novoMesFatura e novaDataVencimento!
-- Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas:
-  Chame "consultarTransacoes" para obter a lista exata!
+7. EDIÇÃO E EXCLUSÃO CIRÚRGICA DE TRANSAÇÕES (NUNCA EXCLUA EM LOTE SEM PEDIDO EXPLÍCITO):
+- Para excluir/editar um lançamento específico: consulte os "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS" acima, localize a transação e passe SEMPRE o ID em transactionId!
+- Se não tiver o ID, passe searchTerm COM O NOME EXATO DO ESTABELECIMENTO e o amount em reais para desambiguação.
+- NUNCA use palavras genéricas como "compra", "despesa" ou "gasto" em searchTerm!
+- Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas: use QUERY_TRANSACTIONS.
 
-7. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO (GUARDRAILS COMPORTAMENTAIS):
-- REGRA CRÍTICA DE INTEGRIDADE FINANCEIRA: Você está estritamente proibido de inventar, estimar ou deduzir valores de transações para fazer a soma bater com um total informado anteriormente. Toda listagem deve refletir caractere por caractere o documento original. Se os itens individuais não estiverem disponíveis no seu contexto atual, releia a ferramenta/documento original antes de responder.
-- NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais informados acima.
-- SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores prováveis ou inventados. O fluxo deve parar e aguardar a resposta dele.
-- CITE OS IDs DE REFERÊNCIA, categorias e números de comprovantes (se houver) sempre que confirmar a preparação de uma tarefa de CRUD/Lançamento.
-- APLIQUE RIGOROSAMENTE a formatação da moeda corrente nas respostas visuais (ex: R$ 45,00 em vez de 45 ou $45).
-- NÃO faça cálculos matemáticos soltos por conta própria para dar saldos. Você deve sempre consultar os dados fornecidos no CONTEXTO ATUAL acima (soma no backend) ou chamar "obterRelatorioEProjecaoMensal".
-- NUNCA afirme que o usuário comprou algo ou gastou determinado valor a menos que conste nos LANÇAMENTOS REAIS acima ou seja retornado pela ferramenta "consultarTransacoes".
-- Se o usuário perguntar algo sobre seu extrato, compras passadas ou se um pagamento foi feito, consulte os LANÇAMENTOS REAIS acima ou chame "consultarTransacoes". Se não encontrar, diga com sinceridade e exatidão: "Não encontrei nenhum lançamento de [X] registrado no mês de ${FinanceEngine.monthLabel(selectedMonth)}."
-- Seja extremamente DIRETO, OBJETIVO e SUCINTO. Elimine rodeios, introduções prolixas, encerramentos repetitivos e sermões não solicitados.
+8. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO:
+- REGRA CRÍTICA DE INTEGRIDADE FINANCEIRA: é estritamente proibido inventar, estimar ou deduzir valores de transações para fazer a soma bater com um total. Toda listagem deve refletir fielmente o documento original.
+- NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais acima.
+- SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores inventados.
+- Na descrição das transações ("description"), extraia ESTRITAMENTE o nome do produto, serviço ou estabelecimento (ex: "Two Brothers", "Subway", "Uber"). NUNCA inclua frases faladas como "eu comprei", "almoço no", "gastei", valores ou datas.
+- CORREÇÃO FONÉTICA INTELIGENTE: corrija termos falados ou erros de transcrição para os nomes corretos de marcas (ex: "two brothers", "ifood", "starbucks", "mercado livre").
+- Calcule datas relativas com precisão: se hoje é ${FinanceEngine.todayKey()}, "ontem" refere-se ao dia anterior.
+- APLIQUE a formatação da moeda brasileira (ex: R$ 45,00).
+- NÃO faça cálculos soltos para dar saldos: use os dados do CONTEXTO ATUAL acima.
+- Se não encontrar um lançamento, diga com sinceridade: "Não encontrei nenhum lançamento de [X] registrado no mês de ${FinanceEngine.monthLabel(selectedMonth)}."
+- Seja extremamente DIRETO, OBJETIVO e SUCINTO. Sem sermões não solicitados.
 
-8. MENSAGENS DE ÁUDIO E COMANDOS POR VOZ (MULTIMODAL):
-- Quando o usuário gravar áudio ou enviar mensagem de voz (ou se houver áudio anexado):
-  1. Transcreva com fidelidade logo no início da sua resposta:
+9. MENSAGENS DE ÁUDIO E COMANDOS POR VOZ (MULTIMODAL):
+- Quando houver áudio anexado:
+  1. Transcreva com fidelidade logo no início da resposta:
      🎙️ **Áudio:** *"[texto exato falado pelo usuário]"*
-  2. Em seguida, processe e execute imediatamente as transações, contas divididas, consultas ou despesas solicitadas na mensagem de áudio!
-- Ao registrar, editar ou excluir despesas, confirme a operação em NO MÁXIMO 2 a 3 linhas objetivas.
-- NÃO dê sermões ou lições financeiras a menos que o usuário explicitamente peça conselhos.
+  2. Em seguida, processe as transações, divisões, consultas ou despesas solicitadas no áudio!
+- Ao registrar, editar ou excluir despesas, confirme em NO MÁXIMO 2 a 3 linhas objetivas.
 
-8. IMPORTAÇÃO DE FATURAS E EXTRATOS BANCÁRIOS EM PDF (ONBOARDING & GASTOS ANTERIORES):
-- Se o usuário anexar um arquivo PDF (fatura de cartão ou extrato de conta bancária) ou colar dados de lançamentos:
-  1. EXTRAÇÃO ANTES DA AGREGAÇÃO (CHAIN-OF-THOUGHT):
-     - O cálculo de totais nunca deve ser feito pela LLM de cabeça. A LLM deve apenas extrair as linhas literais do documento, e o código da ferramenta "registrarTransacoesLote" deve somar os valores a partir da lista extraída.
-     - Extraia rigorosamente cada linha com: data, descricao/contraparte, valorTotal, tipo ("income" ou "expense"), metodoPagamento e categoria.
-     - IGNORE movimentações internas de reserva (Aplicações RDB, Resgates RDB, Guardar Dinheiro) e pagamentos de fatura de cartão já existentes, marcando-as como categoria_filtro: "ignorada" para que não distorçam os totais de receitas nem despesas.
-
-  2. IDENTIFIQUE COM PRECISÃO O TIPO DE DOCUMENTO:
-     A) SE FOR EXTRATO DE CONTA BANCÁRIA (CONTA CORRENTE / POUPANÇA / NUCONTA / INTER CONTA / ITAÚ EXTRATO / BRADESCO):
-        - Defina obrigatoriamente: origemDocumento = "extrato_conta" e metodoPagamentoPadrao = "pix" ou "debit"!
-        - TODAS as ENTRADAS / CRÉDITOS / VALORES POSITIVOS (identificados com +, C, Crédito, Pix Recebido, Salário, Depósito, TED Recebida, Transferência Recebida, Rendimento):
-          * tipo: "income"
-          * categoria: "Receita"
-          * metodoPagamento: "pix" (ou "debit")
-          * status: "paid"
-          * NUNCA marque como despesa de cartão de crédito! Entradas AUMENTAM o Saldo Livre!
-        - TODAS as SAÍDAS / DÉBITOS / GASTOS DE CONTA (identificados com -, D, Débito, Pix Enviado, Transferência Enviada, Compra Débito, Pagamento de Boleto):
-          * tipo: "expense"
-          * metodoPagamento: "pix" (para Pix), "debit" (para débito) ou "bill" (para boletos)
-          * status: "paid"
-          * NUNCA marque como cartão de crédito (credit_card) a menos que a linha do extrato diga expressamente "Compra Cartão de Crédito"!
-        - mesFaturaPadrao: mês em que as transações ocorreram (ex: "2026-10").
-        - dataVencimentoPadrao: a data de cada movimentação.
-
-     B) SE FOR FATURA DE CARTÃO DE CRÉDITO (FATURA NUBANK, FATURA ITAÚ CARTÕES, C6, SANTANDER, BRADESCO, ETC.):
-        - Defina obrigatoriamente: origemDocumento = "fatura_cartao" e metodoPagamentoPadrao = "credit_card"!
-        - As compras no cartão: tipo = "expense", metodoPagamento = "credit_card", status = "pending".
-        - Estornos/créditos de devolução: valorTotal negativo (ex: -15.20) e categoria = "Estorno".
-        - ATENÇÃO: IGNORE linhas de "Pagamento de fatura recebido", "Pagamento efetuado" ou "Saldo anterior" para NÃO duplicar lançamentos nem somar como novo gasto de cartão!
-        - mesFaturaPadrao: mês de vencimento da fatura (ex: "2026-11").
-
-  3. TRANSPARÊNCIA IMEDIATA NA CONFIRMAÇÃO (PRIMEIRA RESPOSTA AO USUÁRIO):
-     - Sempre que pedir para o usuário clicar em **🟢 Confirmar e Executar**, JÁ EXIBA DE IMEDIATO na sua mensagem de resposta a tabela completa e formatada em Markdown com TODAS as transações válidas que compõem aquele total (Data | Tipo | Descrição / Contraparte | Valor), evitando que o usuário aprove uma importação às cegas ou precise pedir a listagem em uma segunda mensagem!
-     - Exemplo de formato obrigatório na resposta:
+10. IMPORTAÇÃO DE FATURAS E EXTRATOS BANCÁRIOS EM PDF:
+- Se o usuário anexar um PDF (fatura de cartão ou extrato bancário) ou colar dados de lançamentos:
+  1. EXTRAÇÃO ANTES DA AGREGAÇÃO: extraia rigorosamente cada linha (data, descrição/contraparte, valor, tipo, método de pagamento e categoria). Os totais são calculados pelo sistema.
+     - IGNORE movimentações internas de reserva (Aplicações RDB, Resgates RDB, Guardar Dinheiro) e pagamentos de fatura de cartão já existentes.
+  2. IDENTIFIQUE O TIPO DE DOCUMENTO:
+     A) EXTRATO DE CONTA BANCÁRIA (Conta Corrente / Poupança / NuConta / Inter / Itaú / Bradesco):
+        - ENTRADAS / CRÉDITOS (+, C, Pix Recebido, Salário, Depósito, TED Recebida, Rendimento): type "income", category "Receita", paymentMethod "pix" ou "debit". Entradas AUMENTAM o Saldo Livre!
+        - SAÍDAS / DÉBITOS (-, D, Pix Enviado, Compra Débito, Pagamento de Boleto): type "expense", paymentMethod "pix", "debit" ou "bill". NUNCA marque como credit_card a menos que a linha diga "Compra Cartão de Crédito"!
+        - competenceMonth: mês em que as transações ocorreram; date: a data de cada movimentação.
+     B) FATURA DE CARTÃO DE CRÉDITO (Nubank, Itaú, C6, Santander, Bradesco, etc.):
+        - Compras: type "expense", paymentMethod "credit_card".
+        - Estornos/créditos: category "Estorno", type "income", amount positivo.
+        - IGNORE "Pagamento de fatura recebido", "Pagamento efetuado" ou "Saldo anterior"!
+        - competenceMonth: mês de vencimento da fatura.
+  3. TRANSPARÊNCIA IMEDIATA: ao pedir confirmação, JÁ EXIBA na resposta a tabela Markdown com TODAS as transações válidas:
        | Data | Tipo | Descrição / Contraparte | Valor |
        | :--- | :--- | :--- | :--- |
        | 05/10/2026 | 🟢 Entrada | Salário Empresa XPTO | R$ 5.200,00 |
        | 06/10/2026 | 🔴 Saída | Pix enviado Brisanet | R$ 99,90 |
-     - Destaque com clareza o total exato de receitas (entradas) e de despesas (saídas) calculados pela ferramenta.
+  4. EXECUÇÃO EM LOTE: use SEMPRE BATCH_TRANSACTIONS com a lista completa.
 
-  4. EXECUÇÃO EM LOTE:
-     - Chame SEMPRE a ferramenta "registrarTransacoesLote" preenchendo origemDocumento, metodoPagamentoPadrao e a lista completa de transações com cada campo tipo, metodoPagamento, categoria, contraparte e categoria_filtro!
+11. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA (HUMAN-IN-THE-LOOP):
+- Criações, edições e exclusões são preparadas em modo RASCUNHO. O sistema exibe automaticamente o card com os botões "✓ Confirmar" e "✕ Cancelar"; a gravação real só ocorre após o clique explícito do usuário (ou se ele responder "sim"/"pode lançar").
+- Demonstre que ENTENDEU a solicitação e cite os parâmetros montados (ex: "Preparei o lançamento de **R$ 45,00** em **Padaria** no débito para **Outubro de 2026**. Confira os dados abaixo e confirme para salvar.").
+- NUNCA afirme que a ação já foi salva ou gravada!
 
-10. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER EXECUÇÃO NO SISTEMA (HUMAN-IN-THE-LOOP):
-- NUNCA assuma que você executa as ações no banco diretamente. Antes de efetivar alterações no banco de dados, o backend (Firestore) é bloqueado e as ferramentas SEMPRE retornam "aguardandoConfirmacao: true" em um estado de DRAFT (rascunho).
-- QUANDO A FERRAMENTA RETORNAR "aguardandoConfirmacao: true":
-  * O seu papel é apenas preparar a ação e exibi-la para o usuário.
-  * Demonstre com total clareza que você ENTENDEU a solicitação e cite os parâmetros montados.
-  * Resuma o que você entendeu de forma direta:
-    - Exemplo de despesa: "Entendi que você deseja registrar uma despesa de **R$ 45,00** na **Padaria** no débito para o mês de **Outubro 2026**."
-  * Convide o usuário a revisar os detalhes no cartão visual e confirmar clicando no botão **🟢 Confirmar e Executar** (a execução real no banco ocorrerá apenas após esse clique explícito do usuário).
-  * NUNCA afirme que a ação já foi salva ou gravada! Diga sempre que a transação foi "preparada/criada em modo rascunho" e está "aguardando a aprovação e confirmação explícita".
-
-11. CRIAÇÃO DE GRÁFICOS FINANCEIROS INTERATIVOS (DATA VISUALIZATION):
-Sempre que o usuário pedir uma análise visual, comparativo, projeção gráfica ou perguntar "faça um gráfico de...", "analise com gráfico", "mostre a evolução", "distribuição de gastos", "como estão meus investimentos", ou você achar relevante enriquecer a resposta com visualização, inclua em sua resposta um bloco de código markdown no formato:
-
-\
+12. CRIAÇÃO DE GRÁFICOS FINANCEIROS INTERATIVOS (DATA VISUALIZATION):
+- Sempre que o usuário pedir uma análise visual, comparativo ou distribuição ("faça um gráfico de...", "distribuição de gastos", "como estão meus investimentos"), ou quando enriquecer a resposta, use a ação GENERATE_CHART (ou um bloco ```chart { "type": "donut", "title": "...", "data": [{ "label": "...", "value": 100.0, "color": "#10b981" }] } ```) com dados numéricos REAIS do contexto (NUNCA invente números).
 """.trimIndent()
     }
 
@@ -1454,16 +1545,18 @@ Sempre que o usuário pedir uma análise visual, comparativo, projeção gráfic
         rawResponse: String,
         userQuery: String
     ): AgentResponse {
+        val (textWithoutChartFence, fenceChart) = sessionManager.extractChartFromMarkdown(rawResponse)
         val jsonRegex = Regex("""```(?:json)?\s*(\{[\s\S]*?\})\s*```""", RegexOption.IGNORE_CASE)
-        val rawJsonRegex = Regex("""(\{\s*"action"\s*:\s*"[A-Z_]+"[^}]*?\})""")
+        val rawJsonRegex = Regex("""(\{\s*"action"\s*:\s*"[A-Za-z_]+"[^}]*?\})""")
 
-        val allMatches = jsonRegex.findAll(rawResponse).toList().ifEmpty { rawJsonRegex.findAll(rawResponse).toList() }
+        val allMatches = jsonRegex.findAll(textWithoutChartFence).toList()
+            .ifEmpty { rawJsonRegex.findAll(textWithoutChartFence).toList() }
 
         if (allMatches.isNotEmpty()) {
             try {
                 val allActions = mutableListOf<ActionCardData>()
-                var cleanText = rawResponse
-                var lastChartPayload: ChartPayload? = null
+                var cleanText = textWithoutChartFence
+                var lastChartPayload: ChartPayload? = fenceChart
                 var fallbackText = ""
 
                 for (match in allMatches) {
@@ -1502,6 +1595,13 @@ Sempre que o usuário pedir uma análise visual, comparativo, projeção gráfic
             } catch (_: Exception) {
                 // Ignore
             }
+        }
+
+        if (fenceChart != null) {
+            return AgentResponse(
+                text = textWithoutChartFence.ifBlank { "📊 **Análise Gráfica Gerada**" },
+                chartPayload = fenceChart
+            )
         }
 
         // Se o Gemini não gerou bloco JSON mas o usuário solicitou uma ação de CRUD,
