@@ -18,27 +18,37 @@ class LearnedRulesManager(
         private const val KEY_RULES_PREFIX = "learned_rules_"
         private const val COLLECTION_USERS = "users"
         private const val SUBCOLLECTION_AGENT_RULES = "agent_rules"
+
+        // Cache em memória para acesso instantâneo sem I/O síncrono
+        private val memoryRulesCache = java.util.concurrent.ConcurrentHashMap<String, List<UserLearnedRule>>()
     }
 
     private val gson = Gson()
     private val prefs = context?.getSharedPreferences(PREFS_RULES, Context.MODE_PRIVATE)
 
     fun getLocalRules(uid: String): List<UserLearnedRule> {
-        val key = "$KEY_RULES_PREFIX${if (uid.isBlank()) "guest" else uid}"
+        val cacheKey = if (uid.isBlank()) "guest" else uid
+        memoryRulesCache[cacheKey]?.let { return it }
+
+        val key = "$KEY_RULES_PREFIX$cacheKey"
         val raw = prefs?.getString(key, null)
         if (raw.isNullOrBlank()) {
             return emptyList()
         }
         return try {
             val type = object : TypeToken<List<UserLearnedRule>>() {}.type
-            gson.fromJson<List<UserLearnedRule>>(raw, type) ?: emptyList()
+            val result: List<UserLearnedRule> = gson.fromJson(raw, type) ?: emptyList()
+            memoryRulesCache[cacheKey] = result
+            result
         } catch (e: Exception) {
             emptyList()
         }
     }
 
     fun saveLocalRules(uid: String, rules: List<UserLearnedRule>) {
-        val key = "$KEY_RULES_PREFIX${if (uid.isBlank()) "guest" else uid}"
+        val cacheKey = if (uid.isBlank()) "guest" else uid
+        memoryRulesCache[cacheKey] = rules
+        val key = "$KEY_RULES_PREFIX$cacheKey"
         val json = gson.toJson(rules)
         prefs?.edit()?.putString(key, json)?.apply()
     }

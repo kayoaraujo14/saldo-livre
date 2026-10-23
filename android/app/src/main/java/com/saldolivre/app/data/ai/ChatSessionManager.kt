@@ -37,6 +37,9 @@ class ChatSessionManager(
             "#10B981", "#3B82F6", "#8B5CF6", "#F59E0B",
             "#EC4899", "#06B6D4", "#6366F1", "#14B8A6"
         )
+
+        // Cache em memória para evitar I/O de disco e reflexão JSON na thread principal durante transições
+        private val memorySessionsCache = java.util.concurrent.ConcurrentHashMap<String, List<ChatSession>>()
     }
 
     private val gson = Gson()
@@ -52,15 +55,7 @@ class ChatSessionManager(
                 ChatMessage(
                     id = WELCOME_MESSAGE_ID,
                     sender = MessageSender.ASSISTANT,
-                    text = "Olá! Sou o **Copiloto Saldo Livre** 🤖✨\n\n" +
-                            "Estou conectado aos seus dados com **IA Generativa Avançada (Google Gemini)** e **Rede Neural Heurística**. Você pode conversar comigo para:\n" +
-                            "• ⚡ **Lançamentos rápidos**: contas que chegaram ou compras parceladas (ex: *\"Gastei 65 no almoço no cartão\"* ou *\"Conta de luz veio R$ 245\"*)\n" +
-                            "• 📄 **Extratos & Faturas em PDF**: anexe faturas ou extratos para importar em lote automaticamente\n" +
-                            "• 📊 **Gráficos e visualizações**: gere gráficos de pizza ou comparativos em barra para ver seus maiores gastos\n" +
-                            "• 🎙️ **Comandos de voz**: toque no microfone e fale naturalmente\n" +
-                            "• 🧠 **Aprendizado contínuo**: ensine regras financeiras personalizadas\n" +
-                            "• 💡 **Consultor ativo**: pergunte seu limite diário e previsões de gastos\n\n" +
-                            "Como posso ajudar você hoje?"
+                    text = "Olá! Sou o Copiloto Saldo Livre 🤖✨. Como posso ajudar você hoje?"
                 )
             )
         )
@@ -78,21 +73,28 @@ class ChatSessionManager(
     }
 
     fun getLocalSessions(uid: String): List<ChatSession> {
-        val key = "$KEY_SESSIONS_PREFIX${if (uid.isBlank()) "guest" else uid}"
+        val cacheKey = if (uid.isBlank()) "guest" else uid
+        memorySessionsCache[cacheKey]?.let { return it }
+
+        val key = "$KEY_SESSIONS_PREFIX$cacheKey"
         val raw = prefs?.getString(key, null)
         if (raw.isNullOrBlank()) {
             return emptyList()
         }
         return try {
             val type = object : TypeToken<List<ChatSession>>() {}.type
-            gson.fromJson<List<ChatSession>>(raw, type) ?: emptyList()
+            val result: List<ChatSession> = gson.fromJson(raw, type) ?: emptyList()
+            memorySessionsCache[cacheKey] = result
+            result
         } catch (e: Exception) {
             emptyList()
         }
     }
 
     fun saveLocalSessions(uid: String, sessions: List<ChatSession>) {
-        val key = "$KEY_SESSIONS_PREFIX${if (uid.isBlank()) "guest" else uid}"
+        val cacheKey = if (uid.isBlank()) "guest" else uid
+        memorySessionsCache[cacheKey] = sessions
+        val key = "$KEY_SESSIONS_PREFIX$cacheKey"
         val json = gson.toJson(sessions)
         prefs?.edit()?.putString(key, json)?.apply()
     }
@@ -558,20 +560,21 @@ class ChatSessionManager(
         val cleanText = content.replace(match.value, "").trim()
         return try {
             val jsonObj = gson.fromJson(match.groupValues[1], JsonObject::class.java)
-            val typeStr = jsonObj.get("type")?.asString ?: jsonObj.get("chartType")?.asString ?: "donut"
-            val title = jsonObj.get("title")?.asString ?: "Análise Financeira"
-            val description = jsonObj.get("description")?.asString
-            val dataArray = jsonObj.getAsJsonArray("data")
+            val typeStr = jsonObj.getStringOrNull("type") ?: jsonObj.getStringOrNull("chartType") ?: "donut"
+            val title = jsonObj.getStringOrNull("title") ?: "Análise Financeira"
+            val description = jsonObj.getStringOrNull("description")
+            val dataArray = jsonObj.getAsJsonArrayOrNull("data")
 
             val items = mutableListOf<ChartDataItem>()
             if (dataArray != null) {
                 var idx = 0
                 for (elem in dataArray) {
+                    if (!elem.isJsonObject) continue
                     val obj = elem.asJsonObject
-                    val label = obj.get("label")?.asString ?: "Outros"
-                    val value = obj.get("value")?.asDouble ?: 0.0
-                    val colorHex = obj.get("color")?.asString
-                        ?: obj.get("colorHex")?.asString
+                    val label = obj.getStringOrNull("label") ?: "Outros"
+                    val value = obj.getDoubleOrNull("value") ?: 0.0
+                    val colorHex = obj.getStringOrNull("color")
+                        ?: obj.getStringOrNull("colorHex")
                         ?: CHART_Colors_HEX[idx % CHART_Colors_HEX.size]
                     val color = try {
                         Color(android.graphics.Color.parseColor(colorHex))

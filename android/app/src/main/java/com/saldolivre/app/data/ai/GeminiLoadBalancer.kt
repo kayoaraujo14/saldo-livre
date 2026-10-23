@@ -91,10 +91,10 @@ class GeminiLoadBalancer(
     }
 
     /**
-     * Executa a requisição ao Gemini com resiliência total:
+     * Executa a requisição ao Gemini com resiliência total e tentativas contínuas:
      * - Rotação de múltiplas chaves de API (Round-Robin com detecção de 429)
      * - Cascata de Fallback de modelos (Flash -> Pro -> Lite)
-     * - Retries com backoff em sobrecargas temporárias (503 / 429)
+     * - Retries persistentes com backoff em sobrecargas temporárias (503 / 429 / rede)
      * - Temperatura e parâmetros ajustados para máxima precisão determinística (0.1f)
      */
     suspend fun executeWithResilience(
@@ -102,7 +102,9 @@ class GeminiLoadBalancer(
         systemInstructionText: String,
         attachmentBytes: ByteArray? = null,
         mimeType: String? = null,
-        onModelSwitched: ((newModel: String) -> Unit)? = null
+        onModelSwitched: ((newModel: String) -> Unit)? = null,
+        onStatusUpdate: ((status: String) -> Unit)? = null,
+        maxRounds: Int = 3
     ): GeminiExecutionResult {
         val keys = getApiKeys()
         if (keys.isEmpty()) {
@@ -113,99 +115,121 @@ class GeminiLoadBalancer(
         val modelCandidates = listOf(initialModel) + DEFAULT_MODELS_POOL.filter { it != initialModel }
 
         var lastException: Exception? = null
-
-        // Itera sobre as chaves disponíveis (Round-Robin / Load Balancing)
         val numKeys = keys.size
-        val startKeyIdx = (keyIndex.getAndIncrement() and Int.MAX_VALUE) % numKeys
 
-        for (kStep in 0 until numKeys) {
-            val currentKeyIdx = (startKeyIdx + kStep) % numKeys
-            val candidateKey = keys[currentKeyIdx]
+        // Executa múltiplos rounds persistentes antes de desistir
+        for (round in 0 until maxRounds) {
+            val startKeyIdx = (keyIndex.getAndIncrement() and Int.MAX_VALUE) % numKeys
 
-            // Verifica se a chave está em período de cooldown por limite de quota recente (429)
-            val cooldownUntil = rateLimitedKeysCooldown[candidateKey]
-            val now = System.currentTimeMillis()
-            if (cooldownUntil != null && now < cooldownUntil) {
-                continue
-            }
+            for (kStep in 0 until numKeys) {
+                val currentKeyIdx = (startKeyIdx + kStep) % numKeys
+                val candidateKey = keys[currentKeyIdx]
 
-            // Tenta a cascata de modelos para esta chave
-            for (candidateModel in modelCandidates) {
-                for (attempt in 0..1) {
-                    try {
-                        android.util.Log.d("GeminiLB", "Chamando modelo $candidateModel com chave ${candidateKey.take(6)}...")
-                        val generativeModel = GenerativeModel(
-                            modelName = candidateModel,
-                            apiKey = candidateKey,
-                            generationConfig = generationConfig {
-                                temperature = 0.1f
-                                topP = 0.95f
-                                topK = 40
-                            },
-                            systemInstruction = content { text(systemInstructionText) }
-                        )
+                // Verifica cooldown recente (429) apenas se houver mais de uma chave disponível
+                val cooldownUntil = rateLimitedKeysCooldown[candidateKey]
+                val now = System.currentTimeMillis()
+                if (numKeys > 1 && cooldownUntil != null && now < cooldownUntil) {
+                    continue
+                }
 
-                        val contentPrompt = content {
-                            text(userQuery)
-                            if (attachmentBytes != null && !mimeType.isNullOrBlank()) {
-                                blob(mimeType, attachmentBytes)
-                            }
-                        }
-
-                        val response: GenerateContentResponse = generativeModel.generateContent(contentPrompt)
-                        val text = response.text
-
-                        if (!text.isNullOrBlank()) {
-                            android.util.Log.i("GeminiLB", "Sucesso com modelo $candidateModel! Resposta tamanho=${text.length}")
-                            if (candidateModel != initialModel) {
-                                onModelSwitched?.invoke(candidateModel)
-                            }
-                            val maskedKey = if (candidateKey.length > 8) {
-                                candidateKey.take(4) + "..." + candidateKey.takeLast(4)
-                            } else "Chave Ativa"
-
-                            return GeminiExecutionResult(
-                                responseText = text,
-                                modelUsed = candidateModel,
-                                keyUsedMasked = maskedKey
+                // Tenta a cascata de modelos para esta chave
+                for (candidateModel in modelCandidates) {
+                    for (attempt in 0..1) {
+                        try {
+                            val modelLabel = candidateModel.replace("gemini-", "").replace("-latest", "")
+                            onStatusUpdate?.invoke(
+                                if (round == 0) "Consultando Gemini $modelLabel..."
+                                else "Tentando Gemini $modelLabel (tentativa ${round + 1})..."
                             )
-                        } else {
-                            throw IllegalStateException("Resposta vazia retornada pelo modelo $candidateModel.")
+                            android.util.Log.d("GeminiLB", "[Round $round Attempt $attempt] Chamando $candidateModel com chave ${candidateKey.take(6)}...")
+
+                            val generativeModel = GenerativeModel(
+                                modelName = candidateModel,
+                                apiKey = candidateKey,
+                                generationConfig = generationConfig {
+                                    temperature = 0.1f
+                                    topP = 0.95f
+                                    topK = 40
+                                },
+                                systemInstruction = content { text(systemInstructionText) }
+                            )
+
+                            val contentPrompt = content {
+                                text(userQuery)
+                                if (attachmentBytes != null && !mimeType.isNullOrBlank()) {
+                                    blob(mimeType, attachmentBytes)
+                                }
+                            }
+
+                            val response: GenerateContentResponse = generativeModel.generateContent(contentPrompt)
+                            val text = response.text
+
+                            if (!text.isNullOrBlank()) {
+                                android.util.Log.i("GeminiLB", "Sucesso com modelo $candidateModel! Resposta tamanho=${text.length}")
+                                if (candidateModel != initialModel) {
+                                    onModelSwitched?.invoke(candidateModel)
+                                }
+                                val maskedKey = if (candidateKey.length > 8) {
+                                    candidateKey.take(4) + "..." + candidateKey.takeLast(4)
+                                } else "Chave Ativa"
+
+                                return GeminiExecutionResult(
+                                    responseText = text,
+                                    modelUsed = candidateModel,
+                                    keyUsedMasked = maskedKey
+                                )
+                            } else {
+                                throw IllegalStateException("Resposta vazia retornada pelo modelo $candidateModel.")
+                            }
+                        } catch (e: Exception) {
+                            lastException = e
+                            android.util.Log.e("GeminiLB", "Tentativa com modelo $candidateModel falhou: ${e.message}")
+                            val errLower = (e.message ?: "").lowercase()
+
+                            val isRateLimit = errLower.contains("429") ||
+                                    errLower.contains("quota") ||
+                                    errLower.contains("resource_exhausted")
+
+                            val isTransient = errLower.contains("503") ||
+                                    errLower.contains("unavailable") ||
+                                    errLower.contains("high demand") ||
+                                    errLower.contains("spikes in demand") ||
+                                    errLower.contains("timeout") ||
+                                    errLower.contains("socket") ||
+                                    errLower.contains("connect")
+
+                            if (isRateLimit) {
+                                if (numKeys > 1) {
+                                    rateLimitedKeysCooldown[candidateKey] = System.currentTimeMillis() + 45_000L
+                                    break // Pula para a próxima chave
+                                } else {
+                                    // Com 1 chave só, aguarda 2s antes de tentar outro modelo
+                                    delay(2000L)
+                                    break
+                                }
+                            }
+
+                            if (attempt == 0 && isTransient) {
+                                delay(1500L)
+                                continue
+                            }
+
+                            // Avança para o próximo modelo candidato
+                            break
                         }
-                    } catch (e: Exception) {
-                        lastException = e
-                        android.util.Log.e("GeminiLB", "Tentativa com modelo $candidateModel falhou: ${e.message}")
-                        val errLower = (e.message ?: "").lowercase()
-
-                        val isRateLimit = errLower.contains("429") ||
-                                errLower.contains("quota") ||
-                                errLower.contains("resource_exhausted")
-
-                        val isTransient = errLower.contains("503") ||
-                                errLower.contains("unavailable") ||
-                                errLower.contains("high demand") ||
-                                errLower.contains("spikes in demand")
-
-                        if (isRateLimit) {
-                            // Marca chave em cooldown de 60 segundos e avança para a próxima chave
-                            rateLimitedKeysCooldown[candidateKey] = System.currentTimeMillis() + 60_000L
-                            break // Sai do loop de modelos e pula para a próxima chave
-                        }
-
-                        if (attempt == 0 && isTransient) {
-                            // Pausa curta de 1.2s para pico transitório do Google
-                            delay(1200L)
-                            continue
-                        }
-
-                        // Se falhou na 2ª tentativa ou erro do modelo, tenta o próximo modelo do pool
-                        break
                     }
                 }
             }
+
+            // Se ainda não teve sucesso e faltam rounds, aguarda backoff progressivo antes da próxima rodada
+            if (round < maxRounds - 1) {
+                val backoffMs = (round + 1) * 2000L
+                onStatusUpdate?.invoke("Aguardando servidores do Gemini (${round + 1}/$maxRounds)...")
+                delay(backoffMs)
+            }
         }
 
-        throw lastException ?: IllegalStateException("Não foi possível obter resposta dos servidores do Google Gemini.")
+        throw lastException ?: IllegalStateException("Não foi possível obter resposta dos servidores do Google Gemini após várias tentativas.")
     }
 
     /**

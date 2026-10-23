@@ -107,21 +107,21 @@ class AndroidAgentToolsEngine(
     // -------------------------------------------------------------
 
     suspend fun executeFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val action = jsonObj.get("action")?.asString ?: jsonObj.get("toolName")?.asString ?: ""
+        val action = jsonObj.getStringOrNull("action") ?: jsonObj.getStringOrNull("toolName") ?: ""
         return when (action) {
             "CREATE_TRANSACTION", "registrarTransacao" -> executeCreateFromJson(jsonObj)
             "BATCH_TRANSACTIONS", "registrarTransacoesLote" -> executeBatchFromJson(jsonObj)
             "EDIT_TRANSACTION", "editarTransacoes" -> executeEditFromJson(jsonObj)
             "DELETE_TRANSACTION", "excluirTransacoes" -> executeDeleteFromJson(jsonObj)
             "UPDATE_ESTIMATED", "atualizarContaPrevista" -> executeUpdateEstimatedFromJson(jsonObj)
-            "QUERY_TRANSACTIONS", "consultarTransacoes" -> executeQueryFromJson(jsonObj)
+            "SEARCH_TRANSACTIONS", "buscarTransacoes", "QUERY_TRANSACTIONS", "consultarTransacoes" -> executeSearchFromJson(jsonObj)
             "MANAGE_CARDS", "gerenciarCartoes" -> executeManageCardsFromJson(jsonObj)
             "MANAGE_RECURRING", "gerenciarContasRecorrentes" -> executeManageRecurringFromJson(jsonObj)
             "EXPAND_INSTALLMENTS", "expandirParcelamentos" -> executeExpandInstallmentsFromJson(jsonObj)
             "GENERATE_CHART", "gerarGraficoFinanceiro" -> executeGenerateChartFromJson(jsonObj)
             "LEARN_RULE", "gerenciarRegrasEMemoria" -> {
-                val op = jsonObj.get("acao")?.asString ?: jsonObj.get("operation")?.asString ?: "aprender"
-                val rule = jsonObj.get("rule")?.asString ?: jsonObj.get("regra")?.asString ?: ""
+                val op = jsonObj.getStringOrNull("acao") ?: jsonObj.getStringOrNull("operation") ?: "aprender"
+                val rule = jsonObj.getStringOrNull("rule") ?: jsonObj.getStringOrNull("regra") ?: ""
                 if (op.equals("esquecer", ignoreCase = true) || op.equals("delete", ignoreCase = true)) {
                     executeDeleteRule(rule)
                 } else {
@@ -129,7 +129,7 @@ class AndroidAgentToolsEngine(
                 }
             }
             "DELETE_RULE" -> {
-                val rule = jsonObj.get("rule")?.asString ?: jsonObj.get("regra")?.asString ?: ""
+                val rule = jsonObj.getStringOrNull("rule") ?: jsonObj.getStringOrNull("regra") ?: ""
                 executeDeleteRule(rule)
             }
             else -> ToolExecutionResult(text = "Ação desconhecida solicitada: $action")
@@ -418,27 +418,27 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeCreateFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        var desc = jsonObj.get("description")?.asString ?: "Lançamento via Copiloto"
+        var desc = jsonObj.getStringOrNull("description") ?: "Lançamento via Copiloto"
         desc = neuralClassifier.extractDescription(desc).ifBlank { desc }
-        val amount = jsonObj.get("amount")?.asDouble ?: 0.0
-        val typeStr = jsonObj.get("type")?.asString ?: "expense"
-        val category = jsonObj.get("category")?.asString
-        val subcategory = jsonObj.get("subcategory")?.asString
-        val payMethodStr = jsonObj.get("paymentMethod")?.asString ?: "pix"
-        val cardName = jsonObj.get("cardName")?.asString
-        val splitTypeStr = jsonObj.get("splitType")?.asString ?: "MINE"
-        val friendName = jsonObj.get("friendName")?.asString
-        val friendEmail = jsonObj.get("friendEmail")?.asString
-        val thirdPartyName = jsonObj.get("thirdPartyName")?.asString
-        val competenceMonth = jsonObj.get("competenceMonth")?.asString
-        val dueDate = jsonObj.get("dueDate")?.asString
-        val confirmed = jsonObj.get("confirmed")?.asBoolean
-            ?: jsonObj.get("__confirmed")?.asBoolean
+        val amount = jsonObj.getDoubleOrNull("amount") ?: 0.0
+        val typeStr = jsonObj.getStringOrNull("type") ?: "expense"
+        val category = jsonObj.getStringOrNull("category")
+        val subcategory = jsonObj.getStringOrNull("subcategory")
+        val payMethodStr = jsonObj.getStringOrNull("paymentMethod") ?: "pix"
+        val cardName = jsonObj.getStringOrNull("cardName")
+        val splitTypeStr = jsonObj.getStringOrNull("splitType") ?: "MINE"
+        val friendName = jsonObj.getStringOrNull("friendName")
+        val friendEmail = jsonObj.getStringOrNull("friendEmail")
+        val thirdPartyName = jsonObj.getStringOrNull("thirdPartyName")
+        val competenceMonth = jsonObj.getStringOrNull("competenceMonth")
+        val dueDate = jsonObj.getStringOrNull("dueDate")
+        val confirmed = jsonObj.getBooleanOrNull("confirmed")
+            ?: jsonObj.getBooleanOrNull("__confirmed")
             ?: false
 
-        val installmentsObj = jsonObj.getAsJsonObject("installments")
-        val currentInstallment = installmentsObj?.get("current")?.asInt ?: 1
-        val totalInstallments = installmentsObj?.get("total")?.asInt ?: 1
+        val installmentsObj = jsonObj.getAsJsonObjectOrNull("installments")
+        val currentInstallment = installmentsObj.getIntOrNull("current") ?: 1
+        val totalInstallments = installmentsObj.getIntOrNull("total") ?: 1
 
         val txType = if (typeStr.equals("income", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
         val payMethod = PaymentMethod.from(payMethodStr)
@@ -476,19 +476,19 @@ class AndroidAgentToolsEngine(
     // -------------------------------------------------------------
 
     private suspend fun executeBatchFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val array = jsonObj.getAsJsonArray("transactions") ?: jsonObj.getAsJsonArray("transacoes")
+        val array = jsonObj.getAsJsonArrayOrNull("transactions") ?: jsonObj.getAsJsonArrayOrNull("transacoes")
         if (array == null || array.size() == 0) {
             return ToolExecutionResult(text = "⚠️ Nenhuma transação encontrada no lote para registrar.")
         }
 
-        val confirmed = jsonObj.get("confirmed")?.asBoolean
-            ?: jsonObj.get("__confirmed")?.asBoolean
+        val confirmed = jsonObj.getBooleanOrNull("confirmed")
+            ?: jsonObj.getBooleanOrNull("__confirmed")
             ?: false
 
         val user = repository.currentUser.value
-        val defaultMonth = jsonObj.get("mesFaturaPadrao")?.asString
+        val defaultMonth = jsonObj.getStringOrNull("mesFaturaPadrao")
             ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
-        val defaultPayMethod = jsonObj.get("metodoPagamentoPadrao")?.asString ?: "pix"
+        val defaultPayMethod = jsonObj.getStringOrNull("metodoPagamentoPadrao") ?: "pix"
         val createdList = mutableListOf<Transaction>()
         val pendingTxMaps = mutableListOf<Map<String, Any?>>()
         var totalExpenses = 0.0
@@ -497,26 +497,26 @@ class AndroidAgentToolsEngine(
         for (elem in array) {
             if (!elem.isJsonObject) continue
             val item = elem.asJsonObject
-            val filterStatus = item.get("categoria_filtro")?.asString ?: "valida"
-            val desc = item.get("description")?.asString
-                ?: item.get("descricao")?.asString
-                ?: item.get("contraparte")?.asString
+            val filterStatus = item.getStringOrNull("categoria_filtro") ?: "valida"
+            val desc = item.getStringOrNull("description")
+                ?: item.getStringOrNull("descricao")
+                ?: item.getStringOrNull("contraparte")
                 ?: "Item de Lote"
-            val rawAmt = item.get("amount")?.asDouble
-                ?: item.get("valorTotal")?.asDouble
-                ?: item.get("valor_exato")?.asDouble
-                ?: item.get("valor")?.asDouble
+            val rawAmt = item.getDoubleOrNull("amount")
+                ?: item.getDoubleOrNull("valorTotal")
+                ?: item.getDoubleOrNull("valor_exato")
+                ?: item.getDoubleOrNull("valor")
                 ?: 0.0
             val amt = kotlin.math.abs(rawAmt)
             if (amt <= 0.0) continue
 
-            val typeStr = item.get("type")?.asString ?: item.get("tipo")?.asString ?: if (rawAmt < 0) "income" else "expense"
+            val typeStr = item.getStringOrNull("type") ?: item.getStringOrNull("tipo") ?: if (rawAmt < 0) "income" else "expense"
             val isIncome = typeStr.equals("income", ignoreCase = true) || rawAmt < 0
-            val cat = item.get("category")?.asString ?: item.get("categoria")?.asString ?: if (isIncome) "Receita" else "Outros"
-            val subcat = item.get("subcategory")?.asString ?: item.get("subcategoria")?.asString
-            val payMethodStr = item.get("paymentMethod")?.asString ?: item.get("metodoPagamento")?.asString ?: defaultPayMethod
-            val dt = item.get("date")?.asString ?: item.get("data")?.asString ?: item.get("dataVencimento")?.asString ?: FinanceEngine.todayKey()
-            val comp = item.get("competenceMonth")?.asString ?: item.get("mesFatura")?.asString ?: defaultMonth
+            val cat = item.getStringOrNull("category") ?: item.getStringOrNull("categoria") ?: if (isIncome) "Receita" else "Outros"
+            val subcat = item.getStringOrNull("subcategory") ?: item.getStringOrNull("subcategoria")
+            val payMethodStr = item.getStringOrNull("paymentMethod") ?: item.getStringOrNull("metodoPagamento") ?: defaultPayMethod
+            val dt = item.getStringOrNull("date") ?: item.getStringOrNull("data") ?: item.getStringOrNull("dataVencimento") ?: FinanceEngine.todayKey()
+            val comp = item.getStringOrNull("competenceMonth") ?: item.getStringOrNull("mesFatura") ?: defaultMonth
 
             pendingTxMaps.add(
                 mapOf(
@@ -528,7 +528,7 @@ class AndroidAgentToolsEngine(
                     "categoria" to cat,
                     "subcategoria" to subcat,
                     "metodoPagamento" to payMethodStr,
-                    "motivoIgnorado" to item.get("motivoIgnorado")?.asString
+                    "motivoIgnorado" to item.getStringOrNull("motivoIgnorado")
                 )
             )
             if (filterStatus.equals("ignorada", ignoreCase = true)) continue
@@ -780,18 +780,18 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeEditFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val searchTerm = jsonObj.get("searchTerm")?.asString
-        val transactionId = jsonObj.get("transactionId")?.asString
-        val month = jsonObj.get("month")?.asString
-        val newAmount = jsonObj.get("newAmount")?.asDouble
-        val newDescription = jsonObj.get("newDescription")?.asString
-        val newCategory = jsonObj.get("newCategory")?.asString
-        val newSubcategory = jsonObj.get("newSubcategory")?.asString
-        val newStatusStr = jsonObj.get("newStatus")?.asString
-        val newPayMethodStr = jsonObj.get("newPaymentMethod")?.asString
-        val newCompetenceMonth = jsonObj.get("newCompetenceMonth")?.asString
-        val newDueDate = jsonObj.get("newDueDate")?.asString
-        val newSplitTypeStr = jsonObj.get("newSplitType")?.asString
+        val searchTerm = jsonObj.getStringOrNull("searchTerm")
+        val transactionId = jsonObj.getStringOrNull("transactionId")
+        val month = jsonObj.getStringOrNull("month")
+        val newAmount = jsonObj.getDoubleOrNull("newAmount")
+        val newDescription = jsonObj.getStringOrNull("newDescription")
+        val newCategory = jsonObj.getStringOrNull("newCategory")
+        val newSubcategory = jsonObj.getStringOrNull("newSubcategory")
+        val newStatusStr = jsonObj.getStringOrNull("newStatus")
+        val newPayMethodStr = jsonObj.getStringOrNull("newPaymentMethod")
+        val newCompetenceMonth = jsonObj.getStringOrNull("newCompetenceMonth")
+        val newDueDate = jsonObj.getStringOrNull("newDueDate")
+        val newSplitTypeStr = jsonObj.getStringOrNull("newSplitType")
 
         val newStatus = newStatusStr?.let { TransactionStatus.from(it) }
         val newPayMethod = newPayMethodStr?.let { PaymentMethod.from(it) }
@@ -893,11 +893,11 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeDeleteFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val searchTerm = jsonObj.get("searchTerm")?.asString
-        val transactionId = jsonObj.get("transactionId")?.asString
-        val amount = jsonObj.get("amount")?.asDouble
-        val month = jsonObj.get("month")?.asString
-        val deleteAll = jsonObj.get("deleteAllInstallments")?.asBoolean ?: false
+        val searchTerm = jsonObj.getStringOrNull("searchTerm")
+        val transactionId = jsonObj.getStringOrNull("transactionId")
+        val amount = jsonObj.getDoubleOrNull("amount")
+        val month = jsonObj.getStringOrNull("month")
+        val deleteAll = jsonObj.getBooleanOrNull("deleteAllInstallments") ?: false
 
         return executeDeleteTransaction(
             searchTerm = searchTerm,
@@ -983,9 +983,9 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeUpdateEstimatedFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val searchTerm = jsonObj.get("searchTerm")?.asString ?: jsonObj.get("buscaDescricao")?.asString ?: ""
-        val actualAmount = jsonObj.get("actualAmount")?.asDouble ?: jsonObj.get("valorReal")?.asDouble ?: 0.0
-        val statusStr = jsonObj.get("status")?.asString ?: jsonObj.get("novoStatus")?.asString ?: "paid"
+        val searchTerm = jsonObj.getStringOrNull("searchTerm") ?: jsonObj.getStringOrNull("buscaDescricao") ?: ""
+        val actualAmount = jsonObj.getDoubleOrNull("actualAmount") ?: jsonObj.getDoubleOrNull("valorReal") ?: 0.0
+        val statusStr = jsonObj.getStringOrNull("status") ?: jsonObj.getStringOrNull("novoStatus") ?: "paid"
         val status = TransactionStatus.from(statusStr)
 
         return executeUpdateEstimated(
@@ -999,7 +999,7 @@ class AndroidAgentToolsEngine(
     // 6. QUERY TRANSACTIONS (CONSULTA INTELIGENTE / FILTRO)
     // -------------------------------------------------------------
 
-    suspend fun executeQueryTransactions(
+    suspend fun executeSearchTransactions(
         searchTerm: String? = null,
         category: String? = null,
         subcategory: String? = null,
@@ -1008,33 +1008,51 @@ class AndroidAgentToolsEngine(
     ): ToolExecutionResult {
         val all = repository.getTransactions().first()
         val user = repository.currentUser.value
-        val activeMonth = month ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val activeMonth = month?.takeIf { it.isNotBlank() } ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val recurringBills = repository.getRecurringBills().first()
+        val cardsMap = repository.getCards().first().associateBy { it.id }
 
-        var filtered = all.filter { t ->
-            if (!month.isNullOrBlank() && t.competenceMonth != activeMonth) return@filter false
-            if (!category.isNullOrBlank() && !t.category.equals(category, ignoreCase = true)) return@filter false
+        // 1. Filtra prioritariamente no mês vigente / selecionado (para evitar divergência de valores com moldes)
+        val monthTransactions = all.filter { it.competenceMonth == activeMonth }
+        var filtered = monthTransactions.filter { t ->
+            if (!category.isNullOrBlank() && !t.category.equals(category, ignoreCase = true) && !matchesSearch(t.category, category)) return@filter false
             if (!subcategory.isNullOrBlank() && !(t.subcategory?.contains(subcategory, ignoreCase = true) == true)) return@filter false
             if (status != null && t.status != status) return@filter false
             if (!searchTerm.isNullOrBlank() && !matchesSearch(t.description, searchTerm) && !matchesSearch(t.category, searchTerm)) return@filter false
             true
         }.sortedByDescending { it.dueDate }
 
-        // Se o usuário procurou por um termo específico sem fixar mês e não encontrou no mês ativo, busca no histórico completo!
-        if (filtered.isEmpty() && !searchTerm.isNullOrBlank() && month == null) {
-            filtered = all.filter { t ->
-                matchesSearch(t.description, searchTerm) || matchesSearch(t.category, searchTerm)
+        // Verifica se há molde de Conta Recorrente correspondente ao termo
+        val matchingRecurring = if (!searchTerm.isNullOrBlank()) {
+            recurringBills.firstOrNull { matchesSearch(it.description, searchTerm) || (!category.isNullOrBlank() && matchesSearch(it.category, category)) }
+        } else null
+
+        // 2. Se não encontrou no mês ativo e o usuário não especificou um mês fixo, busca em outros meses para orientar
+        var foundInOtherMonth = false
+        if (filtered.isEmpty() && !searchTerm.isNullOrBlank() && month.isNullOrBlank()) {
+            val inOtherMonths = all.filter { t ->
+                matchesSearch(t.description, searchTerm) || (!category.isNullOrBlank() && matchesSearch(t.category, category))
             }.sortedByDescending { it.dueDate }
+            if (inOtherMonths.isNotEmpty()) {
+                filtered = inOtherMonths.take(5)
+                foundInOtherMonth = true
+            }
         }
 
         if (filtered.isEmpty()) {
+            val recurringNote = if (matchingRecurring != null) {
+                "\n\n⚠️ **Nota sobre Conta Recorrente:** Encontrei o molde previsto de **\"${matchingRecurring.description}\"** cadastrado com valor estimado de **${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)}** (vence dia ${matchingRecurring.dueDay}), mas **NENHUM lançamento real foi efetivado ou registrado** no mês de ${FinanceEngine.monthLabel(activeMonth)}."
+            } else ""
+
             return ToolExecutionResult(
-                text = "🔍 Não encontrei nenhuma transação com os filtros aplicados" +
-                        (if (!searchTerm.isNullOrBlank()) " (\"$searchTerm\")" else "") +
-                        " em ${FinanceEngine.monthLabel(activeMonth)}.",
+                text = "🔍 **Busca de Transações Reais (${FinanceEngine.monthLabel(activeMonth)}):**\n" +
+                        "Nenhuma transação real encontrada no banco de dados para " +
+                        (if (!searchTerm.isNullOrBlank()) "\"$searchTerm\"" else "os filtros informados") +
+                        " em ${FinanceEngine.monthLabel(activeMonth)}.$recurringNote",
                 actionCard = ActionCardData(
-                    title = "Nenhum lançamento encontrado",
+                    title = "Nenhum lançamento real encontrado",
                     description = if (!searchTerm.isNullOrBlank()) "Busca: \"$searchTerm\"" else "Nenhum resultado",
-                    detail = "Filtro: ${FinanceEngine.monthLabel(activeMonth)}"
+                    detail = if (matchingRecurring != null) "Molde previsto: ${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)} (sem lançamento real)" else "Mês: ${FinanceEngine.monthLabel(activeMonth)}"
                 )
             )
         }
@@ -1042,35 +1060,103 @@ class AndroidAgentToolsEngine(
         val totalAmount = filtered.sumOf { it.totalAmount }
         val myImpactTotal = filtered.sumOf { it.userImpact[user.uid] ?: it.totalAmount }
 
-        val lines = filtered.take(10).joinToString("\n") { t ->
+        val lines = filtered.take(15).joinToString("\n") { t ->
             val sub = if (!t.subcategory.isNullOrBlank()) " › ${t.subcategory}" else ""
-            "• **${t.description}**: ${FinanceEngine.formatCurrency(t.effectiveAmount)} | ${t.category}$sub | ${t.status.label} (${FinanceEngine.formatShortDate(t.dueDate)})"
+            val cName = t.cardId?.let { cid -> cardsMap[cid]?.cardName }
+            val methodOrCard = if (!cName.isNullOrBlank()) "Cartão $cName" else t.paymentMethod.label
+            val monthNote = if (foundInOtherMonth) " [Mês: ${FinanceEngine.monthLabel(t.competenceMonth)}]" else ""
+
+            val myImpact = t.userImpact[user.uid] ?: t.effectiveAmount
+            val isSplit = kotlin.math.abs(myImpact - t.effectiveAmount) > 0.01 || (t.splitType != null && t.splitType != SplitType.MINE)
+            val splitNote = if (isSplit) {
+                val friendName = t.assignedFriendName?.takeIf { it.isNotBlank() }
+                    ?: t.allocations.firstOrNull { it.uid != user.uid && it.name.isNotBlank() }?.name
+                val friendPct = t.friendSharePct?.toInt() ?: 50
+                val who = when {
+                    !friendName.isNullOrBlank() -> "Dividido com $friendName ($friendPct%)"
+                    t.splitType == SplitType.SPLIT_50 -> "Dividido 50/50 (Casal)"
+                    t.splitType == SplitType.FRIEND -> "Dividido com Amigo(a)"
+                    t.splitType == SplitType.PARTNER -> "100% Parceiro(a)"
+                    t.splitType == SplitType.EXTERNAL -> "Dividido com Terceiro"
+                    else -> "Compra Dividida"
+                }
+                " (Sua parte: ${FinanceEngine.formatCurrency(myImpact)} • $who)"
+            } else ""
+
+            "• **${t.description}**: ${FinanceEngine.formatCurrency(t.effectiveAmount)}$splitNote • ${t.category}$sub • ${t.status.label} (${FinanceEngine.formatShortDate(t.dueDate)}) • $methodOrCard$monthNote"
         }
 
-        val extraNote = if (filtered.size > 10) "\n*(e mais ${filtered.size - 10} lançamentos)*" else ""
+        val extraNote = if (filtered.size > 15) "\n*(e mais ${filtered.size - 15} lançamentos)*" else ""
+
+        val recurringDivergenceNote = if (matchingRecurring != null && !foundInOtherMonth) {
+            val diff = totalAmount - matchingRecurring.defaultAmount
+            if (kotlin.math.abs(diff) > 0.01) {
+                "\n\nℹ️ **Divergência com Molde Recorrente:** O molde de previsão cadastrado previa **${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)}**, mas o **valor real registrado no mês é ${FinanceEngine.formatCurrency(totalAmount)}**."
+            } else {
+                "\n\nℹ️ **Conta Recorrente:** O valor real lançado confere exatamente com o molde previsto (${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)})."
+            }
+        } else ""
+
+        val hasAnySplit = filtered.any {
+            val myImpact = it.userImpact[user.uid] ?: it.effectiveAmount
+            kotlin.math.abs(myImpact - it.effectiveAmount) > 0.01
+        }
+        val splitSummaryNote = if (hasAnySplit) {
+            "\n*(Nota: O Impacto no Saldo Livre reflete os abatimentos da divisão de contas com amigos/parceiro)*"
+        } else ""
+
+        val headerText = if (foundInOtherMonth) {
+            "🔍 **Lançamentos reais encontrados em outros meses (nenhum em ${FinanceEngine.monthLabel(activeMonth)}):**"
+        } else {
+            "📋 **Lançamentos reais encontrados em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):**"
+        }
 
         return ToolExecutionResult(
-            text = "📋 **Encontrei ${filtered.size} lançamento(s):**\n\n" +
+            text = "$headerText\n\n" +
                     "$lines$extraNote\n\n" +
-                    "• **Soma Total**: ${FinanceEngine.formatCurrency(totalAmount)}\n" +
-                    "• **Seu Impacto no Saldo**: ${FinanceEngine.formatCurrency(myImpactTotal)}",
+                    "• **Soma Total Real**: ${FinanceEngine.formatCurrency(totalAmount)}\n" +
+                    "• **Seu Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(myImpactTotal)}$splitSummaryNote" +
+                    recurringDivergenceNote,
             actionCard = ActionCardData(
-                title = "Consulta: ${filtered.size} lançamento(s)",
+                title = "Busca: ${filtered.size} lançamento(s) real(is)",
                 description = "Total: ${FinanceEngine.formatCurrency(totalAmount)}",
-                detail = "Impacto no Saldo: ${FinanceEngine.formatCurrency(myImpactTotal)} • Mês: ${FinanceEngine.monthLabel(activeMonth)}"
+                detail = "Impacto: ${FinanceEngine.formatCurrency(myImpactTotal)} • Mês: ${FinanceEngine.monthLabel(if (foundInOtherMonth) filtered.first().competenceMonth else activeMonth)}"
             )
         )
     }
 
-    private suspend fun executeQueryFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val searchTerm = jsonObj.get("searchTerm")?.asString
-        val category = jsonObj.get("category")?.asString
-        val subcategory = jsonObj.get("subcategory")?.asString
-        val month = jsonObj.get("month")?.asString
-        val statusStr = jsonObj.get("status")?.asString
+    suspend fun executeQueryTransactions(
+        searchTerm: String? = null,
+        category: String? = null,
+        subcategory: String? = null,
+        month: String? = null,
+        status: TransactionStatus? = null
+    ): ToolExecutionResult = executeSearchTransactions(
+        searchTerm = searchTerm,
+        category = category,
+        subcategory = subcategory,
+        month = month,
+        status = status
+    )
+
+    private suspend fun executeSearchFromJson(jsonObj: JsonObject): ToolExecutionResult {
+        val searchTerm = jsonObj.getStringOrNull("searchTerm")
+            ?: jsonObj.getStringOrNull("termoBusca")
+            ?: jsonObj.getStringOrNull("description")
+            ?: jsonObj.getStringOrNull("descricao")
+            ?: jsonObj.getStringOrNull("query")
+            ?: jsonObj.getStringOrNull("busca")
+        val category = jsonObj.getStringOrNull("category")
+            ?: jsonObj.getStringOrNull("categoria")
+        val subcategory = jsonObj.getStringOrNull("subcategory")
+            ?: jsonObj.getStringOrNull("subcategoria")
+        val month = jsonObj.getStringOrNull("month")
+            ?: jsonObj.getStringOrNull("mes")
+            ?: jsonObj.getStringOrNull("competenceMonth")
+        val statusStr = jsonObj.getStringOrNull("status")
         val status = statusStr?.let { TransactionStatus.from(it) }
 
-        return executeQueryTransactions(
+        return executeSearchTransactions(
             searchTerm = searchTerm,
             category = category,
             subcategory = subcategory,
@@ -1078,6 +1164,9 @@ class AndroidAgentToolsEngine(
             status = status
         )
     }
+
+    private suspend fun executeQueryFromJson(jsonObj: JsonObject): ToolExecutionResult =
+        executeSearchFromJson(jsonObj)
 
     // -------------------------------------------------------------
     // 7. MANAGE CARDS (CARTÕES DE CRÉDITO)
@@ -1151,11 +1240,11 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeManageCardsFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val op = jsonObj.get("operation")?.asString ?: jsonObj.get("acao")?.asString ?: "listar"
-        val name = jsonObj.get("cardName")?.asString ?: jsonObj.get("nome")?.asString
-        val closing = jsonObj.get("closingDay")?.asInt ?: jsonObj.get("fechamento")?.asInt
-        val due = jsonObj.get("dueDay")?.asInt ?: jsonObj.get("vencimento")?.asInt
-        val id = jsonObj.get("cardId")?.asString ?: jsonObj.get("id")?.asString
+        val op = jsonObj.getStringOrNull("operation") ?: jsonObj.getStringOrNull("acao") ?: "listar"
+        val name = jsonObj.getStringOrNull("cardName") ?: jsonObj.getStringOrNull("nome")
+        val closing = jsonObj.getIntOrNull("closingDay") ?: jsonObj.getIntOrNull("fechamento")
+        val due = jsonObj.getIntOrNull("dueDay") ?: jsonObj.getIntOrNull("vencimento")
+        val id = jsonObj.getStringOrNull("cardId") ?: jsonObj.getStringOrNull("id")
 
         return executeManageCards(operation = op, cardName = name, closingDay = closing, dueDay = due, cardId = id)
     }
@@ -1183,7 +1272,7 @@ class AndroidAgentToolsEngine(
                 }
                 val list = bills.joinToString("\n") {
                     val status = if (it.active) "🟢 Ativa" else "⏸️ Pausada"
-                    "• **${it.description}**: ${FinanceEngine.formatCurrency(it.defaultAmount)} (Vence dia ${it.dueDay}) | ${it.category} [$status]"
+                    "• **${it.description}**: ${FinanceEngine.formatCurrency(it.defaultAmount)} (Vence dia ${it.dueDay}) • ${it.category} • [$status]"
                 }
                 return ToolExecutionResult(
                     text = "⚡ **Suas Contas Fixas e Assinaturas Recorrentes:**\n\n$list",
@@ -1251,13 +1340,13 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeManageRecurringFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val op = jsonObj.get("operation")?.asString ?: jsonObj.get("acao")?.asString ?: "listar"
-        val desc = jsonObj.get("description")?.asString ?: jsonObj.get("descricao")?.asString
-        val amt = jsonObj.get("amount")?.asDouble ?: jsonObj.get("valor")?.asDouble
-        val day = jsonObj.get("dueDay")?.asInt ?: jsonObj.get("diaVencimento")?.asInt
-        val cat = jsonObj.get("category")?.asString ?: jsonObj.get("categoria")?.asString
-        val sub = jsonObj.get("subcategory")?.asString ?: jsonObj.get("subcategoria")?.asString
-        val id = jsonObj.get("billId")?.asString ?: jsonObj.get("id")?.asString
+        val op = jsonObj.getStringOrNull("operation") ?: jsonObj.getStringOrNull("acao") ?: "listar"
+        val desc = jsonObj.getStringOrNull("description") ?: jsonObj.getStringOrNull("descricao")
+        val amt = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor")
+        val day = jsonObj.getIntOrNull("dueDay") ?: jsonObj.getIntOrNull("diaVencimento")
+        val cat = jsonObj.getStringOrNull("category") ?: jsonObj.getStringOrNull("categoria")
+        val sub = jsonObj.getStringOrNull("subcategory") ?: jsonObj.getStringOrNull("subcategoria")
+        val id = jsonObj.getStringOrNull("billId") ?: jsonObj.getStringOrNull("id")
 
         return executeManageRecurring(operation = op, description = desc, amount = amt, dueDay = day, category = cat, subcategory = sub, billId = id)
     }
@@ -1332,7 +1421,7 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeExpandInstallmentsFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val month = jsonObj.get("month")?.asString ?: jsonObj.get("mes")?.asString
+        val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
         return executeExpandInstallments(month)
     }
 
@@ -1341,19 +1430,19 @@ class AndroidAgentToolsEngine(
     // -------------------------------------------------------------
 
     private fun executeGenerateChartFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val chartTypeStr = jsonObj.get("chartType")?.asString ?: "donut"
-        val title = jsonObj.get("title")?.asString ?: "Análise Financeira"
-        val description = jsonObj.get("description")?.asString
-        val dataArray = jsonObj.getAsJsonArray("data")
+        val chartTypeStr = jsonObj.getStringOrNull("chartType") ?: "donut"
+        val title = jsonObj.getStringOrNull("title") ?: "Análise Financeira"
+        val description = jsonObj.getStringOrNull("description")
+        val dataArray = jsonObj.getAsJsonArrayOrNull("data")
 
         val items = mutableListOf<ChartDataItem>()
         if (dataArray != null) {
             for (elem in dataArray) {
                 if (!elem.isJsonObject) continue
                 val obj = elem.asJsonObject
-                val label = obj.get("label")?.asString ?: "Outros"
-                val value = obj.get("value")?.asDouble ?: 0.0
-                val colorHex = obj.get("colorHex")?.asString ?: "#10B981"
+                val label = obj.getStringOrNull("label") ?: "Outros"
+                val value = obj.getDoubleOrNull("value") ?: 0.0
+                val colorHex = obj.getStringOrNull("colorHex") ?: "#10B981"
                 val color = try {
                     Color(android.graphics.Color.parseColor(colorHex))
                 } catch (_: Exception) {

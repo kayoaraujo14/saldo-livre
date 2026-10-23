@@ -15,6 +15,7 @@ import com.saldolivre.app.data.ai.GeminiExecutionResult
 import com.saldolivre.app.data.ai.GeminiLoadBalancer
 import com.saldolivre.app.data.ai.LearnedRulesManager
 import com.saldolivre.app.data.ai.NeuralFinanceClassifier
+import com.saldolivre.app.data.ai.ToolExecutionResult
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.parser.ParsedStatementItem
@@ -246,7 +247,10 @@ class GeminiChatViewModel(
                 sessions = listOf(fresh) + it.sessions.filter { s -> s.id != fresh.id },
                 currentSessionId = fresh.id,
                 messages = fresh.messages,
-                isHistoryOpen = false
+                inputText = "",
+                pendingAttachment = null,
+                isHistoryOpen = false,
+                isRulesOpen = false
             )
         }
     }
@@ -1065,7 +1069,7 @@ class GeminiChatViewModel(
         }
 
         viewModelScope.launch {
-            val responseResult = executeGeminiOrFallback(promptText, attachment)
+            val responseResult = executeGemini(promptText, attachment)
             val assistantMsg = ChatMessage(
                 sender = MessageSender.ASSISTANT,
                 text = responseResult.text,
@@ -1078,12 +1082,12 @@ class GeminiChatViewModel(
     }
 
     private data class AgentResponse(
-    val text: String,
-    val actions: List<ActionCardData>? = null,
-    val chartPayload: ChartPayload? = null
-)
+        val text: String,
+        val actions: List<ActionCardData>? = null,
+        val chartPayload: ChartPayload? = null
+    )
 
-    private suspend fun executeGeminiOrFallback(query: String, attachment: ChatAttachment? = null): AgentResponse {
+    private suspend fun executeGemini(query: String, attachment: ChatAttachment? = null): AgentResponse {
         val user = repository.currentUser.value
         val summary = repository.getMonthSummary().first()
         val cards = repository.getCards().first()
@@ -1094,48 +1098,67 @@ class GeminiChatViewModel(
 
         val keys = loadBalancer.getApiKeys()
 
-        if (keys.isNotEmpty()) {
-            try {
-                val systemPrompt = buildSystemInstruction(
-                    user = user,
-                    summary = summary,
-                    cards = cards,
-                    recurringBills = recurringBills,
-                    transactions = transactions,
-                    friendships = friendships,
-                    selectedMonth = selectedMonth
-                )
-
-                var attachBytes: ByteArray? = null
-                var attachMime: String? = null
-                if (attachment?.base64 != null) {
-                    attachBytes = android.util.Base64.decode(attachment.base64, android.util.Base64.DEFAULT)
-                    attachMime = attachment.type
-                }
-
-                val result: GeminiExecutionResult = loadBalancer.executeWithResilience(
-                    userQuery = query,
-                    systemInstructionText = systemPrompt,
-                    attachmentBytes = attachBytes,
-                    mimeType = attachMime,
-                    onModelSwitched = { newModel ->
-                        _uiState.update { it.copy(selectedModel = newModel) }
-                    }
-                )
-
-                _uiState.update {
-                    it.copy(connectionStatus = "Online")
-                }
-
-                if (result.responseText.isNotBlank()) {
-                    return processGeminiResponseAndExecuteActions(result.responseText, query)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("GeminiChat", "executeGeminiOrFallback falhou, acionando fallback local: ${e.message}", e)
-            }
+        if (keys.isEmpty()) {
+            return AgentResponse(
+                text = "🔑 **Chave da API do Google Gemini não encontrada**\n\n" +
+                        "Para conversar com o Copiloto com inteligência artificial, configure sua chave de API no ícone 🔑 acima ou cole sua chave diretamente nesta conversa."
+            )
         }
 
-        return processLocalFallback(query)
+        try {
+            val systemPrompt = buildSystemInstruction(
+                user = user,
+                summary = summary,
+                cards = cards,
+                recurringBills = recurringBills,
+                transactions = transactions,
+                friendships = friendships,
+                selectedMonth = selectedMonth
+            )
+
+            var attachBytes: ByteArray? = null
+            var attachMime: String? = null
+            if (attachment?.base64 != null) {
+                attachBytes = android.util.Base64.decode(attachment.base64, android.util.Base64.DEFAULT)
+                attachMime = attachment.type
+            }
+
+            val result: GeminiExecutionResult = loadBalancer.executeWithResilience(
+                userQuery = query,
+                systemInstructionText = systemPrompt,
+                attachmentBytes = attachBytes,
+                mimeType = attachMime,
+                onModelSwitched = { newModel ->
+                    _uiState.update { it.copy(selectedModel = newModel) }
+                },
+                onStatusUpdate = { status ->
+                    _uiState.update { it.copy(connectionStatus = status) }
+                }
+            )
+
+            _uiState.update {
+                it.copy(connectionStatus = "Online")
+            }
+
+            if (result.responseText.isNotBlank()) {
+                return processGeminiResponseAndExecuteActions(
+                    rawResponse = result.responseText,
+                    originalQuery = query,
+                    systemPrompt = systemPrompt
+                )
+            } else {
+                throw IllegalStateException("Resposta vazia retornada pelo modelo Gemini.")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("GeminiChat", "executeGemini falhou após todas as tentativas: ${e.message}", e)
+            _uiState.update { it.copy(connectionStatus = "Erro nos Servidores do Gemini") }
+            val errorMsg = e.message ?: "Instabilidade nos servidores do Google"
+            return AgentResponse(
+                text = "⚠️ **Não foi possível obter resposta dos servidores do Google Gemini.**\n\n" +
+                        "*Detalhe:* $errorMsg\n\n" +
+                        "Por favor, verifique sua conexão com a internet ou sua chave de API no ícone 🔑 acima e tente enviar novamente."
+            )
+        }
     }
 
     private fun buildSystemInstruction(
@@ -1147,6 +1170,7 @@ class GeminiChatViewModel(
         friendships: List<Friendship>,
         selectedMonth: String
     ): String {
+        val cardsMap = cards.associateBy { it.id }
         val cardsDesc = if (cards.isEmpty()) "nenhum"
         else cards.joinToString("; ") {
             "${it.cardName} (titular: ${it.ownerName}, fecha dia ${it.closingDay}, vence dia ${it.dueDay}, id: ${it.id})"
@@ -1159,19 +1183,30 @@ class GeminiChatViewModel(
             "$friendName (email: $friendEmail, uid: $friendUid)"
         }
 
-        val recurringDesc = if (recurringBills.isEmpty()) "nenhuma conta recorrente ativa"
+        val recurringDesc = if (recurringBills.isEmpty()) "nenhum molde de conta recorrente cadastrado"
         else recurringBills.filter { it.active }.joinToString("; ") {
-            "${it.description} (R$ ${it.defaultAmount}, vence dia ${it.dueDay}, categoria: ${it.category})"
+            "${it.description} [MOLDE / PREVISÃO TEÓRICA: R$ ${FinanceEngine.round2(it.defaultAmount)}, vence dia ${it.dueDay}, categoria: ${it.category}]"
         }
 
-        val recentTxsDesc = if (transactions.isEmpty()) {
-            "LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento."
+        val currentMonthTxs = transactions.filter { it.competenceMonth == selectedMonth }
+        val recentTxsDesc = if (currentMonthTxs.isEmpty()) {
+            "LANÇAMENTOS REAIS REGISTRADOS NO MÊS VIGENTE (${FinanceEngine.monthLabel(selectedMonth).uppercase()} / $selectedMonth): Nenhum lançamento real registrado neste mês até o momento."
         } else {
-            val sorted = transactions.sortedByDescending { it.dueDate }.take(30)
-            "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS (${sorted.size} itens):\n" +
+            val sorted = currentMonthTxs.sortedByDescending { it.dueDate }.take(40)
+            "LANÇAMENTOS REAIS REGISTRADOS NO MÊS VIGENTE (${FinanceEngine.monthLabel(selectedMonth).uppercase()} / $selectedMonth - ${sorted.size} de ${currentMonthTxs.size} itens):\n" +
                     sorted.joinToString("\n") {
                         val subText = if (!it.subcategory.isNullOrBlank()) "${it.category} › ${it.subcategory}" else it.category
-                        "• [ID: ${it.id}] ${it.dueDate} | ${it.description} | R$ ${FinanceEngine.round2(it.effectiveAmount)} | $subText | ${it.status.label} | ${it.paymentMethod.label}"
+                        val cName = it.cardId?.let { cid -> cardsMap[cid]?.cardName }
+                        val methodOrCard = if (!cName.isNullOrBlank()) "Cartão $cName" else it.paymentMethod.label
+                        val myImpact = it.userImpact[user.uid] ?: it.effectiveAmount
+                        val isSplit = kotlin.math.abs(myImpact - it.effectiveAmount) > 0.01 || (it.splitType != null && it.splitType != SplitType.MINE)
+                        val splitNote = if (isSplit) {
+                            val friendName = it.assignedFriendName?.takeIf { f -> f.isNotBlank() }
+                                ?: it.allocations.firstOrNull { a -> a.uid != user.uid && a.name.isNotBlank() }?.name
+                            val who = if (!friendName.isNullOrBlank()) "com $friendName" else it.splitType?.label ?: "dividido"
+                            " [DIVISÃO: Sua cota: R$ ${FinanceEngine.round2(myImpact)} de R$ ${FinanceEngine.round2(it.effectiveAmount)} ($who)]"
+                        } else ""
+                        "• [ID: ${it.id}] ${it.dueDate} — **${it.description}**: R$ ${FinanceEngine.round2(it.effectiveAmount)}$splitNote • $subText • ${it.status.label} • $methodOrCard"
                     }
         }
 
@@ -1205,7 +1240,8 @@ DADOS FINANCEIROS REAIS DO USUÁRIO EM ${FinanceEngine.monthLabel(selectedMonth)
 - Gastos por Categoria neste mês:
   $byCategoryDesc
 - Total Investido no Mês: R$ ${FinanceEngine.round2(summary.totalInvested)}$byInvestmentDesc
-- Contas recorrentes ativas: $recurringDesc
+- Moldes de Contas Recorrentes Cadastradas [ATENÇÃO: MOLDES / PREVISÕES TEÓRICAS - NÃO SÃO TRANSAÇÕES EFETIVADAS]:
+  $recurringDesc
 """.trim()
 
         // Lote pendente de confirmação (memória estruturada de estado — paridade com `pendingTxsDesc` da Web)
@@ -1237,9 +1273,8 @@ DADOS FINANCEIROS REAIS DO USUÁRIO EM ${FinanceEngine.monthLabel(selectedMonth)
             val itemsDesc = pendingTxs.mapIndexed { idx, t ->
                 val tipoLabel = if (isIncome(t)) "🟢 ENTRADA" else "🔴 SAÍDA"
                 val motivo = pendingStr(t, "motivoIgnorado").let { if (it.isNotBlank()) " ($it)" else "" }
-                "${idx + 1}. [${pendingStr(t, "data", "date")}] $tipoLabel | Contraparte: ${pendingStr(t, "contraparte", "description", "descricao")} | " +
-                    "R$ ${FinanceEngine.round2(pendingAmount(t))} | Categoria: ${pendingStr(t, "categoria", "category").ifBlank { "Geral" }} | " +
-                    "Filtro: ${pendingStr(t, "categoria_filtro").ifBlank { "valida" }}$motivo"
+                "${idx + 1}. [${pendingStr(t, "data", "date")}] $tipoLabel — **${pendingStr(t, "contraparte", "description", "descricao")}**: " +
+                    "R$ ${FinanceEngine.round2(pendingAmount(t))} • ${pendingStr(t, "categoria", "category").ifBlank { "Geral" }}$motivo"
             }.joinToString("\n")
             """
 TRANSAÇÕES PENDENTES DE CONFIRMAÇÃO DO EXTRATO/LOTE (MEMÓRIA ESTRUTURADA DE ESTADO):
@@ -1286,6 +1321,37 @@ $learnedRulesDesc
 
 ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
 Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, use OBRIGATORIAMENTE a ação LEARN_RULE ou DELETE_RULE.
+
+======================================================================
+REGRA DE OURO INVIOLÁVEL: DISTINÇÃO RIGOROSA ENTRE CONTAS RECORRENTES (CONFIGURAÇÕES E PREVISÕES) E TRANSAÇÕES REAIS (LANÇAMENTOS DO MÊS)
+======================================================================
+1. DEFINIÇÃO DE CONTAS RECORRENTES (CONFIGURAÇÕES E PREVISÕES):
+   - "Contas Recorrentes" são APENAS configurações e previsões orçamentárias teóricas (ex: estimativa padrão configurada de R$ 150,00 para supermercado, R$ 100,00 para conta de luz, etc.).
+   - O valor pré-cadastrado na conta recorrente é uma mera configuração de previsão inicial.
+   - CONTAS RECORRENTES NÃO SÃO TRANSAÇÕES EFETIVADAS NEM GASTOS REAIS PAGOS NO MÊS!
+
+2. PROIBIÇÃO TERMINANTE (ANTI-ALUCINAÇÃO):
+   - Se o usuário perguntar sobre lançamentos, faturas, gastos ou despesas reais (ex: "quanto paguei no Forte Alencar?", "busque a conta de luz", "qual foi o valor do mercado?", "qual a despesa real de X no mês?"):
+     * A IA É TERMINANTEMENTE PROIBIDA de usar o valor da Conta Recorrente como resposta final e DEVE OBRIGATORIAMENTE consultar as transações reais!
+     * A IA NUNCA pode usar ou afirmar que o valor configurado na conta recorrente foi pago ou faturado.
+
+3. OBRIGATORIEDADE DA CONSULTA A TRANSAÇÕES REAIS (TOOL SEARCH_TRANSACTIONS):
+   - Sempre que o usuário perguntar sobre lançamentos, faturas, gastos ou despesas reais, a IA DEVE OBRIGATORIAMENTE emitir a tool call `SEARCH_TRANSACTIONS`:
+     ```json
+     {
+       "action": "SEARCH_TRANSACTIONS",
+       "searchTerm": "Forte Alencar",
+       "category": null,
+       "month": "$selectedMonth"
+     }
+     ```
+   - O motor nativo (FinanceRepository / FinanceEngine) executará essa busca localmente ou no Firestore e devolverá para a IA os valores exatos lançados no mês vigente, superando a limitação de ler apenas a amostra estática do prompt.
+
+4. PREVALÊNCIA ABSOLUTA DO VALOR REAL:
+   - O valor da transação real lançada no banco de dados é o ÚNICO que deve ser informado como valor pago/efetivado.
+   - Havendo divergência entre o valor da transação real e o valor configurado na Conta Recorrente (ex: previsão configurada de R$ 150,00 vs lançamento real de R$ 185,50), o valor REAL registrado (R$ 185,50) é o único correto que você deve informar.
+   - Se nenhuma transação real for encontrada no mês após a busca no banco de dados, informe com total sinceridade que existe apenas a configuração/previsão cadastrada de R$ X, mas que NENHUM lançamento real foi registrado, faturado ou pago no mês de ${FinanceEngine.monthLabel(selectedMonth)} até o momento.
+======================================================================
 
 EXECUÇÃO DE OPERAÇÕES NO BANCO DE DADOS (CRUD COMPLETO):
 Sempre que você precisar realizar uma ação, explique brevemente ao usuário e OBRIGATORIAMENTE INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com a ação correspondente! Você pode incluir MAIS DE UM bloco JSON na mesma resposta quando o usuário solicitar múltiplas ações.
@@ -1363,17 +1429,18 @@ Sempre que você precisar realizar uma ação, explique brevemente ao usuário e
 }
 ```
 
-6. Consultar e Filtrar Lançamentos:
+6. Buscar Transações Reais no Banco de Dados (SEARCH_TRANSACTIONS):
 ```json
 {
-  "action": "QUERY_TRANSACTIONS",
-  "searchTerm": "Uber",
-  "category": null,
-  "subcategory": null,
+  "action": "SEARCH_TRANSACTIONS",
+  "searchTerm": "Forte Alencar",
+  "category": "Alimentação",
+  "subcategory": "Supermercado",
   "month": "2026-10",
-  "status": null
+  "status": "paid"
 }
 ```
+*(OBRIGATÓRIO: Use SEMPRE que o usuário perguntar sobre despesas reais, valores pagos, compras de estabelecimentos específicos como "Forte Alencar", contas do mês ou pesquisar se algo já foi lançado. O motor nativo busca no banco de dados local/Firestore e devolve os valores exatos lançados no mês vigente. Campos category, subcategory, month ou status são opcionais e podem ser omitidos)*
 
 7. Gerenciar Cartões de Crédito (operation: "listar" | "adicionar" | "excluir"):
 ```json
@@ -1452,6 +1519,11 @@ REGRAS DE FUNCIONAMENTO:
 - Se for dividido meio a meio com o(a) parceiro(a): splitType = "SPLIT_50". Se for 100% do parceiro: splitType = "PARTNER".
 - Se for pessoa sem conta na plataforma (ex: "Mãe", "Pai", "Irmão"):
   Use splitType = "EXTERNAL" com thirdPartyName = "Mãe".
+- EXIBIÇÃO DE TRANSAÇÕES DIVIDIDAS (SPLIT):
+  Ao listar, detalhar ou responder sobre transações que foram divididas (com amigos, parceiro ou terceiros):
+  * NUNCA afirme que o usuário gastou ou pagou o valor TOTAL de uma compra dividida sem esclarecer a divisão!
+  * Informe SEMPRE o valor total da compra E a parte correspondente ao usuário (ex: "Oficina Della Pizza: R$ 135,45 no total da compra, sendo R$ 67,73 a sua parte (dividida 50/50 com seu amigo)").
+  * Deixe claro que o impacto no Saldo Livre reflete apenas a cota do usuário (R$ 67,73), e não o valor total da compra.
 
 3. ESTORNOS E REEMBOLSOS:
 - Se o gasto for um estorno/crédito (ex: "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"), registre com category = "Estorno", type = "income" e amount POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o Saldo Livre.
@@ -1489,7 +1561,7 @@ REGRAS DE FUNCIONAMENTO:
 - Para excluir/editar um lançamento específico: consulte os "LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS" acima, localize a transação e passe SEMPRE o ID em transactionId!
 - Se não tiver o ID, passe searchTerm COM O NOME EXATO DO ESTABELECIMENTO e o amount em reais para desambiguação.
 - NUNCA use palavras genéricas como "compra", "despesa" ou "gasto" em searchTerm!
-- Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas: use QUERY_TRANSACTIONS.
+- Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas: use SEMPRE SEARCH_TRANSACTIONS.
 
 8. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO:
 - REGRA CRÍTICA DE INTEGRIDADE FINANCEIRA: é estritamente proibido inventar, estimar ou deduzir valores de transações para fazer a soma bater com um total. Toda listagem deve refletir fielmente o documento original.
@@ -1502,6 +1574,8 @@ REGRAS DE FUNCIONAMENTO:
 - NÃO faça cálculos soltos para dar saldos: use os dados do CONTEXTO ATUAL acima.
 - Se não encontrar um lançamento, diga com sinceridade: "Não encontrei nenhum lançamento de [X] registrado no mês de ${FinanceEngine.monthLabel(selectedMonth)}."
 - Seja extremamente DIRETO, OBJETIVO e SUCINTO. Sem sermões não solicitados.
+- PROIBIÇÃO ABSOLUTA DE TABELAS MARKDOWN (FORMATAÇÃO MOBILE):
+  NUNCA utilize tabelas Markdown com barras verticais (| Coluna 1 | Coluna 2 |). Dispositivos móveis quebram tabelas tornando-as totalmente desalinhadas e ilegíveis na tela. Apresente SEMPRE listas limpas com marcadores (bullet points •) e detalhes organizados.
 
 9. MENSAGENS DE ÁUDIO E COMANDOS POR VOZ (MULTIMODAL):
 - Quando houver áudio anexado:
@@ -1524,11 +1598,10 @@ REGRAS DE FUNCIONAMENTO:
         - Estornos/créditos: category "Estorno", type "income", amount positivo.
         - IGNORE "Pagamento de fatura recebido", "Pagamento efetuado" ou "Saldo anterior"!
         - competenceMonth: mês de vencimento da fatura.
-  3. TRANSPARÊNCIA IMEDIATA: ao pedir confirmação, JÁ EXIBA na resposta a tabela Markdown com TODAS as transações válidas:
-       | Data | Tipo | Descrição / Contraparte | Valor |
-       | :--- | :--- | :--- | :--- |
-       | 05/10/2026 | 🟢 Entrada | Salário Empresa XPTO | R$ 5.200,00 |
-       | 06/10/2026 | 🔴 Saída | Pix enviado Brisanet | R$ 99,90 |
+  3. TRANSPARÊNCIA IMEDIATA: ao pedir confirmação, liste todas as transações válidas em lista limpa com marcadores (•):
+       • 05/10/2026: **Salário Empresa XPTO** — R$ 5.200,00 (🟢 Entrada)
+       • 06/10/2026: **Pix enviado Brisanet** — R$ 99,90 (🔴 Saída)
+     (NUNCA utilize tabelas Markdown com barras verticais | Coluna | pois telas mobile quebram tabelas).
   4. EXECUÇÃO EM LOTE: use SEMPRE BATCH_TRANSACTIONS com a lista completa.
 
 11. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA (HUMAN-IN-THE-LOOP):
@@ -1541,98 +1614,223 @@ REGRAS DE FUNCIONAMENTO:
 """.trimIndent()
     }
 
-    private suspend fun processGeminiResponseAndExecuteActions(
-        rawResponse: String,
-        userQuery: String
-    ): AgentResponse {
-        val (textWithoutChartFence, fenceChart) = sessionManager.extractChartFromMarkdown(rawResponse)
-        val jsonRegex = Regex("""```(?:json)?\s*(\{[\s\S]*?\})\s*```""", RegexOption.IGNORE_CASE)
-        val rawJsonRegex = Regex("""(\{\s*"action"\s*:\s*"[A-Za-z_]+"[^}]*?\})""")
+    private data class ExtractedJsonBlock(
+        val fullMatchedText: String,
+        val jsonContent: String
+    )
 
-        val allMatches = jsonRegex.findAll(textWithoutChartFence).toList()
-            .ifEmpty { rawJsonRegex.findAll(textWithoutChartFence).toList() }
+    private fun extractActionJsonBlocks(content: String): List<ExtractedJsonBlock> {
+        val results = mutableListOf<ExtractedJsonBlock>()
 
-        if (allMatches.isNotEmpty()) {
-            try {
-                val allActions = mutableListOf<ActionCardData>()
-                var cleanText = textWithoutChartFence
-                var lastChartPayload: ChartPayload? = fenceChart
-                var fallbackText = ""
+        // 1. Procura blocos cercados por ```json ... ``` ou ``` ... ```
+        val fenceRegex = Regex("""```(?:json)?\s*(\{[\s\S]*?\})\s*```""", RegexOption.IGNORE_CASE)
+        for (match in fenceRegex.findAll(content)) {
+            val jsonCandidate = match.groupValues[1].trim()
+            if (jsonCandidate.contains("\"action\"") || jsonCandidate.contains("\"toolName\"")) {
+                results.add(ExtractedJsonBlock(match.value, jsonCandidate))
+            }
+        }
 
-                for (match in allMatches) {
-                    val jsonString = match.groupValues[1]
-                    val jsonObj = gson.fromJson(jsonString, JsonObject::class.java)
-                    val toolResult = toolsEngine.executeFromJson(jsonObj)
+        // 2. Se não encontrou blocos com fences, procura blocos JSON crus contendo "action" ou "toolName"
+        if (results.isEmpty()) {
+            val actionPattern = Regex("""\{\s*"(?:action|toolName)"\s*:""")
+            val startIndices = actionPattern.findAll(content).map { it.range.first }.toList()
 
-                    cleanText = cleanText.replace(match.value, "").trim()
-                    if (toolResult.actions != null) {
-                        allActions.addAll(toolResult.actions)
-                    } else if (toolResult.actionCard != null) {
-                        allActions.add(toolResult.actionCard)
+            for (startIndex in startIndices) {
+                var depth = 0
+                var inString = false
+                var escape = false
+                var endIndex = -1
+
+                for (i in startIndex until content.length) {
+                    val c = content[i]
+                    if (escape) {
+                        escape = false
+                        continue
                     }
-                    if (toolResult.chartPayload != null) {
-                        lastChartPayload = toolResult.chartPayload
+                    if (c == '\\') {
+                        escape = true
+                        continue
                     }
-                    if (fallbackText.isBlank()) fallbackText = toolResult.text
+                    if (c == '"') {
+                        inString = !inString
+                        continue
+                    }
+                    if (!inString) {
+                        if (c == '{') depth++
+                        else if (c == '}') {
+                            depth--
+                            if (depth == 0) {
+                                endIndex = i + 1
+                                break
+                            }
+                        }
+                    }
                 }
 
-                val isPending = allActions.any { it.pendingAction != null }
-                val claimsSaved = Regex("""cadastrad[oa] com sucesso|registrad[oa] com sucesso|salv[oa] com sucesso""", RegexOption.IGNORE_CASE).containsMatchIn(cleanText)
+                if (endIndex != -1) {
+                    val fullJson = content.substring(startIndex, endIndex)
+                    results.add(ExtractedJsonBlock(fullJson, fullJson))
+                }
+            }
+        }
 
-                val finalText = if (isPending) {
-                    if (cleanText.isNotBlank() && !claimsSaved) cleanText else fallbackText
-                } else if (cleanText.isNotBlank()) {
-                    cleanText
+        return results
+    }
+
+    private suspend fun processGeminiResponseAndExecuteActions(
+        rawResponse: String,
+        originalQuery: String? = null,
+        systemPrompt: String? = null
+    ): AgentResponse {
+        val (textWithoutChartFence, fenceChart) = sessionManager.extractChartFromMarkdown(rawResponse)
+        val extractedBlocks = extractActionJsonBlocks(textWithoutChartFence)
+
+        var cleanText = textWithoutChartFence
+        // Limpa SEMPRE todos os blocos de ação JSON do texto visível ao usuário
+        for (block in extractedBlocks) {
+            cleanText = cleanText.replace(block.fullMatchedText, "")
+        }
+        // Limpeza adicional defensiva de qualquer bloco de código json residual com action/toolName
+        cleanText = cleanText.replace(
+            Regex("""```(?:json)?\s*\{[\s\S]*?"(?:action|toolName)"[\s\S]*?\}\s*```""", RegexOption.IGNORE_CASE),
+            ""
+        ).trim()
+
+        if (extractedBlocks.isNotEmpty()) {
+            val allActions = mutableListOf<ActionCardData>()
+            var lastChartPayload: ChartPayload? = fenceChart
+            var fallbackText = ""
+
+            for (block in extractedBlocks) {
+                try {
+                    val jsonObj = gson.fromJson(block.jsonContent, JsonObject::class.java)
+                    if (jsonObj != null && (jsonObj.has("action") || jsonObj.has("toolName"))) {
+                        val toolResult = toolsEngine.executeFromJson(jsonObj)
+                        if (toolResult.actions != null) {
+                            allActions.addAll(toolResult.actions)
+                        } else if (toolResult.actionCard != null) {
+                            allActions.add(toolResult.actionCard)
+                        }
+                        if (toolResult.chartPayload != null) {
+                            lastChartPayload = toolResult.chartPayload
+                        }
+                        if (fallbackText.isBlank() && toolResult.text.isNotBlank()) {
+                            fallbackText = toolResult.text
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("GeminiChat", "Erro ao executar ação a partir do JSON: ${block.jsonContent}", e)
+                }
+            }
+
+            val isPending = allActions.any { it.pendingAction != null }
+            val claimsSaved = Regex("""cadastrad[oa] com sucesso|registrad[oa] com sucesso|salv[oa] com sucesso""", RegexOption.IGNORE_CASE).containsMatchIn(cleanText)
+
+            val isSearchOrQuery = extractedBlocks.any { block ->
+                val upper = block.jsonContent.uppercase()
+                upper.contains("SEARCH_TRANSACTIONS") || upper.contains("QUERY_TRANSACTIONS") ||
+                upper.contains("BUSCARTRANSACOES") || upper.contains("CONSULTARTRANSACOES") ||
+                upper.contains("\"OPERACAO\": \"LISTAR\"") || upper.contains("\"OPERATION\": \"LISTAR\"")
+            }
+
+            // Se a IA solicitou uma busca de transações reais, devolvemos os valores exatos lançados
+            // no mês vigente (FinanceRepository / FinanceEngine) de volta para a IA formular a resposta final,
+            // superando a limitação de ler apenas a amostra estática do prompt!
+            if (isSearchOrQuery && !originalQuery.isNullOrBlank() && !systemPrompt.isNullOrBlank() && fallbackText.isNotBlank()) {
+                val followUpPrompt = """
+Pergunta original do usuário: "$originalQuery"
+
+Você solicitou a consulta ao banco de dados via ferramenta SEARCH_TRANSACTIONS.
+O motor nativo (FinanceRepository / FinanceEngine) executou a busca no banco de transações reais e retornou os seguintes dados oficiais do mês vigente:
+
+$fallbackText
+
+INSTRUÇÃO PARA SUA RESPOSTA FINAL AO USUÁRIO:
+- Responda de forma direta e acolhedora em linguagem natural.
+- Baseie-se EXCLUSIVAMENTE nos dados reais retornados acima pelo motor nativo.
+- FORMATAÇÃO VISUAL MOBILE (RIGOROSO):
+  É ESTRITAMENTE PROIBIDO usar tabelas Markdown com barras verticais (| Coluna | Coluna |). O aplicativo mobile NÃO renderiza tabelas e elas ficam totalmente quebradas e ilegíveis na tela do smartphone.
+  Formate SEMPRE como uma lista limpa com marcadores (bullet points •) e linhas bem organizadas, por exemplo:
+  • **Oficina Della Pizza**: R$ 135,45 no total (Sua parte: **R$ 67,73** • 50% com Amigo)
+    📅 19/10/2026 • Alimentação › Restaurante • Pendente (Cartão)
+- ATENÇÃO RIGOROSA A COMPRAS DIVIDIDAS (SPLIT / AMIGOS / CASAL):
+  Se alguma transação contiver indicação de divisão ou cota do usuário (ex: "(Sua parte: R$ 67,73 • Dividido com...)"), VOCÊ DEVE OBRIGATORIAMENTE DESTACAR O VALOR DA PARTE DO USUÁRIO e o valor total (ex: "Oficina Della Pizza: R$ 135,45 no total da compra, sendo R$ 67,73 a sua parte de 50% dividida com sua amizade"). NUNCA afirme que o usuário gastou ou pagou sozinho o valor integral da compra dividida!
+- Se o valor real faturado/pago for diferente da previsão/configuração da Conta Recorrente, explique a diferença ao usuário com clareza.
+- Se o banco de dados informou que não há lançamentos reais neste mês, informe com total clareza que existe apenas a previsão/configuração cadastrada, mas nenhum lançamento real foi registrado ou pago ainda.
+- NÃO gere novos blocos JSON nesta resposta final.
+""".trimIndent()
+
+                try {
+                    _uiState.update { it.copy(connectionStatus = "Consultando dados oficiais...") }
+                    val followUpResult = loadBalancer.executeWithResilience(
+                        userQuery = followUpPrompt,
+                        systemInstructionText = systemPrompt,
+                        onModelSwitched = { newModel -> _uiState.update { it.copy(selectedModel = newModel) } }
+                    )
+                    _uiState.update { it.copy(connectionStatus = "Online") }
+                    if (followUpResult.responseText.isNotBlank()) {
+                        val (finalCleanText, finalChart) = sessionManager.extractChartFromMarkdown(followUpResult.responseText)
+                        val cleaned = finalCleanText.replace(
+                            Regex("""```(?:json)?\s*\{[\s\S]*?"(?:action|toolName)"[\s\S]*?\}\s*```""", RegexOption.IGNORE_CASE),
+                            ""
+                        ).trim()
+                        if (cleaned.isNotBlank()) {
+                            return AgentResponse(
+                                text = cleaned,
+                                actions = allActions.ifEmpty { null },
+                                chartPayload = finalChart ?: lastChartPayload
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("GeminiChat", "Erro no follow-up da tool SEARCH_TRANSACTIONS: ${e.message}")
+                }
+            }
+
+            val finalText = if (isPending) {
+                if (cleanText.isNotBlank() && !claimsSaved) cleanText else fallbackText
+            } else if (isSearchOrQuery && fallbackText.isNotBlank()) {
+                if (cleanText.isNotBlank() && !cleanText.contains("R$")) {
+                    "$cleanText\n\n$fallbackText"
                 } else {
                     fallbackText
                 }
-
-                return AgentResponse(
-                    text = finalText,
-                    actions = allActions.ifEmpty { null },
-                    chartPayload = lastChartPayload
-                )
-            } catch (_: Exception) {
-                // Ignore
+            } else if (cleanText.isNotBlank()) {
+                cleanText
+            } else if (fallbackText.isNotBlank()) {
+                fallbackText
+            } else {
+                "✅ Ação concluída com sucesso."
             }
+
+            return AgentResponse(
+                text = finalText,
+                actions = allActions.ifEmpty { null },
+                chartPayload = lastChartPayload
+            )
         }
 
         if (fenceChart != null) {
             return AgentResponse(
-                text = textWithoutChartFence.ifBlank { "📊 **Análise Gráfica Gerada**" },
+                text = cleanText.ifBlank { "📊 **Análise Gráfica Gerada**" },
                 chartPayload = fenceChart
             )
         }
 
-        // Se o Gemini não gerou bloco JSON mas o usuário solicitou uma ação de CRUD,
-        // o motor de ferramentas local processa para garantir a execução no banco de dados!
-        val offlineResult = toolsEngine.processNaturalLanguageOffline(userQuery)
-        val isDefaultFallback = offlineResult.text.startsWith("Estou pronto para ajudar! Você pode me pedir para:")
-
-        if (!isDefaultFallback || offlineResult.actions != null || offlineResult.actionCard != null || offlineResult.chartPayload != null) {
-            val finalText = if ((offlineResult.actions?.firstOrNull() ?: offlineResult.actionCard)?.pendingAction != null) {
-                offlineResult.text
-            } else if (!isDefaultFallback) {
-                offlineResult.text
-            } else {
-                "${rawResponse.trim()}\n\n${offlineResult.text}".trim()
-            }
-            return AgentResponse(
-                text = finalText,
-                actions = offlineResult.actions,
-                chartPayload = offlineResult.chartPayload
-            )
-        }
-
-        return AgentResponse(text = rawResponse.trim())
+        return AgentResponse(text = cleanText)
     }
 
-    private suspend fun processLocalFallback(query: String): AgentResponse {
-        val toolResult = toolsEngine.processNaturalLanguageOffline(query)
-        return AgentResponse(
-            text = toolResult.text,
-            actions = toolResult.actions ?: toolResult.actionCard?.let { listOf(it) },
-            chartPayload = toolResult.chartPayload
-        )
-    }
+    /**
+     * Executa busca de transações reais diretamente pelo repositório/motor nativo.
+     */
+    suspend fun searchTransactions(
+        searchTerm: String? = null,
+        category: String? = null,
+        month: String? = null
+    ): ToolExecutionResult = toolsEngine.executeSearchTransactions(
+        searchTerm = searchTerm,
+        category = category,
+        month = month
+    )
 }

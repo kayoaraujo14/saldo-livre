@@ -1,9 +1,15 @@
 package com.saldolivre.app.ui.navigation
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,10 +63,28 @@ fun AppNavHost(
 
     val showBottomBar = currentRoute in bottomNavItems.map { it.route }
 
+    val bottomNavRoutes = remember {
+        setOf(
+            BottomNavItem.Dashboard.route,
+            BottomNavItem.Transactions.route,
+            BottomNavItem.Menu.route
+        )
+    }
+
     Scaffold(
         containerColor = DarkBackground,
         bottomBar = {
-            if (showBottomBar) {
+            AnimatedVisibility(
+                visible = showBottomBar,
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                ) + fadeIn(animationSpec = tween(200)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                ) + fadeOut(animationSpec = tween(150))
+            ) {
                 NavigationBar(
                     containerColor = DarkSurface,
                     tonalElevation = 8.dp
@@ -108,7 +132,72 @@ fun AppNavHost(
         NavHost(
             navController = navController,
             startDestination = BottomNavItem.Dashboard.route,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
+            enterTransition = {
+                val fromRoute = initialState.destination.route
+                val toRoute = targetState.destination.route
+                if (fromRoute in bottomNavRoutes && toRoute in bottomNavRoutes) {
+                    // Transição entre abas da navbar: crossfade ágil com micro-escala
+                    fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+                        scaleIn(initialScale = 0.98f, animationSpec = tween(220, easing = FastOutSlowInEasing))
+                } else {
+                    // Transição para submenus/telas filhas: deslizamento suave da direita
+                    slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                        animationSpec = tween(280, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing))
+                }
+            },
+            exitTransition = {
+                val fromRoute = initialState.destination.route
+                val toRoute = targetState.destination.route
+                if (fromRoute in bottomNavRoutes && toRoute in bottomNavRoutes) {
+                    fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing))
+                } else if (toRoute == "chat" || toRoute == "add_transaction" || toRoute?.startsWith("edit_transaction") == true) {
+                    // Recuo sutil em profundidade quando abre o Chat ou formulário modal
+                    scaleOut(targetScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)) +
+                        fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
+                } else {
+                    // Tela anterior desliza levemente em paralaxe para a esquerda
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Start,
+                        targetOffset = { (it * 0.15f).toInt() },
+                        animationSpec = tween(280, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
+                }
+            },
+            popEnterTransition = {
+                val fromRoute = initialState.destination.route
+                val toRoute = targetState.destination.route
+                if (fromRoute in bottomNavRoutes && toRoute in bottomNavRoutes) {
+                    fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+                        scaleIn(initialScale = 0.98f, animationSpec = tween(220, easing = FastOutSlowInEasing))
+                } else if (fromRoute == "chat" || fromRoute == "add_transaction" || fromRoute?.startsWith("edit_transaction") == true) {
+                    // Retorno de modal / Chat para tela anterior
+                    scaleIn(initialScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)) +
+                        fadeIn(animationSpec = tween(200, easing = FastOutSlowInEasing))
+                } else {
+                    // Ao voltar de um submenu, a tela anterior ressurge pela esquerda
+                    slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.End,
+                        initialOffset = { -(it * 0.15f).toInt() },
+                        animationSpec = tween(280, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing))
+                }
+            },
+            popExitTransition = {
+                val fromRoute = initialState.destination.route
+                val toRoute = targetState.destination.route
+                if (fromRoute in bottomNavRoutes && toRoute in bottomNavRoutes) {
+                    fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing))
+                } else {
+                    // Ao fechar um submenu, ele desliza para a direita de forma fluida
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.End,
+                        animationSpec = tween(260, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
+                }
+            }
         ) {
             // 1. Dashboard (Início)
             composable(BottomNavItem.Dashboard.route) {
@@ -150,8 +239,34 @@ fun AppNavHost(
                 )
             }
 
-            // 4. Copiloto IA Gemini (Tela Cheia sem BottomNav)
-            composable("chat") {
+            // 4. Copiloto IA Gemini (Abertura fluida estilo modal drawer de alta tecnologia)
+            composable(
+                route = "chat",
+                enterTransition = {
+                    slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Up,
+                        animationSpec = tween(300, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(220)) +
+                        scaleIn(initialScale = 0.96f, animationSpec = tween(300, easing = FastOutSlowInEasing))
+                },
+                exitTransition = {
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Down,
+                        animationSpec = tween(260, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(180)) +
+                        scaleOut(targetScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing))
+                },
+                popEnterTransition = {
+                    fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing))
+                },
+                popExitTransition = {
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Down,
+                        animationSpec = tween(260, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(180)) +
+                        scaleOut(targetScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing))
+                }
+            ) {
                 val chatViewModel = viewModel { GeminiChatViewModel(repository) }
                 GeminiChatScreen(
                     viewModel = chatViewModel,
@@ -175,8 +290,22 @@ fun AppNavHost(
                 )
             }
 
-            // Form: Nova Transação
-            composable("add_transaction") {
+            // Form: Nova Transação (Modal Slide Up)
+            composable(
+                route = "add_transaction",
+                enterTransition = {
+                    slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Up,
+                        animationSpec = tween(280, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(200))
+                },
+                popExitTransition = {
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Down,
+                        animationSpec = tween(240, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(180))
+                }
+            ) {
                 val formViewModel = viewModel { TransactionFormViewModel(repository) }
                 TransactionFormScreen(
                     viewModel = formViewModel,
@@ -184,8 +313,22 @@ fun AppNavHost(
                 )
             }
 
-            // Form: Editar Transação Existente
-            composable("edit_transaction/{txId}") { backStackEntry ->
+            // Form: Editar Transação Existente (Modal Slide Up)
+            composable(
+                route = "edit_transaction/{txId}",
+                enterTransition = {
+                    slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Up,
+                        animationSpec = tween(280, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(200))
+                },
+                popExitTransition = {
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Down,
+                        animationSpec = tween(240, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(180))
+                }
+            ) { backStackEntry ->
                 val txId = backStackEntry.arguments?.getString("txId")
                 val formViewModel = viewModel(key = "edit_tx_$txId") {
                     TransactionFormViewModel(repository, editingTxId = txId)

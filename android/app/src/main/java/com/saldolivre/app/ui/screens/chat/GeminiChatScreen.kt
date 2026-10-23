@@ -6,9 +6,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,6 +16,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -27,7 +27,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,11 +39,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -116,9 +122,16 @@ fun GeminiChatScreen(
         }
     }
 
+    var isInitialScrollDone by remember { mutableStateOf(false) }
+
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+            if (!isInitialScrollDone) {
+                listState.scrollToItem(uiState.messages.size - 1)
+                isInitialScrollDone = true
+            } else {
+                listState.animateScrollToItem(uiState.messages.size - 1)
+            }
         }
     }
 
@@ -134,7 +147,8 @@ fun GeminiChatScreen(
                 currentSessionId = uiState.currentSessionId,
                 onSelectSession = { viewModel.onSelectSession(it) },
                 onNewSession = { viewModel.onNewSession() },
-                onDeleteSession = { viewModel.onDeleteSession(it) }
+                onDeleteSession = { viewModel.onDeleteSession(it) },
+                onClose = { viewModel.setHistoryOpen(false) }
             )
         }
     }
@@ -151,7 +165,8 @@ fun GeminiChatScreen(
                 newRuleInput = uiState.newRuleInput,
                 onInputChange = { viewModel.onNewRuleInputChange(it) },
                 onAddRule = { viewModel.onAddRule() },
-                onDeleteRule = { viewModel.onDeleteRule(it) }
+                onDeleteRule = { viewModel.onDeleteRule(it) },
+                onClose = { viewModel.setRulesOpen(false) }
             )
         }
     }
@@ -201,120 +216,57 @@ fun GeminiChatScreen(
                         titleContentColor = TextPrimary
                     ),
                     navigationIcon = {
-                        IconButton(
-                            onClick = onNavigateBack,
-                            modifier = Modifier
-                                .padding(start = 6.dp)
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(DarkSurfaceVariant.copy(alpha = 0.7f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        Box(modifier = Modifier.padding(start = 12.dp, end = 4.dp)) {
+                            ChatTopBarButton(
+                                onClick = onNavigateBack,
+                                icon = Icons.AutoMirrored.Rounded.ArrowBack,
                                 contentDescription = "Voltar",
-                                tint = TextPrimary,
-                                modifier = Modifier.size(18.dp)
+                                tint = TextPrimary
                             )
                         }
                     },
                     title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(start = 4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .shadow(8.dp, RoundedCornerShape(12.dp), spotColor = Emerald400)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(Emerald400, Cyan500)
-                                        )
-                                    )
-                                    .border(
-                                        1.dp,
-                                        Color.White.copy(alpha = 0.25f),
-                                        RoundedCornerShape(12.dp)
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = DarkBackground,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f, fill = false)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "Copiloto Smart",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = TextPrimary,
-                                        letterSpacing = 0.2.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .clip(CircleShape)
-                                            .background(Emerald400)
-                                    )
-                                    Spacer(modifier = Modifier.width(5.dp))
-                                    Text(
-                                        text = "Online",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = Emerald400,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
+                        Text(
+                            text = "Copiloto Saldo Livre",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            letterSpacing = 0.2.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(start = 4.dp, end = 8.dp)
+                        )
                     },
                     actions = {
-                        // Botão 1: Histórico de Conversas (Sessões)
-                        IconButton(
-                            onClick = { viewModel.setHistoryOpen(true) },
-                            modifier = Modifier
-                                .padding(horizontal = 2.dp)
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(DarkSurfaceVariant.copy(alpha = 0.6f))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(end = 12.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = "Histórico de conversas",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(18.dp)
+                            // 1. Botão Criar Novo Chat
+                            ChatTopBarButton(
+                                onClick = { viewModel.onNewSession() },
+                                icon = Icons.Rounded.Add,
+                                contentDescription = "Criar novo chat",
+                                tint = TextPrimary
                             )
-                        }
 
-                        // Botão 2: Regras Aprendidas (Memória Viva)
-                        IconButton(
-                            onClick = { viewModel.setRulesOpen(true) },
-                            modifier = Modifier
-                                .padding(start = 2.dp, end = 6.dp)
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (uiState.learnedRules.isNotEmpty()) Amber500.copy(alpha = 0.14f)
-                                    else DarkSurfaceVariant.copy(alpha = 0.6f)
-                                )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lightbulb,
-                                contentDescription = "Memória e Regras do Agente",
-                                tint = if (uiState.learnedRules.isNotEmpty()) Amber400 else TextSecondary,
-                                modifier = Modifier.size(18.dp)
+                            // 2. Botão Histórico de Conversas (Sessões)
+                            ChatTopBarButton(
+                                onClick = { viewModel.setHistoryOpen(true) },
+                                icon = Icons.Rounded.History,
+                                contentDescription = "Histórico de conversas",
+                                tint = TextSecondary
+                            )
+
+                            // 3. Botão Dicas / Memória (Regras Aprendidas)
+                            val hasRules = uiState.learnedRules.isNotEmpty()
+                            ChatTopBarButton(
+                                onClick = { viewModel.setRulesOpen(true) },
+                                icon = Icons.Rounded.Lightbulb,
+                                contentDescription = "Dicas e regras do Copiloto",
+                                tint = TextSecondary,
+                                hasBadge = hasRules
                             )
                         }
                     }
@@ -358,13 +310,28 @@ fun GeminiChatScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp)
             ) {
-                items(uiState.messages) { msg ->
+                itemsIndexed(
+                    items = uiState.messages,
+                    key = { _, msg -> msg.id },
+                    contentType = { _, _ -> "chat_message" }
+                ) { index, msg ->
                     ChatBubble(
                         message = msg,
                         isActionInProgress = uiState.isTyping,
                         onConfirmAction = { viewModel.confirmPendingAction(it) },
                         onCancelAction = { viewModel.cancelPendingAction(it) }
                     )
+
+                    // Prompt Starters (Onboarding) logo abaixo da primeira mensagem do assistente
+                    if (index == 0 && msg.sender == MessageSender.ASSISTANT) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        PromptStartersSection(
+                            onQuickExpense = { viewModel.onInputTextChange("Lançar gasto de R$ ") },
+                            onImportPdf = { filePickerLauncher.launch("*/*") },
+                            onViewCharts = { viewModel.sendMessage(overrideText = "Mostrar gráficos dos meus gastos do mês") },
+                            onDailyLimit = { viewModel.sendMessage(overrideText = "Qual meu limite diário para hoje?") }
+                        )
+                    }
                 }
 
                 if (uiState.isTyping) {
@@ -402,7 +369,8 @@ fun GeminiChatScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
-                                    text = if (uiState.isTranscribingAudio) "Transcrevendo mensagem de voz..." else "Copiloto processando análise...",
+                                    text = if (uiState.isTranscribingAudio) "Transcrevendo mensagem de voz..."
+                                        else uiState.connectionStatus?.takeIf { it != "Online" } ?: "Copiloto processando análise...",
                                     fontSize = 12.sp,
                                     color = TextPrimary,
                                     fontWeight = FontWeight.SemiBold
@@ -492,42 +460,39 @@ fun GeminiChatScreen(
                 }
             }
 
-            // Dock Flutuante Smart (Gravação de Voz Ativa OU Barra de Comando Inteligente)
-            val dockShape = RoundedCornerShape(28.dp)
-            Box(
+            // Área de Entrada da Mensagem (Layout unificado com dimensões idênticas entre Digitação e Gravação)
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .shadow(10.dp, dockShape, spotColor = Emerald500.copy(alpha = 0.25f))
-                    .clip(dockShape)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFF1A253A), DarkSurface)
-                        )
-                    )
-                    .border(
-                        1.dp,
-                        if (uiState.inputText.isNotBlank() || uiState.isRecordingAudio) {
-                            Brush.horizontalGradient(listOf(Emerald500.copy(alpha = 0.6f), Cyan500.copy(alpha = 0.5f)))
-                        } else {
-                            Brush.horizontalGradient(listOf(DarkBorder, DarkBorder))
-                        },
-                        dockShape
-                    )
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                if (uiState.isRecordingAudio) {
-                    // BARRA DE GRAVAÇÃO DE VOZ ATIVA
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                // Container da Pílula Principal (mantém exatamente 56.dp de altura base em ambos os estados)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 56.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (uiState.isRecordingAudio) {
+                        // Pílula escura de gravação com 56.dp de altura (idêntica ao TextField)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color(0xFF1A253A), DarkSurface)
+                                    )
+                                )
+                                .border(1.dp, Rose500.copy(alpha = 0.5f), CircleShape)
+                                .padding(start = 16.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .size(12.dp)
+                                    .size(10.dp)
                                     .clip(CircleShape)
                                     .background(Rose500)
                             )
@@ -538,68 +503,36 @@ fun GeminiChatScreen(
                                 text = "Ouvindo comando de voz... $timerStr",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Rose400
+                                color = Rose400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
-                        }
+                            Spacer(modifier = Modifier.width(8.dp))
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Cancelar
+                            // Botão de cancelar (X) como IconButton de tamanho fixo (40.dp)
                             IconButton(
                                 onClick = { viewModel.cancelVoiceRecording() },
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(DarkSurfaceVariant)
+                                modifier = Modifier.size(40.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Cancelar gravação",
-                                    tint = Rose400,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            // Concluir e Enviar
-                            IconButton(
-                                onClick = { viewModel.stopVoiceRecording(sendImmediately = true) },
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.linearGradient(listOf(Emerald400, Cyan500))
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(DarkSurfaceVariant.copy(alpha = 0.85f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Cancelar gravação",
+                                        tint = Rose400,
+                                        modifier = Modifier.size(18.dp)
                                     )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Concluir áudio",
-                                    tint = DarkBackground,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                }
                             }
                         }
-                    }
-                } else {
-                    // BARRA DE COMANDO SMART
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Botão de Anexo (PDF / OFX / CSV / TXT / Imagem)
-                        IconButton(
-                            onClick = { filePickerLauncher.launch("*/*") },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.AttachFile,
-                                contentDescription = "Anexar extrato PDF, OFX, CSV ou TXT",
-                                tint = if (uiState.pendingAttachment != null) Emerald400 else TextSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // Campo de Texto Integrado e Limpo
+                    } else {
+                        // TextField em formato de Pílula (CircleShape) com 56.dp de altura base
                         TextField(
                             value = uiState.inputText,
                             onValueChange = { viewModel.onInputTextChange(it) },
@@ -607,17 +540,38 @@ fun GeminiChatScreen(
                                 Text(
                                     text = "Mensagem ou lançamento...",
                                     color = TextMuted,
-                                    fontSize = 13.sp,
+                                    fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             },
-                            modifier = Modifier.weight(1f),
+                            leadingIcon = {
+                                IconButton(
+                                    onClick = { filePickerLauncher.launch("*/*") },
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.AttachFile,
+                                        contentDescription = "Anexar extrato PDF, OFX, CSV ou TXT",
+                                        tint = if (uiState.pendingAttachment != null) Emerald400 else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 56.dp)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (uiState.inputText.isNotBlank()) Emerald500.copy(alpha = 0.5f) else DarkBorder,
+                                    shape = CircleShape
+                                ),
+                            shape = CircleShape,
                             maxLines = 4,
                             colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                disabledContainerColor = Color.Transparent,
+                                focusedContainerColor = DarkSurfaceVariant.copy(alpha = 0.85f),
+                                unfocusedContainerColor = DarkSurfaceVariant.copy(alpha = 0.65f),
+                                disabledContainerColor = DarkSurfaceVariant.copy(alpha = 0.5f),
                                 focusedIndicatorColor = Color.Transparent,
                                 unfocusedIndicatorColor = Color.Transparent,
                                 disabledIndicatorColor = Color.Transparent,
@@ -626,51 +580,228 @@ fun GeminiChatScreen(
                                 cursorColor = Emerald400
                             )
                         )
+                    }
+                }
 
-                        // Botão de Microfone (Voz)
-                        IconButton(
-                            onClick = {
-                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                    viewModel.startVoiceRecording(context)
-                                } else {
-                                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Mic,
-                                contentDescription = "Falar por áudio",
-                                tint = Emerald400,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                Spacer(modifier = Modifier.width(8.dp))
 
-                        Spacer(modifier = Modifier.width(4.dp))
-
-                        // Botão de Enviar Smart
-                        val canSend = (uiState.inputText.isNotBlank() || uiState.pendingAttachment != null) && !uiState.isTyping
-                        IconButton(
-                            onClick = { viewModel.sendMessage() },
-                            enabled = canSend,
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (canSend) Brush.linearGradient(listOf(Emerald400, Cyan500))
-                                    else Brush.linearGradient(listOf(DarkSurfaceVariant, DarkSurfaceVariant))
+                // Botão de Ação Circular Dedicado (48.dp fixo: Microfone ↔ Enviar ↔ Confirmar Áudio)
+                val actionButtonState = when {
+                    uiState.isRecordingAudio -> "RECORDING"
+                    uiState.inputText.isNotBlank() || uiState.pendingAttachment != null -> "SEND"
+                    else -> "MIC"
+                }
+                AnimatedContent(
+                    targetState = actionButtonState,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(180)) + scaleIn(initialScale = 0.8f, animationSpec = tween(180)))
+                            .togetherWith(fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.8f, animationSpec = tween(150)))
+                    },
+                    label = "ActionFabTransition"
+                ) { state ->
+                    when (state) {
+                        "RECORDING" -> {
+                            IconButton(
+                                onClick = { viewModel.stopVoiceRecording(sendImmediately = true) },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(listOf(Emerald400, Cyan500))
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = "Concluir áudio",
+                                    tint = DarkBackground,
+                                    modifier = Modifier.size(22.dp)
                                 )
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Enviar",
-                                tint = if (canSend) DarkBackground else TextMuted,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            }
+                        }
+                        "SEND" -> {
+                            val isEnabled = !uiState.isTyping
+                            IconButton(
+                                onClick = { if (isEnabled) viewModel.sendMessage() },
+                                enabled = isEnabled,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Brush.linearGradient(listOf(Emerald400, Cyan500)))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.Send,
+                                    contentDescription = "Enviar",
+                                    tint = DarkBackground,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        else -> {
+                            IconButton(
+                                onClick = {
+                                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                        viewModel.startVoiceRecording(context)
+                                    } else {
+                                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Emerald500)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Mic,
+                                    contentDescription = "Falar por áudio",
+                                    tint = DarkBackground,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// BOTÃO REUTILIZÁVEL DO CABEÇALHO / SHEETS DO CHAT
+// -------------------------------------------------------------
+@Composable
+private fun ChatTopBarButton(
+    onClick: () -> Unit,
+    icon: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    hasBadge: Boolean = false
+) {
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = tint,
+                modifier = Modifier.size(18.dp)
+            )
+            if (hasBadge) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 2.dp, y = (-2).dp)
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(Amber400)
+                )
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// CHIPS DE SUGESTÃO / ONBOARDING (PROMPT STARTERS)
+// -------------------------------------------------------------
+@Composable
+private fun PromptStartersSection(
+    onQuickExpense: () -> Unit,
+    onImportPdf: () -> Unit,
+    onViewCharts: () -> Unit,
+    onDailyLimit: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PromptStarterCard(
+                icon = Icons.Rounded.FlashOn,
+                label = "Lançar gasto rápido",
+                onClick = onQuickExpense,
+                modifier = Modifier.weight(1f)
+            )
+            PromptStarterCard(
+                icon = Icons.Rounded.PictureAsPdf,
+                label = "Importar fatura PDF",
+                onClick = onImportPdf,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PromptStarterCard(
+                icon = Icons.Rounded.BarChart,
+                label = "Ver gráficos",
+                onClick = onViewCharts,
+                modifier = Modifier.weight(1f)
+            )
+            PromptStarterCard(
+                icon = Icons.Rounded.Lightbulb,
+                label = "Meu limite diário",
+                onClick = onDailyLimit,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PromptStarterCard(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = DarkSurfaceVariant.copy(alpha = 0.55f),
+        border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.28f)),
+        modifier = modifier.heightIn(min = 42.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(Emerald500.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Emerald400,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Text(
+                text = label,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -684,7 +815,8 @@ private fun ChatHistorySheetContent(
     currentSessionId: String,
     onSelectSession: (String) -> Unit,
     onNewSession: () -> Unit,
-    onDeleteSession: (String) -> Unit
+    onDeleteSession: (String) -> Unit,
+    onClose: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -697,7 +829,7 @@ private fun ChatHistorySheetContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Histórico de Conversas",
                     fontSize = 18.sp,
@@ -710,6 +842,12 @@ private fun ChatHistorySheetContent(
                     color = TextSecondary
                 )
             }
+            ChatTopBarButton(
+                onClick = onClose,
+                icon = Icons.Rounded.Close,
+                contentDescription = "Fechar histórico",
+                tint = TextSecondary
+            )
         }
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -751,7 +889,10 @@ private fun ChatHistorySheetContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text(
                                 text = session.title,
                                 fontSize = 13.sp,
@@ -772,6 +913,7 @@ private fun ChatHistorySheetContent(
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "$dateStr • ${session.messages.size} mensagens",
                             fontSize = 11.sp,
@@ -780,6 +922,8 @@ private fun ChatHistorySheetContent(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     IconButton(
                         onClick = { onDeleteSession(session.id) },
@@ -807,7 +951,8 @@ private fun LearnedRulesSheetContent(
     newRuleInput: String,
     onInputChange: (String) -> Unit,
     onAddRule: () -> Unit,
-    onDeleteRule: (String) -> Unit
+    onDeleteRule: (String) -> Unit,
+    onClose: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -815,18 +960,33 @@ private fun LearnedRulesSheetContent(
             .padding(horizontal = 20.dp, vertical = 8.dp)
             .padding(bottom = 24.dp)
     ) {
-        Text(
-            text = "Memória do Copiloto (Regras)",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary
-        )
-        Text(
-            text = "O Copiloto memoriza preferências financeiras para categorizar e lançar gastos automaticamente do seu jeito.",
-            fontSize = 12.sp,
-            color = TextSecondary,
-            lineHeight = 16.sp
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Memória do Copiloto (Regras)",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Text(
+                    text = "O Copiloto memoriza preferências financeiras para categorizar e lançar gastos automaticamente do seu jeito.",
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    lineHeight = 16.sp
+                )
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            ChatTopBarButton(
+                onClick = onClose,
+                icon = Icons.Rounded.Close,
+                contentDescription = "Fechar regras",
+                tint = TextSecondary
+            )
+        }
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -853,7 +1013,8 @@ private fun LearnedRulesSheetContent(
                 onClick = onAddRule,
                 enabled = newRuleInput.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.wrapContentWidth()
             ) {
                 Text("+ Adicionar", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 12.sp)
             }
@@ -889,20 +1050,34 @@ private fun LearnedRulesSheetContent(
                             .clip(RoundedCornerShape(12.dp))
                             .background(DarkSurfaceVariant)
                             .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Emerald400, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(text = rule.rule, fontSize = 12.sp, color = TextPrimary, lineHeight = 16.sp)
-                        }
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Emerald400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = rule.rule,
+                            fontSize = 12.sp,
+                            color = TextPrimary,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                         IconButton(
                             onClick = { onDeleteRule(rule.id) },
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.Delete, contentDescription = "Remover regra", tint = TextMuted, modifier = Modifier.size(16.dp))
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Remover regra",
+                                tint = TextMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                 }
@@ -912,30 +1087,287 @@ private fun LearnedRulesSheetContent(
 }
 
 // -------------------------------------------------------------
-// BOLHA DE MENSAGEM SMART DO CHAT
+// CONVERSÃO INTELIGENTE DE TABELAS MARKDOWN PARA LISTAS MOBILE
 // -------------------------------------------------------------
-private fun parseSmartMarkdownText(text: String, isUser: Boolean): AnnotatedString {
+private fun convertMarkdownTables(rawText: String): String {
+    if (!rawText.contains("|")) return rawText
+
+    val lines = rawText.lines()
+    val result = mutableListOf<String>()
+    var i = 0
+
+    while (i < lines.size) {
+        val line = lines[i]
+        val trimmed = line.trim()
+
+        if (isTableRow(trimmed) && i + 1 < lines.size && isTableSeparator(lines[i + 1].trim())) {
+            val headerCells = splitTableRow(trimmed)
+            i += 2 // pula cabeçalho e separador
+
+            val dataRows = mutableListOf<List<String>>()
+            while (i < lines.size && isTableRow(lines[i].trim())) {
+                val rowTrimmed = lines[i].trim()
+                if (!isTableSeparator(rowTrimmed)) {
+                    val rowCells = splitTableRow(rowTrimmed)
+                    if (rowCells.isNotEmpty()) {
+                        dataRows.add(rowCells)
+                    }
+                }
+                i++
+            }
+
+            val formattedTable = formatTableForMobile(headerCells, dataRows)
+            if (formattedTable.isNotBlank()) {
+                result.add(formattedTable)
+            }
+        } else {
+            result.add(line)
+            i++
+        }
+    }
+
+    return result.joinToString("\n")
+}
+
+private fun isTableRow(line: String): Boolean {
+    val trimmed = line.trim()
+    if (!trimmed.contains("|")) return false
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) return true
+    return trimmed.count { it == '|' } >= 2
+}
+
+private fun isTableSeparator(line: String): Boolean {
+    val trimmed = line.trim()
+    if (!trimmed.contains("|") || !trimmed.contains("-")) return false
+    val cells = splitTableRow(trimmed)
+    if (cells.isEmpty()) return false
+    return cells.all { cell ->
+        val c = cell.trim()
+        c.isNotEmpty() && c.all { it == '-' || it == ':' || it == ' ' } && c.contains('-')
+    }
+}
+
+private fun splitTableRow(line: String): List<String> {
+    val trimmed = line.trim()
+    val stripped = trimmed.removePrefix("|").removeSuffix("|")
+    return stripped.split("|").map { it.trim() }
+}
+
+private fun formatTableForMobile(headers: List<String>, rows: List<List<String>>): String {
+    if (rows.isEmpty()) return ""
+
+    val headersLower = headers.map { it.lowercase().trim() }
+
+    val titleIdx = headersLower.indexOfFirst {
+        it.contains("descri") || it.contains("nome") || it.contains("estabelecimento") ||
+        it.contains("contraparte") || it.contains("item") || it.contains("serviço") ||
+        it.contains("servico") || it.contains("conta")
+    }
+
+    val totalValIdx = headersLower.indexOfFirst {
+        it.contains("valor total") || it.contains("total")
+    }
+
+    val valIdx = if (totalValIdx != -1) totalValIdx else headersLower.indexOfFirst {
+        it.contains("valor") || it.contains("preço") || it.contains("preco") || it.contains("quantia")
+    }
+
+    val impactIdx = headersLower.indexOfFirst {
+        it.contains("impacto") || it.contains("cota") || it.contains("sua parte") || it.contains("seu impacto")
+    }
+
+    val dateIdx = headersLower.indexOfFirst {
+        it.contains("data") || it.contains("vencimento") || it.contains("dia")
+    }
+
+    val catIdx = headersLower.indexOfFirst {
+        it.contains("subcategoria") || it.contains("categoria")
+    }
+
+    val statusIdx = headersLower.indexOfFirst {
+        it.contains("status") || it.contains("situação") || it.contains("situacao") ||
+        it.contains("tipo") || it.contains("método") || it.contains("metodo") || it.contains("pagamento")
+    }
+
+    // Tabela simples Chave / Valor de 2 colunas
+    if (headers.size == 2 && (titleIdx == -1 || valIdx == -1)) {
+        return rows.joinToString("\n") { row ->
+            val key = row.getOrNull(0)?.removePrefix("**")?.removeSuffix("**")?.trim().orEmpty()
+            val value = row.getOrNull(1)?.trim().orEmpty()
+            if (key.isNotBlank()) "• **$key**: $value" else value
+        }
+    }
+
+    val formattedRows = rows.mapNotNull { row ->
+        val resolvedTitleIdx = if (titleIdx != -1) titleIdx else {
+            if (dateIdx == 0 && row.size > 1) 1 else 0
+        }
+
+        val rawTitle = row.getOrNull(resolvedTitleIdx)?.trim().orEmpty()
+        if (rawTitle.isBlank() || rawTitle == "-") return@mapNotNull null
+
+        val cleanTitle = rawTitle.removePrefix("**").removeSuffix("**").trim()
+        val totalVal = if (valIdx != -1 && valIdx != resolvedTitleIdx) row.getOrNull(valIdx)?.trim() else null
+        val impactVal = if (impactIdx != -1 && impactIdx != resolvedTitleIdx && impactIdx != valIdx) row.getOrNull(impactIdx)?.trim() else null
+        val dateVal = if (dateIdx != -1 && dateIdx != resolvedTitleIdx) row.getOrNull(dateIdx)?.trim() else null
+        val catVal = if (catIdx != -1 && catIdx != resolvedTitleIdx) row.getOrNull(catIdx)?.trim() else null
+        val statusVal = if (statusIdx != -1 && statusIdx != resolvedTitleIdx) row.getOrNull(statusIdx)?.trim() else null
+
+        val headerBuilder = StringBuilder("• **$cleanTitle**")
+        if (!totalVal.isNullOrBlank() && totalVal != "-") {
+            headerBuilder.append(": $totalVal")
+        }
+
+        if (!impactVal.isNullOrBlank() && impactVal != "-" && impactVal != totalVal) {
+            val impactClean = if (impactVal.lowercase().contains("parte") || impactVal.lowercase().contains("cota") || impactVal.lowercase().contains("impacto")) {
+                impactVal
+            } else {
+                "Sua parte: $impactVal"
+            }
+            headerBuilder.append(" ($impactClean)")
+        }
+
+        val details = mutableListOf<String>()
+        if (!dateVal.isNullOrBlank() && dateVal != "-") {
+            details.add("📅 $dateVal")
+        }
+        if (!catVal.isNullOrBlank() && catVal != "-") {
+            details.add(catVal)
+        }
+        if (!statusVal.isNullOrBlank() && statusVal != "-") {
+            details.add(statusVal)
+        }
+
+        for (colIdx in row.indices) {
+            if (colIdx != resolvedTitleIdx && colIdx != valIdx && colIdx != impactIdx &&
+                colIdx != dateIdx && colIdx != catIdx && colIdx != statusIdx) {
+                val hName = headers.getOrNull(colIdx)?.trim()
+                val cellVal = row.getOrNull(colIdx)?.trim()
+                if (!hName.isNullOrBlank() && !cellVal.isNullOrBlank() && cellVal != "-") {
+                    details.add("$hName: $cellVal")
+                }
+            }
+        }
+
+        if (details.isNotEmpty()) {
+            "${headerBuilder}\n  ${details.joinToString(" • ")}"
+        } else {
+            headerBuilder.toString()
+        }
+    }
+
+    return formattedRows.joinToString("\n\n")
+}
+
+// -------------------------------------------------------------
+// FORMATAÇÃO INTELIGENTE DE MARKDOWN (NEGRITO, ITÁLICO, CÓDIGO E LISTAS)
+// -------------------------------------------------------------
+private fun parseSmartMarkdownText(rawText: String, isUser: Boolean): AnnotatedString {
     val boldColor = if (isUser) Color.White else Emerald400
+    val italicColor = if (isUser) Color.White.copy(alpha = 0.92f) else TextPrimary
+    val codeColor = if (isUser) Color.White else Cyan400
+    val codeBg = DarkSurfaceVariant.copy(alpha = 0.65f)
+
+    // Pré-processamento: converte tabelas Markdown em listas mobile amigáveis
+    val textWithoutTables = convertMarkdownTables(rawText)
+
+    // Pré-processamento de linhas: cabeçalhos e marcadores de lista
+    val preprocessed = textWithoutTables.lines().joinToString("\n") { line ->
+        var l = line
+        val trimmed = l.trimStart()
+        if (trimmed.startsWith("### ")) {
+            val indent = l.substring(0, l.length - trimmed.length)
+            l = "$indent**${trimmed.substring(4)}**"
+        } else if (trimmed.startsWith("## ")) {
+            val indent = l.substring(0, l.length - trimmed.length)
+            l = "$indent**${trimmed.substring(3)}**"
+        } else if (trimmed.startsWith("# ")) {
+            val indent = l.substring(0, l.length - trimmed.length)
+            l = "$indent**${trimmed.substring(2)}**"
+        }
+        val t2 = l.trimStart()
+        if (t2.startsWith("* ") || t2.startsWith("- ")) {
+            val indent = l.substring(0, l.length - t2.length)
+            "$indent• " + t2.substring(2)
+        } else l
+    }
+
+    // Expressão regular com grupos ordenados por especificidade
+    val pattern = Regex(
+        """(\*\*\*(.+?)\*\*\*)|(\*\*(.+?)\*\*)|(\*([^\*\n]+?)\*)|(_([^_\n]+?)_)|(`([^`\n]+?)`)"""
+    )
+
     return buildAnnotatedString {
-        var idx = 0
-        while (idx < text.length) {
-            val startBold = text.indexOf("**", idx)
-            if (startBold == -1) {
-                append(text.substring(idx))
-                break
+        var lastIndex = 0
+        for (match in pattern.findAll(preprocessed)) {
+            val range = match.range
+            if (range.first > lastIndex) {
+                append(preprocessed.substring(lastIndex, range.first))
             }
-            val endBold = text.indexOf("**", startBold + 2)
-            if (endBold == -1) {
-                append(text.substring(idx))
-                break
+            when {
+                // ***negrito e itálico***
+                match.groups[2] != null -> {
+                    withStyle(
+                        SpanStyle(
+                            fontWeight = FontWeight.Bold,
+                            fontStyle = FontStyle.Italic,
+                            color = boldColor
+                        )
+                    ) {
+                        append(match.groups[2]!!.value)
+                    }
+                }
+                // **negrito**
+                match.groups[4] != null -> {
+                    withStyle(
+                        SpanStyle(
+                            fontWeight = FontWeight.Bold,
+                            color = boldColor
+                        )
+                    ) {
+                        append(match.groups[4]!!.value)
+                    }
+                }
+                // *itálico*
+                match.groups[6] != null -> {
+                    withStyle(
+                        SpanStyle(
+                            fontStyle = FontStyle.Italic,
+                            color = italicColor
+                        )
+                    ) {
+                        append(match.groups[6]!!.value)
+                    }
+                }
+                // _itálico_
+                match.groups[8] != null -> {
+                    withStyle(
+                        SpanStyle(
+                            fontStyle = FontStyle.Italic,
+                            color = italicColor
+                        )
+                    ) {
+                        append(match.groups[8]!!.value)
+                    }
+                }
+                // `código inline`
+                match.groups[10] != null -> {
+                    withStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            background = codeBg,
+                            color = codeColor,
+                            fontSize = 12.sp
+                        )
+                    ) {
+                        append(" ${match.groups[10]!!.value} ")
+                    }
+                }
             }
-            if (startBold > idx) {
-                append(text.substring(idx, startBold))
-            }
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = boldColor)) {
-                append(text.substring(startBold + 2, endBold))
-            }
-            idx = endBold + 2
+            lastIndex = range.last + 1
+        }
+        if (lastIndex < preprocessed.length) {
+            append(preprocessed.substring(lastIndex))
         }
     }
 }
@@ -995,7 +1427,7 @@ fun ChatBubble(
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Copiloto Smart",
+                    text = "Copiloto Saldo Livre",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = Emerald400,
