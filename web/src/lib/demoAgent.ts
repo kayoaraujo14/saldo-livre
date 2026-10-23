@@ -470,7 +470,7 @@ ${weekend ? 'Para o **fim de semana (2 dias)**:' : 'Para **hoje**:'}
     if (!d.ok) return { text: `Não encontrei uma conta em aberto com "${billWord}". Contas em aberto: ${(d.contasEmAberto ?? []).join(', ') || 'nenhuma'}.`, actions }
     const diff = d.variacaoNoMeuSaldoLivre as number
     return {
-      text: `Atualizei **${d.conta}** para **${formatBRL(d.valorReal)}** (${d.novoStatus.toLowerCase()}, vence ${d.vencimento.split('-').reverse().slice(0, 2).join('/')}).
+      text: `Atualizei **${d.conta}** para **${formatBRL(d.valorReal)}** (${d.novoStatus.toLowerCase()}, vence ${d.vencimento ? d.vencimento.split('-').reverse().slice(0, 2).join('/') : '—'}).
 
 ${diff === 0 ? 'Veio exatamente o valor estimado — seu Saldo Livre não mudou.' : diff < 0 ? `Veio **${formatBRL(Math.abs(d.diferencaVsEstimado))} acima** da estimativa. Como a conta é dividida conforme a regra, seu Saldo Livre caiu **${formatBRL(Math.abs(diff))}**.` : `Boa! Veio **${formatBRL(Math.abs(d.diferencaVsEstimado))} abaixo** do estimado e seu Saldo Livre subiu **${formatBRL(diff)}**.`}
 

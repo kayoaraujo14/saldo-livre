@@ -293,7 +293,7 @@ export function InvestmentsModal({ open, onOpenChange, onOpenNewTx }: Investment
             </div>
             <div className="text-xs text-amber-300 font-medium mt-2 truncate">
               {subcategoryBreakdown.length > 0
-                ? subcategoryBreakdown.map((s) => s.subcategory.split(' ')[0]).join(', ')
+                ? subcategoryBreakdown.map((s) => (s.subcategory || '').split(' ')[0]).filter(Boolean).join(', ')
                 : 'Nenhum ativo alocado neste mês'}
             </div>
           </div>
@@ -760,7 +760,7 @@ export function InvestmentsModal({ open, onOpenChange, onOpenNewTx }: Investment
                         : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    {sub.split(' ')[0]} ({count})
+                    {(sub || '').split(' ')[0]} ({count})
                   </button>
                 )
               })}

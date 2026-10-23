@@ -1073,7 +1073,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                           onClick={() => handleQuickFriendPreset(friends[0].uid, 50)}
                           className="px-2 py-1 text-[10px] font-semibold rounded-lg bg-violet-950/70 hover:bg-violet-900/70 text-violet-300 border border-violet-700/60 cursor-pointer"
                         >
-                          50/50 {friends[0].name.split(' ')[0]}
+                          50/50 {(friends[0].name || 'Amigo').split(' ')[0]}
                         </button>
                       )}
                       <button

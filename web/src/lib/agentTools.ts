@@ -439,7 +439,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
               ? `🏷️ ${splitForCurrent.allocations[0]?.name || 'Terceiro'}`
               : `${label?.emoji ?? '👤'} ${label?.label ?? 'Meu'}`,
       },
-      ...(card ? [{ label: 'Cartão', value: card.cardName }] : []),
+      ...(card ? [{ label: 'Cartão', value: card.cardName || 'Cartão' }] : []),
       {
         label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
         value: type === 'income' ? `+${money(total)}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
@@ -657,7 +657,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
                 ? `🏷️ ${splitForCurrent.allocations[0]?.name || 'Terceiro'}`
                 : `${label?.emoji ?? '👤'} ${label?.label ?? 'Meu'}`,
         },
-        ...(card ? [{ label: 'Cartão', value: card.cardName }] : []),
+        ...(card ? [{ label: 'Cartão', value: card.cardName || 'Cartão' }] : []),
         {
           label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
           value: type === 'income' ? `+${money(total)}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
@@ -811,6 +811,7 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
           status: 'pending',
           createdAt: Date.now(),
           lines: confirmationLines,
+          pending_transactions: pendingTransactionsList,
         },
       },
     }

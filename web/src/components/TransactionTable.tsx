@@ -562,7 +562,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             {card && (
                               <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-slate-800/80 text-slate-300 border-slate-700 gap-1">
                                 <CreditCard className="size-2.5 text-violet-400" />
-                                {card.cardName.split(' ')[0]}
+                                {(card.cardName || 'Cartão').split(' ')[0]}
                               </Badge>
                             )}
 

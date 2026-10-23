@@ -37,11 +37,15 @@ export function effectiveAmount(tx: Pick<Transaction, 'actualAmount' | 'estimate
  * para compras no cartão de crédito, respeitando a data de fechamento e vencimento do cartão.
  */
 export function calculateCardInvoiceDates(
-  purchaseDate: string,
+  purchaseDate?: string | null,
   card?: Card | null,
   explicitDueDate?: string | null,
   explicitMonth?: string | null,
 ): { dueDate: string; competenceMonth: string } {
+  const safePurchaseDate = typeof purchaseDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(purchaseDate.trim())
+    ? purchaseDate.trim()
+    : todayKey()
+
   if (explicitDueDate && /^\d{4}-\d{2}-\d{2}$/.test(explicitDueDate.trim())) {
     const cleanDueDate = explicitDueDate.trim()
     const cleanMonth = explicitMonth && /^\d{4}-\d{2}$/.test(explicitMonth.trim())
@@ -58,11 +62,11 @@ export function calculateCardInvoiceDates(
   }
 
   if (!card || !card.closingDay || !card.dueDay) {
-    const cleanMonth = purchaseDate.slice(0, 7)
-    return { dueDate: purchaseDate, competenceMonth: cleanMonth }
+    const cleanMonth = safePurchaseDate.slice(0, 7)
+    return { dueDate: safePurchaseDate, competenceMonth: cleanMonth }
   }
 
-  const parts = purchaseDate.split('-')
+  const parts = safePurchaseDate.split('-')
   let year = parseInt(parts[0], 10)
   let month = parseInt(parts[1], 10)
   const day = parseInt(parts[2], 10)
@@ -934,10 +938,13 @@ export function isSharedCard(card: Card | undefined) {
 
 /** Escolhe o cartão mais adequado para um lançamento. */
 export function pickCard(meUid: string, cards: Card[], splitType: SplitType, hint?: string) {
-  const mine = accessibleCards(meUid, cards)
-  if (hint) {
+  const mine = accessibleCards(meUid, cards || [])
+  if (hint && typeof hint === 'string') {
     const h = normalize(hint)
-    const byName = mine.find((c) => normalize(c.cardName).includes(h) || h.includes(normalize(c.cardName)))
+    const byName = mine.find((c) => {
+      const cName = c?.cardName ? normalize(c.cardName) : ''
+      return cName && (cName.includes(h) || h.includes(cName))
+    })
     if (byName) return byName
     if (/parceir|namorad|dela|dele|marido|esposa/.test(h)) {
       const other = mine.find((c) => c.ownerUid !== meUid)

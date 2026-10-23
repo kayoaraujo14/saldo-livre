@@ -1087,8 +1087,8 @@ Atenção crítica:
       const batchAction = result.actions?.find((a) => a.pendingAction?.toolName === 'registrarTransacoesLote')
       const extractedPending = (batchAction?.pending_transactions ||
         batchAction?.pendingAction?.pending_transactions ||
-        batchAction?.pendingAction?.args?.transacoes ||
-        batchAction?.pendingAction?.args?.pending_transactions) as PendingBatchTransaction[] | undefined
+        batchAction?.pendingAction?.args?.pending_transactions ||
+        batchAction?.pendingAction?.args?.transacoes) as PendingBatchTransaction[] | undefined
 
       if (extractedPending && Array.isArray(extractedPending) && extractedPending.length > 0) {
         setPendingBatchTransactions(extractedPending)
@@ -1702,11 +1702,14 @@ Atenção crítica:
 
                             {/* Se for registrarTransacoesLote, exibe a tabela/lista resumida de transações para conferência imediata */}
                             {pAct.toolName === 'registrarTransacoesLote' && (() => {
-                              const batchTxs: PendingBatchTransaction[] = (pAct.pending_transactions ||
-                                (pAct.args?.transacoes as PendingBatchTransaction[] | undefined) ||
-                                (pAct.args?.pending_transactions as PendingBatchTransaction[] | undefined) ||
-                                activePendingTxs) || []
-                              const validOnly = batchTxs.filter((t: PendingBatchTransaction) => t.categoria_filtro !== 'ignorada')
+                              const batchTxs: any[] = (
+                                pAct.pending_transactions ||
+                                (pAct.args?.pending_transactions as any[] | undefined) ||
+                                act.pending_transactions ||
+                                (pAct.args?.transacoes as any[] | undefined) ||
+                                activePendingTxs
+                              ) || []
+                              const validOnly = batchTxs.filter((t: any) => t.categoria_filtro !== 'ignorada')
                               if (validOnly.length === 0) return null
 
                               return (
@@ -1716,37 +1719,48 @@ Atenção crítica:
                                     <span className="text-[10px] text-slate-400">Verificação transparente</span>
                                   </div>
                                   <div className="max-h-52 overflow-y-auto rounded-xl border border-white/[0.08] bg-slate-950/70 p-1.5 space-y-1 text-[11px]">
-                                    {validOnly.map((tx: PendingBatchTransaction, idx: number) => (
-                                      <div
-                                        key={idx}
-                                        className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-slate-900/60 hover:bg-slate-800/60 border border-white/[0.04]"
-                                      >
-                                        <div className="flex items-center gap-1.5 min-w-0">
-                                          <span className="text-[10px] text-slate-400 shrink-0">
-                                            {formatShortDate(tx.data)}
-                                          </span>
+                                    {validOnly.map((txItem: any, idx: number) => {
+                                      const txDate =
+                                        txItem.data ||
+                                        txItem.dataVencimento ||
+                                        (pAct.args?.dataVencimentoPadrao as string) ||
+                                        (pAct.args?.mesFaturaPadrao ? `${pAct.args.mesFaturaPadrao}-01` : todayKey())
+                                      const txAmount = Math.abs(Number(txItem.valor_exato ?? txItem.valorTotal ?? txItem.valor ?? 0))
+                                      const txDesc = String(txItem.contraparte || txItem.descricao || 'Item')
+                                      const isIncome = txItem.tipo === 'income'
+
+                                      return (
+                                        <div
+                                          key={idx}
+                                          className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-slate-900/60 hover:bg-slate-800/60 border border-white/[0.04]"
+                                        >
+                                          <div className="flex items-center gap-1.5 min-w-0">
+                                            <span className="text-[10px] text-slate-400 shrink-0">
+                                              {formatShortDate(txDate)}
+                                            </span>
+                                            <span
+                                              className={`text-[9px] px-1 py-0.5 rounded font-bold shrink-0 ${
+                                                isIncome
+                                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                                  : 'bg-rose-500/20 text-rose-300'
+                                              }`}
+                                            >
+                                              {isIncome ? 'Entrada' : 'Saída'}
+                                            </span>
+                                            <span className="text-slate-200 font-medium truncate" title={txDesc}>
+                                              {txDesc}
+                                            </span>
+                                          </div>
                                           <span
-                                            className={`text-[9px] px-1 py-0.5 rounded font-bold shrink-0 ${
-                                              tx.tipo === 'income'
-                                                ? 'bg-emerald-500/20 text-emerald-300'
-                                                : 'bg-rose-500/20 text-rose-300'
+                                            className={`font-semibold shrink-0 ${
+                                              isIncome ? 'text-emerald-400' : 'text-rose-400'
                                             }`}
                                           >
-                                            {tx.tipo === 'income' ? 'Entrada' : 'Saída'}
-                                          </span>
-                                          <span className="text-slate-200 font-medium truncate" title={tx.contraparte}>
-                                            {tx.contraparte}
+                                            {formatBRL(txAmount)}
                                           </span>
                                         </div>
-                                        <span
-                                          className={`font-semibold shrink-0 ${
-                                            tx.tipo === 'income' ? 'text-emerald-400' : 'text-rose-400'
-                                          }`}
-                                        >
-                                          {formatBRL(tx.valor_exato)}
-                                        </span>
-                                      </div>
-                                    ))}
+                                      )
+                                    })}
                                   </div>
                                 </div>
                               )

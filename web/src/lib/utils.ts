@@ -47,14 +47,23 @@ export function currentMonthKey() {
   return toMonthKey(new Date())
 }
 
-export function shiftMonth(monthKey: string, delta: number) {
-  const [y, m] = monthKey.split('-').map(Number)
+export function shiftMonth(monthKey?: string | null, delta = 0) {
+  const key = typeof monthKey === 'string' && monthKey.includes('-') ? monthKey.trim() : currentMonthKey()
+  const [y, m] = key.split('-').map(Number)
+  if (isNaN(y) || isNaN(m)) {
+    const d = new Date()
+    return toMonthKey(new Date(d.getFullYear(), d.getMonth() + delta, 1))
+  }
   const d = new Date(y, m - 1 + delta, 1)
   return toMonthKey(d)
 }
 
-export function monthLabel(monthKey: string) {
-  const [y, m] = monthKey.split('-').map(Number)
+export function monthLabel(monthKey?: string | null) {
+  if (!monthKey || typeof monthKey !== 'string' || !monthKey.includes('-')) {
+    return 'Mês'
+  }
+  const [y, m] = monthKey.trim().split('-').map(Number)
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return monthKey
   return `${MONTH_NAMES[m - 1]} ${y}`
 }
 
@@ -63,31 +72,65 @@ const SHORT_MONTH_NAMES = [
   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
 ]
 
-export function shortMonthLabel(monthKey: string) {
-  const [y, m] = monthKey.split('-').map(Number)
+export function shortMonthLabel(monthKey?: string | null) {
+  if (!monthKey || typeof monthKey !== 'string' || !monthKey.includes('-')) {
+    return 'Mês'
+  }
+  const [y, m] = monthKey.trim().split('-').map(Number)
+  if (isNaN(y) || isNaN(m) || m < 1 || m > 12) return monthKey
   const shortYear = String(y).slice(-2)
   return `${SHORT_MONTH_NAMES[m - 1]}/${shortYear}`
 }
 
-export function daysInMonth(monthKey: string) {
-  const [y, m] = monthKey.split('-').map(Number)
+export function daysInMonth(monthKey?: string | null) {
+  if (!monthKey || typeof monthKey !== 'string' || !monthKey.includes('-')) {
+    return 30
+  }
+  const [y, m] = monthKey.trim().split('-').map(Number)
+  if (isNaN(y) || isNaN(m)) return 30
   return new Date(y, m, 0).getDate()
 }
 
 /** Gera YYYY-MM-DD para um dia do mês, limitando ao último dia válido. */
-export function dateInMonth(monthKey: string, day: number) {
-  const last = daysInMonth(monthKey)
-  return `${monthKey}-${pad(Math.min(Math.max(1, day), last))}`
+export function dateInMonth(monthKey: string | null | undefined, day: number) {
+  const safeMonthKey = typeof monthKey === 'string' && monthKey.includes('-') ? monthKey.trim() : currentMonthKey()
+  const last = daysInMonth(safeMonthKey)
+  return `${safeMonthKey}-${pad(Math.min(Math.max(1, day), last))}`
 }
 
-export function formatShortDate(dateKey: string) {
-  const [, m, d] = dateKey.split('-')
-  return `${d}/${m}`
+export function formatShortDate(dateKey?: string | null) {
+  if (!dateKey || typeof dateKey !== 'string') return '—'
+  const trimmed = dateKey.trim()
+  if (trimmed.includes('-')) {
+    const parts = trimmed.split('-')
+    if (parts.length >= 3) {
+      const [, m, d] = parts
+      return `${d}/${m}`
+    }
+    if (parts.length === 2) {
+      const [y, m] = parts
+      return `${m}/${y}`
+    }
+  }
+  if (trimmed.includes('/')) {
+    const parts = trimmed.split('/')
+    if (parts.length >= 3) {
+      const [d, m] = parts
+      return `${d}/${m}`
+    }
+    return trimmed
+  }
+  return trimmed || '—'
 }
 
 /** Desloca uma data YYYY-MM-DD em N meses para a frente mantendo o dia */
-export function shiftDateMonth(dateKey: string, deltaMonths: number) {
-  const [y, m, d] = dateKey.split('-').map(Number)
+export function shiftDateMonth(dateKey: string | null | undefined, deltaMonths: number) {
+  const key = typeof dateKey === 'string' && dateKey.includes('-') ? dateKey.trim() : todayKey()
+  const parts = key.split('-').map(Number)
+  const y = parts[0]
+  const m = parts[1]
+  const d = parts[2] || 1
+  if (isNaN(y) || isNaN(m)) return todayKey()
   const targetMonthKey = shiftMonth(`${y}-${pad(m)}`, deltaMonths)
   return dateInMonth(targetMonthKey, d)
 }
@@ -96,9 +139,11 @@ export function uid(prefix = 'id') {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`
 }
 
-export function initials(name: string) {
+export function initials(name?: string | null) {
+  if (!name || typeof name !== 'string') return '?'
   return name
-    .split(' ')
+    .trim()
+    .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase())
