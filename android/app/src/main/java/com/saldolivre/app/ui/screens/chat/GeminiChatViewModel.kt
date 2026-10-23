@@ -1065,6 +1065,7 @@ class GeminiChatViewModel(
             attachment = attachment
         )
 
+        val historyForAgent = _uiState.value.messages
         val nextMessages = _uiState.value.messages + userMsg
         updateActiveSessionMessages(nextMessages, userPromptForTitle = promptText)
 
@@ -1077,7 +1078,7 @@ class GeminiChatViewModel(
         }
 
         viewModelScope.launch {
-            val responseResult = executeGemini(promptText, attachment)
+            val responseResult = executeGemini(promptText, attachment, historyForAgent)
             val assistantMsg = ChatMessage(
                 sender = MessageSender.ASSISTANT,
                 text = responseResult.text,
@@ -1095,7 +1096,11 @@ class GeminiChatViewModel(
         val chartPayload: ChartPayload? = null
     )
 
-    private suspend fun executeGemini(query: String, attachment: ChatAttachment? = null): AgentResponse {
+    private suspend fun executeGemini(
+        query: String,
+        attachment: ChatAttachment? = null,
+        history: List<ChatMessage> = emptyList()
+    ): AgentResponse {
         val user = repository.currentUser.value
         val summary = repository.getMonthSummary().first()
         val cards = repository.getCards().first()
@@ -1134,6 +1139,7 @@ class GeminiChatViewModel(
             val result: GeminiExecutionResult = loadBalancer.executeWithResilience(
                 userQuery = query,
                 systemInstructionText = systemPrompt,
+                history = history,
                 attachmentBytes = attachBytes,
                 mimeType = attachMime,
                 onModelSwitched = { newModel ->
@@ -1152,7 +1158,8 @@ class GeminiChatViewModel(
                 return processGeminiResponseAndExecuteActions(
                     rawResponse = result.responseText,
                     originalQuery = query,
-                    systemPrompt = systemPrompt
+                    systemPrompt = systemPrompt,
+                    history = history
                 )
             } else {
                 throw IllegalStateException("Resposta vazia retornada pelo modelo Gemini.")
@@ -1329,6 +1336,32 @@ $learnedRulesDesc
 
 ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
 Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, use OBRIGATORIAMENTE a ação LEARN_RULE ou DELETE_RULE.
+
+======================================================================
+MEMÓRIA DE CONTEXTO E CONTINUIDADE CONVERSACIONAL (FOLLOW-UPS, REFINAMENTOS E AJUSTES DE CONSULTAS ANTERIORES):
+======================================================================
+1. CONTINUIDADE RIGOROSA DO CONTEXTO:
+   - Você DEVE levar SEMPRE em consideração o histórico recente das mensagens anteriores da conversa para interpretar solicitações de acompanhamento (follow-ups), filtros adicionais, refinamentos, correções ou ajustes.
+   - Quando o usuário enviar uma mensagem curta de refinamento ou restrição (como: "não, quero somente do mês de outubro", "e em novembro?", "somente no débito", "filtre apenas os meus", "mostre só os do Nubank", "e quanto deu no total?"), NUNCA trate como uma consulta descontextualizada ou isolada!
+   
+2. PRESERVAÇÃO E AJUSTE DE FILTROS:
+   - Identifique os parâmetros da consulta anterior (ex: searchTerm: "Forte Alencar", category, person, cardName, etc.) e combine-os com os novos critérios solicitados pelo usuário.
+   - Exemplo clássico:
+     * Mensagem 1 do usuário: "trazer as despesas ligadas ao Forte Alencar" -> você consultou "Forte Alencar" (trazendo todas do ano ou sem mês especificado).
+     * Mensagem 2 do usuário: "não, quero somente do mês de outubro" -> você DEVE manter o searchTerm "Forte Alencar" e aplicar o filtro do mês de outubro ("2026-10"), emitindo a ação:
+       ```json
+       {
+         "action": "SEARCH_TRANSACTIONS",
+         "searchTerm": "Forte Alencar",
+         "month": "2026-10"
+       }
+       ```
+   - NUNCA descarte o termo de busca, estabelecimento, pessoa ou categoria já estabelecidos na conversa ao aplicar um novo filtro de mês, período ou forma de pagamento!
+
+3. CONVERSÃO DE NOMES DE MESES:
+   - Quando o usuário mencionar meses por extenso (ex: "outubro", "novembro", "janeiro"), converta SEMPRE para o formato YYYY-MM (ex: "2026-10", "2026-11") usando o ano corrente do contexto ("Hoje é ${FinanceEngine.todayKey()}").
+   - Se o usuário pedir despesas de todo o ano ou todos os meses, use "month": "all" ou omita "month".
+======================================================================
 
 ======================================================================
 REGRA DE OURO INVIOLÁVEL: DISTINÇÃO RIGOROSA ENTRE CONTAS RECORRENTES (CONFIGURAÇÕES E PREVISÕES) E TRANSAÇÕES REAIS (LANÇAMENTOS DO MÊS)
@@ -1753,7 +1786,8 @@ F) APRESENTAÇÃO DESCRITIVA SUPERIOR NO APP MOBILE:
     private suspend fun processGeminiResponseAndExecuteActions(
         rawResponse: String,
         originalQuery: String? = null,
-        systemPrompt: String? = null
+        systemPrompt: String? = null,
+        history: List<ChatMessage> = emptyList()
     ): AgentResponse {
         val (textWithoutChartFence, fenceChart) = sessionManager.extractChartFromMarkdown(rawResponse)
         val extractedBlocks = extractActionJsonBlocks(textWithoutChartFence)
@@ -1847,6 +1881,7 @@ INSTRUÇÃO PARA SUA RESPOSTA FINAL AO USUÁRIO:
                     val followUpResult = loadBalancer.executeWithResilience(
                         userQuery = followUpPrompt,
                         systemInstructionText = systemPrompt,
+                        history = history,
                         onModelSwitched = { newModel -> _uiState.update { it.copy(selectedModel = newModel) } }
                     )
                     _uiState.update { it.copy(connectionStatus = "Online") }

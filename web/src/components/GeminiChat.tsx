@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
-import type { ActionCardData, ChatMessage, ChatSession, ChatAttachment, PendingAction, PendingBatchTransaction } from '@/types'
+import type { ChatMessage, ChatSession, ChatAttachment, PendingAction, PendingBatchTransaction } from '@/types'
 import {
-  getGeminiApiKey,
+  getGeminiApiKeys,
   setGeminiApiKey,
   runGeminiAgent,
   buildSystemInstruction,
@@ -17,7 +17,6 @@ import {
   transcribeAudioWithGemini,
   type ToolName,
 } from '@/lib/gemini'
-import { runDemoAgent } from '@/lib/demoAgent'
 import { effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
 import { formatBRL, formatShortDate, monthLabel, todayKey } from '@/lib/utils'
 import { extractTextFromPdf } from '@/lib/pdfParser'
@@ -138,6 +137,8 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     deleteRule: contextDeleteRule,
   } = useFinance()
   const currentUid = me?.uid ?? 'guest'
+  const geminiKeys = getGeminiApiKeys()
+  const hasGeminiKey = geminiKeys.length > 0
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const loaded = getStoredSessions(currentUid)
@@ -398,10 +399,10 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
         }
 
         // Se temos a chave da API do Gemini conectada, transcrevemos com IA diretamente
-        if (apiKey) {
+        if (hasGeminiKey) {
           try {
             const aiTranscription = await transcribeAudioWithGemini({
-              apiKey,
+              apiKey: geminiKeys.join(','),
               audioBase64: b64,
               mimeType: mime,
             })
@@ -419,8 +420,8 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
           await handleSend(finalPrompt, audioAttachment)
         } else if (capturedText) {
           setInput(capturedText)
-        } else if (!apiKey) {
-          alert('Não foi possível transcrever a voz pelo navegador do celular. Conecte sua chave gratuita do Gemini no botão 🔑 para ativar a transcrição com IA!')
+        } else if (!hasGeminiKey) {
+          alert('Não foi possível transcrever a voz pelo microfone. Conecte sua chave gratuita do Google Gemini no botão 🔑 para ativar a transcrição com IA!')
         }
       } catch (err) {
         console.error('Erro ao processar gravação de voz:', err)
@@ -708,8 +709,6 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     updateSessionMessages([INITIAL_MESSAGE])
   }
 
-  const apiKey = getGeminiApiKey()
-  const isLiveGemini = Boolean(apiKey)
   const [activeModel, setActiveModel] = useState<string>(getSelectedGeminiModel())
 
   // Sugestões inteligentes avançadas focadas em análise financeira real e tomada de decisão
@@ -1021,71 +1020,76 @@ Atenção crítica:
     setLoading(true)
 
     try {
-      let result: { text: string; actions: ActionCardData[] }
-
-      if (apiKey) {
-        // Run with live Gemini Flash via Function Calling
-        const sys = buildSystemInstruction({
-          userName: me?.name ?? 'Usuário',
-          partnerName: partner?.name ?? null,
-          today: todayKey(),
-          monthLabel: monthLabel(month),
-          monthKey: month,
-          cards: cards.map((c) => ({
-            id: c.id,
-            name: c.cardName,
-            owner: c.ownerName,
-            closingDay: c.closingDay,
-            dueDay: c.dueDay,
-          })),
-          friends: (friends || []).map((f) => ({
-            uid: f.uid,
-            name: f.name,
-            email: f.email,
-          })),
-          learnedRules: rules.map((r) => r.rule),
-          summary: summary
-            ? {
-                income: summary.income,
-                paid: summary.paid,
-                committed: summary.committed,
-                freeBalance: summary.freeBalance,
-                dailyLimit: summary.dailyLimit,
-                daysRemaining: summary.daysRemaining,
-                receivableTotal: summary.receivableTotal,
-                byCategory: summary.byCategory,
-                bySubcategory: summary.bySubcategory,
-                totalInvested: summary.totalInvested,
-                totalInvestedAccumulated: summary.totalInvestedAccumulated,
-                byInvestmentSubcategory: summary.byInvestmentSubcategory,
-              }
-            : null,
-          recentTransactions: (monthTransactions || []).slice(0, 40).map((t) => ({
-            id: t.id,
-            date: formatShortDate(t.dueDate),
-            description: t.description,
-            amount: effectiveAmount(t),
-            category: t.category,
-            status: t.status,
-            split: SPLIT_LABELS[t.splitType || 'mine']?.label || t.splitType || 'mine',
-          })),
-          pendingTransactions: activePendingTxs.length > 0 ? activePendingTxs : undefined,
-        })
-
-        result = await runGeminiAgent({
-          apiKey,
-          history: messages,
-          userMessage: text,
-          attachment: currentAttachment || undefined,
-          systemInstruction: sys,
-          execute: executeTool,
-          model: activeModel,
-          onModelChanged: (newModel) => setActiveModel(newModel),
-        })
-      } else {
-        // Offline demo agent fallback with natural language heuristics
-        result = await runDemoAgent(text, executeTool, month, currentAttachment || undefined, activePendingTxs)
+      if (!hasGeminiKey) {
+        const noKeyMsg: ChatMessage = {
+          id: `bot_${Date.now()}`,
+          role: 'assistant',
+          content:
+            '🔑 **Chave da API do Google Gemini não encontrada**\n\n' +
+            'Para conversar com o Copiloto com inteligência artificial, configure sua chave de API no ícone 🔑 acima ou cole sua chave diretamente nesta conversa.',
+        }
+        updateSessionMessages((prev) => [...prev, noKeyMsg])
+        return
       }
+
+      // Executa exclusivamente via Google Gemini com Load Balancing e Function Calling
+      const sys = buildSystemInstruction({
+        userName: me?.name ?? 'Usuário',
+        partnerName: partner?.name ?? null,
+        today: todayKey(),
+        monthLabel: monthLabel(month),
+        monthKey: month,
+        cards: cards.map((c) => ({
+          id: c.id,
+          name: c.cardName,
+          owner: c.ownerName,
+          closingDay: c.closingDay,
+          dueDay: c.dueDay,
+        })),
+        friends: (friends || []).map((f) => ({
+          uid: f.uid,
+          name: f.name,
+          email: f.email,
+        })),
+        learnedRules: rules.map((r) => r.rule),
+        summary: summary
+          ? {
+              income: summary.income,
+              paid: summary.paid,
+              committed: summary.committed,
+              freeBalance: summary.freeBalance,
+              dailyLimit: summary.dailyLimit,
+              daysRemaining: summary.daysRemaining,
+              receivableTotal: summary.receivableTotal,
+              byCategory: summary.byCategory,
+              bySubcategory: summary.bySubcategory,
+              totalInvested: summary.totalInvested,
+              totalInvestedAccumulated: summary.totalInvestedAccumulated,
+              byInvestmentSubcategory: summary.byInvestmentSubcategory,
+            }
+          : null,
+        recentTransactions: (monthTransactions || []).slice(0, 40).map((t) => ({
+          id: t.id,
+          date: formatShortDate(t.dueDate),
+          description: t.description,
+          amount: effectiveAmount(t),
+          category: t.category,
+          status: t.status,
+          split: SPLIT_LABELS[t.splitType || 'mine']?.label || t.splitType || 'mine',
+        })),
+        pendingTransactions: activePendingTxs.length > 0 ? activePendingTxs : undefined,
+      })
+
+      const result = await runGeminiAgent({
+        apiKey: geminiKeys.join(','),
+        history: messages,
+        userMessage: text,
+        attachment: currentAttachment || undefined,
+        systemInstruction: sys,
+        execute: executeTool,
+        model: activeModel,
+        onModelChanged: (newModel) => setActiveModel(newModel),
+      })
 
       // Se a ferramenta retornou transações em lote pendentes de aprovação, armazena no estado da sessão
       const batchAction = result.actions?.find((a) => a.pendingAction?.toolName === 'registrarTransacoesLote')
@@ -1114,7 +1118,10 @@ Atenção crítica:
       const errorMsg: ChatMessage = {
         id: `err_${Date.now()}`,
         role: 'assistant',
-        content: `⚠️ ${friendlyMessage}\n\nSe a instabilidade nos servidores do Google persistir, você pode aguardar alguns instantes ou alternar para o Gemini 3.8 Flash no botão 🔑 acima.`,
+        content:
+          `⚠️ **Não foi possível obter resposta dos servidores do Google Gemini.**\n\n` +
+          `*Detalhe:* ${friendlyMessage}\n\n` +
+          `Por favor, verifique sua conexão com a internet ou sua chave de API no ícone 🔑 acima e tente enviar novamente.`,
         error: true,
       }
       updateSessionMessages((prev) => [...prev, errorMsg])
@@ -1180,7 +1187,7 @@ Atenção crítica:
               <h3 className="text-xs font-bold text-white tracking-tight m-0 truncate">
                 {currentSession.title !== 'Nova Conversa' ? currentSession.title : 'Copiloto Saldo Livre'}
               </h3>
-              {isLiveGemini ? (
+              {hasGeminiKey ? (
                 <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800 gap-1 font-mono shrink-0 hidden sm:inline-flex">
                   <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   {activeModel}
@@ -1188,10 +1195,12 @@ Atenção crítica:
               ) : (
                 <Badge
                   variant="outline"
-                  className="text-[9px] py-0 px-1.5 bg-amber-950/60 text-amber-300 border-amber-800 gap-1 font-mono shrink-0 hidden sm:inline-flex"
+                  onClick={onOpenApiKey}
+                  className="text-[9px] py-0 px-1.5 bg-slate-800/60 text-slate-300 border-slate-700 hover:border-emerald-500/50 gap-1 font-mono shrink-0 hidden sm:inline-flex cursor-pointer"
+                  title="Configurar Chave do Google Gemini"
                 >
                   <span className="size-1.5 rounded-full bg-amber-400" />
-                  demo offline
+                  Configurar Gemini
                 </Badge>
               )}
             </div>
@@ -1255,17 +1264,15 @@ Atenção crítica:
           </Button>
 
           {/* API Key */}
-          {isLiveGemini && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onOpenApiKey}
-              className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer hidden sm:flex"
-              title="Configurar Chave Gemini"
-            >
-              <KeyRound className="size-3.5" />
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onOpenApiKey}
+            className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer hidden sm:flex"
+            title="Configurar Chave Gemini"
+          >
+            <KeyRound className="size-3.5" />
+          </Button>
 
           {/* Clear Current Chat Messages */}
           <Button
@@ -1543,19 +1550,19 @@ Atenção crítica:
         </div>
       )}
 
-      {/* Offline Alert Banner */}
-      {!isLiveGemini && (
-        <div className="mx-3.5 mt-2.5 p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-xs text-amber-300 animate-in fade-in">
+      {/* Gemini Key Notice Banner */}
+      {!hasGeminiKey && (
+        <div className="mx-3.5 mt-2.5 p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs text-emerald-300 animate-in fade-in">
           <div className="flex items-center gap-1.5">
-            <Sparkles className="size-3.5 text-amber-400 shrink-0" />
-            <span className="text-[11px]">Chat em modo offline. Conecte sua API Key do Gemini.</span>
+            <Sparkles className="size-3.5 text-emerald-400 shrink-0" />
+            <span className="text-[11px]">Conecte sua API Key do Google Gemini para ativar o Copiloto IA.</span>
           </div>
           <button
             type="button"
             onClick={onOpenApiKey}
-            className="text-[11px] font-semibold text-amber-200 hover:text-white underline cursor-pointer shrink-0 ml-2"
+            className="text-[11px] font-semibold text-emerald-200 hover:text-white underline cursor-pointer shrink-0 ml-2"
           >
-            Conectar
+            Configurar
           </button>
         </div>
       )}

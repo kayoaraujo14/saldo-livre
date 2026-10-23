@@ -7,13 +7,26 @@ import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } 
 import type { ActionCardData, ChatMessage, ChatAttachment, PendingBatchTransaction } from '@/types'
 import { CATEGORIES } from '@/types'
 
-export const GEMINI_MODEL = 'gemini-3-flash'
+export const GEMINI_MODEL = 'gemini-3.5-flash'
+export const DEFAULT_MODELS_POOL = [
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-flash-latest',
+  'gemini-flash-lite-latest',
+  'gemini-3.1-flash-lite',
+  'gemini-pro-latest',
+] as const
+
 export const GEMINI_MODELS = [
-  { id: 'gemini-3-flash', label: 'Gemini 3 Flash (Padrão — Melhor Custo-Benefício)' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (O Mais Inteligente — Limites rígidos)' },
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (Mais Rápido / Alta Disponibilidade)' },
-  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite (Leve)' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Alternativa Estável)' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash (Padrão — Mais Rápido e Atual)' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (Alta Disponibilidade)' },
+  { id: 'gemini-flash-latest', label: 'Gemini Flash Latest (Estável)' },
+  { id: 'gemini-flash-lite-latest', label: 'Gemini Flash-Lite Latest (Ultra Leve)' },
+  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite' },
+  { id: 'gemini-pro-latest', label: 'Gemini Pro Latest (Raciocínio Profundo)' },
+  { id: 'gemini-3-flash', label: 'Gemini 3 Flash' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
 ] as const
 
 const LS_KEY = 'saldo-livre:gemini-api-key'
@@ -23,8 +36,22 @@ const LS_MIGRATION_KEY = 'saldo-livre:model-migrated-v3-flash'
 export const envGeminiKey = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) || null
 export const envGeminiModel = (import.meta.env.VITE_GEMINI_MODEL as string | undefined) || null
 
+export function getGeminiApiKeysRaw(): string {
+  return (envGeminiKey || localStorage.getItem(LS_KEY) || '').trim()
+}
+
+export function getGeminiApiKeys(): string[] {
+  const raw = getGeminiApiKeysRaw()
+  if (!raw) return []
+  return raw
+    .split(/[,;\n]/)
+    .map((k) => k.trim())
+    .filter(Boolean)
+}
+
 export function getGeminiApiKey(): string | null {
-  return envGeminiKey || localStorage.getItem(LS_KEY)
+  const keys = getGeminiApiKeys()
+  return keys.length > 0 ? keys[0] : null
 }
 
 export function setGeminiApiKey(key: string | null) {
@@ -33,7 +60,7 @@ export function setGeminiApiKey(key: string | null) {
 }
 
 export function getSelectedGeminiModel(): string {
-  // Migra automaticamente para o Gemini 3 Flash garantindo melhor balanço entre performance e cota (RPD)
+  // Migra automaticamente para o Gemini 3.5 Flash garantindo o melhor equilíbrio entre velocidade e inteligência
   const migrated = localStorage.getItem(LS_MIGRATION_KEY)
   if (!migrated) {
     localStorage.setItem(LS_MIGRATION_KEY, 'true')
@@ -42,8 +69,8 @@ export function getSelectedGeminiModel(): string {
   }
 
   const saved = localStorage.getItem(LS_MODEL_KEY)
-  // Limpa modelos fictícios ou depreciados do local storage
-  if (!saved || saved === 'gemini-2.0-flash' || saved === 'gemini-3.8-flash' || saved === 'gemini-1.5-flash') {
+  // Limpa modelos inexistentes ou depreciados do local storage
+  if (!saved || saved === 'gemini-2.0-flash' || saved === 'gemini-1.5-flash') {
     return envGeminiModel || GEMINI_MODEL
   }
   return saved
@@ -51,6 +78,17 @@ export function getSelectedGeminiModel(): string {
 
 export function setSelectedGeminiModel(model: string) {
   localStorage.setItem(LS_MODEL_KEY, model)
+}
+
+/**
+ * Roteador de Modelos (Router Pattern):
+ * Analisa a intenção da mensagem do usuário e eleva para o modelo Pro se for análise complexa,
+ * ou mantém o modelo Flash para operações e cadastros rápidos.
+ */
+export function resolveTargetModel(userQuery: string, preferredModel: string): string {
+  const analysisRegex =
+    /(analis(?:e|ar)|relat(?:ório|orios)|auditori|diagn[óo]stico|dre|balan[çc]o|resumo detalhado|compara[çc][ãa]o|proje[çc][ãa]o)/i
+  return analysisRegex.test(userQuery) ? 'gemini-pro-latest' : preferredModel
 }
 
 /**
@@ -100,19 +138,28 @@ export async function testGeminiConnection(
   key: string,
   model = getSelectedGeminiModel(),
 ): Promise<{ ok: boolean; message: string; modelUsed?: string }> {
-  const trimmed = key.trim()
-  if (!trimmed) {
+  const keys = key
+    .split(/[,;\n]/)
+    .map((k) => k.trim())
+    .filter(Boolean)
+
+  if (keys.length === 0) {
     return { ok: false, message: 'Chave da API não fornecida.' }
   }
 
-  const ai = new GoogleGenAI({ apiKey: trimmed })
+  const testKey = keys[0]
+  const ai = new GoogleGenAI({ apiKey: testKey })
   const candidates = [
     model,
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-latest',
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-pro-latest',
     'gemini-3-flash',
     'gemini-2.5-pro',
     'gemini-2.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
   ].filter((m, idx, arr) => arr.indexOf(m) === idx)
 
   let lastErr: unknown = null
@@ -128,9 +175,10 @@ export async function testGeminiConnection(
           if (candidate !== model) {
             setSelectedGeminiModel(candidate)
           }
+          const suffix = keys.length > 1 ? ` (${keys.length} chaves prontas para Load Balancing)` : ''
           return {
             ok: true,
-            message: `Conexão estabelecida com sucesso com o Google Gemini (${candidate})!`,
+            message: `Conexão estabelecida com sucesso com o Google Gemini (${candidate})!${suffix}`,
             modelUsed: candidate,
           }
         }
@@ -393,7 +441,11 @@ export const functionDeclarations: FunctionDeclaration[] = [
         termoBusca: { type: Type.STRING, description: 'Termo de busca na descrição ou estabelecimento (ex: "Uber", "Mercado", "iFood").' },
         categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Filtra por categoria ou grupo principal.' },
         subcategoria: { type: Type.STRING, description: 'Filtra por subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", etc.).' },
-        mes: { type: Type.STRING, description: 'Mês de competência (YYYY-MM). Padrão: mês atual em análise na tela.' },
+        mes: {
+          type: Type.STRING,
+          description:
+            'Mês de competência (YYYY-MM). Ex: "2026-10" para outubro. Deixe em branco apenas se o usuário pediu despesas de todos os meses / do ano todo.',
+        },
         dataInicio: { type: Type.STRING, description: 'Data de início para intervalo de período (YYYY-MM-DD).' },
         dataFim: { type: Type.STRING, description: 'Data de fim para intervalo de período (YYYY-MM-DD).' },
         somenteMinhas: {
@@ -743,6 +795,26 @@ REGRAS DE FUNCIONAMENTO:
 - Se o usuário perguntar sobre compras anteriores, pesquisar despesas específicas ou pedir análises financeiras:
   Chame "consultarTransacoes" para obter os dados oficiais!
 
+======================================================================
+MEMÓRIA DE CONTEXTO E CONTINUIDADE CONVERSACIONAL (FOLLOW-UPS, REFINAMENTOS E AJUSTES DE CONSULTAS ANTERIORES):
+======================================================================
+1. CONTINUIDADE RIGOROSA DO CONTEXTO:
+   - Você DEVE levar SEMPRE em consideração o histórico recente das mensagens anteriores da conversa para interpretar solicitações de acompanhamento (follow-ups), filtros adicionais, refinamentos, correções ou ajustes.
+   - Quando o usuário enviar uma mensagem curta de refinamento ou restrição (como: "não, quero somente do mês de outubro", "e em novembro?", "somente no débito", "filtre apenas os meus", "mostre só os do Nubank", "e quanto deu no total?"), NUNCA trate como uma consulta descontextualizada ou isolada!
+   
+2. PRESERVAÇÃO E AJUSTE DE FILTROS:
+   - Identifique os parâmetros da consulta anterior (ex: termoBusca: "Forte Alencar", categoria, subcategoria, pessoa, cartão, etc.) e combine-os com os novos critérios solicitados pelo usuário.
+   - Exemplo clássico:
+     * Mensagem 1 do usuário: "trazer as despesas ligadas ao Forte Alencar" -> você chamou "consultarTransacoes" com termoBusca: "Forte Alencar" (trazendo todas do ano ou sem mês especificado).
+     * Mensagem 2 do usuário: "não, quero somente do mês de outubro" -> você DEVE manter o termoBusca: "Forte Alencar" e aplicar o filtro do mês de outubro ("2026-10"), chamando "consultarTransacoes" com:
+       { "termoBusca": "Forte Alencar", "mes": "2026-10" }!
+   - NUNCA descarte o termo de busca, estabelecimento, pessoa ou categoria já estabelecidos na conversa ao aplicar um novo filtro de mês, período ou forma de pagamento!
+
+3. CONVERSÃO DE NOMES DE MESES:
+   - Quando o usuário mencionar meses por extenso (ex: "outubro", "novembro", "janeiro"), converta SEMPRE para o formato YYYY-MM (ex: "2026-10", "2026-11") usando o ano corrente do contexto ("Hoje é ${ctx.today}").
+   - Se o usuário pedir despesas de todo o ano ou todos os meses, deixe "mes" em branco ou omita-o.
+======================================================================
+
 7. INTELIGÊNCIA ANALÍTICA E SENSIÊNCIA DE DESPESAS (100% MINHAS, TERCEIROS, CARTÕES, CATEGORIAS E PERÍODOS):
 Você possui inteligência analítica profunda e sensibilidade discriminatória para analisar as despesas do usuário com máxima precisão e clareza descritiva:
 
@@ -988,7 +1060,7 @@ export function buildChatContents(
   )
 
   const turns: Content[] = []
-  for (const m of filtered.slice(-12)) {
+  for (const m of filtered.slice(-20)) {
     const role: 'user' | 'model' = m.role === 'user' ? 'user' : 'model'
     if (turns.length === 0 && role !== 'user') continue
 
@@ -1075,89 +1147,154 @@ export function buildChatContents(
   return turns
 }
 
+const rateLimitedKeysCooldown = new Map<string, number>()
+let keyIndex = 0
+
 async function callGeminiWithResilience(params: {
-  ai: GoogleGenAI
+  apiKey?: string
   model: string
   contents: Content[]
   systemInstruction: string
   tools: Array<{ functionDeclarations: FunctionDeclaration[] }>
   onModelChanged?: (newModel: string) => void
+  onStatusUpdate?: (status: string) => void
+  maxRounds?: number
+  userQuery?: string
 }): Promise<{ res: any; activeModel: string }> {
-  const { ai, contents, systemInstruction, tools, onModelChanged } = params
-  let currentModel = params.model
+  const { apiKey, contents, systemInstruction, tools, onModelChanged, onStatusUpdate } = params
 
-  // Cascata de Fallback Inteligente: do melhor custo/benefício/raciocínio para a maior velocidade/disponibilidade.
-  // 1º tenta o modelo solicitado. Se falhar, tenta Pro (se ainda houver cota), senão cai para os Flash/Lite.
-  const fallbackPool = [
+  const rawKeys = apiKey
+    ? apiKey.split(/[,;\n]/).map((k) => k.trim()).filter(Boolean)
+    : []
+  const keys = rawKeys.length > 0 ? rawKeys : getGeminiApiKeys()
+
+  if (keys.length === 0) {
+    throw new Error('Nenhuma chave de API do Google Gemini configurada.')
+  }
+
+  const initialModel = params.userQuery
+    ? resolveTargetModel(params.userQuery, params.model)
+    : params.model
+
+  // Cascata completa de Modelos (paridade com Android GeminiLoadBalancer):
+  const modelCandidates = [
+    initialModel,
+    ...DEFAULT_MODELS_POOL.filter((m) => m !== initialModel),
     'gemini-3-flash',
     'gemini-2.5-pro',
     'gemini-2.5-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite',
-  ]
-
-  const modelsToTry = [
-    currentModel,
-    ...fallbackPool.filter((m) => m !== currentModel),
-  ]
+  ].filter((m, idx, arr) => arr.indexOf(m) === idx)
 
   let lastError: unknown = null
+  const numKeys = keys.length
+  const maxRounds = params.maxRounds ?? 3
 
-  for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
-    const candidate = modelsToTry[mIdx]
+  for (let round = 0; round < maxRounds; round++) {
+    const startKeyIdx = (keyIndex++ & 0x7fffffff) % numKeys
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const res = await ai.models.generateContent({
-          model: candidate,
-          contents,
-          config: {
-            systemInstruction,
-            tools,
-            temperature: 0.1,
-          },
-        })
+    for (let kStep = 0; kStep < numKeys; kStep++) {
+      const currentKeyIdx = (startKeyIdx + kStep) % numKeys
+      const candidateKey = keys[currentKeyIdx]
 
-        if (!res) {
-          throw new Error(`Nenhuma resposta retornada pelo modelo ${candidate}.`)
-        }
-
-        if (candidate !== currentModel) {
-          currentModel = candidate
-          onModelChanged?.(candidate)
-          setSelectedGeminiModel(candidate)
-        }
-
-        return { res, activeModel: currentModel }
-      } catch (err) {
-        lastError = err
-        const errStr = ((err as Error)?.message || String(err)).toLowerCase()
-        const isTransient =
-          errStr.includes('503') ||
-          errStr.includes('unavailable') ||
-          errStr.includes('high demand') ||
-          errStr.includes('spikes in demand') ||
-          errStr.includes('429') ||
-          errStr.includes('resource_exhausted') ||
-          errStr.includes('quota')
-
-        // Se for erro transitório de sobrecarga (503 / 429), aguarda 1.2s antes de tentar novamente o mesmo modelo
-        if (attempt === 0 && isTransient) {
-          await new Promise((r) => setTimeout(r, 1200))
-          continue
-        }
-
-        // Se falhou na 2ª tentativa ou for erro permanente, avança para o próximo modelo do pool
-        break
+      // Cooldown em caso de 429 se houver mais de uma chave disponível
+      const cooldownUntil = rateLimitedKeysCooldown.get(candidateKey)
+      const now = Date.now()
+      if (numKeys > 1 && cooldownUntil && now < cooldownUntil) {
+        continue
       }
+
+      const ai = new GoogleGenAI({ apiKey: candidateKey })
+
+      for (const candidateModel of modelCandidates) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const modelLabel = candidateModel.replace('gemini-', '').replace('-latest', '')
+            onStatusUpdate?.(
+              round === 0
+                ? `Consultando Gemini ${modelLabel}...`
+                : `Tentando Gemini ${modelLabel} (tentativa ${round + 1})...`
+            )
+
+            const config: Record<string, unknown> = {
+              systemInstruction,
+              tools,
+              temperature: 0.1,
+              topP: 0.95,
+              topK: 40,
+            }
+
+            const res = await ai.models.generateContent({
+              model: candidateModel,
+              contents,
+              config,
+            })
+
+            if (!res) {
+              throw new Error(`Nenhuma resposta retornada pelo modelo ${candidateModel}.`)
+            }
+
+            if (candidateModel !== initialModel) {
+              onModelChanged?.(candidateModel)
+              setSelectedGeminiModel(candidateModel)
+            }
+
+            return { res, activeModel: candidateModel }
+          } catch (err) {
+            lastError = err
+            const errStr = ((err as Error)?.message || String(err)).toLowerCase()
+            const isRateLimit =
+              errStr.includes('429') ||
+              errStr.includes('resource_exhausted') ||
+              errStr.includes('quota')
+
+            const isTransient =
+              errStr.includes('503') ||
+              errStr.includes('unavailable') ||
+              errStr.includes('high demand') ||
+              errStr.includes('spikes in demand') ||
+              errStr.includes('timeout') ||
+              errStr.includes('socket') ||
+              errStr.includes('connect') ||
+              errStr.includes('network')
+
+            if (isRateLimit) {
+              if (numKeys > 1) {
+                rateLimitedKeysCooldown.set(candidateKey, Date.now() + 45_000)
+                break // Pula para a próxima chave
+              } else {
+                await new Promise((r) => setTimeout(r, 2000))
+                break
+              }
+            }
+
+            // Se for erro transitório de sobrecarga (503), aguarda 1.5s antes de tentar novamente o mesmo modelo
+            if (attempt === 0 && isTransient) {
+              await new Promise((r) => setTimeout(r, 1500))
+              continue
+            }
+
+            // Se falhou na 2ª tentativa ou for outro erro, avança para o próximo modelo do pool
+            break
+          }
+        }
+      }
+    }
+
+    if (round < maxRounds - 1) {
+      const backoffMs = (round + 1) * 2000
+      onStatusUpdate?.(`Aguardando servidores do Gemini (${round + 1}/${maxRounds})...`)
+      await new Promise((r) => setTimeout(r, backoffMs))
     }
   }
 
-  throw lastError
+  throw (
+    lastError ||
+    new Error('Não foi possível obter resposta dos servidores do Google Gemini após várias tentativas.')
+  )
 }
 
 export async function runGeminiAgent(opts: {
-  apiKey: string
+  apiKey?: string
   history: ChatMessage[]
   userMessage: string
   attachment?: ChatAttachment
@@ -1165,29 +1302,19 @@ export async function runGeminiAgent(opts: {
   execute: ToolExecutor
   model?: string
   onModelChanged?: (newModel: string) => void
+  onStatusUpdate?: (status: string) => void
 }): Promise<{ text: string; actions: ActionCardData[] }> {
-  const ai = new GoogleGenAI({ apiKey: opts.apiKey })
   const contents: Content[] = buildChatContents(opts.history, opts.userMessage, opts.attachment)
   const actions: ActionCardData[] = []
   let activeModel = opts.model || getSelectedGeminiModel() || GEMINI_MODEL
-
-  // Implementação Padrão Router (Roteamento Dinâmico de Modelos)
-  // Encaminha análises de DRE, auditorias complexas e diagnósticos de conciliação para o Gemini 2.5 Pro (quando configurado via Router).
-  const analysisRegex = /(analis(?:e|ar)|relat(?:ório|orios)|auditori|diagn[óo]stico|dre|balan[çc]o|resumo detalhado|compara[çc][ãa]o)/i
-  if (analysisRegex.test(opts.userMessage)) {
-    // Força uso temporário do modelo mais inteligente para essa requisição complexa
-    activeModel = 'gemini-2.5-pro'
-  } else if (!opts.model && activeModel === 'gemini-2.5-pro') {
-     // Se não pediu modelo e for normal CRUD, forçamos o flash para economizar as cotas do PRO.
-     activeModel = 'gemini-3-flash'
-  }
 
   for (let step = 0; step < 6; step++) {
     let res: any
     try {
       const outcome = await callGeminiWithResilience({
-        ai,
+        apiKey: opts.apiKey,
         model: activeModel,
+        userQuery: opts.userMessage,
         contents,
         systemInstruction: opts.systemInstruction,
         tools: [{ functionDeclarations }],
@@ -1195,6 +1322,7 @@ export async function runGeminiAgent(opts: {
           activeModel = m
           opts.onModelChanged?.(m)
         },
+        onStatusUpdate: opts.onStatusUpdate,
       })
       res = outcome.res
       activeModel = outcome.activeModel
@@ -1252,12 +1380,26 @@ export async function runGeminiAgent(opts: {
  * Suporta gravações de celulares (mp4/aac no iOS Safari e webm/opus no Android Chrome).
  */
 export async function transcribeAudioWithGemini(opts: {
-  apiKey: string
+  apiKey?: string
   audioBase64: string
   mimeType: string
 }): Promise<string> {
-  const ai = new GoogleGenAI({ apiKey: opts.apiKey })
-  const models = ['gemini-3-flash', 'gemini-2.5-flash', 'gemini-3.5-flash-lite']
+  const providedKeys = opts.apiKey
+    ? opts.apiKey.split(/[,;\n]/).map((k) => k.trim()).filter(Boolean)
+    : []
+  const keys = providedKeys.length > 0 ? providedKeys : getGeminiApiKeys()
+  if (keys.length === 0) {
+    throw new Error('Nenhuma chave de API configurada para transcrição.')
+  }
+
+  const models = [
+    'gemini-3.5-flash',
+    'gemini-flash-latest',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3-flash',
+  ]
   let lastError: unknown = null
 
   let normalizedMime = opts.mimeType || 'audio/webm'
@@ -1267,36 +1409,39 @@ export async function transcribeAudioWithGemini(opts: {
   else if (normalizedMime.includes('ogg')) normalizedMime = 'audio/ogg'
   else if (normalizedMime.includes('wav')) normalizedMime = 'audio/wav'
 
-  for (const model of models) {
-    try {
-      const res = await ai.models.generateContent({
-        model,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                text: 'Transcreva com fidelidade absoluta em português do Brasil o que foi falado neste áudio. Retorne EXCLUSIVAMENTE o texto transcrito, sem aspas, sem saudações, sem introduções e sem explicações.',
-              },
-              {
-                inlineData: {
-                  mimeType: normalizedMime,
-                  data: opts.audioBase64,
+  for (const candidateKey of keys) {
+    const ai = new GoogleGenAI({ apiKey: candidateKey })
+    for (const model of models) {
+      try {
+        const res = await ai.models.generateContent({
+          model,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: 'Transcreva com fidelidade absoluta em português do Brasil o que foi falado neste áudio. Retorne EXCLUSIVAMENTE o texto transcrito, sem aspas, sem saudações, sem introduções e sem explicações.',
                 },
-              },
-            ],
+                {
+                  inlineData: {
+                    mimeType: normalizedMime,
+                    data: opts.audioBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          config: {
+            temperature: 0.1,
           },
-        ],
-        config: {
-          temperature: 0.1,
-        },
-      })
+        })
 
-      const text = (res.text || '').trim().replace(/^["']|["']$/g, '')
-      if (text) return text
-    } catch (err) {
-      lastError = err
-      console.warn(`Falha na transcrição com modelo ${model}:`, err)
+        const text = (res.text || '').trim().replace(/^["']|["']$/g, '')
+        if (text) return text
+      } catch (err) {
+        lastError = err
+        console.warn(`Falha na transcrição com modelo ${model}:`, err)
+      }
     }
   }
 

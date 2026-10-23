@@ -1,6 +1,5 @@
 /**
- * Implementação das ferramentas do agente (usada tanto pelo Gemini real
- * quanto pelo agente offline do Modo Demo).
+ * Implementação das ferramentas do agente (executadas pelo motor do Google Gemini).
  */
 import type { Allocation, Card, Category, NewTransaction, PaymentMethod, PendingBatchTransaction, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
 import { CATEGORIES } from '@/types'
@@ -1669,12 +1668,50 @@ async function atualizar(env: AgentEnv, args: Record<string, unknown>): Promise<
   }
 }
 
+function parseMonthKey(raw: unknown, referenceMonth = todayKey()): string {
+  if (typeof raw !== 'string' || !raw.trim()) return ''
+  const trimmed = raw.trim().toLowerCase()
+  if (/^\d{4}-\d{2}$/.test(trimmed)) return trimmed
+  if (trimmed === 'all' || trimmed === 'todos' || trimmed === 'ano' || trimmed === 'tudo') return ''
+
+  const yearMatch = trimmed.match(/\b(20\d{2})\b/)
+  const year = yearMatch ? yearMatch[1] : referenceMonth.slice(0, 4)
+
+  const monthMap: Record<string, string> = {
+    janeiro: '01', jan: '01',
+    fevereiro: '02', fev: '02',
+    marco: '03', março: '03', mar: '03',
+    abril: '04', abr: '04',
+    maio: '05', mai: '05',
+    junho: '06', jun: '06',
+    julho: '07', jul: '07',
+    agosto: '08', ago: '08',
+    setembro: '09', set: '09',
+    outubro: '10', out: '10',
+    novembro: '11', nov: '11',
+    dezembro: '12', dez: '12',
+  }
+
+  for (const [name, mm] of Object.entries(monthMap)) {
+    if (trimmed.includes(name)) {
+      return `${year}-${mm}`
+    }
+  }
+
+  const numMatch = trimmed.match(/^([1-9]|1[0-2])$/)
+  if (numMatch) {
+    return `${year}-${numMatch[1].padStart(2, '0')}`
+  }
+
+  return ''
+}
+
 async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
   const all = env.getTransactions()
   const termo = typeof args.termoBusca === 'string' ? args.termoBusca.trim() : ''
   const categoria = typeof args.categoria === 'string' ? args.categoria.trim() : ''
   const subcategoria = typeof args.subcategoria === 'string' ? args.subcategoria.trim() : ''
-  const mes = typeof args.mes === 'string' && /^\d{4}-\d{2}$/.test(args.mes) ? args.mes : ''
+  const mes = parseMonthKey(args.mes)
   const dataInicio = typeof args.dataInicio === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.dataInicio) ? args.dataInicio.trim() : ''
   const dataFim = typeof args.dataFim === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.dataFim) ? args.dataFim.trim() : ''
   const somenteMinhas = args.somenteMinhas === true || args.apenasMinhas === true
@@ -1929,10 +1966,13 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
     reportTitle = `Fatura Cartão ${matchedCard.cardName} (${filtered.length} compras)`
   } else if (categoria) {
     reportTitle = `Despesas em ${categoria}${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
+  } else if (termo) {
+    reportTitle = `${termo} (${filtered.length} itens)`
   }
 
   const lines = [
     { label: 'Total Encontrado', value: `${filtered.length} lançamento(s)` },
+    ...(termo ? [{ label: 'Termo de Busca', value: termo }] : []),
     { label: 'Soma Total', value: money(somaTotal) },
     { label: 'Seu Impacto (Saldo Livre)', value: money(somaMeuImpacto), tone: somaMeuImpacto > 0 ? ('negative' as const) : ('neutral' as const) },
     ...(somaTerceiros > 0 ? [{ label: 'Cota de Terceiros / A Receber', value: money(somaTerceiros), tone: 'positive' as const }] : []),

@@ -1187,6 +1187,45 @@ class AndroidAgentToolsEngine(
     // 6. QUERY TRANSACTIONS (CONSULTA INTELIGENTE / FILTRO)
     // -------------------------------------------------------------
 
+    fun parseMonthKey(raw: String?, defaultMonth: String = FinanceEngine.currentMonthKey()): String? {
+        if (raw.isNullOrBlank()) return null
+        val trimmed = raw.trim().lowercase()
+        if (Regex("""^\d{4}-\d{2}$""").matches(trimmed)) return trimmed
+        if (trimmed == "all" || trimmed == "todos" || trimmed == "ano" || trimmed == "tudo") return "all"
+
+        val yearMatch = Regex("""\b(20\d{2})\b""").find(trimmed)
+        val year = yearMatch?.value ?: defaultMonth.take(4)
+
+        val monthMap = mapOf(
+            "janeiro" to "01", "jan" to "01",
+            "fevereiro" to "02", "fev" to "02",
+            "marco" to "03", "março" to "03", "mar" to "03",
+            "abril" to "04", "abr" to "04",
+            "maio" to "05", "mai" to "05",
+            "junho" to "06", "jun" to "06",
+            "julho" to "07", "jul" to "07",
+            "agosto" to "08", "ago" to "08",
+            "setembro" to "09", "set" to "09",
+            "outubro" to "10", "out" to "10",
+            "novembro" to "11", "nov" to "11",
+            "dezembro" to "12", "dez" to "12"
+        )
+
+        for ((name, mm) in monthMap) {
+            if (trimmed.contains(name)) {
+                return "$year-$mm"
+            }
+        }
+
+        val numMatch = Regex("""^([1-9]|1[0-2])$""").matchEntire(trimmed)
+        if (numMatch != null) {
+            val mm = numMatch.value.padStart(2, '0')
+            return "$year-$mm"
+        }
+
+        return null
+    }
+
     suspend fun executeSearchTransactions(
         searchTerm: String? = null,
         category: String? = null,
@@ -1203,7 +1242,11 @@ class AndroidAgentToolsEngine(
     ): ToolExecutionResult {
         val all = repository.getTransactions().first()
         val user = repository.currentUser.value
-        val activeMonth = month?.takeIf { it.isNotBlank() } ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val defaultMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val parsedMonth = parseMonthKey(month, defaultMonth)
+        val isAllMonths = parsedMonth == "all" || (!searchTerm.isNullOrBlank() && month.isNullOrBlank())
+        val activeMonth = if (isAllMonths) null else (parsedMonth ?: defaultMonth)
+        val activeMonthLabel = if (activeMonth.isNullOrBlank()) "Todos os meses" else FinanceEngine.monthLabel(activeMonth)
         val recurringBills = repository.getRecurringBills().first()
         val cards = repository.getCards().first()
         val cardsMap = cards.associateBy { it.id }
@@ -1216,12 +1259,10 @@ class AndroidAgentToolsEngine(
         } else null
 
         // 1. Filtra prioritariamente no mês vigente / selecionado (ou intervalo de datas se informado)
-        val monthTransactions = if (!month.isNullOrBlank()) {
-            all.filter { it.competenceMonth == month }
-        } else if (!startDate.isNullOrBlank() || !endDate.isNullOrBlank()) {
-            all
-        } else {
+        val monthTransactions = if (!activeMonth.isNullOrBlank()) {
             all.filter { it.competenceMonth == activeMonth }
+        } else {
+            all
         }
 
         var filtered = monthTransactions.filter { t ->
@@ -1308,7 +1349,7 @@ class AndroidAgentToolsEngine(
 
         if (filtered.isEmpty()) {
             val recurringNote = if (matchingRecurring != null) {
-                "\n\n⚠️ **Nota sobre Conta Recorrente:** Encontrei o molde previsto de **\"${matchingRecurring.description}\"** cadastrado com valor estimado de **${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)}** (vence dia ${matchingRecurring.dueDay}), mas **NENHUM lançamento real foi efetivado ou registrado** no mês de ${FinanceEngine.monthLabel(activeMonth)}."
+                "\n\n⚠️ **Nota sobre Conta Recorrente:** Encontrei o molde previsto de **\"${matchingRecurring.description}\"** cadastrado com valor estimado de **${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)}** (vence dia ${matchingRecurring.dueDay}), mas **NENHUM lançamento real foi efetivado ou registrado** no mês de $activeMonthLabel."
             } else ""
 
             var emptyFilterMsg = "os filtros informados"
@@ -1319,12 +1360,12 @@ class AndroidAgentToolsEngine(
             else if (!searchTerm.isNullOrBlank()) emptyFilterMsg = "\"$searchTerm\""
 
             return ToolExecutionResult(
-                text = "🔍 **Busca de Transações Reais (${FinanceEngine.monthLabel(activeMonth)}):**\n" +
-                        "Nenhuma transação real encontrada no banco de dados para $emptyFilterMsg em ${FinanceEngine.monthLabel(activeMonth)}.$recurringNote",
+                text = "🔍 **Busca de Transações Reais ($activeMonthLabel):**\n" +
+                        "Nenhuma transação real encontrada no banco de dados para $emptyFilterMsg em $activeMonthLabel.$recurringNote",
                 actionCard = ActionCardData(
                     title = "Nenhum lançamento real encontrado",
                     description = "Filtro: $emptyFilterMsg",
-                    detail = if (matchingRecurring != null) "Molde previsto: ${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)} (sem lançamento real)" else "Mês: ${FinanceEngine.monthLabel(activeMonth)}"
+                    detail = if (matchingRecurring != null) "Molde previsto: ${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)} (sem lançamento real)" else "Mês: $activeMonthLabel"
                 )
             )
         }
@@ -1386,23 +1427,28 @@ class AndroidAgentToolsEngine(
             "\n• **Cota de Terceiros (A Receber / Reembolso)**: ${FinanceEngine.formatCurrency(thirdPartyTotal)}"
         } else ""
 
+        val displayMonth = if (foundInOtherMonth) filtered.first().competenceMonth else (activeMonth ?: "Ano")
+        val monthLabelText = if (displayMonth == "Ano") "Todos os meses / Ano" else FinanceEngine.monthLabel(displayMonth)
+
         val headerText = when {
             foundInOtherMonth ->
-                "🔍 **Lançamentos reais encontrados em outros meses (nenhum em ${FinanceEngine.monthLabel(activeMonth)}):**"
+                "🔍 **Lançamentos reais encontrados em outros meses (nenhum em $monthLabelText):**"
             onlyMine ->
-                "👤 **Despesas 100% Pessoais (Suas Despesas Exclusivas)** em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+                "👤 **Despesas 100% Pessoais (Suas Despesas Exclusivas)** em $monthLabelText (${filtered.size} item(ns)):"
             !person.isNullOrBlank() ->
-                "👥 **Despesas Vinculadas a $person** em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+                "👥 **Despesas Vinculadas a $person** em $monthLabelText (${filtered.size} item(ns)):"
             onlyThirdParties ->
-                "👥 **Despesas de Terceiros e Divisões no Cartão** em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+                "👥 **Despesas de Terceiros e Divisões no Cartão** em $monthLabelText (${filtered.size} item(ns)):"
             matchedCard != null ->
-                "💳 **Fatura do Cartão ${matchedCard.cardName}** (Titular: ${matchedCard.ownerName}, Fecha dia ${matchedCard.closingDay}, Vence dia ${matchedCard.dueDay}) em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} compra(s)):"
+                "💳 **Fatura do Cartão ${matchedCard.cardName}** (Titular: ${matchedCard.ownerName}, Fecha dia ${matchedCard.closingDay}, Vence dia ${matchedCard.dueDay}) em $monthLabelText (${filtered.size} compra(s)):"
             !category.isNullOrBlank() ->
-                "🏷️ **Despesas na Categoria $category**${if (!subcategory.isNullOrBlank()) " › $subcategory" else ""} em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+                "🏷️ **Despesas na Categoria $category**${if (!subcategory.isNullOrBlank()) " › $subcategory" else ""} em $monthLabelText (${filtered.size} item(ns)):"
             !startDate.isNullOrBlank() || !endDate.isNullOrBlank() ->
                 "📅 **Despesas no Período [${startDate ?: "início"} a ${endDate ?: "hoje"}]** (${filtered.size} item(ns)):"
+            !searchTerm.isNullOrBlank() ->
+                "🔍 **Lançamentos encontrados para \"$searchTerm\" em $monthLabelText (${filtered.size} item(ns)):**"
             else ->
-                "📋 **Lançamentos reais encontrados em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):**"
+                "📋 **Lançamentos reais encontrados em $monthLabelText (${filtered.size} item(ns)):**"
         }
 
         var cardTitle = "Busca: ${filtered.size} lançamento(s)"
@@ -1410,6 +1456,23 @@ class AndroidAgentToolsEngine(
         else if (!person.isNullOrBlank()) cardTitle = "Despesas de $person (${filtered.size})"
         else if (onlyThirdParties) cardTitle = "Terceiros: ${filtered.size} item(ns)"
         else if (matchedCard != null) cardTitle = "Cartão ${matchedCard.cardName} (${filtered.size})"
+        else if (!searchTerm.isNullOrBlank()) cardTitle = "$searchTerm (${filtered.size})"
+
+        val linesList = listOfNotNull(
+            ActionCardLine("Total Encontrado", "${filtered.size} lançamento(s)"),
+            searchTerm?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Termo de Busca", it) },
+            ActionCardLine("Soma Total", FinanceEngine.formatCurrency(totalAmount)),
+            ActionCardLine("Seu Impacto (Saldo Livre)", FinanceEngine.formatCurrency(myImpactTotal)),
+            if (thirdPartyTotal > 0.01) ActionCardLine("Cota de Terceiros", FinanceEngine.formatCurrency(thirdPartyTotal)) else null,
+            ActionCardLine("Mês / Período", monthLabelText)
+        )
+
+        val finalCard = ActionCardData(
+            title = cardTitle,
+            description = "Total: ${FinanceEngine.formatCurrency(totalAmount)}",
+            detail = "Impacto: ${FinanceEngine.formatCurrency(myImpactTotal)} • Mês: $monthLabelText",
+            lines = linesList
+        )
 
         return ToolExecutionResult(
             text = "$headerText\n\n" +
@@ -1418,11 +1481,8 @@ class AndroidAgentToolsEngine(
                     "• **Seu Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(myImpactTotal)}$thirdPartySummaryNote" +
                     subcategoryBreakdownText +
                     recurringDivergenceNote,
-            actionCard = ActionCardData(
-                title = cardTitle,
-                description = "Total: ${FinanceEngine.formatCurrency(totalAmount)}",
-                detail = "Impacto: ${FinanceEngine.formatCurrency(myImpactTotal)} • Mês: ${FinanceEngine.monthLabel(if (foundInOtherMonth) filtered.first().competenceMonth else activeMonth)}"
-            )
+            actionCard = finalCard,
+            actions = listOf(finalCard)
         )
     }
 

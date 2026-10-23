@@ -1,4 +1,5 @@
 @file:Suppress("DEPRECATION")
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 
 package com.saldolivre.app.ui.screens.auth
 
@@ -6,21 +7,24 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,7 +43,9 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.saldolivre.app.R
 import com.saldolivre.app.ui.theme.*
+import kotlinx.coroutines.launch
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Suppress("DEPRECATION")
 @Composable
 fun LoginScreen(
@@ -144,11 +150,10 @@ fun LoginScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Gestão Financeira Pessoal & Cartões Compartilhados com Privacidade Estrita",
-                    fontSize = 13.sp,
-                    color = TextSecondary,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 18.sp
+                    text = "Gestão Financeira",
+                    fontSize = 14.sp,
+                    color = TextSecondary.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(28.dp))
@@ -179,7 +184,7 @@ fun LoginScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                text = "Conecte-se com sua conta Google para acessar seu painel seguro",
+                                text = "Conecte-se com sua conta Google",
                                 fontSize = 12.sp,
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center
@@ -271,7 +276,8 @@ fun LoginScreen(
                                 onClick = { authViewModel.enterDemoMode(onLoginSuccess) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(46.dp),
+                                    .heightIn(min = 48.dp),
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                                 enabled = !uiState.isLoading,
                                 shape = RoundedCornerShape(14.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
@@ -283,6 +289,7 @@ fun LoginScreen(
                                 )
                             ) {
                                 Row(
+                                    modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.Center
                                 ) {
@@ -297,88 +304,102 @@ fun LoginScreen(
                                         text = "Experimentar Modo Demonstração (Sem Login)",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = TextPrimary
+                                        color = TextPrimary,
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 16.sp,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
                                 }
                             }
                         }
 
-                        // Garantia de Isolamento e Privacidade (Interno ao Card, igual à Web)
-                        Box(
+                        // Garantia de Isolamento e Privacidade (Sem Box-in-Box, sutil e posicionado livremente)
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(DarkBackground.copy(alpha = 0.7f))
-                                .border(1.dp, DarkBorder, RoundedCornerShape(14.dp))
-                                .padding(14.dp)
+                                .padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Lock,
-                                        contentDescription = null,
-                                        tint = Emerald400,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Garantia de Isolamento e Privacidade",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Emerald400
-                                    )
-                                }
-                                Text(
-                                    text = buildAnnotatedString {
-                                        append("Gastos pessoais e faturas particulares ")
-                                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextPrimary)) {
-                                            append("nunca são exibidos")
-                                        }
-                                        append(" para outros usuários. Apenas despesas explicitamente compartilhadas (50/50 ou no cartão de um para o outro) são refletidas nos saldos mútuos.")
-                                    },
-                                    fontSize = 11.sp,
-                                    color = TextSecondary,
-                                    lineHeight = 16.sp
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier
+                                    .size(15.dp)
+                                    .padding(top = 1.dp)
+                            )
+                            Text(
+                                text = buildAnnotatedString {
+                                    append("Gastos pessoais e faturas particulares ")
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextPrimary.copy(alpha = 0.85f))) {
+                                        append("nunca são exibidos")
+                                    }
+                                    append(" para outros usuários. Apenas despesas explicitamente compartilhadas (50/50 ou no cartão de um para o outro) são refletidas nos saldos mútuos.")
+                                },
+                                fontSize = 11.sp,
+                                color = TextSecondary.copy(alpha = 0.7f),
+                                lineHeight = 16.sp
+                            )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-                // Feature Pills (Rodapé idêntico à Web)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                // Feature Highlights Carousel (Design limpo, paginado com indicadores)
+                val featureHighlights = remember {
                     listOf(
-                        Triple(Icons.Default.Shield, "Dados 100% isolados", Emerald400),
-                        Triple(Icons.Default.CreditCard, "Cartão Compartilhado", Purple400),
-                        Triple(Icons.Default.SmartToy, "Copiloto Gemini IA", Cyan400)
-                    ).forEach { (icon, label, color) ->
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(DarkSurface.copy(alpha = 0.6f))
-                                .border(1.dp, DarkBorder.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = color,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = label,
-                                fontSize = 10.sp,
-                                color = TextSecondary,
-                                maxLines = 1
+                        "Dados 100% Isolados",
+                        "Cartões Compartilhados",
+                        "Copiloto Gemini IA"
+                    )
+                }
+                val pagerState = rememberPagerState(pageCount = { featureHighlights.size })
+                val coroutineScope = rememberCoroutineScope()
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxWidth()
+                    ) { page ->
+                        Text(
+                            text = featureHighlights[page],
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextSecondary.copy(alpha = 0.75f),
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Indicadores (Três pontinhos)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        repeat(pagerState.pageCount) { iteration ->
+                            val isSelected = pagerState.currentPage == iteration
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isSelected) Emerald400 else TextSecondary.copy(alpha = 0.3f)
+                                    )
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(iteration)
+                                        }
+                                    }
                             )
                         }
                     }

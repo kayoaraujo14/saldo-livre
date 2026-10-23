@@ -55,14 +55,16 @@ export function MobileMenuSheet({
   const hasGeminiKey = Boolean(getGeminiApiKey())
   const activeModel = getSelectedGeminiModel()
   const modelLabel = hasGeminiKey
-    ? activeModel.includes('3.5')
+    ? activeModel.includes('3.5') && activeModel.includes('lite')
       ? 'Gemini 3.5 Lite'
-      : activeModel.includes('3.8')
-        ? 'Gemini 3.8 Flash'
-        : activeModel.includes('2.5')
-          ? 'Gemini 2.5 Flash'
-          : 'Gemini Conectado'
-    : 'Gemini Offline'
+      : activeModel.includes('3.5')
+        ? 'Gemini 3.5 Flash'
+        : activeModel.includes('flash')
+          ? 'Gemini Flash'
+          : activeModel.includes('pro')
+            ? 'Gemini Pro'
+            : 'Gemini Conectado'
+    : 'Configurar Gemini'
 
   const totalAlerts = pendingFriendRequests.length + pendingChargeGroups.length
 

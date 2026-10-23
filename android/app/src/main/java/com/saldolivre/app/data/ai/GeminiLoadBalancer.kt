@@ -2,10 +2,13 @@ package com.saldolivre.app.data.ai
 
 import android.content.Context
 import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.Content
 import com.google.ai.client.generativeai.type.GenerateContentResponse
 import com.google.ai.client.generativeai.type.content
 import com.google.ai.client.generativeai.type.generationConfig
 import com.saldolivre.app.BuildConfig
+import com.saldolivre.app.data.model.ChatMessage
+import com.saldolivre.app.data.model.MessageSender
 import kotlinx.coroutines.delay
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -92,6 +95,7 @@ class GeminiLoadBalancer(
 
     /**
      * Executa a requisição ao Gemini com resiliência total e tentativas contínuas:
+     * - Histórico conversacional para continuidade de contexto (multi-turn chat)
      * - Rotação de múltiplas chaves de API (Round-Robin com detecção de 429)
      * - Cascata de Fallback de modelos (Flash -> Pro -> Lite)
      * - Retries persistentes com backoff em sobrecargas temporárias (503 / 429 / rede)
@@ -100,6 +104,7 @@ class GeminiLoadBalancer(
     suspend fun executeWithResilience(
         userQuery: String,
         systemInstructionText: String,
+        history: List<ChatMessage> = emptyList(),
         attachmentBytes: ByteArray? = null,
         mimeType: String? = null,
         onModelSwitched: ((newModel: String) -> Unit)? = null,
@@ -154,14 +159,9 @@ class GeminiLoadBalancer(
                                 systemInstruction = content { text(systemInstructionText) }
                             )
 
-                            val contentPrompt = content {
-                                text(userQuery)
-                                if (attachmentBytes != null && !mimeType.isNullOrBlank()) {
-                                    blob(mimeType, attachmentBytes)
-                                }
-                            }
+                            val allContents = buildChatContents(history, userQuery, attachmentBytes, mimeType)
 
-                            val response: GenerateContentResponse = generativeModel.generateContent(contentPrompt)
+                            val response: GenerateContentResponse = generativeModel.generateContent(*allContents.toTypedArray())
                             val text = response.text
 
                             if (!text.isNullOrBlank()) {
@@ -230,6 +230,68 @@ class GeminiLoadBalancer(
         }
 
         throw lastException ?: IllegalStateException("Não foi possível obter resposta dos servidores do Google Gemini após várias tentativas.")
+    }
+
+    /**
+     * Constrói o histórico multi-turn de mensagens garantindo as regras rígidas da API do Gemini:
+     * 1. O primeiro turno DEVE ser do papel 'user' (descarta mensagem de boas-vindas do assistente).
+     * 2. Os turnos devem alternar rigorosamente entre 'user' e 'model'.
+     * 3. A mensagem atual do usuário é incluída como o turno final de 'user'.
+     */
+    private fun buildChatContents(
+        history: List<ChatMessage>,
+        currentQuery: String,
+        attachmentBytes: ByteArray? = null,
+        mimeType: String? = null
+    ): List<Content> {
+        data class SimpleTurn(val role: String, var text: String)
+
+        val turns = mutableListOf<SimpleTurn>()
+
+        val filtered = history.filter {
+            it.text.isNotBlank() &&
+            !it.text.contains("Olá! Sou o **Copiloto Saldo Livre**") &&
+            !it.text.startsWith("🔑 *[Chave de API")
+        }
+
+        for (msg in filtered.takeLast(20)) {
+            val role = if (msg.sender == MessageSender.USER) "user" else "model"
+            if (turns.isEmpty() && role != "user") continue
+
+            val actionDetails = if (!msg.allActionCards().isNullOrEmpty()) {
+                "\n" + msg.allActionCards().joinToString("\n") { card ->
+                    val linesDesc = card.resolvedLines().joinToString(", ") { "${it.label}: ${it.value}" }
+                    "[Ação executada: ${card.title} - $linesDesc]"
+                }
+            } else ""
+
+            val fullText = (msg.text + actionDetails).trim()
+            if (fullText.isBlank()) continue
+
+            val last = turns.lastOrNull()
+            if (last != null && last.role == role) {
+                last.text = "${last.text}\n$fullText"
+            } else {
+                turns.add(SimpleTurn(role, fullText))
+            }
+        }
+
+        val last = turns.lastOrNull()
+        if (last != null && last.role == "user") {
+            last.text = "${last.text}\n$currentQuery"
+        } else {
+            turns.add(SimpleTurn("user", currentQuery))
+        }
+
+        return turns.mapIndexed { index, turn ->
+            val isLast = index == turns.size - 1
+            content(turn.role) {
+                text(turn.text)
+                if (isLast && attachmentBytes != null && !mimeType.isNullOrBlank()) {
+                    blob(mimeType, attachmentBytes)
+                }
+            }
+        }
     }
 
     /**

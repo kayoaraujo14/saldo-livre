@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   getGeminiApiKey,
+  getGeminiApiKeysRaw,
   setGeminiApiKey,
   envGeminiKey,
   GEMINI_MODELS,
@@ -20,7 +21,7 @@ interface ApiKeyModalProps {
 }
 
 export function ApiKeyModal({ open, onOpenChange }: ApiKeyModalProps) {
-  const currentKey = getGeminiApiKey() || ''
+  const currentKey = getGeminiApiKeysRaw() || getGeminiApiKey() || ''
   const [keyInput, setKeyInput] = useState(currentKey)
   const [showKey, setShowKey] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>(getSelectedGeminiModel())
@@ -150,13 +151,19 @@ export function ApiKeyModal({ open, onOpenChange }: ApiKeyModalProps) {
           </div>
 
           {/* Key Input */}
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-200">Chave da API Gemini (Google AI Studio)</label>
-            <div className="flex gap-2">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-200">Chave da API Gemini (Google AI Studio)</label>
+              <span className="text-[10px] text-emerald-400 font-mono">Load Balancing Suportado</span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Você pode colar múltiplas chaves separadas por vírgula para alternar automaticamente entre cotas e balancear requisições.
+            </p>
+            <div className="flex gap-2 pt-1">
               <div className="relative flex-1">
                 <Input
                   type={showKey ? 'text' : 'password'}
-                  placeholder="AIzaSy..."
+                  placeholder="AIzaSy... (uma ou mais chaves separadas por vírgula)"
                   value={keyInput}
                   onChange={(e) => {
                     setKeyInput(e.target.value)

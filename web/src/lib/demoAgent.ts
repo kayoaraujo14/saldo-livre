@@ -3,7 +3,7 @@
  * e chama as MESMAS ferramentas do Gemini, permitindo testar o fluxo
  * completo sem API key.
  */
-import type { ActionCardData, ChatAttachment, PendingBatchTransaction } from '@/types'
+import type { ActionCardData, ChatAttachment, ChatMessage, PendingBatchTransaction } from '@/types'
 import { CATEGORIES, CATEGORY_GROUPS } from '@/types'
 import type { ToolExecutor } from './gemini'
 import { guessCategory, guessCategoryAndSubcategory } from './finance'
@@ -58,6 +58,7 @@ export async function runDemoAgent(
   monthKey: string,
   attachment?: ChatAttachment,
   pendingTransactions?: PendingBatchTransaction[],
+  history?: ChatMessage[],
 ): Promise<{ text: string; actions: ActionCardData[] }> {
   const n = normalize(message)
   const actions: ActionCardData[] = []
@@ -484,13 +485,34 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
   // ---------------- Consulta de Transações / Gastos ----------------
   if (
     isQuestion ||
-    /consult|listar transac|pesquis|buscar|extrato|ultimas compras|ultimos lancamentos|historico de gastos|gastos com|gastei com|gastei no|gastei na|100% (a mim|minh|meu)|so minh|apenas o que e meu|despesas|compras|gastos do|gastos da|cartao/.test(
+    /trazer|traga|ver|mostre|mostrar|consult|listar transac|pesquis|buscar|extrato|ultimas compras|ultimos lancamentos|historico de gastos|gastos com|gastei com|gastei no|gastei na|100% (a mim|minh|meu)|so minh|apenas o que e meu|despesas|compras|gastos do|gastos da|cartao|somente|apenas|so do mes|do mes de/.test(
       n,
     )
   ) {
     // Sensiência para 100% minhas despesas vs terceiros vs cartões
     const isOnlyMine = /100% (a mim|minh|meu)|so minh|apenas o que e meu|meus gastos pessoais|despesas 100%|minhas despesas/i.test(n)
     const isThirdParties = /terceir|dividid|rachad|a receber de|de terceiros/i.test(n)
+
+    // Detecção de mês específico ou ano todo
+    const monthMap: Record<string, string> = {
+      janeiro: '01', fevereiro: '02', marco: '03', março: '03',
+      abril: '04', maio: '05', junho: '06', julho: '07',
+      agosto: '08', setembro: '09', outubro: '10', novembro: '11', dezembro: '12',
+    }
+    let targetMonth = monthKey
+    let explicitMonthFound = false
+    for (const [mName, mNum] of Object.entries(monthMap)) {
+      if (n.includes(mName)) {
+        const year = monthKey.slice(0, 4)
+        targetMonth = `${year}-${mNum}`
+        explicitMonthFound = true
+        break
+      }
+    }
+    const isAllYear = /ano\s+todo|todo\s+o\s+ano|todas\s+do\s+ano|no\s+ano|do\s+ano|todas/i.test(n)
+    if (isAllYear && !explicitMonthFound) {
+      targetMonth = ''
+    }
 
     let matchedPerson: string | undefined
     for (const [re, name] of THIRD_PARTIES) {
@@ -544,9 +566,11 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
       }
     }
 
-    // Check if user is asking about a search term (e.g. "uber", "ifood", "mercado")
+    // Check if user is asking about a search term (e.g. "Forte Alencar", "uber", "ifood", "mercado")
     let searchTerm: string | undefined
-    const searchMatch = message.match(/\b(?:no|na|em|com|de)\s+([A-Za-zÀ-ÿ0-9]{3,20})\b/i)
+    const searchMatch = message.match(
+      /\b(?:ligadas?\s+ao?|ligados?\s+aos?|relacionadas?\s+ao?|com\s+o|com\s+a|de|do|da|no|na|em|com)\s+([A-Za-zÀ-ÿ0-9\s]{3,30}?)(?=\s+(?:no\s+ano|do\s+ano|em\s+outubro|em\s+novembro|todas|todos|$|\?))/i,
+    )
     if (searchMatch && !matchedCategory && !matchedSubcategory && !matchedCardName && !matchedPerson) {
       const term = searchMatch[1].trim()
       if (
@@ -558,6 +582,34 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
       }
     }
 
+    // Memória de contexto das mensagens anteriores (continuidade de follow-ups / refinamentos)
+    if (history && history.length > 0) {
+      const pastMessages = [...history].reverse()
+      for (const pm of pastMessages) {
+        if (!searchTerm && pm.actions && pm.actions.length > 0) {
+          for (const act of pm.actions) {
+            const termLine = act.lines?.find((l) => l.label === 'Termo de Busca')
+            if (termLine?.value) {
+              searchTerm = termLine.value
+              break
+            }
+          }
+        }
+        if (!searchTerm && pm.role === 'user') {
+          const userSearchMatch = pm.content.match(
+            /\b(?:ligadas?\s+ao?|ligados?\s+aos?|relacionadas?\s+ao?|com\s+o|com\s+a|de|do|da|no|na|em|com)\s+([A-Za-zÀ-ÿ0-9\s]{3,30}?)(?=\s+(?:no\s+ano|do\s+ano|em\s+outubro|em\s+novembro|todas|todos|$|\?))/i,
+          )
+          if (userSearchMatch) {
+            const t = userSearchMatch[1].trim()
+            if (!/^(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|cartao|credito|debito|fatura|hoje|ontem)$/i.test(normalize(t))) {
+              searchTerm = t
+            }
+          }
+        }
+        if (searchTerm) break
+      }
+    }
+
     const r = await execute('consultarTransacoes', {
       termoBusca: searchTerm,
       categoria: matchedCategory,
@@ -566,7 +618,7 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
       pessoa: matchedPerson,
       apenasTerceiros: isThirdParties && !isOnlyMine,
       cartao: matchedCardName,
-      mes: monthKey,
+      mes: targetMonth,
     })
     if (r.action) actions.push(r.action)
     const d = r.response as Record<string, any>
