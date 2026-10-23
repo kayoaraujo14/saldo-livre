@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class InvoiceItemFilter(val label: String) { ALL("Todos"), OPEN("Em aberto"), PAID("Pagos") }
+enum class InvoiceItemFilter(val label: String) { ALL("Todos"), OPEN("Em aberto"), PAID("Pagos"), INSTALLMENTS("Parcelados") }
 
 data class CardInvoicesUiState(
     val viewMonth: String = FinanceEngine.currentMonthKey(),
@@ -26,6 +26,7 @@ data class CardInvoicesUiState(
     val totalMine: Double = 0.0,
     val nextDue: CardInvoice? = null,
     val itemFilter: InvoiceItemFilter = InvoiceItemFilter.ALL,
+    val searchQuery: String = "",
     val showPayConfirm: Boolean = false,
     val isPaying: Boolean = false,
     val isLoading: Boolean = true,
@@ -94,6 +95,7 @@ class CardInvoicesViewModel(
     }
 
     fun setFilter(filter: InvoiceItemFilter) = _uiState.update { it.copy(itemFilter = filter) }
+    fun setSearchQuery(query: String) = _uiState.update { it.copy(searchQuery = query) }
 
     fun requestPay() = _uiState.update { it.copy(showPayConfirm = true) }
     fun dismissPay() = _uiState.update { it.copy(showPayConfirm = false) }

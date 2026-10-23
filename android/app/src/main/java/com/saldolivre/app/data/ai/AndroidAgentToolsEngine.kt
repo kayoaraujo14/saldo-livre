@@ -1192,21 +1192,100 @@ class AndroidAgentToolsEngine(
         category: String? = null,
         subcategory: String? = null,
         month: String? = null,
-        status: TransactionStatus? = null
+        status: TransactionStatus? = null,
+        onlyMine: Boolean = false,
+        person: String? = null,
+        onlyThirdParties: Boolean = false,
+        cardFilter: String? = null,
+        startDate: String? = null,
+        endDate: String? = null,
+        type: TransactionType? = null
     ): ToolExecutionResult {
         val all = repository.getTransactions().first()
         val user = repository.currentUser.value
         val activeMonth = month?.takeIf { it.isNotBlank() } ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
         val recurringBills = repository.getRecurringBills().first()
-        val cardsMap = repository.getCards().first().associateBy { it.id }
+        val cards = repository.getCards().first()
+        val cardsMap = cards.associateBy { it.id }
 
-        // 1. Filtra prioritariamente no mês vigente / selecionado (para evitar divergência de valores com moldes)
-        val monthTransactions = all.filter { it.competenceMonth == activeMonth }
+        // Identificação de Cartão de Crédito cadastrado se filtro fornecido
+        val matchedCard = if (!cardFilter.isNullOrBlank()) {
+            cards.firstOrNull {
+                it.cardName.contains(cardFilter, ignoreCase = true) || it.id.equals(cardFilter, ignoreCase = true)
+            }
+        } else null
+
+        // 1. Filtra prioritariamente no mês vigente / selecionado (ou intervalo de datas se informado)
+        val monthTransactions = if (!month.isNullOrBlank()) {
+            all.filter { it.competenceMonth == month }
+        } else if (!startDate.isNullOrBlank() || !endDate.isNullOrBlank()) {
+            all
+        } else {
+            all.filter { it.competenceMonth == activeMonth }
+        }
+
         var filtered = monthTransactions.filter { t ->
+            // Tipo (despesa vs receita)
+            if (type != null) {
+                if (t.type != type) return@filter false
+            } else if (onlyMine || !person.isNullOrBlank() || onlyThirdParties || !cardFilter.isNullOrBlank() || !category.isNullOrBlank()) {
+                // Em análises de despesas, filtra compras/saídas a menos que categoria seja Receita
+                if (t.type != TransactionType.EXPENSE && !t.category.equals("Receita", ignoreCase = true)) return@filter false
+            }
+
+            // Intervalo de datas
+            if (!startDate.isNullOrBlank() && t.dueDate < startDate) return@filter false
+            if (!endDate.isNullOrBlank() && t.dueDate > endDate) return@filter false
+
+            // Cartão de crédito
+            if (matchedCard != null) {
+                if (t.cardId != matchedCard.id && !matchesSearch(t.description, matchedCard.cardName)) return@filter false
+            } else if (!cardFilter.isNullOrBlank()) {
+                if (!matchesSearch(t.description, cardFilter)) return@filter false
+            }
+
+            // Categoria e subcategoria
             if (!category.isNullOrBlank() && !t.category.equals(category, ignoreCase = true) && !matchesSearch(t.category, category)) return@filter false
             if (!subcategory.isNullOrBlank() && !(t.subcategory?.contains(subcategory, ignoreCase = true) == true)) return@filter false
             if (status != null && t.status != status) return@filter false
             if (!searchTerm.isNullOrBlank() && !matchesSearch(t.description, searchTerm) && !matchesSearch(t.category, searchTerm)) return@filter false
+
+            // FILTRO CRÍTICO: SOMENTE 100% MEU (SEM DIVISÕES NEM TERCEIROS)
+            if (onlyMine) {
+                if (t.category.equals("Cartão Terceiros", ignoreCase = true)) return@filter false
+                if (t.splitType != null && t.splitType != SplitType.MINE) return@filter false
+                if (!t.assignedFriendUid.isNullOrBlank() || !t.assignedFriendName.isNullOrBlank()) return@filter false
+                if (t.allocations.any { it.uid != user.uid && it.amount > 0 }) return@filter false
+                val myImp = t.userImpact[user.uid] ?: t.effectiveAmount
+                if (kotlin.math.abs(myImp - t.totalAmount) > 0.01) return@filter false
+            }
+
+            // FILTRO CRÍTICO: PESSOA ESPECÍFICA (TERCEIRO X OU Y / AMIGO)
+            if (!person.isNullOrBlank() && !onlyThirdParties) {
+                val matchesFriend = t.assignedFriendName?.contains(person, ignoreCase = true) == true
+                val matchesAlloc = t.allocations.any { it.name.contains(person, ignoreCase = true) }
+                val matchesDesc = matchesSearch(t.description, person)
+                val isThirdCat = t.category.equals("Cartão Terceiros", ignoreCase = true) && matchesSearch(t.description, person)
+
+                if (!matchesFriend && !matchesAlloc && !matchesDesc && !isThirdCat) {
+                    return@filter false
+                }
+            }
+
+            // FILTRO CRÍTICO: APENAS TERCEIROS / DIVIDIDOS (NÃO 100% MEU)
+            if (onlyThirdParties) {
+                val isThirdCat = t.category.equals("Cartão Terceiros", ignoreCase = true)
+                val isSharedSplit = t.splitType != null && t.splitType != SplitType.MINE
+                val hasFriend = !t.assignedFriendUid.isNullOrBlank() || !t.assignedFriendName.isNullOrBlank()
+                val hasOtherAlloc = t.allocations.any { it.uid != user.uid && it.amount > 0 }
+                val myImp = t.userImpact[user.uid] ?: t.effectiveAmount
+                val hasThirdShare = t.totalAmount - myImp > 0.01
+
+                if (!isThirdCat && !isSharedSplit && !hasFriend && !hasOtherAlloc && !hasThirdShare) {
+                    return@filter false
+                }
+            }
+
             true
         }.sortedByDescending { it.dueDate }
 
@@ -1215,9 +1294,9 @@ class AndroidAgentToolsEngine(
             recurringBills.firstOrNull { matchesSearch(it.description, searchTerm) || (!category.isNullOrBlank() && matchesSearch(it.category, category)) }
         } else null
 
-        // 2. Se não encontrou no mês ativo e o usuário não especificou um mês fixo, busca em outros meses para orientar
+        // 2. Se não encontrou no mês ativo e o usuário não especificou um mês fixo nem filtros específicos, busca em outros meses para orientar
         var foundInOtherMonth = false
-        if (filtered.isEmpty() && !searchTerm.isNullOrBlank() && month.isNullOrBlank()) {
+        if (filtered.isEmpty() && !searchTerm.isNullOrBlank() && month.isNullOrBlank() && !onlyMine && person.isNullOrBlank() && !onlyThirdParties && cardFilter.isNullOrBlank()) {
             val inOtherMonths = all.filter { t ->
                 matchesSearch(t.description, searchTerm) || (!category.isNullOrBlank() && matchesSearch(t.category, category))
             }.sortedByDescending { it.dueDate }
@@ -1232,14 +1311,19 @@ class AndroidAgentToolsEngine(
                 "\n\n⚠️ **Nota sobre Conta Recorrente:** Encontrei o molde previsto de **\"${matchingRecurring.description}\"** cadastrado com valor estimado de **${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)}** (vence dia ${matchingRecurring.dueDay}), mas **NENHUM lançamento real foi efetivado ou registrado** no mês de ${FinanceEngine.monthLabel(activeMonth)}."
             } else ""
 
+            var emptyFilterMsg = "os filtros informados"
+            if (onlyMine) emptyFilterMsg = "despesas 100% pessoais do usuário"
+            else if (!person.isNullOrBlank()) emptyFilterMsg = "despesas vinculadas a \"$person\""
+            else if (onlyThirdParties) emptyFilterMsg = "despesas de terceiros ou divididas"
+            else if (matchedCard != null) emptyFilterMsg = "o cartão ${matchedCard.cardName}"
+            else if (!searchTerm.isNullOrBlank()) emptyFilterMsg = "\"$searchTerm\""
+
             return ToolExecutionResult(
                 text = "🔍 **Busca de Transações Reais (${FinanceEngine.monthLabel(activeMonth)}):**\n" +
-                        "Nenhuma transação real encontrada no banco de dados para " +
-                        (if (!searchTerm.isNullOrBlank()) "\"$searchTerm\"" else "os filtros informados") +
-                        " em ${FinanceEngine.monthLabel(activeMonth)}.$recurringNote",
+                        "Nenhuma transação real encontrada no banco de dados para $emptyFilterMsg em ${FinanceEngine.monthLabel(activeMonth)}.$recurringNote",
                 actionCard = ActionCardData(
                     title = "Nenhum lançamento real encontrado",
-                    description = if (!searchTerm.isNullOrBlank()) "Busca: \"$searchTerm\"" else "Nenhum resultado",
+                    description = "Filtro: $emptyFilterMsg",
                     detail = if (matchingRecurring != null) "Molde previsto: ${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)} (sem lançamento real)" else "Mês: ${FinanceEngine.monthLabel(activeMonth)}"
                 )
             )
@@ -1247,6 +1331,19 @@ class AndroidAgentToolsEngine(
 
         val totalAmount = filtered.sumOf { it.totalAmount }
         val myImpactTotal = filtered.sumOf { it.userImpact[user.uid] ?: it.totalAmount }
+        val thirdPartyTotal = kotlin.math.max(0.0, totalAmount - myImpactTotal)
+
+        // Agrupamento por subcategoria se houver múltiplos itens
+        val subcategoryGroups = filtered.groupBy { it.subcategory ?: "Geral" }
+        val subcategoryBreakdownText = if (subcategoryGroups.size > 1) {
+            val breakdownLines = subcategoryGroups.entries
+                .sortedByDescending { it.value.sumOf { tx -> tx.totalAmount } }
+                .take(5)
+                .joinToString("\n") { (sub, txs) ->
+                    "  * **$sub**: ${FinanceEngine.formatCurrency(txs.sumOf { it.totalAmount })} (${txs.size} item(ns))"
+                }
+            "\n\n📊 **Distribuição por Subcategoria:**\n$breakdownLines"
+        } else ""
 
         val lines = filtered.take(15).joinToString("\n") { t ->
             val sub = if (!t.subcategory.isNullOrBlank()) " › ${t.subcategory}" else ""
@@ -1285,28 +1382,44 @@ class AndroidAgentToolsEngine(
             }
         } else ""
 
-        val hasAnySplit = filtered.any {
-            val myImpact = it.userImpact[user.uid] ?: it.effectiveAmount
-            kotlin.math.abs(myImpact - it.effectiveAmount) > 0.01
-        }
-        val splitSummaryNote = if (hasAnySplit) {
-            "\n*(Nota: O Impacto no Saldo Livre reflete os abatimentos da divisão de contas com amigos/parceiro)*"
+        val thirdPartySummaryNote = if (thirdPartyTotal > 0.01) {
+            "\n• **Cota de Terceiros (A Receber / Reembolso)**: ${FinanceEngine.formatCurrency(thirdPartyTotal)}"
         } else ""
 
-        val headerText = if (foundInOtherMonth) {
-            "🔍 **Lançamentos reais encontrados em outros meses (nenhum em ${FinanceEngine.monthLabel(activeMonth)}):**"
-        } else {
-            "📋 **Lançamentos reais encontrados em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):**"
+        val headerText = when {
+            foundInOtherMonth ->
+                "🔍 **Lançamentos reais encontrados em outros meses (nenhum em ${FinanceEngine.monthLabel(activeMonth)}):**"
+            onlyMine ->
+                "👤 **Despesas 100% Pessoais (Suas Despesas Exclusivas)** em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+            !person.isNullOrBlank() ->
+                "👥 **Despesas Vinculadas a $person** em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+            onlyThirdParties ->
+                "👥 **Despesas de Terceiros e Divisões no Cartão** em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+            matchedCard != null ->
+                "💳 **Fatura do Cartão ${matchedCard.cardName}** (Titular: ${matchedCard.ownerName}, Fecha dia ${matchedCard.closingDay}, Vence dia ${matchedCard.dueDay}) em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} compra(s)):"
+            !category.isNullOrBlank() ->
+                "🏷️ **Despesas na Categoria $category**${if (!subcategory.isNullOrBlank()) " › $subcategory" else ""} em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):"
+            !startDate.isNullOrBlank() || !endDate.isNullOrBlank() ->
+                "📅 **Despesas no Período [${startDate ?: "início"} a ${endDate ?: "hoje"}]** (${filtered.size} item(ns)):"
+            else ->
+                "📋 **Lançamentos reais encontrados em ${FinanceEngine.monthLabel(activeMonth)} (${filtered.size} item(ns)):**"
         }
+
+        var cardTitle = "Busca: ${filtered.size} lançamento(s)"
+        if (onlyMine) cardTitle = "100% Pessoais: ${filtered.size} item(ns)"
+        else if (!person.isNullOrBlank()) cardTitle = "Despesas de $person (${filtered.size})"
+        else if (onlyThirdParties) cardTitle = "Terceiros: ${filtered.size} item(ns)"
+        else if (matchedCard != null) cardTitle = "Cartão ${matchedCard.cardName} (${filtered.size})"
 
         return ToolExecutionResult(
             text = "$headerText\n\n" +
                     "$lines$extraNote\n\n" +
                     "• **Soma Total Real**: ${FinanceEngine.formatCurrency(totalAmount)}\n" +
-                    "• **Seu Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(myImpactTotal)}$splitSummaryNote" +
+                    "• **Seu Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(myImpactTotal)}$thirdPartySummaryNote" +
+                    subcategoryBreakdownText +
                     recurringDivergenceNote,
             actionCard = ActionCardData(
-                title = "Busca: ${filtered.size} lançamento(s) real(is)",
+                title = cardTitle,
                 description = "Total: ${FinanceEngine.formatCurrency(totalAmount)}",
                 detail = "Impacto: ${FinanceEngine.formatCurrency(myImpactTotal)} • Mês: ${FinanceEngine.monthLabel(if (foundInOtherMonth) filtered.first().competenceMonth else activeMonth)}"
             )
@@ -1318,13 +1431,27 @@ class AndroidAgentToolsEngine(
         category: String? = null,
         subcategory: String? = null,
         month: String? = null,
-        status: TransactionStatus? = null
+        status: TransactionStatus? = null,
+        onlyMine: Boolean = false,
+        person: String? = null,
+        onlyThirdParties: Boolean = false,
+        cardFilter: String? = null,
+        startDate: String? = null,
+        endDate: String? = null,
+        type: TransactionType? = null
     ): ToolExecutionResult = executeSearchTransactions(
         searchTerm = searchTerm,
         category = category,
         subcategory = subcategory,
         month = month,
-        status = status
+        status = status,
+        onlyMine = onlyMine,
+        person = person,
+        onlyThirdParties = onlyThirdParties,
+        cardFilter = cardFilter,
+        startDate = startDate,
+        endDate = endDate,
+        type = type
     )
 
     private suspend fun executeSearchFromJson(jsonObj: JsonObject): ToolExecutionResult {
@@ -1344,12 +1471,51 @@ class AndroidAgentToolsEngine(
         val statusStr = jsonObj.getStringOrNull("status")
         val status = statusStr?.let { TransactionStatus.from(it) }
 
+        val onlyMine = jsonObj.getBooleanOrNull("onlyMine")
+            ?: jsonObj.getBooleanOrNull("somenteMinhas")
+            ?: jsonObj.getBooleanOrNull("apenasMinhas")
+            ?: false
+
+        val person = jsonObj.getStringOrNull("person")
+            ?: jsonObj.getStringOrNull("pessoa")
+            ?: jsonObj.getStringOrNull("terceiro")
+            ?: jsonObj.getStringOrNull("friendName")
+
+        val onlyThirdParties = jsonObj.getBooleanOrNull("onlyThirdParties")
+            ?: jsonObj.getBooleanOrNull("apenasTerceiros")
+            ?: (person != null && (person.equals("terceiro", ignoreCase = true) || person.equals("terceiros", ignoreCase = true) || person.equals("amigos", ignoreCase = true)))
+
+        val cardFilter = jsonObj.getStringOrNull("cardName")
+            ?: jsonObj.getStringOrNull("cartao")
+            ?: jsonObj.getStringOrNull("card")
+
+        val startDate = jsonObj.getStringOrNull("startDate")
+            ?: jsonObj.getStringOrNull("dataInicio")
+
+        val endDate = jsonObj.getStringOrNull("endDate")
+            ?: jsonObj.getStringOrNull("dataFim")
+
+        val typeStr = jsonObj.getStringOrNull("type")
+            ?: jsonObj.getStringOrNull("tipo")
+        val type = when {
+            typeStr?.equals("income", ignoreCase = true) == true || typeStr?.equals("receita", ignoreCase = true) == true -> TransactionType.INCOME
+            typeStr?.equals("expense", ignoreCase = true) == true || typeStr?.equals("despesa", ignoreCase = true) == true -> TransactionType.EXPENSE
+            else -> null
+        }
+
         return executeSearchTransactions(
             searchTerm = searchTerm,
             category = category,
             subcategory = subcategory,
             month = month,
-            status = status
+            status = status,
+            onlyMine = onlyMine,
+            person = person,
+            onlyThirdParties = onlyThirdParties,
+            cardFilter = cardFilter,
+            startDate = startDate,
+            endDate = endDate,
+            type = type
         )
     }
 

@@ -35,6 +35,14 @@ data class InvoiceCategorySlice(
 )
 
 @Immutable
+data class InvoiceParticipantShare(
+    val name: String,
+    val amount: Double,
+    val pct: Int,
+    val isMe: Boolean
+)
+
+@Immutable
 data class CardInvoice(
     val card: Card,
     val monthKey: String,
@@ -53,7 +61,16 @@ data class CardInvoice(
     val daysToDue: Int,
     val daysToClose: Int,
     val items: List<Transaction>,
-    val byCategory: List<InvoiceCategorySlice>
+    val byCategory: List<InvoiceCategorySlice>,
+    val splitBreakdown: List<InvoiceParticipantShare> = emptyList(),
+    val topExpense: Transaction? = null,
+    val futureInstallmentsTotal: Double = 0.0,
+    val futureInstallmentsCount: Int = 0,
+    val bestPurchaseDay: Int = 1,
+    val bestPurchaseDate: String = "",
+    val isBestPurchaseTime: Boolean = false,
+    val bestPurchaseHint: String = "",
+    val cycleProgressPct: Int = 0
 ) {
     val itemsCount: Int get() = items.size
     val unpaidExpenses: List<Transaction>
@@ -135,6 +152,105 @@ object InvoiceEngine {
 
         val limit = card.limit?.takeIf { it > 0.0 }
 
+        // Rateio detalhado por participante
+        val participantMap = mutableMapOf<String, InvoiceParticipantShare>()
+        if (myShare > 0) {
+            participantMap["__me__"] = InvoiceParticipantShare(
+                name = "Você (Minha parte)",
+                amount = myShare,
+                pct = if (total > 0) ((myShare / total) * 100).roundToInt() else 0,
+                isMe = true
+            )
+        }
+
+        for (t in expenses) {
+            if (t.allocations.isNotEmpty()) {
+                for (a in t.allocations) {
+                    if (a.uid == uid) continue
+                    val name = a.name.trim().ifEmpty { "Outro" }
+                    val current = participantMap[name]?.amount ?: 0.0
+                    val updatedAmt = FinanceEngine.round2(current + a.amount)
+                    participantMap[name] = InvoiceParticipantShare(
+                        name = name,
+                        amount = updatedAmt,
+                        pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
+                        isMe = false
+                    )
+                }
+            } else if (!t.assignedFriendName.isNullOrBlank()) {
+                val name = t.assignedFriendName.trim()
+                val friendShare = FinanceEngine.round2(max(0.0, t.effectiveAmount - (t.userImpact[uid] ?: 0.0)))
+                if (friendShare > 0) {
+                    val current = participantMap[name]?.amount ?: 0.0
+                    val updatedAmt = FinanceEngine.round2(current + friendShare)
+                    participantMap[name] = InvoiceParticipantShare(
+                        name = name,
+                        amount = updatedAmt,
+                        pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
+                        isMe = false
+                    )
+                }
+            } else if (!t.externalName.isNullOrBlank()) {
+                val name = t.externalName.trim()
+                val share = FinanceEngine.round2(max(0.0, t.effectiveAmount - (t.userImpact[uid] ?: 0.0)))
+                if (share > 0) {
+                    val current = participantMap[name]?.amount ?: 0.0
+                    val updatedAmt = FinanceEngine.round2(current + share)
+                    participantMap[name] = InvoiceParticipantShare(
+                        name = name,
+                        amount = updatedAmt,
+                        pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
+                        isMe = false
+                    )
+                }
+            }
+        }
+
+        val recordedOthers = participantMap.values.filter { !it.isMe }.sumOf { it.amount }
+        if (othersShare > recordedOthers + 0.05) {
+            val diff = FinanceEngine.round2(othersShare - recordedOthers)
+            val current = participantMap["Parceiro(a)"]?.amount ?: 0.0
+            val updatedAmt = FinanceEngine.round2(current + diff)
+            participantMap["Parceiro(a)"] = InvoiceParticipantShare(
+                name = "Parceiro(a)",
+                amount = updatedAmt,
+                pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
+                isMe = false
+            )
+        }
+
+        val splitBreakdown = participantMap.values
+            .filter { it.amount > 0 }
+            .sortedWith(compareByDescending<InvoiceParticipantShare> { it.isMe }.thenByDescending { it.amount })
+
+        val topExpense = expenses.maxByOrNull { it.effectiveAmount }
+
+        val futureItems = all.filter {
+            it.cardId == card.id &&
+                it.competenceMonth > monthKey &&
+                it.type == TransactionType.EXPENSE &&
+                it.reserveCardId == null &&
+                it.visibleToUids.contains(uid)
+        }
+        val futureInstallmentsTotal = FinanceEngine.round2(futureItems.sumOf { it.effectiveAmount })
+        val futureInstallmentsCount = futureItems.size
+
+        val bestPurchaseDay = card.closingDay
+        val bestPurchaseDate = closingDate
+        val isBestPurchaseTime = today >= closingDate && diffDays(closingDate, today) <= 5
+        val bestPurchaseHint = if (today < closingDate) {
+            "A partir do dia $bestPurchaseDay, compras caem só na próxima fatura (até 40 dias para pagar)."
+        } else {
+            "Melhor época de compra ativa! Suas compras agora já caem na fatura do próximo ciclo."
+        }
+
+        val closingMonth = if (card.dueDay < card.closingDay) FinanceEngine.shiftMonth(monthKey, -1) else monthKey
+        val prevClosingMonth = FinanceEngine.shiftMonth(closingMonth, -1)
+        val prevClosingDate = clampDay(prevClosingMonth, card.closingDay)
+        val cycleTotalDays = max(1, diffDays(prevClosingDate, closingDate))
+        val cyclePassedDays = max(0, diffDays(prevClosingDate, today))
+        val cycleProgressPct = ((cyclePassedDays.toDouble() / cycleTotalDays) * 100).roundToInt().coerceIn(0, 100)
+
         return CardInvoice(
             card = card,
             monthKey = monthKey,
@@ -153,7 +269,16 @@ object InvoiceEngine {
             daysToDue = diffDays(today, dueDate),
             daysToClose = diffDays(today, closingDate),
             items = items,
-            byCategory = byCategory
+            byCategory = byCategory,
+            splitBreakdown = splitBreakdown,
+            topExpense = topExpense,
+            futureInstallmentsTotal = futureInstallmentsTotal,
+            futureInstallmentsCount = futureInstallmentsCount,
+            bestPurchaseDay = bestPurchaseDay,
+            bestPurchaseDate = bestPurchaseDate,
+            isBestPurchaseTime = isBestPurchaseTime,
+            bestPurchaseHint = bestPurchaseHint,
+            cycleProgressPct = cycleProgressPct
         )
     }
 
@@ -175,6 +300,7 @@ object InvoiceEngine {
         InvoiceStatus.EMPTY -> "Nenhuma compra neste ciclo"
         InvoiceStatus.OPEN ->
             if (inv.daysToClose == 0) "Fecha hoje"
+            else if (inv.daysToClose < 0) "Fechando ciclo"
             else "Fecha em ${inv.daysToClose} dia${if (inv.daysToClose == 1) "" else "s"}"
         else -> when {
             inv.daysToDue == 0 -> "Vence hoje"

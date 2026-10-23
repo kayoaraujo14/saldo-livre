@@ -1675,8 +1675,23 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   const categoria = typeof args.categoria === 'string' ? args.categoria.trim() : ''
   const subcategoria = typeof args.subcategoria === 'string' ? args.subcategoria.trim() : ''
   const mes = typeof args.mes === 'string' && /^\d{4}-\d{2}$/.test(args.mes) ? args.mes : ''
+  const dataInicio = typeof args.dataInicio === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.dataInicio) ? args.dataInicio.trim() : ''
+  const dataFim = typeof args.dataFim === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.dataFim) ? args.dataFim.trim() : ''
+  const somenteMinhas = args.somenteMinhas === true || args.apenasMinhas === true
+  const pessoa = typeof args.pessoa === 'string' ? args.pessoa.trim() : typeof args.terceiro === 'string' ? args.terceiro.trim() : ''
+  const apenasTerceiros = args.apenasTerceiros === true || args.terceiros === true || /^(terceiro|terceiros|amigos|amigo)$/i.test(pessoa)
+  const cartaoFiltro = typeof args.cartao === 'string' ? args.cartao.trim() : ''
+  const tipoFiltro = typeof args.tipo === 'string' ? args.tipo.trim().toLowerCase() : ''
   const status = typeof args.status === 'string' ? args.status : ''
-  const limite = typeof args.limite === 'number' && args.limite > 0 ? args.limite : 20
+  const limite = typeof args.limite === 'number' && args.limite > 0 ? args.limite : 25
+
+  const cards = env.getCards()
+  const cardsMap = new Map(cards.map((c) => [c.id, c]))
+  let matchedCard: Card | undefined
+  if (cartaoFiltro) {
+    const normCartao = normalize(cartaoFiltro)
+    matchedCard = cards.find((c) => normalize(c.cardName).includes(normCartao) || c.id === cartaoFiltro)
+  }
 
   const pendingTxs = env.getPendingTransactions?.()
   if (pendingTxs && pendingTxs.length > 0 && (args.pendentes === true || /pendent|extrato|lote|importad/i.test(termo))) {
@@ -1703,7 +1718,32 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   }
 
   const filtered = all.filter((t) => {
+    // 1. Tipo (despesa vs receita)
+    if (tipoFiltro && tipoFiltro !== 'all') {
+      if (t.type !== tipoFiltro) return false
+    } else if (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria) {
+      // Por padrão em análises de gastos e faturas, filtra despesas a menos que o usuário peça receitas
+      if (t.type !== 'expense' && categoria !== 'Receita') return false
+    }
+
+    // 2. Mês de competência
     if (mes && t.competenceMonth !== mes) return false
+
+    // 3. Intervalo de datas (dataInicio / dataFim)
+    const tDate = t.dueDate || (t as any).date || ''
+    if (dataInicio && tDate && tDate < dataInicio) return false
+    if (dataFim && tDate && tDate > dataFim) return false
+
+    // 4. Cartão de crédito cadastrado
+    if (cartaoFiltro) {
+      if (matchedCard) {
+        if (t.cardId !== matchedCard.id && !matchesSearch(t.description, matchedCard.cardName)) return false
+      } else {
+        if (!matchesSearch(t.description, cartaoFiltro)) return false
+      }
+    }
+
+    // 5. Categoria e Subcategoria
     if (categoria && t.category !== categoria) return false
     if (subcategoria) {
       if (t.subcategory) {
@@ -1712,8 +1752,50 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
         if (!matchesSearch(t.description, subcategoria)) return false
       }
     }
+
+    // 6. Status
     if (status && t.status !== status) return false
+
+    // 7. Termo de busca livre
     if (termo && !matchesSearch(t.description, termo) && !(t.subcategory && matchesSearch(t.subcategory, termo))) return false
+
+    // 8. FILTRO CRÍTICO: SOMENTE 100% MEU (SEM DIVISÕES NEM TERCEIROS)
+    if (somenteMinhas) {
+      if (t.category === 'Cartão Terceiros') return false
+      if (t.splitType && t.splitType !== 'mine') return false
+      if (t.assignedFriendUid || t.assignedFriendName) return false
+      if (t.allocations && t.allocations.some((a) => a.uid !== env.me.uid && a.amount > 0)) return false
+      const myImp = impactFor(t, env.me.uid, all)
+      if (Math.abs(myImp - t.totalAmount) > 0.01) return false
+    }
+
+    // 9. FILTRO CRÍTICO: PESSOA ESPECÍFICA (TERCEIRO X OU Y / AMIGO)
+    if (pessoa && !/^(terceiro|terceiros|amigos|amigo)$/i.test(pessoa)) {
+      const normPessoa = normalize(pessoa)
+      const matchesFriendName = t.assignedFriendName && normalize(t.assignedFriendName).includes(normPessoa)
+      const matchesAllocations = t.allocations && t.allocations.some((a) => normalize(a.name).includes(normPessoa))
+      const matchesDesc = matchesSearch(t.description, pessoa)
+      const isThirdPartyCat = t.category === 'Cartão Terceiros' && matchesSearch(t.description, pessoa)
+
+      if (!matchesFriendName && !matchesAllocations && !matchesDesc && !isThirdPartyCat) {
+        return false
+      }
+    }
+
+    // 10. FILTRO CRÍTICO: APENAS TERCEIROS / DIVIDIDOS (NÃO 100% MEU)
+    if (apenasTerceiros) {
+      const isThirdPartyCat = t.category === 'Cartão Terceiros'
+      const isSharedSplit = t.splitType && t.splitType !== 'mine'
+      const hasFriend = Boolean(t.assignedFriendUid || t.assignedFriendName)
+      const hasOtherAllocations = t.allocations && t.allocations.some((a) => a.uid !== env.me.uid && a.amount > 0)
+      const myImp = impactFor(t, env.me.uid, all)
+      const hasThirdShare = t.totalAmount - myImp > 0.01
+
+      if (!isThirdPartyCat && !isSharedSplit && !hasFriend && !hasOtherAllocations && !hasThirdShare) {
+        return false
+      }
+    }
+
     return true
   })
 
@@ -1723,35 +1805,164 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   const targets = filtered.slice(0, limite)
   const somaTotal = filtered.reduce((acc, t) => acc + (t.totalAmount || 0), 0)
   const somaMeuImpacto = filtered.reduce((acc, t) => acc + impactFor(t, env.me.uid, all), 0)
+  const somaTerceiros = Math.max(0, somaTotal - somaMeuImpacto)
 
-  const items = targets.map((t) => ({
-    id: t.id,
-    descricao: t.description,
-    valorTotal: t.totalAmount,
-    meuImpacto: round2(impactFor(t, env.me.uid, all)),
-    dataVencimento: t.dueDate,
-    mesCompetencia: t.competenceMonth,
-    categoria: t.category,
-    subcategoria: t.subcategory || null,
-    status: t.status,
-    tipo: t.type,
-    divisao: t.splitType || 'mine',
-    nomeAmigo: t.assignedFriendName || null,
-  }))
+  // Agrupamento por subcategoria para relatórios analíticos ricos
+  const subcategoryTotals: Record<string, { total: number; count: number; category: string }> = {}
+  for (const t of filtered) {
+    const sub = t.subcategory || 'Geral'
+    if (!subcategoryTotals[sub]) {
+      subcategoryTotals[sub] = { total: 0, count: 0, category: t.category }
+    }
+    subcategoryTotals[sub].total += t.totalAmount
+    subcategoryTotals[sub].count += 1
+  }
+  const porSubcategoria = Object.entries(subcategoryTotals)
+    .map(([sub, data]) => ({
+      subcategoria: sub,
+      categoria: data.category,
+      total: round2(data.total),
+      quantidade: data.count,
+    }))
+    .sort((a, b) => b.total - a.total)
+
+  // Agrupamento por pessoa / participante
+  const personTotals: Record<string, { total: number; userShare: number; personShare: number; count: number }> = {}
+  for (const t of filtered) {
+    const myImp = impactFor(t, env.me.uid, all)
+    const thirdImp = Math.max(0, t.totalAmount - myImp)
+    let pName =
+      t.assignedFriendName ||
+      t.allocations?.find((a) => a.uid !== env.me.uid)?.name ||
+      (t.category === 'Cartão Terceiros' ? 'Terceiro' : null)
+    if (!pName && t.splitType === 'split_50') pName = 'Parceiro(a)'
+    if (!pName && t.splitType === 'partner') pName = 'Parceiro(a)'
+    if (pName) {
+      if (!personTotals[pName]) {
+        personTotals[pName] = { total: 0, userShare: 0, personShare: 0, count: 0 }
+      }
+      personTotals[pName].total += t.totalAmount
+      personTotals[pName].userShare += myImp
+      personTotals[pName].personShare += thirdImp
+      personTotals[pName].count += 1
+    }
+  }
+  const porPessoa = Object.entries(personTotals)
+    .map(([pName, data]) => ({
+      pessoa: pName,
+      total: round2(data.total),
+      cotaUsuario: round2(data.userShare),
+      cotaPessoa: round2(data.personShare),
+      quantidade: data.count,
+    }))
+    .sort((a, b) => b.total - a.total)
+
+  // Agrupamento por cartão
+  const cardTotals: Record<string, { total: number; count: number }> = {}
+  for (const t of filtered) {
+    const cName = t.cardId ? cardsMap.get(t.cardId)?.cardName : null
+    if (cName) {
+      cardTotals[cName] = cardTotals[cName] || { total: 0, count: 0 }
+      cardTotals[cName].total += t.totalAmount
+      cardTotals[cName].count += 1
+    }
+  }
+  const porCartao = Object.entries(cardTotals)
+    .map(([cName, data]) => ({
+      cartao: cName,
+      total: round2(data.total),
+      quantidade: data.count,
+    }))
+    .sort((a, b) => b.total - a.total)
+
+  const items = targets.map((t) => {
+    const cardObj = t.cardId ? cardsMap.get(t.cardId) : undefined
+    const myImpact = round2(impactFor(t, env.me.uid, all))
+    const thirdPartyImpact = round2(Math.max(0, t.totalAmount - myImpact))
+
+    let detalheDivisao = '100% do usuário'
+    if (t.splitType === 'split_50') {
+      detalheDivisao = `Dividido 50/50 (Você: ${money(myImpact)} | Parceiro: ${money(thirdPartyImpact)})`
+    } else if (t.splitType === 'friend' || t.assignedFriendName) {
+      const friend = t.assignedFriendName || 'Amigo'
+      const pct = t.friendSharePct != null ? `${t.friendSharePct}%` : '100%'
+      detalheDivisao = `Amigo: ${friend} (${pct}) • Cota dele(a): ${money(thirdPartyImpact)} • Sua cota: ${money(myImpact)}`
+    } else if (t.splitType === 'partner') {
+      detalheDivisao = `100% do Parceiro(a) (${money(t.totalAmount)})`
+    } else if (t.splitType === 'external' || t.category === 'Cartão Terceiros') {
+      const who = t.allocations?.find((a) => a.uid !== env.me.uid)?.name || 'Terceiro'
+      detalheDivisao = `Terceiro (${who}) • Cota dele(a): ${money(thirdPartyImpact)}`
+    } else if (t.allocations && t.allocations.length > 1) {
+      detalheDivisao = t.allocations.map((a) => `${a.name}: ${money(a.amount)}`).join(' | ')
+    }
+
+    return {
+      id: t.id,
+      descricao: t.description,
+      valorTotal: t.totalAmount,
+      meuImpacto: myImpact,
+      impactoTerceiros: thirdPartyImpact,
+      dataVencimento: t.dueDate,
+      dataCompra: (t as any).date || t.dueDate,
+      mesCompetencia: t.competenceMonth,
+      categoria: t.category,
+      subcategoria: t.subcategory || null,
+      cartao: cardObj ? cardObj.cardName : null,
+      metodoPagamento: t.paymentMethod,
+      status: t.status,
+      tipo: t.type,
+      divisao: t.splitType || 'mine',
+      nomeAmigo: t.assignedFriendName || null,
+      detalhesDivisao: detalheDivisao,
+    }
+  })
+
+  // Título e linhas do ActionCard dinâmicos e elegantes
+  let reportTitle = `Consulta: ${filtered.length} lançamento(s)`
+  if (somenteMinhas) {
+    reportTitle = `Despesas 100% Pessoais (${filtered.length} itens)`
+  } else if (pessoa) {
+    reportTitle = `Despesas vinculadas a ${pessoa} (${filtered.length} itens)`
+  } else if (apenasTerceiros) {
+    reportTitle = `Despesas de Terceiros e Divisões (${filtered.length} itens)`
+  } else if (matchedCard) {
+    reportTitle = `Fatura Cartão ${matchedCard.cardName} (${filtered.length} compras)`
+  } else if (categoria) {
+    reportTitle = `Despesas em ${categoria}${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
+  }
 
   const lines = [
-    { label: 'Lançamentos', value: `${filtered.length} encontrado(s)` },
+    { label: 'Total Encontrado', value: `${filtered.length} lançamento(s)` },
     { label: 'Soma Total', value: money(somaTotal) },
-    { label: 'Meu Impacto', value: money(somaMeuImpacto), tone: somaMeuImpacto > 0 ? 'negative' as const : 'neutral' as const },
-    ...(mes ? [{ label: 'Mês', value: monthLabel(mes) }] : []),
-    ...(termo ? [{ label: 'Filtro', value: `"${termo}"` }] : []),
+    { label: 'Seu Impacto (Saldo Livre)', value: money(somaMeuImpacto), tone: somaMeuImpacto > 0 ? ('negative' as const) : ('neutral' as const) },
+    ...(somaTerceiros > 0 ? [{ label: 'Cota de Terceiros / A Receber', value: money(somaTerceiros), tone: 'positive' as const }] : []),
+    ...(matchedCard ? [{ label: 'Cartão Referenciado', value: `${matchedCard.cardName} (Fecha dia ${matchedCard.closingDay}, Vence dia ${matchedCard.dueDay})` }] : []),
+    ...(pessoa ? [{ label: 'Pessoa / Terceiro', value: pessoa }] : []),
     ...(categoria ? [{ label: 'Categoria', value: categoria }] : []),
     ...(subcategoria ? [{ label: 'Subcategoria', value: subcategoria }] : []),
-    ...(targets.length > 0 ? [{
-      label: 'Itens',
-      value: targets.slice(0, 3).map((t) => `${t.description} (${money(t.totalAmount)})`).join(', ') + (targets.length > 3 ? ` (+${targets.length - 3})` : '')
-    }] : []),
+    ...(mes ? [{ label: 'Mês de Competência', value: monthLabel(mes) }] : []),
+    ...(dataInicio || dataFim ? [{ label: 'Período', value: `${dataInicio || 'início'} até ${dataFim || 'hoje'}` }] : []),
+    ...(targets.length > 0
+      ? [
+          {
+            label: 'Principais Itens',
+            value:
+              targets.slice(0, 3).map((t) => `${t.description} (${money(t.totalAmount)})`).join(', ') +
+              (targets.length > 3 ? ` (+${targets.length - 3})` : ''),
+          },
+        ]
+      : []),
   ]
+
+  const cartaoReferenciado = matchedCard
+    ? {
+        id: matchedCard.id,
+        nome: matchedCard.cardName,
+        titular: matchedCard.ownerName,
+        fechamentoDia: matchedCard.closingDay,
+        vencimentoDia: matchedCard.dueDay,
+      }
+    : null
 
   return {
     response: {
@@ -1759,12 +1970,17 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
       totalEncontrados: filtered.length,
       somaTotal: round2(somaTotal),
       somaMeuImpacto: round2(somaMeuImpacto),
+      somaTerceiros: round2(somaTerceiros),
+      cartaoReferenciado,
+      porSubcategoria,
+      porPessoa,
+      porCartao,
       exibindoQuantidade: items.length,
       transacoes: items,
     },
     action: {
       kind: 'report',
-      title: `Consulta: ${filtered.length} lançamento(s) encontrado(s)`,
+      title: reportTitle,
       lines,
     },
   }

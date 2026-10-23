@@ -524,9 +524,25 @@ fun TransactionFormScreen(
             }
 
             // Card selector if credit card
-            if (state.paymentMethod == PaymentMethod.CREDIT_CARD && state.availableCards.isNotEmpty()) {
+            if (state.paymentMethod == PaymentMethod.CREDIT_CARD) {
                 Text(text = "Cartão de Crédito", style = Typography.titleMedium, color = TextPrimary)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (state.availableCards.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkSurface)
+                            .border(1.dp, Amber400.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "Nenhum cartão cadastrado ainda. Cadastre um cartão no menu 'Cartões de Crédito' para vincular compras e faturas.",
+                            style = Typography.bodySmall,
+                            color = Amber400
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     state.availableCards.forEach { card ->
                         val isSelected = state.selectedCardId == card.id
                         Box(
@@ -570,6 +586,8 @@ fun TransactionFormScreen(
                         }
                     }
                 }
+            }
+
             }
 
             // Split Type (Divisão)

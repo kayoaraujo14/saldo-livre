@@ -159,7 +159,8 @@ data class Transaction(
     val installmentGroupId: String? = null,
     val installmentNumber: Int? = null,
     val installmentsTotal: Int? = null,
-    val splitType: SplitType? = null
+    val splitType: SplitType? = null,
+    val externalName: String? = null
 ) {
     val effectiveAmount: Double
         get() = actualAmount ?: estimatedAmount ?: totalAmount

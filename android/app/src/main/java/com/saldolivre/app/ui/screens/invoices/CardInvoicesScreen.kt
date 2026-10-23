@@ -42,6 +42,15 @@ private fun cardColor(name: String?): Color = when (name) {
     else -> CardNubankViolet
 }
 
+private fun cardDarkGradient(name: String?): List<Color> = when (name) {
+    "orange" -> listOf(Color(0xFF7C2D12), Color(0xFF451A03), DarkSurface)
+    "slate" -> listOf(Color(0xFF334155), Color(0xFF1E293B), DarkSurface)
+    "emerald" -> listOf(Color(0xFF064E3B), Color(0xFF022C22), DarkSurface)
+    "cyan" -> listOf(Color(0xFF164E63), Color(0xFF083344), DarkSurface)
+    "rose" -> listOf(Color(0xFF881337), Color(0xFF4C0519), DarkSurface)
+    else -> listOf(Color(0xFF581C87), Color(0xFF3B0764), DarkSurface)
+}
+
 private fun statusColor(status: InvoiceStatus): Color = when (status) {
     InvoiceStatus.EMPTY -> TextMuted
     InvoiceStatus.OPEN -> Cyan400
@@ -74,12 +83,19 @@ fun CardInvoicesScreen(
         }
     }
 
-    val visibleItems = remember(selected, uiState.itemFilter) {
+    val visibleItems = remember(selected, uiState.itemFilter, uiState.searchQuery) {
         val items = selected?.items.orEmpty()
-        when (uiState.itemFilter) {
+        val filtered = when (uiState.itemFilter) {
             InvoiceItemFilter.ALL -> items
             InvoiceItemFilter.OPEN -> items.filter { it.status != TransactionStatus.PAID }
             InvoiceItemFilter.PAID -> items.filter { it.status == TransactionStatus.PAID }
+            InvoiceItemFilter.INSTALLMENTS -> items.filter { (it.installmentsTotal ?: 1) > 1 }
+        }
+        if (uiState.searchQuery.isBlank()) filtered
+        else filtered.filter {
+            it.description.contains(uiState.searchQuery, ignoreCase = true) ||
+            it.category.contains(uiState.searchQuery, ignoreCase = true) ||
+            it.subcategory?.contains(uiState.searchQuery, ignoreCase = true) == true
         }
     }
 
@@ -107,7 +123,7 @@ fun CardInvoicesScreen(
                             maxLines = 1
                         )
                         Text(
-                            text = "Fechamento, vencimento e pagamento",
+                            text = "Fechamento, vencimento, rateio e inteligência",
                             fontSize = 11.sp,
                             color = TextMuted,
                             maxLines = 1
@@ -169,6 +185,7 @@ fun CardInvoicesScreen(
             }
 
             if (selected != null) {
+                // 1. Cartão Virtual Moderno
                 item(key = "summary_${selected.card.id}") {
                     InvoiceSummaryCard(
                         invoice = selected,
@@ -180,6 +197,19 @@ fun CardInvoicesScreen(
                     )
                 }
 
+                // 2. Card Inteligente: Melhor Época de Compra e Ciclo
+                item(key = "insights_${selected.card.id}") {
+                    SmartInsightsCard(invoice = selected)
+                }
+
+                // 3. Divisão da Fatura (Quem divide comigo)
+                if (selected.splitBreakdown.isNotEmpty()) {
+                    item(key = "split_${selected.card.id}") {
+                        SplitBreakdownCard(invoice = selected)
+                    }
+                }
+
+                // 4. Histórico e Evolução
                 item(key = "history") {
                     HistoryChart(
                         history = uiState.history,
@@ -189,28 +219,42 @@ fun CardInvoicesScreen(
                     )
                 }
 
+                // 5. Categorias
                 if (selected.byCategory.isNotEmpty()) {
                     item(key = "categories") { CategoryBreakdown(selected) }
                 }
 
+                // 6. Cabeçalho de Lançamentos + Busca + Filtros
                 item(key = "items_header") {
                     ItemsHeader(
                         count = selected.itemsCount,
                         filter = uiState.itemFilter,
-                        onFilter = viewModel::setFilter
+                        searchQuery = uiState.searchQuery,
+                        onFilter = viewModel::setFilter,
+                        onSearchChange = viewModel::setSearchQuery
                     )
                 }
 
                 if (visibleItems.isEmpty()) {
                     item(key = "items_empty") {
-                        Text(
-                            text = "Nenhum lançamento para este filtro.",
-                            fontSize = 12.sp,
-                            color = TextMuted,
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 24.dp),
-                        )
+                                .padding(vertical = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "Nenhum lançamento para este filtro.",
+                                fontSize = 12.sp,
+                                color = TextMuted
+                            )
+                            if (uiState.searchQuery.isNotBlank()) {
+                                TextButton(onClick = { viewModel.setSearchQuery("") }) {
+                                    Text("Limpar busca", fontSize = 11.sp, color = Cyan400)
+                                }
+                            }
+                        }
                     }
                 } else {
                     items(visibleItems, key = { "tx_${it.id}" }) { tx ->
@@ -341,81 +385,126 @@ private fun InvoiceSummaryCard(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val base = cardColor(invoice.card.color)
+    val gradientColors = cardDarkGradient(invoice.card.color)
     val paidProgress by animateFloatAsState(invoice.paidRatio, label = "paidProgress")
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Brush.linearGradient(listOf(base.copy(alpha = 0.40f), DarkSurface)))
-            .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Brush.linearGradient(gradientColors))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(22.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Row(verticalAlignment = Alignment.Top) {
+        // Top row: Titular + Chip metálico simulado + Status
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
             Column(Modifier.weight(1f)) {
-                Text("Fatura ${invoice.card.cardName}", fontSize = 11.sp, color = TextSecondary)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        invoice.card.cardName.uppercase(),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White.copy(alpha = 0.85f),
+                        letterSpacing = 1.sp
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            invoice.card.ownerName.ifBlank { "Titular" },
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
                 Text(
                     FinanceEngine.formatCurrency(invoice.total),
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = TextPrimary
+                    fontSize = 30.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White
                 )
                 Text(
                     InvoiceEngine.countdownLabel(invoice),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (invoice.status == InvoiceStatus.OVERDUE) Rose400 else TextPrimary
+                    color = if (invoice.status == InvoiceStatus.OVERDUE) Rose400 else Color.White.copy(alpha = 0.9f)
                 )
             }
-            StatusPill(invoice.status)
+
+            // Chip simulado
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 36.dp, height = 28.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Brush.linearGradient(listOf(Color(0xFFFDE68A), Color(0xFFD97706))))
+                        .border(1.dp, Color(0xFFB45309), RoundedCornerShape(6.dp))
+                        .padding(4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF92400E).copy(alpha = 0.7f)))
+                        Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF92400E).copy(alpha = 0.7f)))
+                    }
+                }
+                StatusPill(invoice.status)
+            }
         }
 
+        // Fechamento e Vencimento
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             InfoBox("Fechamento", FinanceEngine.formatShortDate(invoice.closingDate), Modifier.weight(1f))
             InfoBox("Vencimento", FinanceEngine.formatShortDate(invoice.dueDate), Modifier.weight(1f))
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InfoBox("Minha parte", FinanceEngine.formatCurrency(invoice.myShare), Modifier.weight(1f))
-            InfoBox("De terceiros", FinanceEngine.formatCurrency(invoice.othersShare), Modifier.weight(1f))
         }
 
         // Progresso de pagamento
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Pago ${FinanceEngine.formatCurrency(invoice.paidAmount)}", fontSize = 11.sp, color = TextSecondary)
-                Text("Em aberto ${FinanceEngine.formatCurrency(invoice.openAmount)}", fontSize = 11.sp, color = TextSecondary)
+                Text("Pago: ${FinanceEngine.formatCurrency(invoice.paidAmount)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
+                Text("Em aberto: ${FinanceEngine.formatCurrency(invoice.openAmount)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
             }
             LinearProgressIndicator(
                 progress = { paidProgress },
                 modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
-                color = Emerald500,
-                trackColor = DarkBackground.copy(alpha = 0.8f)
+                color = Emerald400,
+                trackColor = Color.Black.copy(alpha = 0.45f)
             )
         }
 
+        // Limite do Cartão
         invoice.limit?.let { limit ->
             val usage = invoice.limitUsagePct ?: 0
             val usageColor = when {
-                usage >= 90 -> Rose500
-                usage >= 70 -> Amber500
-                else -> base
+                usage >= 90 -> Rose400
+                usage >= 70 -> Amber400
+                else -> Cyan400
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Uso do limite ($usage%)", fontSize = 11.sp, color = TextSecondary)
+                    Text("Uso do limite ($usage%)", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
                     Text(
-                        "Disponível ${FinanceEngine.formatCurrency((limit - invoice.total).coerceAtLeast(0.0))}",
+                        "Disponível: ${FinanceEngine.formatCurrency((limit - invoice.total).coerceAtLeast(0.0))}",
                         fontSize = 11.sp,
-                        color = TextSecondary
+                        color = Color.White.copy(alpha = 0.8f)
                     )
                 }
                 LinearProgressIndicator(
                     progress = { usage / 100f },
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
                     color = usageColor,
-                    trackColor = DarkBackground.copy(alpha = 0.8f)
+                    trackColor = Color.Black.copy(alpha = 0.45f)
                 )
             }
         }
@@ -434,8 +523,8 @@ private fun InvoiceSummaryCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Emerald500.copy(alpha = 0.12f))
-                        .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                        .background(Emerald500.copy(alpha = 0.15f))
+                        .border(1.dp, Emerald500.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -484,15 +573,153 @@ private fun InvoiceSummaryCard(
 }
 
 @Composable
+private fun SmartInsightsCard(invoice: CardInvoice) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(DarkSurface)
+            .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Bolt, contentDescription = null, tint = Amber400, modifier = Modifier.size(18.dp))
+                Text("Inteligência da Fatura", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            }
+            if (invoice.isBestPurchaseTime) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Amber400.copy(alpha = 0.15f))
+                        .border(1.dp, Amber400.copy(alpha = 0.4f), CircleShape)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text("Melhor Época Ativa!", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Amber400)
+                }
+            }
+        }
+
+        Text(invoice.bestPurchaseHint, fontSize = 12.sp, color = TextSecondary, lineHeight = 17.sp)
+
+        // Barra de progresso do ciclo
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Progresso do ciclo da fatura", fontSize = 10.sp, color = TextMuted)
+                Text("${invoice.cycleProgressPct}%", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            }
+            LinearProgressIndicator(
+                progress = { invoice.cycleProgressPct / 100f },
+                modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+                color = Cyan400,
+                trackColor = DarkBackground
+            )
+        }
+
+        // Blocos de futuro comprometido e maior compra
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkBackground.copy(alpha = 0.6f))
+                    .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                    .padding(10.dp)
+            ) {
+                Column {
+                    Text("FUTURO COMPROMETIDO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Cyan400)
+                    Spacer(Modifier.height(2.dp))
+                    Text(FinanceEngine.formatCurrency(invoice.futureInstallmentsTotal), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = TextPrimary)
+                    Text("${invoice.futureInstallmentsCount} parcelas nos prox. meses", fontSize = 10.sp, color = TextMuted, maxLines = 1)
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkBackground.copy(alpha = 0.6f))
+                    .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                    .padding(10.dp)
+            ) {
+                Column {
+                    Text("MAIOR COMPRA", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Rose400)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        invoice.topExpense?.let { FinanceEngine.formatCurrency(it.effectiveAmount) } ?: "—",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextPrimary,
+                        maxLines = 1
+                    )
+                    Text(
+                        invoice.topExpense?.description ?: "Sem despesas",
+                        fontSize = 10.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SplitBreakdownCard(invoice: CardInvoice) {
+    SectionCard("Divisão da Fatura (Quem Divide Comigo)", Icons.Default.People, Emerald400) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            invoice.splitBreakdown.forEach { part ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkBackground.copy(alpha = 0.6f))
+                        .padding(10.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(
+                                part.name,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (part.isMe) Emerald400 else TextPrimary
+                            )
+                            Text(
+                                "${FinanceEngine.formatCurrency(part.amount)} (${part.pct}%)",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { part.pct / 100f },
+                            modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+                            color = if (part.isMe) Emerald400 else Cyan400,
+                            trackColor = DarkSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun InfoBox(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(DarkBackground.copy(alpha = 0.55f))
+            .background(Color.Black.copy(alpha = 0.25f))
             .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        Text(label, fontSize = 10.sp, color = TextSecondary)
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1)
+        Text(label, fontSize = 10.sp, color = Color.White.copy(alpha = 0.65f))
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
     }
 }
 
@@ -599,16 +826,30 @@ private fun CategoryBreakdown(invoice: CardInvoice) {
 }
 
 @Composable
-private fun ItemsHeader(count: Int, filter: InvoiceItemFilter, onFilter: (InvoiceItemFilter) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            "Lançamentos da fatura ($count)",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InvoiceItemFilter.entries.forEach { f ->
+private fun ItemsHeader(
+    count: Int,
+    filter: InvoiceItemFilter,
+    searchQuery: String,
+    onFilter: (InvoiceItemFilter) -> Unit,
+    onSearchChange: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Lançamentos da fatura ($count)",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+        }
+
+        // Filtros por chip
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(InvoiceItemFilter.entries) { f ->
                 FilterChip(
                     selected = f == filter,
                     onClick = { onFilter(f) },
@@ -622,6 +863,32 @@ private fun ItemsHeader(count: Int, filter: InvoiceItemFilter, onFilter: (Invoic
                 )
             }
         }
+
+        // Campo de busca
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            placeholder = { Text("Buscar lançamentos...", fontSize = 12.sp, color = TextMuted) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp)) },
+            trailingIcon = {
+                if (searchQuery.isNotBlank()) {
+                    IconButton(onClick = { onSearchChange("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Limpar", tint = TextMuted, modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = DarkSurface,
+                unfocusedContainerColor = DarkSurface,
+                focusedBorderColor = Cyan400,
+                unfocusedBorderColor = DarkBorder,
+                focusedTextColor = TextPrimary,
+                unfocusedTextColor = TextPrimary
+            )
+        )
     }
 }
 

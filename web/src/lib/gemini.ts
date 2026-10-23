@@ -386,16 +386,42 @@ export const functionDeclarations: FunctionDeclaration[] = [
   {
     name: 'consultarTransacoes',
     description:
-      'Consulta, filtra e pesquisa lançamentos e transações cadastradas no sistema. Use SEMPRE que o usuário perguntar sobre compras passadas, gastos com determinado estabelecimento, histórico do mês ou verificar se algo já foi lançado.',
+      'Consulta, filtra e analisa lançamentos e transações cadastrados no sistema com inteligência analítica profunda. Suporta filtros por: despesas 100% pessoais do usuário ("somenteMinhas"), despesas de uma pessoa/terceiro específico ("pessoa"), despesas de terceiros em geral ("apenasTerceiros"), cartão de crédito cadastrado na plataforma ("cartao"), categoria ou subcategoria, período ou intervalo de datas (mes, dataInicio, dataFim) e status.',
     parameters: {
       type: Type.OBJECT,
       properties: {
-        termoBusca: { type: Type.STRING, description: 'Termo de busca na descrição (ex: "Uber", "Mercado", "iFood").' },
+        termoBusca: { type: Type.STRING, description: 'Termo de busca na descrição ou estabelecimento (ex: "Uber", "Mercado", "iFood").' },
         categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Filtra por categoria ou grupo principal.' },
         subcategoria: { type: Type.STRING, description: 'Filtra por subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", etc.).' },
-        mes: { type: Type.STRING, description: 'Mês de competência (YYYY-MM). Padrão: mês atual.' },
-        status: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'], description: 'Filtra por status.' },
-        limite: { type: Type.NUMBER, description: 'Quantidade máxima de resultados (padrão: 15).' },
+        mes: { type: Type.STRING, description: 'Mês de competência (YYYY-MM). Padrão: mês atual em análise na tela.' },
+        dataInicio: { type: Type.STRING, description: 'Data de início para intervalo de período (YYYY-MM-DD).' },
+        dataFim: { type: Type.STRING, description: 'Data de fim para intervalo de período (YYYY-MM-DD).' },
+        somenteMinhas: {
+          type: Type.BOOLEAN,
+          description:
+            'CRÍTICO: Defina como true quando o usuário pedir para ver despesas relacionadas 100% a ele ("meus gastos pessoais", "100% minhas", "apenas o que é meu", "só minhas"). Exclui rigorosamente qualquer gasto compartilhado com amigos, parceiro ou terceiros.',
+        },
+        pessoa: {
+          type: Type.STRING,
+          description:
+            'Nome ou identificação de um terceiro, amigo ou pessoa específica (ex: "Kayo", "Mariana", "Mãe", "João"). O sistema filtra exclusivamente os lançamentos relacionados a essa pessoa.',
+        },
+        apenasTerceiros: {
+          type: Type.BOOLEAN,
+          description: 'Defina como true para filtrar despesas que envolvam terceiros, amigos ou divisões no cartão, excluindo gastos 100% pessoais.',
+        },
+        cartao: {
+          type: Type.STRING,
+          description:
+            'Nome ou identificador de um cartão de crédito cadastrado na plataforma (ex: "Nubank", "Inter Black", "XP"). O sistema filtra transações desse cartão e referencia seus dados de fechamento e vencimento.',
+        },
+        tipo: {
+          type: Type.STRING,
+          enum: ['expense', 'income', 'all'],
+          description: 'Filtra pelo tipo: "expense" para despesas/saídas, "income" para receitas/entradas, ou "all" para ambos. Padrão: expense para análises de gastos.',
+        },
+        status: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'], description: 'Filtra por status (pendente na fatura, pago, estimado).' },
+        limite: { type: Type.NUMBER, description: 'Quantidade máxima de resultados a detalhar individualmente (padrão: 25).' },
       },
     },
   },
@@ -714,8 +740,62 @@ REGRAS DE FUNCIONAMENTO:
   * NUNCA defina apenasRecentes: true ou tudoDoMes: true a menos que o usuário peça expressamente com palavras como: "desfazer último lote", "limpar todos os recentes" ou "apagar tudo do mês"!
 - Se o usuário pedir para mover despesas avulsas cadastradas por engano para outro mês/fatura:
   Chame "editarTransacoes" com mesOrigem, novoMesFatura e novaDataVencimento!
-- Se o usuário perguntar sobre compras anteriores ou pesquisar despesas específicas:
-  Chame "consultarTransacoes" para obter a lista exata!
+- Se o usuário perguntar sobre compras anteriores, pesquisar despesas específicas ou pedir análises financeiras:
+  Chame "consultarTransacoes" para obter os dados oficiais!
+
+7. INTELIGÊNCIA ANALÍTICA E SENSIÊNCIA DE DESPESAS (100% MINHAS, TERCEIROS, CARTÕES, CATEGORIAS E PERÍODOS):
+Você possui inteligência analítica profunda e sensibilidade discriminatória para analisar as despesas do usuário com máxima precisão e clareza descritiva:
+
+A) DESPESAS 100% PESSOAIS DO USUÁRIO ("100% a mim", "meus gastos exclusivos", "só o que é meu", "minhas despesas pessoais"):
+- Se o usuário pedir para ver apenas as despesas referentes 100% a ele:
+  * Chame OBRIGATORIAMENTE "consultarTransacoes" com somenteMinhas: true!
+  * Essa regra EXCLUI estritamente qualquer despesa de terceiros, amigos na rede, compras de parceiro(a) ou compras divididas.
+  * Na sua resposta descritiva, confirme com total clareza e transparência: "Aqui estão exclusivamente os seus gastos 100% pessoais (sem divisões nem participação de terceiros):"
+  * Destaque a soma total, o número de lançamentos e o impacto direto no seu Saldo Livre.
+
+B) DESPESAS DE UM TERCEIRO ESPECÍFICO (X OU Y) OU TERCEIROS EM GERAL:
+- Se o usuário pedir despesas de um terceiro ou amigo específico (ex: "despesas do Kayo", "o que comprei pra Mariana", "gastos da minha Mãe", "compras do João"):
+  * Chame OBRIGATORIAMENTE "consultarTransacoes" com pessoa: "NomeDoTerceiro" (ex: pessoa: "Kayo", pessoa: "Mariana", pessoa: "Mãe")!
+  * O sistema localiza cirurgicamente lançamentos atribuídos a essa pessoa por amizade, alocação, divisão ou menção na descrição.
+- Se o usuário pedir genericamente "despesas de terceiros", "o que terceiros gastaram no meu cartão" ou "gastos divididos":
+  * Chame "consultarTransacoes" com apenasTerceiros: true.
+- Na sua resposta descritiva:
+  * Destaque com precisão cirúrgica: Total acumulado pela pessoa, quanto é a cota dela (a ser reembolsada), quanto foi a sua parte (se a compra foi dividida) e status de ressarcimento.
+  * Exemplo: "Identifiquei X lançamentos vinculados a [Nome]: Total de R$ Y, sendo R$ Z a cota dele(a) a ser recebida na fatura."
+
+C) DESPESAS POR CARTÃO DE CRÉDITO CADASTRADO (REFERENCIANDO-SE A ELE COM PRECISÃO):
+- Quando o usuário pedir despesas relacionadas a um cartão de crédito (ex: "gastos no Nubank", "o que comprei no Inter", "despesas do cartão XP"):
+  * Chame OBRIGATORIAMENTE "consultarTransacoes" com cartao: "NomeDoCartao" (ex: cartao: "Nubank")!
+  * Referencie SEMPRE o cartão cadastrado pelos seus dados cadastrais oficiais informados no contexto: nome do cartão, titular, dia de fechamento e dia de vencimento!
+  * Exemplo: "💳 **Cartão Nubank** (Titular: ${ctx.userName}, Fechamento dia 04, Vencimento dia 11 — Fatura de Novembro 2026):"
+  * Informe o valor total comprometido na fatura daquele cartão, impacto no Saldo Livre e a listagem detalhada das compras passadas nele (indicando se alguma foi dividida).
+
+D) DESPESAS POR CATEGORIA OU SUBCATEGORIA:
+- Quando o usuário pedir despesas de uma categoria (ex: Alimentação, Transporte, Moradia) ou subcategoria específica (Supermercado, Delivery, Uber, Farmácia):
+  * Chame "consultarTransacoes" com categoria e/ou subcategoria.
+  * Agrupe e mostre a distribuição detalhada por subcategoria (ex: dentro de Alimentação, destaque o subtotal de Supermercado, Restaurante e Delivery).
+  * Informe a representatividade percentual sobre os gastos totais do mês.
+
+E) DESPESAS POR PERÍODO OU INTERVALO DE DATAS:
+- Quando o usuário pedir despesas de um período específico (ex: "em outubro", "dos últimos 15 dias", "entre 01/10 e 15/10", "esta semana"):
+  * Chame "consultarTransacoes" com mes (YYYY-MM) ou com dataInicio e dataFim (YYYY-MM-DD).
+
+F) APRESENTAÇÃO DESCRITIVA SUPERIOR ("MOSTRAR DESCRITIVAMENTE MELHOR"):
+- NUNCA devolva uma lista crua ou monótona sem organização.
+- Estruture SEMPRE sua resposta com:
+  1. 📌 **Visão Geral & Contexto**: Título destacado com emoji, filtro aplicado (cartão referenciado, terceiro, categoria ou período).
+  2. 📊 **Painel de Resumo (Métricas em Destaque)**:
+     - **Total Geral**: R$ X,XX
+     - **Seu Impacto Real (Saldo Livre)**: R$ Y,YY
+     - **Cota de Terceiros / A Receber**: R$ Z,ZZ (se houver divisão ou terceiros)
+     - **Quantidade de Lançamentos**: N item(ns)
+  3. 📋 **Detalhamento Descritivo Organizado**:
+     - Tabela limpa em Markdown ou lista com marcadores detalhados (Data | Estabelecimento / Descrição | Categoria › Subcategoria | Cartão / Método | Valor Total | Divisão / Quem Paga).
+     - Subtotais quando houver múltiplas subcategorias ou múltiplos participantes.
+  4. 💡 **Insight Financeiro Contextual**:
+     - Breve comentário inteligente sobre a concentração desses gastos, alertas de fechamento/vencimento do cartão ou dicas práticas para o Saldo Livre.
+  5. 📈 **Gráfico Financeiro Interativo**:
+     - Inclua um bloco \`\`\`chart ... \`\`\` sempre que a resposta envolver divisão de categorias/subcategorias ou comparativo entre você e terceiros, enriquecendo visualmente a experiência do usuário!
 
 7. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO (GUARDRAILS COMPORTAMENTAIS):
 - REGRA CRÍTICA DE INTEGRIDADE FINANCEIRA: Você está estritamente proibido de inventar, estimar ou deduzir valores de transações para fazer a soma bater com um total informado anteriormente. Toda listagem deve refletir caractere por caractere o documento original. Se os itens individuais não estiverem disponíveis no seu contexto atual, releia a ferramenta/documento original antes de responder.

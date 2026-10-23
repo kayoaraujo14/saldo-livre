@@ -23,6 +23,7 @@ import type {
 import {
   amountPatch,
   buildSplit,
+  calculateCardInvoiceDates,
   clampPct,
   computeSummary,
   friendPctOf,
@@ -1125,7 +1126,14 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         }
 
         const curDate = isInstallment ? shiftDateMonth(input.date, i - 1) : input.date
-        const curMonth = curDate.slice(0, 7)
+        let curDueDate = curDate
+        let curCompetenceMonth = curDate.slice(0, 7)
+
+        if (input.paymentMethod === 'credit_card' && card) {
+          const cardDates = calculateCardInvoiceDates(curDate, card)
+          curDueDate = cardDates.dueDate
+          curCompetenceMonth = cardDates.competenceMonth
+        }
         const curDesc = isInstallment
           ? `${input.description} (${i}/${installmentsTotal})`
           : input.description
@@ -1157,8 +1165,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           estimatedAmount: input.status === 'estimated' ? curAmount : null,
           actualAmount: input.status === 'estimated' ? null : curAmount,
           totalAmount: curAmount,
-          dueDate: curDate,
-          competenceMonth: curMonth,
+          dueDate: curDueDate,
+          competenceMonth: curCompetenceMonth,
           visibleToUids: isReserve ? [me.uid] : split.visibleToUids,
           userImpact: split.userImpact,
           allocations: isReserve ? split.allocations.map((a) => ({ ...a, reimbursed: true })) : split.allocations,

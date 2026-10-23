@@ -17,6 +17,13 @@ export interface InvoiceCategorySlice {
   pct: number
 }
 
+export interface InvoiceParticipantShare {
+  name: string
+  amount: number
+  pct: number
+  isMe: boolean
+}
+
 export interface CardInvoice {
   card: Card
   monthKey: string
@@ -46,6 +53,20 @@ export interface CardInvoice {
   installmentsCount: number
   items: Transaction[]
   byCategory: InvoiceCategorySlice[]
+  /** Divisão por participante da fatura */
+  splitBreakdown: InvoiceParticipantShare[]
+  /** Maior gasto individual desta fatura */
+  topExpense: Transaction | null
+  /** Comprometimento futuro deste cartão (soma de parcelas em meses futuros) */
+  futureInstallmentsTotal: number
+  futureInstallmentsCount: number
+  /** Melhor dia para compras neste cartão */
+  bestPurchaseDay: number
+  bestPurchaseDate: string
+  isBestPurchaseTime: boolean
+  bestPurchaseHint: string
+  /** Progresso temporal do ciclo da fatura (0% a 100%) */
+  cycleProgressPct: number
 }
 
 export const INVOICE_STATUS_META: Record<InvoiceStatus, { label: string; tone: string; dot: string }> = {
@@ -128,6 +149,89 @@ export function buildCardInvoice(
 
   const limit = card.limit && card.limit > 0 ? card.limit : null
 
+  // Rateio detalhado por participante
+  const participantMap = new Map<string, { name: string; amount: number; isMe: boolean }>()
+  if (myShare > 0) {
+    participantMap.set('__me__', { name: 'Você (Minha parte)', amount: myShare, isMe: true })
+  }
+
+  for (const t of expenses) {
+    if (t.allocations && Array.isArray(t.allocations) && t.allocations.length > 0) {
+      for (const a of t.allocations) {
+        if (a.uid && a.uid === uid) continue
+        const name = a.name?.trim() || 'Outro'
+        const existing = participantMap.get(name) ?? { name, amount: 0, isMe: false }
+        existing.amount = round2(existing.amount + (a.amount || 0))
+        participantMap.set(name, existing)
+      }
+    } else if (t.assignedFriendName) {
+      const name = t.assignedFriendName.trim()
+      const friendShare = round2(Math.max(0, effectiveAmount(t) - (t.userImpact?.[uid] ?? 0)))
+      if (friendShare > 0) {
+        const existing = participantMap.get(name) ?? { name, amount: 0, isMe: false }
+        existing.amount = round2(existing.amount + friendShare)
+        participantMap.set(name, existing)
+      }
+    } else if (t.externalName) {
+      const name = t.externalName.trim()
+      const share = round2(Math.max(0, effectiveAmount(t) - (t.userImpact?.[uid] ?? 0)))
+      if (share > 0) {
+        const existing = participantMap.get(name) ?? { name, amount: 0, isMe: false }
+        existing.amount = round2(existing.amount + share)
+        participantMap.set(name, existing)
+      }
+    }
+  }
+
+  const recordedOthers = [...participantMap.values()].filter((p) => !p.isMe).reduce((s, p) => s + p.amount, 0)
+  if (othersShare > recordedOthers + 0.05) {
+    const diff = round2(othersShare - recordedOthers)
+    const existing = participantMap.get('Parceiro(a)') ?? { name: 'Parceiro(a)', amount: 0, isMe: false }
+    existing.amount = round2(existing.amount + diff)
+    participantMap.set('Parceiro(a)', existing)
+  }
+
+  const splitBreakdown: InvoiceParticipantShare[] = [...participantMap.values()]
+    .filter((p) => p.amount > 0)
+    .map((p) => ({
+      ...p,
+      pct: total > 0 ? Math.round((p.amount / total) * 100) : 0,
+    }))
+    .sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.amount - a.amount)
+
+  // Maior gasto da fatura
+  const topExpense =
+    expenses.length > 0 ? [...expenses].sort((a, b) => effectiveAmount(b) - effectiveAmount(a))[0] : null
+
+  // Comprometimento futuro em parcelas deste cartão
+  const futureItems = (all || []).filter(
+    (t) =>
+      t.cardId === card.id &&
+      t.competenceMonth > monthKey &&
+      t.type === 'expense' &&
+      !t.reserveCardId &&
+      (t.visibleToUids || []).includes(uid),
+  )
+  const futureInstallmentsTotal = round2(futureItems.reduce((s, t) => s + effectiveAmount(t), 0))
+  const futureInstallmentsCount = futureItems.length
+
+  // Melhor dia de compra
+  const bestPurchaseDay = card.closingDay
+  const bestPurchaseDate = closingDate
+  const isBestPurchaseTime = today >= closingDate && diffDays(closingDate, today) <= 5
+  const bestPurchaseHint =
+    today < closingDate
+      ? `A partir do dia ${bestPurchaseDay}, compras caem só na próxima fatura (até 40 dias para pagar).`
+      : `Melhor época de compra ativa! Suas compras agora já caem na fatura do próximo ciclo.`
+
+  // Progresso do ciclo de fatura
+  const closingMonth = card.dueDay < card.closingDay ? shiftMonth(monthKey, -1) : monthKey
+  const prevClosingMonth = shiftMonth(closingMonth, -1)
+  const prevClosingDate = clampDay(prevClosingMonth, card.closingDay)
+  const cycleTotalDays = Math.max(1, diffDays(prevClosingDate, closingDate))
+  const cyclePassedDays = Math.max(0, diffDays(prevClosingDate, today))
+  const cycleProgressPct = Math.min(100, Math.max(0, Math.round((cyclePassedDays / cycleTotalDays) * 100)))
+
   return {
     card,
     monthKey,
@@ -149,11 +253,27 @@ export function buildCardInvoice(
     installmentsCount: expenses.filter((t) => t.installmentsTotal && t.installmentsTotal > 1).length,
     items,
     byCategory,
+    splitBreakdown,
+    topExpense,
+    futureInstallmentsTotal,
+    futureInstallmentsCount,
+    bestPurchaseDay,
+    bestPurchaseDate,
+    isBestPurchaseTime,
+    bestPurchaseHint,
+    cycleProgressPct,
   }
 }
 
 /** Histórico das últimas `months` faturas (inclusive `monthKey`), da mais antiga para a mais recente. */
-export function buildInvoiceHistory(card: Card, monthKey: string, all: Transaction[], uid: string, months = 6, forward = 0) {
+export function buildInvoiceHistory(
+  card: Card,
+  monthKey: string,
+  all: Transaction[],
+  uid: string,
+  months = 6,
+  forward = 0,
+) {
   const out: CardInvoice[] = []
   for (let i = months - 1; i >= -forward; i--) {
     out.push(buildCardInvoice(card, shiftMonth(monthKey, -i), all, uid))
@@ -167,6 +287,7 @@ export function dueCountdownLabel(inv: CardInvoice) {
   if (inv.status === 'empty') return 'Nenhuma compra neste ciclo'
   if (inv.status === 'open') {
     if (inv.daysToClose === 0) return 'Fecha hoje'
+    if (inv.daysToClose < 0) return 'Fechando ciclo'
     return `Fecha em ${inv.daysToClose} dia${inv.daysToClose === 1 ? '' : 's'}`
   }
   if (inv.daysToDue === 0) return 'Vence hoje'

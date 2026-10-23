@@ -768,17 +768,21 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
       list.push(`🔍 Onde estão os maiores ralos de dinheiro no meu orçamento deste mês?`)
     }
 
-    // 7. Recebíveis e Amigos
+    // 7. Análises Inteligentes de Despesas (100% Pessoais, Terceiros, Categorias e Cartões)
+    list.push(`👤 Ver apenas despesas 100% minhas em ${label}`)
     if (receivables > 0) {
-      list.push(`📬 Detalhar todos os valores que tenho a receber (${formatBRL(receivables)})`)
+      list.push(`👥 Ver despesas de terceiros e valores a receber em ${label}`)
+    } else {
+      list.push(`👥 Analisar compras divididas e de terceiros em ${label}`)
     }
+    list.push(`🏷️ Detalhar despesas com Alimentação em ${label}`)
 
     // 8. Fatura de Cartões
     const cardsList = Array.isArray(cards) ? cards : []
     if (cardsList.length > 0) {
       const card = cardsList[0]
       if (card?.cardName) {
-        list.push(`💳 Qual a previsão da fatura do cartão ${card.cardName} e compras ativas?`)
+        list.push(`💳 Analisar detalhadamente os gastos no cartão ${card.cardName}`)
       }
     }
 

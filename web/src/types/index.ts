@@ -342,6 +342,7 @@ export interface Transaction {
   installmentNumber?: number | null
   installmentsTotal?: number | null
   splitType?: SplitType | null
+  externalName?: string | null
 }
 
 export interface FriendSplitInput {

@@ -105,52 +105,57 @@ class FirestoreFinanceRepository(
     }
 
     override fun getCards(): Flow<List<Card>> = callbackFlow {
-        val currentUid = auth.currentUser?.uid
-        if (currentUid.isNullOrBlank()) {
+        val currentUid = auth.currentUser?.uid ?: _currentUser.value.uid
+        if (currentUid.isBlank() || currentUid == "default_uid") {
             trySend(emptyList())
             awaitClose { }
             return@callbackFlow
         }
 
-        val registration = firestore.collection("cards")
+        val ownedCardsMap = mutableMapOf<String, Card>()
+        val sharedCardsMap = mutableMapOf<String, Card>()
+
+        fun emitCombined() {
+            val combined = (ownedCardsMap + sharedCardsMap).values.toList()
+            trySend(combined)
+        }
+
+        val regOwned = firestore.collection("cards")
+            .whereEqualTo("ownerUid", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    return@addSnapshotListener
+                }
+                ownedCardsMap.clear()
+                snapshot?.documents?.forEach { doc ->
+                    try {
+                        val card = parseCard(doc)
+                        ownedCardsMap[card.id] = card
+                    } catch (_: Exception) {}
+                }
+                emitCombined()
+            }
+
+        val regShared = firestore.collection("cards")
             .whereArrayContains("sharedWithUids", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    trySend(emptyList())
                     return@addSnapshotListener
                 }
-                val cards = snapshot?.documents?.mapNotNull { doc ->
+                sharedCardsMap.clear()
+                snapshot?.documents?.forEach { doc ->
                     try {
-                        parseCard(doc)
-                    } catch (_: Exception) {
-                        null
-                    }
-                } ?: emptyList()
-
-                if (cards.isEmpty() && snapshot != null) {
-                    createDefaultCardForUser(currentUid)
+                        val card = parseCard(doc)
+                        sharedCardsMap[card.id] = card
+                    } catch (_: Exception) {}
                 }
-
-                trySend(cards)
+                emitCombined()
             }
 
-        awaitClose { registration.remove() }
-    }
-
-    private fun createDefaultCardForUser(uid: String) {
-        val user = _currentUser.value
-        val cardId = "card_main_$uid"
-        val cardDoc = mapOf(
-            "id" to cardId,
-            "ownerUid" to uid,
-            "ownerName" to user.displayName,
-            "cardName" to "Cartão Principal",
-            "closingDay" to 1,
-            "dueDay" to 10,
-            "sharedWithUids" to listOf(uid),
-            "color" to "violet"
-        )
-        firestore.collection("cards").document(cardId).set(cardDoc)
+        awaitClose {
+            regOwned.remove()
+            regShared.remove()
+        }
     }
 
     override fun getRecurringBills(): Flow<List<RecurringBill>> = callbackFlow {

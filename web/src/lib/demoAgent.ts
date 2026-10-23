@@ -482,7 +482,41 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
   const isQuestion = message.includes('?') || /^(qual|quanto|quantos|quais|onde|quem|por que|pq|o que|tem algum|tem alguma|existe|sera que)\b/i.test(n.trim())
 
   // ---------------- Consulta de Transações / Gastos ----------------
-  if (isQuestion || /consult|listar transac|pesquis|buscar|extrato|ultimas compras|ultimos lancamentos|historico de gastos|gastos com|gastei com|gastei no|gastei na/.test(n)) {
+  if (
+    isQuestion ||
+    /consult|listar transac|pesquis|buscar|extrato|ultimas compras|ultimos lancamentos|historico de gastos|gastos com|gastei com|gastei no|gastei na|100% (a mim|minh|meu)|so minh|apenas o que e meu|despesas|compras|gastos do|gastos da|cartao/.test(
+      n,
+    )
+  ) {
+    // Sensiência para 100% minhas despesas vs terceiros vs cartões
+    const isOnlyMine = /100% (a mim|minh|meu)|so minh|apenas o que e meu|meus gastos pessoais|despesas 100%|minhas despesas/i.test(n)
+    const isThirdParties = /terceir|dividid|rachad|a receber de|de terceiros/i.test(n)
+
+    let matchedPerson: string | undefined
+    for (const [re, name] of THIRD_PARTIES) {
+      if (re.test(n)) {
+        matchedPerson = name
+        break
+      }
+    }
+
+    // Identificação de Cartão de Crédito cadastrado
+    let matchedCardName: string | undefined
+    const cardQuery = await execute('gerenciarCartoes', { acao: 'listar' }).catch(() => null)
+    const registeredCards = (cardQuery?.response?.cartoes as Array<{ id: string; nome: string }>) || []
+    for (const c of registeredCards) {
+      if (c.nome && n.includes(normalize(c.nome))) {
+        matchedCardName = c.nome
+        break
+      }
+    }
+    if (!matchedCardName) {
+      const cardMatch = message.match(/cart[ãa]o\s+([A-Za-zÀ-ÿ0-9]+)/i)
+      if (cardMatch && !/^(credito|debito|meu|da|do|de|fechou|vence)$/i.test(normalize(cardMatch[1]))) {
+        matchedCardName = cardMatch[1].trim()
+      }
+    }
+
     // Check if user is asking about a subcategory or category
     let matchedCategory: string | undefined
     let matchedSubcategory: string | undefined
@@ -513,9 +547,13 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
     // Check if user is asking about a search term (e.g. "uber", "ifood", "mercado")
     let searchTerm: string | undefined
     const searchMatch = message.match(/\b(?:no|na|em|com|de)\s+([A-Za-zÀ-ÿ0-9]{3,20})\b/i)
-    if (searchMatch && !matchedCategory && !matchedSubcategory) {
+    if (searchMatch && !matchedCategory && !matchedSubcategory && !matchedCardName && !matchedPerson) {
       const term = searchMatch[1].trim()
-      if (!/^(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|cartao|credito|debito|fatura|hoje|ontem)$/i.test(normalize(term))) {
+      if (
+        !/^(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|cartao|credito|debito|fatura|hoje|ontem)$/i.test(
+          normalize(term),
+        )
+      ) {
         searchTerm = term
       }
     }
@@ -524,6 +562,10 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
       termoBusca: searchTerm,
       categoria: matchedCategory,
       subcategoria: matchedSubcategory,
+      somenteMinhas: isOnlyMine,
+      pessoa: matchedPerson,
+      apenasTerceiros: isThirdParties && !isOnlyMine,
+      cartao: matchedCardName,
       mes: monthKey,
     })
     if (r.action) actions.push(r.action)
@@ -531,21 +573,69 @@ Novo Saldo Livre: **${formatBRL(d.saldoLivreDepois)}** · Limite diário: **${d.
     const items = (d.transacoes as Array<any>) || []
 
     if (items.length === 0) {
+      let msgVazio = `🔍 Não encontrei nenhum lançamento registrado em **${monthLabel(monthKey)}**`
+      if (isOnlyMine) msgVazio += ` que seja 100% pessoal seu.`
+      else if (matchedPerson) msgVazio += ` vinculado a **${matchedPerson}**.`
+      else if (matchedCardName) msgVazio += ` no cartão **${matchedCardName}**.`
+      else if (matchedSubcategory) msgVazio += ` no subgrupo **${matchedSubcategory}** (${matchedCategory}).`
+      else if (matchedCategory) msgVazio += ` na categoria **${matchedCategory}**.`
+      else if (searchTerm) msgVazio += ` com o termo "**${searchTerm}**".`
+      else msgVazio += ` para os filtros informados.`
+
       return {
-        text: `🔍 Não encontrei nenhum lançamento ${matchedSubcategory ? `no subgrupo **${matchedSubcategory}** (${matchedCategory})` : matchedCategory ? `na categoria **${matchedCategory}**` : searchTerm ? `com o termo "**${searchTerm}**"` : ''} registrado em **${monthLabel(monthKey)}**.`,
+        text: msgVazio,
         actions,
       }
     }
 
     const total = d.somaTotal as number
     const meuImpacto = d.somaMeuImpacto as number
-    const listFormatted = items.slice(0, 8).map((t) => `• **${t.descricao}** ${t.subcategoria ? `(${t.categoria} › ${t.subcategoria})` : `(${t.categoria})`}: ${formatBRL(t.valorTotal)} (${t.dataVencimento || t.mesCompetencia})`).join('\n')
+    const somaTerceiros = (d.somaTerceiros as number) || 0
+    const cardRef = d.cartaoReferenciado as { nome: string; fechamentoDia: number; vencimentoDia: number } | null
+    const porSub = (d.porSubcategoria as Array<{ subcategoria: string; total: number; quantidade: number }>) || []
+
+    // Montagem do cabeçalho de contexto descritivo
+    let header = `### 📋 Análise de Despesas — ${monthLabel(monthKey)}`
+    if (isOnlyMine) {
+      header = `### 👤 Despesas 100% Pessoais (Exclusivas) — ${monthLabel(monthKey)}`
+    } else if (matchedPerson) {
+      header = `### 👥 Despesas Vinculadas a ${matchedPerson} — ${monthLabel(monthKey)}`
+    } else if (cardRef) {
+      header = `### 💳 Fatura do Cartão ${cardRef.nome} (Fecha dia ${cardRef.fechamentoDia}, Vence dia ${cardRef.vencimentoDia}) — ${monthLabel(monthKey)}`
+    } else if (matchedCategory) {
+      header = `### 🏷️ Despesas em ${matchedCategory}${matchedSubcategory ? ` › ${matchedSubcategory}` : ''} — ${monthLabel(monthKey)}`
+    }
+
+    // Painel de métricas principais
+    const metrics = [
+      `• **Total Geral:** ${formatBRL(total)}`,
+      `• **Seu Impacto (Saldo Livre):** ${formatBRL(meuImpacto)}`,
+      ...(somaTerceiros > 0 ? [`• **Cota de Terceiros (A Receber):** ${formatBRL(somaTerceiros)}`] : []),
+      `• **Quantidade:** ${d.totalEncontrados} lançamento(s)`,
+    ].join('\n')
+
+    // Detalhamento de subcategorias se houver mais de uma
+    let subBreakdown = ''
+    if (porSub.length > 1) {
+      subBreakdown = `\n\n**Distribuição por Subgrupo:**\n` +
+        porSub.map((s) => `  * **${s.subcategoria}:** ${formatBRL(s.total)} (${s.quantidade} item${s.quantidade > 1 ? 's' : ''})`).join('\n')
+    }
+
+    // Listagem descritiva e limpa dos lançamentos
+    const listFormatted = items
+      .slice(0, 10)
+      .map((t) => {
+        const sub = t.subcategoria ? ` (${t.categoria} › ${t.subcategoria})` : ` (${t.categoria})`
+        const cardInfo = t.cartao ? ` • Cartão ${t.cartao}` : ''
+        const splitInfo = t.detalhesDivisao && t.detalhesDivisao !== '100% do usuário' ? `\n    ↳ *${t.detalhesDivisao}*` : ''
+        return `• **${t.descricao}**${sub}: **${formatBRL(t.valorTotal)}** (${formatShortDate(t.dataVencimento || t.dataCompra)})${cardInfo}${splitInfo}`
+      })
+      .join('\n')
+
+    const extraNote = items.length > 10 ? `\n*(exibindo os 10 primeiros de ${items.length} lançamentos)*` : ''
 
     return {
-      text: `🔍 Encontrei **${d.totalEncontrados}** lançamento(s) em **${monthLabel(monthKey)}**:\n\n` +
-        `${listFormatted}\n\n` +
-        `• **Soma Total:** ${formatBRL(total)}\n` +
-        `• **Seu Impacto Pessoal:** ${formatBRL(meuImpacto)}`,
+      text: `${header}\n\n${metrics}${subBreakdown}\n\n**Detalhamento dos Lançamentos:**\n${listFormatted}${extraNote}`,
       actions,
     }
   }

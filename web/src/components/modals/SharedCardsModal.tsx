@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useFinance } from '@/store/FinanceContext'
 import type { Card } from '@/types'
-import { CreditCard, Plus, Trash2, Users, Tag, Calendar, Edit2, Sparkles } from 'lucide-react'
+import { formatBRL } from '@/lib/utils'
+import { CreditCard, Plus, Trash2, Users, Tag, Calendar, Edit2, Sparkles, ShieldCheck } from 'lucide-react'
 
 interface SharedCardsModalProps {
   open: boolean
@@ -18,6 +19,7 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
   const [cardName, setCardName] = useState('')
   const [closingDay, setClosingDay] = useState(3)
   const [dueDay, setDueDay] = useState(10)
+  const [limit, setLimit] = useState<number | string>(5000)
   const [shareWithPartner, setShareWithPartner] = useState(true)
   const [thirdPartiesInput, setThirdPartiesInput] = useState('Mãe, Irmão')
   const [color, setColor] = useState('violet')
@@ -39,6 +41,7 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
     setCardName('')
     setClosingDay(5)
     setDueDay(12)
+    setLimit(5000)
     setShareWithPartner(Boolean(partner))
     setThirdPartiesInput('Mãe')
     setColor('violet')
@@ -49,6 +52,7 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
     setCardName(card.cardName)
     setClosingDay(card.closingDay)
     setDueDay(card.dueDay)
+    setLimit(card.limit ?? 5000)
     setShareWithPartner((card.sharedWithUsers?.length ?? 0) > 0)
     setThirdPartiesInput((card.frequentThirdParties || []).join(', '))
     setColor(card.color || 'violet')
@@ -64,11 +68,14 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
 
     const sharedWithUsers = shareWithPartner && partner ? [{ uid: partner.uid, email: '', name: partner.name }] : []
 
+    const parsedLimit = Number(limit) > 0 ? Number(limit) : null
+
     const toSave: Card = {
       ...editingCard,
       cardName: cardName.trim(),
       closingDay: Number(closingDay),
       dueDay: Number(dueDay),
+      limit: parsedLimit,
       sharedWithUsers,
       sharedWithUids: sharedWithUsers.map((u) => u.uid),
       frequentThirdParties: parties,
@@ -163,6 +170,19 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
                   max={31}
                   value={dueDay}
                   onChange={(e) => setDueDay(Number(e.target.value))}
+                  className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl font-mono"
+                />
+              </div>
+
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-xs font-semibold text-slate-300">Limite de Crédito do Cartão (R$)</label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={100}
+                  value={limit}
+                  onChange={(e) => setLimit(e.target.value)}
+                  placeholder="Ex: 5000"
                   className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl font-mono"
                 />
               </div>
@@ -286,6 +306,12 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
                           <Calendar className="size-3.5 text-slate-500" />
                           Fecha dia <strong className="text-slate-200">{card.closingDay}</strong> · Vence dia <strong className="text-slate-200">{card.dueDay}</strong>
                         </span>
+                        {card.limit != null && card.limit > 0 && (
+                          <span className="flex items-center gap-1.5">
+                            <ShieldCheck className="size-3.5 text-emerald-400" />
+                            Limite: <strong className="text-slate-200">{formatBRL(card.limit)}</strong>
+                          </span>
+                        )}
                         {card.frequentThirdParties?.length > 0 && (
                           <span className="flex items-center gap-1.5">
                             <Tag className="size-3.5 text-slate-500" />

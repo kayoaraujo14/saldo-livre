@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
 import { effectiveAmount } from '@/lib/finance'
 import {
@@ -13,6 +14,7 @@ import {
 import { formatBRL, formatShortDate, monthLabel, shiftMonth, shortMonthLabel } from '@/lib/utils'
 import { CATEGORY_GROUPS, type Category, type Transaction } from '@/types'
 import {
+  Calendar,
   CalendarClock,
   CheckCircle2,
   ChevronLeft,
@@ -23,8 +25,12 @@ import {
   Lock,
   PieChart,
   Receipt,
+  Search,
+  Sparkles,
+  TrendingDown,
   Users,
   Wallet,
+  Zap,
 } from 'lucide-react'
 
 interface CardInvoicesModalProps {
@@ -33,14 +39,50 @@ interface CardInvoicesModalProps {
   onEditTx?: (tx: Transaction) => void
 }
 
-/** Paleta estática (Tailwind precisa das classes literais para o JIT). */
-const CARD_THEME: Record<string, { gradient: string; ring: string; bar: string; text: string }> = {
-  violet: { gradient: 'from-violet-600/40 via-violet-900/30', ring: 'ring-violet-500/60', bar: 'bg-violet-500', text: 'text-violet-300' },
-  orange: { gradient: 'from-orange-500/40 via-orange-900/30', ring: 'ring-orange-500/60', bar: 'bg-orange-500', text: 'text-orange-300' },
-  slate: { gradient: 'from-slate-500/40 via-slate-800/30', ring: 'ring-slate-400/60', bar: 'bg-slate-400', text: 'text-slate-300' },
-  emerald: { gradient: 'from-emerald-500/40 via-emerald-900/30', ring: 'ring-emerald-500/60', bar: 'bg-emerald-500', text: 'text-emerald-300' },
-  cyan: { gradient: 'from-cyan-500/40 via-cyan-900/30', ring: 'ring-cyan-500/60', bar: 'bg-cyan-500', text: 'text-cyan-300' },
-  rose: { gradient: 'from-rose-500/40 via-rose-900/30', ring: 'ring-rose-500/60', bar: 'bg-rose-500', text: 'text-rose-300' },
+/** Paleta estática alinhada com as cores dos cartões. */
+const CARD_THEME: Record<string, { gradient: string; ring: string; bar: string; text: string; bgCard: string }> = {
+  violet: {
+    gradient: 'from-violet-600/40 via-violet-900/30',
+    ring: 'ring-violet-500/60',
+    bar: 'bg-violet-500',
+    text: 'text-violet-300',
+    bgCard: 'from-purple-900 via-indigo-950 to-slate-950',
+  },
+  orange: {
+    gradient: 'from-orange-500/40 via-orange-900/30',
+    ring: 'ring-orange-500/60',
+    bar: 'bg-orange-500',
+    text: 'text-orange-300',
+    bgCard: 'from-orange-900 via-amber-950 to-slate-950',
+  },
+  slate: {
+    gradient: 'from-slate-500/40 via-slate-800/30',
+    ring: 'ring-slate-400/60',
+    bar: 'bg-slate-400',
+    text: 'text-slate-300',
+    bgCard: 'from-slate-800 via-slate-900 to-slate-950',
+  },
+  emerald: {
+    gradient: 'from-emerald-500/40 via-emerald-900/30',
+    ring: 'ring-emerald-500/60',
+    bar: 'bg-emerald-500',
+    text: 'text-emerald-300',
+    bgCard: 'from-emerald-900 via-teal-950 to-slate-950',
+  },
+  cyan: {
+    gradient: 'from-cyan-500/40 via-cyan-900/30',
+    ring: 'ring-cyan-500/60',
+    bar: 'bg-cyan-500',
+    text: 'text-cyan-300',
+    bgCard: 'from-cyan-900 via-sky-950 to-slate-950',
+  },
+  rose: {
+    gradient: 'from-rose-500/40 via-rose-900/30',
+    ring: 'ring-rose-500/60',
+    bar: 'bg-rose-500',
+    text: 'text-rose-300',
+    bgCard: 'from-rose-900 via-pink-950 to-slate-950',
+  },
 }
 const themeOf = (color?: string) => CARD_THEME[color ?? 'violet'] ?? CARD_THEME.violet
 
@@ -68,13 +110,15 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [confirmPay, setConfirmPay] = useState(false)
   const [paying, setPaying] = useState(false)
-  const [itemFilter, setItemFilter] = useState<'all' | 'open' | 'paid'>('all')
+  const [itemFilter, setItemFilter] = useState<'all' | 'open' | 'paid' | 'installments'>('all')
+  const [searchQuery, setSearchQuery] = useState('')
 
   // Sincroniza com o mês global sempre que o modal é aberto
   useEffect(() => {
     if (open) {
       setViewMonth(month)
       setConfirmPay(false)
+      setSearchQuery('')
     }
   }, [open, month])
 
@@ -112,10 +156,22 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
 
   const visibleItems = useMemo(() => {
     if (!selected) return []
-    if (itemFilter === 'open') return selected.items.filter((t) => t.status !== 'paid')
-    if (itemFilter === 'paid') return selected.items.filter((t) => t.status === 'paid')
-    return selected.items
-  }, [selected, itemFilter])
+    let list = selected.items
+    if (itemFilter === 'open') list = list.filter((t) => t.status !== 'paid')
+    else if (itemFilter === 'paid') list = list.filter((t) => t.status === 'paid')
+    else if (itemFilter === 'installments') list = list.filter((t) => (t.installmentsTotal ?? 1) > 1)
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim()
+      list = list.filter(
+        (t) =>
+          t.description.toLowerCase().includes(q) ||
+          t.category.toLowerCase().includes(q) ||
+          (t.subcategory && t.subcategory.toLowerCase().includes(q)),
+      )
+    }
+    return list
+  }, [selected, itemFilter, searchQuery])
 
   const handlePayInvoice = async () => {
     if (!selected) return
@@ -140,7 +196,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
             Faturas dos Cartões
           </DialogTitle>
           <DialogDescription className="text-xs text-slate-400">
-            Acompanhe fechamento, vencimento, composição e pagamento de cada fatura.
+            Acompanhamento inteligente de faturas, rateio de despesas, melhor data de compra e limites.
           </DialogDescription>
         </DialogHeader>
 
@@ -149,19 +205,19 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
           <button
             type="button"
             onClick={() => setViewMonth((m) => shiftMonth(m, -1))}
-            className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer"
+            className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Fatura anterior"
           >
             <ChevronLeft className="size-4" />
           </button>
           <div className="text-center">
-            <p className="text-[10px] uppercase tracking-wider text-slate-500">Faturas com vencimento em</p>
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Faturas com vencimento em</p>
             <p className="text-sm font-bold text-white capitalize">{monthLabel(viewMonth)}</p>
           </div>
           <button
             type="button"
             onClick={() => setViewMonth((m) => shiftMonth(m, 1))}
-            className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer"
+            className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Próxima fatura"
           >
             <ChevronRight className="size-4" />
@@ -169,10 +225,14 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
         </div>
 
         {cards.length === 0 ? (
-          <div className="py-16 text-center space-y-2">
-            <CreditCard className="size-10 mx-auto text-slate-600" />
-            <p className="text-sm text-slate-300 font-semibold">Nenhum cartão cadastrado</p>
-            <p className="text-xs text-slate-500">Cadastre um cartão em "Cartões de Crédito" para acompanhar as faturas.</p>
+          <div className="py-16 text-center space-y-3">
+            <div className="size-16 rounded-3xl bg-slate-900/90 border border-slate-800 flex items-center justify-center mx-auto text-slate-600">
+              <CreditCard className="size-8" />
+            </div>
+            <p className="text-base text-slate-200 font-bold">Nenhum cartão cadastrado</p>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              Cadastre seus cartões de crédito na seção "Cartões de Crédito" para vincular às suas compras e acompanhar as faturas com inteligência.
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -189,7 +249,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
               />
             </div>
 
-            {/* Seletor de cartões */}
+            {/* Seletor de cartões em carrossel horizontal */}
             <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
               {invoices.map((inv) => {
                 const t = themeOf(inv.card.color)
@@ -202,8 +262,10 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                       setSelectedCardId(inv.card.id)
                       setConfirmPay(false)
                     }}
-                    className={`snap-start shrink-0 w-[210px] text-left rounded-2xl p-3.5 border border-white/[0.08] bg-gradient-to-br ${t.gradient} to-slate-950 transition-all cursor-pointer ${
-                      active ? `ring-2 ${t.ring} scale-[1.01]` : 'opacity-75 hover:opacity-100'
+                    className={`snap-start shrink-0 w-[220px] text-left rounded-2xl p-3.5 border transition-all cursor-pointer ${
+                      active
+                        ? `ring-2 ${t.ring} border-white/20 bg-gradient-to-br ${t.gradient} to-slate-950 scale-[1.01] shadow-lg`
+                        : 'border-white/[0.08] bg-slate-900/40 opacity-75 hover:opacity-100 hover:border-white/20'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -211,9 +273,10 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                       <StatusPill inv={inv} />
                     </div>
                     <p className="mt-3 text-lg font-extrabold text-white tabular-nums">{formatBRL(inv.total)}</p>
-                    <p className="text-[11px] text-slate-300">
-                      Vence {formatShortDate(inv.dueDate)} · {inv.itemsCount} itens
-                    </p>
+                    <div className="mt-1 flex items-center justify-between text-[11px] text-slate-300">
+                      <span>Vence {formatShortDate(inv.dueDate)}</span>
+                      <span className="text-slate-400">{inv.itemsCount} itens</span>
+                    </div>
                   </button>
                 )
               })}
@@ -221,51 +284,81 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
 
             {selected && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                {/* Coluna esquerda: resumo + histórico + categorias */}
+                {/* Coluna esquerda: Cartão Virtual Visual + Insights Inteligentes + Rateio */}
                 <div className="lg:col-span-5 space-y-4">
-                  <section className={`rounded-2xl p-4 border border-white/[0.08] bg-gradient-to-br ${theme.gradient} to-slate-950 space-y-3`}>
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-[11px] text-slate-300">Fatura {selected.card.cardName}</p>
-                        <p className="text-3xl font-extrabold text-white tabular-nums">{formatBRL(selected.total)}</p>
-                        <p className={`text-xs font-semibold ${selected.status === 'overdue' ? 'text-rose-300' : 'text-slate-200'}`}>
+                  {/* Cartão Virtual Interativo */}
+                  <section
+                    className={`relative rounded-3xl p-5 border border-white/15 bg-gradient-to-br ${theme.bgCard} text-white shadow-2xl overflow-hidden`}
+                  >
+                    {/* Linhas de fundo decorativas */}
+                    <div className="absolute -top-12 -right-12 size-40 rounded-full bg-white/5 blur-2xl pointer-events-none" />
+                    <div className="absolute -bottom-12 -left-12 size-40 rounded-full bg-white/5 blur-2xl pointer-events-none" />
+
+                    <div className="flex items-start justify-between relative z-10">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs uppercase font-extrabold tracking-widest text-white/80">
+                            {selected.card.cardName}
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/90 border border-white/20">
+                            {selected.card.ownerName || 'Titular'}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-3xl font-black tabular-nums tracking-tight text-white drop-shadow-sm">
+                          {formatBRL(selected.total)}
+                        </p>
+                        <p className={`text-xs font-semibold mt-0.5 ${selected.status === 'overdue' ? 'text-rose-300' : 'text-slate-200'}`}>
                           {dueCountdownLabel(selected)}
                         </p>
                       </div>
-                      <StatusPill inv={selected} />
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <InfoBox label="Fechamento" value={formatShortDate(selected.closingDate)} />
-                      <InfoBox label="Vencimento" value={formatShortDate(selected.dueDate)} />
-                      <InfoBox label="Minha parte" value={formatBRL(selected.myShare)} />
-                      <InfoBox label="De terceiros" value={formatBRL(selected.othersShare)} />
-                    </div>
-
-                    {/* Progresso de pagamento */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[11px] text-slate-300">
-                        <span>Pago {formatBRL(selected.paidAmount)}</span>
-                        <span>Em aberto {formatBRL(selected.openAmount)}</span>
+                      {/* Chip metálico simulado */}
+                      <div className="flex flex-col items-end gap-1.5">
+                        <div className="size-9 rounded-lg bg-gradient-to-tr from-amber-300 via-amber-400 to-amber-200 border border-amber-500/50 shadow-inner flex flex-col justify-between p-1.5 opacity-90">
+                          <div className="h-0.5 w-full bg-amber-600/60 rounded" />
+                          <div className="h-0.5 w-full bg-amber-600/60 rounded" />
+                        </div>
+                        <StatusPill inv={selected} />
                       </div>
-                      <div className="h-2 rounded-full bg-slate-900/80 overflow-hidden">
+                    </div>
+
+                    {/* Datas de Fechamento e Vencimento */}
+                    <div className="grid grid-cols-2 gap-2 mt-4 relative z-10">
+                      <div className="rounded-xl bg-black/25 border border-white/10 p-2">
+                        <p className="text-[10px] text-white/60">Fechamento</p>
+                        <p className="text-xs font-bold text-white tabular-nums">{formatShortDate(selected.closingDate)}</p>
+                      </div>
+                      <div className="rounded-xl bg-black/25 border border-white/10 p-2">
+                        <p className="text-[10px] text-white/60">Vencimento</p>
+                        <p className="text-xs font-bold text-white tabular-nums">{formatShortDate(selected.dueDate)}</p>
+                      </div>
+                    </div>
+
+                    {/* Progresso de pagamento da fatura */}
+                    <div className="space-y-1 mt-4 relative z-10">
+                      <div className="flex justify-between text-[11px] text-white/80">
+                        <span>Pago: {formatBRL(selected.paidAmount)}</span>
+                        <span>Em aberto: {formatBRL(selected.openAmount)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-black/40 overflow-hidden">
                         <div
-                          className="h-full bg-emerald-500 transition-all"
+                          className="h-full bg-emerald-400 transition-all shadow-sm"
                           style={{ width: `${selected.total > 0 ? (selected.paidAmount / selected.total) * 100 : 0}%` }}
                         />
                       </div>
                     </div>
 
+                    {/* Limite do Cartão */}
                     {selected.limit != null && (
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] text-slate-300">
+                      <div className="space-y-1 mt-3 relative z-10">
+                        <div className="flex justify-between text-[11px] text-white/80">
                           <span>Uso do limite ({selected.limitUsagePct}%)</span>
-                          <span>Disponível {formatBRL(Math.max(0, selected.limit - selected.total))}</span>
+                          <span>Disponível: {formatBRL(Math.max(0, selected.limit - selected.total))}</span>
                         </div>
-                        <div className="h-1.5 rounded-full bg-slate-900/80 overflow-hidden">
+                        <div className="h-1.5 rounded-full bg-black/40 overflow-hidden">
                           <div
                             className={`h-full transition-all ${
-                              (selected.limitUsagePct ?? 0) >= 90 ? 'bg-rose-500' : (selected.limitUsagePct ?? 0) >= 70 ? 'bg-amber-500' : theme.bar
+                              (selected.limitUsagePct ?? 0) >= 90 ? 'bg-rose-400' : (selected.limitUsagePct ?? 0) >= 70 ? 'bg-amber-400' : 'bg-cyan-400'
                             }`}
                             style={{ width: `${selected.limitUsagePct ?? 0}%` }}
                           />
@@ -273,49 +366,146 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                       </div>
                     )}
 
-                    {selected.credits > 0 && (
-                      <p className="text-[11px] text-teal-300">Inclui {formatBRL(selected.credits)} em créditos/estornos.</p>
-                    )}
-
                     {/* Ação de pagamento */}
-                    {selected.openAmount > 0 &&
-                      (confirmPay ? (
-                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
-                          <p className="text-xs text-emerald-200">
-                            Marcar {selected.items.filter((t) => t.type === 'expense' && t.status !== 'paid').length} lançamento(s) como
-                            pagos, totalizando <strong>{formatBRL(selected.openAmount)}</strong>?
-                          </p>
-                          <div className="flex gap-2 justify-end">
-                            <Button size="sm" variant="outline" className="h-8 text-xs cursor-pointer" onClick={() => setConfirmPay(false)} disabled={paying}>
-                              Cancelar
-                            </Button>
-                            <Button
-                              size="sm"
-                              className="h-8 text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer"
-                              onClick={handlePayInvoice}
-                              disabled={paying}
-                            >
-                              {paying ? 'Pagando...' : 'Confirmar pagamento'}
-                            </Button>
+                    {selected.openAmount > 0 && (
+                      <div className="mt-4 pt-3 border-t border-white/15 relative z-10">
+                        {confirmPay ? (
+                          <div className="rounded-xl border border-emerald-400/40 bg-emerald-950/60 p-3 space-y-2 backdrop-blur-md">
+                            <p className="text-xs text-emerald-200">
+                              Marcar {selected.items.filter((t) => t.type === 'expense' && t.status !== 'paid').length} lançamento(s) como
+                              pagos, totalizando <strong>{formatBRL(selected.openAmount)}</strong>?
+                            </p>
+                            <div className="flex gap-2 justify-end">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 text-xs border-white/20 text-white hover:bg-white/10 cursor-pointer"
+                                onClick={() => setConfirmPay(false)}
+                                disabled={paying}
+                              >
+                                Cancelar
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-8 text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer"
+                                onClick={handlePayInvoice}
+                                disabled={paying}
+                              >
+                                {paying ? 'Pagando...' : 'Confirmar pagamento'}
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <Button
-                          onClick={() => setConfirmPay(true)}
-                          className="w-full h-9 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl cursor-pointer"
-                        >
-                          <CheckCircle2 className="size-4 mr-1.5" />
-                          Pagar fatura ({formatBRL(selected.openAmount)})
-                        </Button>
-                      ))}
+                        ) : (
+                          <Button
+                            onClick={() => setConfirmPay(true)}
+                            className="w-full h-10 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl cursor-pointer shadow-lg transition-transform active:scale-95"
+                          >
+                            <CheckCircle2 className="size-4 mr-1.5" />
+                            Pagar fatura ({formatBRL(selected.openAmount)})
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </section>
 
-                  {/* Histórico */}
+                  {/* Card Inteligente: Melhor Dia de Compra & Ciclo */}
+                  <section className="rounded-2xl p-4 border border-white/[0.08] bg-slate-900/50 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Sparkles className="size-3.5 text-amber-400" /> Inteligência de Compra
+                      </h4>
+                      {selected.isBestPurchaseTime ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                          <Zap className="size-3" /> Melhor Época Ativa!
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-slate-400">
+                          Dia {selected.bestPurchaseDay}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      {selected.bestPurchaseHint}
+                    </p>
+                    <div className="space-y-1 pt-1 border-t border-white/[0.06]">
+                      <div className="flex justify-between text-[11px] text-slate-400">
+                        <span>Progresso do ciclo da fatura</span>
+                        <span className="text-slate-200 font-semibold">{selected.cycleProgressPct}%</span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-sky-500 to-indigo-500 rounded-full transition-all"
+                          style={{ width: `${selected.cycleProgressPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Card Inteligente: Divisão da Fatura (Quem Divide Comigo) */}
+                  {selected.splitBreakdown.length > 0 && (
+                    <section className="rounded-2xl p-4 border border-white/[0.08] bg-slate-900/50 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <Users className="size-3.5 text-emerald-400" /> Divisão da Fatura
+                        </h4>
+                        <span className="text-[10px] text-slate-400">Rateio calculado</span>
+                      </div>
+                      <div className="space-y-2">
+                        {selected.splitBreakdown.map((part) => (
+                          <div key={part.name} className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05] space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className={`font-semibold ${part.isMe ? 'text-emerald-300' : 'text-slate-200'}`}>
+                                {part.name}
+                              </span>
+                              <span className="font-bold tabular-nums text-white">
+                                {formatBRL(part.amount)} ({part.pct}%)
+                              </span>
+                            </div>
+                            <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${part.isMe ? 'bg-emerald-500' : 'bg-sky-500'}`}
+                                style={{ width: `${part.pct}%` }}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {/* Comprometimento Futuro & Maior Gasto */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="p-3 rounded-2xl border border-white/[0.08] bg-slate-900/40 space-y-1">
+                      <p className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold uppercase tracking-wider">
+                        <Calendar className="size-3 text-cyan-400" /> Futuro Comprometido
+                      </p>
+                      <p className="text-base font-extrabold text-white tabular-nums">
+                        {formatBRL(selected.futureInstallmentsTotal)}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {selected.futureInstallmentsCount} parcelas nos próximos meses
+                      </p>
+                    </div>
+
+                    <div className="p-3 rounded-2xl border border-white/[0.08] bg-slate-900/40 space-y-1">
+                      <p className="text-[10px] text-slate-400 flex items-center gap-1 font-semibold uppercase tracking-wider">
+                        <TrendingDown className="size-3 text-rose-400" /> Maior Compra
+                      </p>
+                      <p className="text-base font-extrabold text-white tabular-nums truncate">
+                        {selected.topExpense ? formatBRL(effectiveAmount(selected.topExpense)) : '—'}
+                      </p>
+                      <p className="text-[10px] text-slate-400 truncate">
+                        {selected.topExpense?.description ?? 'Nenhuma despesa'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Histórico e Evolução */}
                   <section className="rounded-2xl p-4 border border-white/[0.08] bg-slate-900/40 space-y-3">
                     <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
                       <Layers className="size-3.5 text-cyan-400" /> Evolução das faturas
                     </h4>
-                    <div className="flex items-end gap-1.5 h-32">
+                    <div className="flex items-end gap-1.5 h-28">
                       {history.map((h) => {
                         const isCurrent = h.monthKey === viewMonth
                         const pct = (h.total / historyMax) * 100
@@ -343,7 +533,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                         )
                       })}
                     </div>
-                    <p className="text-[10px] text-slate-500">Barras tracejadas = faturas futuras já comprometidas (parcelas).</p>
+                    <p className="text-[10px] text-slate-500">Barras tracejadas = faturas futuras já comprometidas por compras parceladas.</p>
                   </section>
 
                   {/* Categorias */}
@@ -372,27 +562,30 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                   )}
                 </div>
 
-                {/* Coluna direita: itens da fatura */}
-                <section className="lg:col-span-7 rounded-2xl p-4 border border-white/[0.08] bg-slate-900/40 space-y-3 min-h-0">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                {/* Coluna direita: Lista Inteligente de Lançamentos com Busca e Filtros */}
+                <section className="lg:col-span-7 rounded-2xl p-4 sm:p-5 border border-white/[0.08] bg-slate-900/40 space-y-3.5 min-h-0 flex flex-col">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                     <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <ListChecks className="size-3.5 text-emerald-400" /> Lançamentos da fatura
+                      <ListChecks className="size-3.5 text-emerald-400" /> Lançamentos da Fatura
                       <span className="text-slate-500 font-normal">({selected.itemsCount})</span>
                     </h4>
-                    <div className="flex gap-1 rounded-xl bg-slate-950/60 p-1 border border-white/[0.06]">
+
+                    {/* Filtros em abas */}
+                    <div className="flex gap-1 rounded-xl bg-slate-950/60 p-1 border border-white/[0.06] overflow-x-auto">
                       {(
                         [
                           ['all', 'Todos'],
                           ['open', 'Em aberto'],
                           ['paid', 'Pagos'],
+                          ['installments', 'Parcelados'],
                         ] as const
                       ).map(([key, label]) => (
                         <button
                           key={key}
                           type="button"
                           onClick={() => setItemFilter(key)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-colors ${
-                            itemFilter === key ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap ${
+                            itemFilter === key ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
                           }`}
                         >
                           {label}
@@ -401,10 +594,32 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                     </div>
                   </div>
 
+                  {/* Campo de Busca Rápida */}
+                  <div className="relative">
+                    <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Pesquisar lançamentos por descrição ou categoria..."
+                      className="h-9 pl-9 text-xs bg-slate-950/70 border-white/[0.08] rounded-xl text-slate-200 placeholder:text-slate-500"
+                    />
+                  </div>
+
                   {visibleItems.length === 0 ? (
-                    <p className="text-xs text-slate-500 text-center py-10">Nenhum lançamento para este filtro.</p>
+                    <div className="py-16 text-center space-y-2">
+                      <p className="text-xs text-slate-400 font-medium">Nenhum lançamento encontrado para este filtro.</p>
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery('')}
+                          className="text-[11px] text-cyan-400 hover:underline cursor-pointer"
+                        >
+                          Limpar busca
+                        </button>
+                      )}
+                    </div>
                   ) : (
-                    <ul className="divide-y divide-white/[0.05] max-h-[60dvh] overflow-y-auto pr-1">
+                    <ul className="divide-y divide-white/[0.05] max-h-[65dvh] overflow-y-auto pr-1">
                       {visibleItems.map((tx) => {
                         const isCredit = tx.type === 'income'
                         const st = ITEM_STATUS_LABEL[tx.status]
@@ -414,26 +629,26 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                             <button
                               type="button"
                               onClick={() => onEditTx?.(tx)}
-                              className="w-full py-2.5 flex items-center gap-3 text-left hover:bg-slate-800/30 rounded-lg px-1.5 cursor-pointer"
+                              className="w-full py-2.5 flex items-center gap-3 text-left hover:bg-slate-800/40 rounded-xl px-2 cursor-pointer transition-colors"
                             >
                               <span
                                 className="size-2 rounded-full shrink-0"
                                 style={{ backgroundColor: CATEGORY_GROUPS[tx.category]?.color ?? '#64748b' }}
                               />
                               <div className="min-w-0 flex-1">
-                                <p className="text-xs font-semibold text-slate-100 truncate">
-                                  {tx.description}
+                                <p className="text-xs font-semibold text-slate-100 truncate flex items-center gap-1.5">
+                                  <span>{tx.description}</span>
                                   {tx.installmentsTotal && tx.installmentsTotal > 1 && (
-                                    <span className="ml-1.5 text-[10px] text-cyan-300 font-medium">
+                                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-300 font-bold border border-cyan-500/30">
                                       {tx.installmentNumber}/{tx.installmentsTotal}
                                     </span>
                                   )}
                                 </p>
-                                <p className="text-[10px] text-slate-500 truncate">
+                                <p className="text-[10px] text-slate-400 truncate">
                                   {tx.category}
                                   {tx.subcategory ? ` › ${tx.subcategory}` : ''}
                                   {mine != null && !isCredit && Math.abs(mine - effectiveAmount(tx)) > 0.01 && (
-                                    <> · minha parte {formatBRL(mine)}</>
+                                    <> · minha parte <strong className="text-emerald-400">{formatBRL(mine)}</strong></>
                                   )}
                                 </p>
                               </div>
@@ -469,15 +684,6 @@ function Kpi({ icon, label, value, tone, hint }: { icon: ReactNode; label: strin
       </div>
       <p className={`mt-1 text-base font-extrabold tabular-nums ${tone ?? 'text-white'}`}>{value}</p>
       {hint && <p className="text-[10px] text-slate-500 truncate">{hint}</p>}
-    </div>
-  )
-}
-
-function InfoBox({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-slate-950/50 border border-white/[0.06] px-2.5 py-1.5">
-      <p className="text-[10px] text-slate-400">{label}</p>
-      <p className="text-xs font-bold text-white tabular-nums">{value}</p>
     </div>
   )
 }

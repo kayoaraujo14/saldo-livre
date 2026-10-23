@@ -907,18 +907,24 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                 {paymentMethod === 'credit_card' && (
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-300">Cartão Utilizado</label>
-                    <Select value={cardId} onValueChange={setCardId}>
-                      <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
-                        <SelectValue placeholder="Selecione o cartão" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cards.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.cardName} (Titular: {c.ownerName})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    {cards.length === 0 ? (
+                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-center gap-2">
+                        <span>Nenhum cartão cadastrado. Cadastre um cartão no menu para vincular faturas e vencimentos.</span>
+                      </div>
+                    ) : (
+                      <Select value={cardId} onValueChange={setCardId}>
+                        <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                          <SelectValue placeholder="Selecione o cartão" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {cards.map((c) => (
+                            <SelectItem key={c.id} value={c.id}>
+                              {c.cardName} (Titular: {c.ownerName})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 )}
               </div>
