@@ -14,6 +14,7 @@ import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal
 import { FriendsModal } from '@/components/modals/FriendsModal'
 import { RecentActivityModal } from '@/components/modals/RecentActivityModal'
 import { InvestmentsModal } from '@/components/modals/InvestmentsModal'
+import { CardInvoicesModal } from '@/components/modals/CardInvoicesModal'
 import { ScrollToTop } from '@/components/ui/ScrollToTop'
 import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
@@ -46,6 +47,7 @@ function MainDashboard() {
   const [friendsModalOpen, setFriendsModalOpen] = useState(false)
   const [recentActivityModalOpen, setRecentActivityModalOpen] = useState(false)
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
+  const [invoicesModalOpen, setInvoicesModalOpen] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [generatingBills, setGeneratingBills] = useState(false)
 
@@ -97,6 +99,7 @@ function MainDashboard() {
         onOpenFriends={() => setFriendsModalOpen(true)}
         onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
         onOpenInvestments={() => setInvestmentsModalOpen(true)}
+        onOpenInvoices={() => setInvoicesModalOpen(true)}
       />
 
       {/* 2. Main Content Area */}
@@ -262,6 +265,7 @@ function MainDashboard() {
               onOpenFriends={() => setFriendsModalOpen(true)}
               onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
               onOpenInvestments={() => setInvestmentsModalOpen(true)}
+              onOpenInvoices={() => setInvoicesModalOpen(true)}
               onGenerateBills={handleGenerate}
               generating={generatingBills}
             />
@@ -308,6 +312,11 @@ function MainDashboard() {
         open={investmentsModalOpen}
         onOpenChange={setInvestmentsModalOpen}
         onOpenNewTx={handleOpenNewTx}
+      />
+      <CardInvoicesModal
+        open={invoicesModalOpen}
+        onOpenChange={setInvoicesModalOpen}
+        onEditTx={handleEditTx}
       />
     </div>
   )

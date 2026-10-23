@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.Transaction
+import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
@@ -80,6 +81,24 @@ class DashboardViewModel(
     fun toggleTransactionStatus(id: String) {
         viewModelScope.launch {
             repository.toggleTransactionStatus(id)
+        }
+    }
+
+    fun setStatus(id: String, status: TransactionStatus, actualAmount: Double? = null) {
+        viewModelScope.launch {
+            repository.setTransactionStatus(id, status, actualAmount)
+        }
+    }
+
+    fun deleteTransaction(id: String) {
+        viewModelScope.launch {
+            repository.deleteTransaction(id)
+        }
+    }
+
+    fun deleteInstallmentGroup(groupId: String) {
+        viewModelScope.launch {
+            repository.deleteInstallmentGroup(groupId)
         }
     }
 

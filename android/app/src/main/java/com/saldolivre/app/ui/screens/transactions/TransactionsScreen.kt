@@ -30,6 +30,7 @@ import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.ui.components.DeleteInstallmentDialog
 import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.components.StatusBadge
+import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.ui.components.TransactionItem
 import com.saldolivre.app.ui.theme.*
 
@@ -403,213 +404,20 @@ fun TransactionsScreen(
     // Detail & Actions Dialog
     selectedTxForDetails?.let { initialTx ->
         val tx = uiState.transactions.find { it.id == initialTx.id } ?: initialTx
-        var customActualInput by remember(tx.id, tx.effectiveAmount) {
-            mutableStateOf(String.format(java.util.Locale.US, "%.2f", tx.effectiveAmount))
-        }
-        val isIncome = tx.type == TransactionType.INCOME
-
-        AlertDialog(
+        TransactionDetailDialog(
+            transaction = tx,
             onDismissRequest = { selectedTxForDetails = null },
-            containerColor = DarkSurface,
-            title = {
-                Text(
-                    text = tx.description,
-                    style = Typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+            onToggleStatus = { viewModel.toggleStatus(tx.id) },
+            onSetStatus = { status, actualAmount ->
+                viewModel.setStatus(tx.id, status, actualAmount)
             },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    DetailRow(label = "Valor Efetivo", value = FinanceEngine.formatCurrency(tx.effectiveAmount))
-                    if (tx.estimatedAmount != null) {
-                        DetailRow(label = "Valor Estimado", value = FinanceEngine.formatCurrency(tx.estimatedAmount))
-                    }
-                    DetailRow(label = "Categoria", value = tx.category + (tx.subcategory?.let { " › $it" } ?: ""))
-                    DetailRow(label = "Vencimento", value = FinanceEngine.formatFullDate(tx.dueDate))
-                    DetailRow(label = "Mês de Competência", value = FinanceEngine.formatMonthLabel(tx.competenceMonth))
-                    DetailRow(label = "Forma de Pagamento", value = tx.paymentMethod.label)
-                    tx.splitType?.let {
-                        DetailRow(label = "Divisão", value = "${it.emoji} ${it.label}")
-                    }
-
-                    HorizontalDivider(color = DarkBorder, modifier = Modifier.padding(vertical = 2.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Status Atual:",
-                            style = Typography.bodyMedium,
-                            color = TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        StatusBadge(
-                            status = tx.status,
-                            isIncome = isIncome,
-                            onClick = { viewModel.toggleStatus(tx.id) }
-                        )
-                    }
-
-                    Text(
-                        text = "Alternar Status (Paridade Web):",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextSecondary
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        TransactionStatus.entries.forEach { st ->
-                            val isSelected = tx.status == st
-                            val chipLabel = when (st) {
-                                TransactionStatus.ESTIMATED -> "Estimado"
-                                TransactionStatus.PENDING -> "Pendente"
-                                TransactionStatus.PAID -> "Pago"
-                            }
-                            val activeColor = when (st) {
-                                TransactionStatus.PAID -> Emerald500
-                                TransactionStatus.PENDING -> Amber500
-                                TransactionStatus.ESTIMATED -> Cyan500
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) activeColor.copy(alpha = 0.2f) else DarkSurfaceVariant)
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) activeColor else DarkBorder,
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        val parsedAmount = customActualInput.replace(",", ".").toDoubleOrNull()
-                                        viewModel.setStatus(tx.id, st, parsedAmount)
-                                    }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = chipLabel,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) activeColor else TextSecondary,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-
-                    if (tx.status != TransactionStatus.PAID || tx.estimatedAmount != null) {
-                        OutlinedTextField(
-                            value = customActualInput,
-                            onValueChange = { customActualInput = it },
-                            label = { Text("Valor Real Efetivado (R$)", fontSize = 11.sp) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Emerald500,
-                                unfocusedBorderColor = DarkBorder,
-                                focusedContainerColor = DarkSurfaceVariant,
-                                unfocusedContainerColor = DarkSurfaceVariant,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            )
-                        )
-                    }
-                }
+            onNavigateToEditTransaction = { editTxId ->
+                selectedTxForDetails = null
+                onNavigateToEditTransaction(editTxId)
             },
-            confirmButton = {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FilledTonalButton(
-                        onClick = {
-                            val targetId = tx.id
-                            selectedTxForDetails = null
-                            onNavigateToEditTransaction(targetId)
-                        },
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = Cyan500.copy(alpha = 0.2f),
-                            contentColor = Cyan400
-                        )
-                    ) {
-                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Editar",
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                    }
-
-                    if (tx.status != TransactionStatus.PAID) {
-                        Button(
-                            onClick = {
-                                val parsedAmount = customActualInput.replace(",", ".").toDoubleOrNull()
-                                viewModel.setStatus(tx.id, TransactionStatus.PAID, parsedAmount)
-                                selectedTxForDetails = null
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
-                        ) {
-                            Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = DarkBackground)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isIncome) "Confirmar" else "Confirmar Pago",
-                                color = DarkBackground,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    } else {
-                        FilledTonalButton(
-                            onClick = {
-                                viewModel.setStatus(tx.id, TransactionStatus.PENDING)
-                                selectedTxForDetails = null
-                            },
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = Amber500.copy(alpha = 0.2f),
-                                contentColor = Amber400
-                            )
-                        ) {
-                            Icon(imageVector = Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Voltar p/ Pendente",
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        txToDelete = tx
-                        selectedTxForDetails = null
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Rose400)
-                ) {
-                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Excluir", maxLines = 1)
-                }
+            onDeleteRequest = {
+                txToDelete = tx
+                selectedTxForDetails = null
             }
         )
     }
@@ -698,33 +506,6 @@ private fun FilterChipItem(
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
             color = textColor,
             maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun DetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = Typography.bodyMedium,
-            color = TextSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 8.dp)
-        )
-        Text(
-            text = value,
-            style = Typography.labelLarge,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
         )
     }
 }

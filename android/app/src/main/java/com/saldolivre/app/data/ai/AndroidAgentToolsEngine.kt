@@ -619,6 +619,7 @@ class AndroidAgentToolsEngine(
     suspend fun executeEditTransaction(
         searchTerm: String? = null,
         transactionId: String? = null,
+        targetIds: List<String>? = null,
         month: String? = null,
         newAmount: Double? = null,
         newDescription: String? = null,
@@ -628,12 +629,15 @@ class AndroidAgentToolsEngine(
         newPaymentMethod: PaymentMethod? = null,
         newCompetenceMonth: String? = null,
         newDueDate: String? = null,
-        newSplitType: SplitType? = null
+        newSplitType: SplitType? = null,
+        confirmed: Boolean = false
     ): ToolExecutionResult {
         val all = repository.getTransactions().first()
         val user = repository.currentUser.value
 
-        var targets = if (!transactionId.isNullOrBlank()) {
+        var targets = if (!targetIds.isNullOrEmpty()) {
+            all.filter { it.id in targetIds }
+        } else if (!transactionId.isNullOrBlank()) {
             all.filter { it.id == transactionId }
         } else if (!searchTerm.isNullOrBlank()) {
             all.filter { t ->
@@ -656,7 +660,117 @@ class AndroidAgentToolsEngine(
         }
 
         val updatedCount = targets.size
+        val firstTarget = targets.first()
+        val firstDesc = firstTarget.description
         val changesList = mutableListOf<String>()
+
+        if (newDescription != null) {
+            changesList.add("Descrição: \"$newDescription\"")
+        }
+        if (newAmount != null && newAmount > 0.0) {
+            changesList.add("Valor: ${FinanceEngine.formatCurrency(firstTarget.effectiveAmount)} → ${FinanceEngine.formatCurrency(newAmount)}")
+        }
+        if (newCategory != null) {
+            changesList.add("Categoria: $newCategory")
+        }
+        if (newSubcategory != null) {
+            changesList.add("Subcategoria: $newSubcategory")
+        }
+        if (newStatus != null) {
+            changesList.add("Status: ${newStatus.label}")
+        }
+        if (newPaymentMethod != null) {
+            changesList.add("Método: ${newPaymentMethod.label}")
+        }
+        if (newCompetenceMonth != null && newCompetenceMonth.matches(Regex("""^\d{4}-\d{2}$"""))) {
+            changesList.add("Mês da Fatura: ${FinanceEngine.monthLabel(newCompetenceMonth)}")
+        }
+        if (newDueDate != null && newDueDate.matches(Regex("""^\d{4}-\d{2}-\d{2}$"""))) {
+            changesList.add("Vencimento: ${FinanceEngine.formatShortDate(newDueDate)}")
+        }
+        if (newSplitType != null) {
+            changesList.add("Divisão: ${newSplitType.label}")
+        }
+
+        if (changesList.isEmpty()) {
+            return ToolExecutionResult(
+                text = "⚠️ Nenhuma alteração foi informada para o lançamento \"$firstDesc\"."
+            )
+        }
+
+        // SE AINDA NÃO CONFIRMADO PELO USUÁRIO: Gera rascunho com pedido de confirmação interativo
+        if (!confirmed) {
+            val before = repository.getMonthSummary().first()
+            var estimatedAfter = before.freeBalance
+
+            if (newAmount != null && newAmount > 0.0) {
+                val oldImpact = firstTarget.userImpact[user.uid] ?: firstTarget.effectiveAmount
+                val partner = repository.allUsers.find { it.uid != user.uid }
+                val newSplit = FinanceEngine.buildSplit(
+                    splitType = newSplitType ?: firstTarget.splitType ?: SplitType.MINE,
+                    total = newAmount,
+                    myUid = user.uid,
+                    myName = user.displayName,
+                    partnerUid = partner?.uid,
+                    partnerName = partner?.displayName,
+                    payerUid = firstTarget.paidByUid
+                )
+                val newImpact = newSplit.userImpact[user.uid] ?: newAmount
+                val diff = if (firstTarget.type == TransactionType.INCOME) (newAmount - firstTarget.effectiveAmount) else -(newImpact - oldImpact)
+                estimatedAfter = FinanceEngine.round2(before.freeBalance + diff)
+            }
+
+            val confirmMessage = if (updatedCount > 1) {
+                "Entendi que você deseja alterar **$updatedCount lançamentos** vinculados a **\"$firstDesc\"**:\n\n" +
+                        changesList.joinToString("\n") { "• **$it**" } + "\n\n" +
+                        (if (newAmount != null) "• **Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" else "") +
+                        "Por favor, confirme se os dados estão corretos para salvar as edições."
+            } else {
+                "Entendi que você deseja alterar o lançamento **\"$firstDesc\"** (${FinanceEngine.formatCurrency(firstTarget.effectiveAmount)}):\n\n" +
+                        changesList.joinToString("\n") { "• **$it**" } + "\n\n" +
+                        (if (newAmount != null) "• **Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" else "") +
+                        "Por favor, confirme se os dados estão corretos para salvar as edições."
+            }
+
+            val actionTitle = if (updatedCount > 1) "Confirmar Edição ($updatedCount itens)" else "Confirmar Edição: $firstDesc"
+            val actionDesc = if (updatedCount > 1) "$firstDesc (+${updatedCount - 1} parcelas)" else "$firstDesc (${FinanceEngine.formatCurrency(newAmount ?: firstTarget.effectiveAmount)})"
+
+            val pendingAction = PendingAction(
+                id = "act_" + UUID.randomUUID().toString().take(8),
+                toolName = "EDIT_TRANSACTION",
+                title = actionTitle,
+                description = actionDesc,
+                detail = changesList.joinToString(" • "),
+                args = mapOf(
+                    "transactionId" to (transactionId ?: firstTarget.id),
+                    "targetIds" to targets.map { it.id },
+                    "searchTerm" to searchTerm,
+                    "month" to month,
+                    "newAmount" to newAmount,
+                    "newDescription" to newDescription,
+                    "newCategory" to newCategory,
+                    "newSubcategory" to newSubcategory,
+                    "newStatus" to newStatus?.name,
+                    "newPaymentMethod" to newPaymentMethod?.name,
+                    "newCompetenceMonth" to newCompetenceMonth,
+                    "newDueDate" to newDueDate,
+                    "newSplitType" to newSplitType?.name,
+                    "confirmed" to true
+                ),
+                status = PendingActionStatus.PENDING
+            )
+
+            return ToolExecutionResult(
+                text = confirmMessage,
+                actionCard = ActionCardData(
+                    title = actionTitle,
+                    description = actionDesc,
+                    detail = changesList.joinToString(" • "),
+                    newFreeBalance = if (newAmount != null) "Saldo Livre previsto: ${FinanceEngine.formatCurrency(before.freeBalance)} → ${FinanceEngine.formatCurrency(estimatedAfter)}" else null,
+                    pendingAction = pendingAction
+                )
+            )
+        }
 
         for (tx in targets) {
             var updated = tx
@@ -667,7 +781,6 @@ class AndroidAgentToolsEngine(
                     FinanceEngine.formatInstallmentDesc(clean, tx.installmentNumber, tx.installmentsTotal)
                 } else clean
                 updated = updated.copy(description = finalDesc)
-                if ("Descrição" !in changesList) changesList.add("Descrição: $finalDesc")
             }
 
             if (newAmount != null && newAmount > 0.0) {
@@ -689,27 +802,22 @@ class AndroidAgentToolsEngine(
                     userImpact = newSplit.userImpact,
                     allocations = newSplit.allocations
                 )
-                if ("Valor" !in changesList) changesList.add("Valor: ${FinanceEngine.formatCurrency(newAmount)}")
             }
 
             if (newCategory != null) {
                 updated = updated.copy(category = newCategory)
-                if ("Categoria" !in changesList) changesList.add("Categoria: $newCategory")
             }
 
             if (newSubcategory != null) {
                 updated = updated.copy(subcategory = newSubcategory)
-                if ("Subcategoria" !in changesList) changesList.add("Subcategoria: $newSubcategory")
             }
 
             if (newStatus != null) {
                 updated = updated.copy(status = newStatus)
-                if ("Status" !in changesList) changesList.add("Status: ${newStatus.label}")
             }
 
             if (newPaymentMethod != null) {
                 updated = updated.copy(paymentMethod = newPaymentMethod)
-                if ("Método de Pagamento" !in changesList) changesList.add("Método: ${newPaymentMethod.label}")
             }
 
             if (newCompetenceMonth != null && newCompetenceMonth.matches(Regex("""^\d{4}-\d{2}$"""))) {
@@ -719,12 +827,10 @@ class AndroidAgentToolsEngine(
                 } else {
                     updated = updated.copy(competenceMonth = newCompetenceMonth)
                 }
-                if ("Mês da Fatura" !in changesList) changesList.add("Mês da Fatura: ${FinanceEngine.monthLabel(newCompetenceMonth)}")
             }
 
             if (newDueDate != null && newDueDate.matches(Regex("""^\d{4}-\d{2}-\d{2}$"""))) {
                 updated = updated.copy(dueDate = newDueDate)
-                if ("Vencimento" !in changesList) changesList.add("Vencimento: ${FinanceEngine.formatShortDate(newDueDate)}")
             }
 
             if (newSplitType != null) {
@@ -744,7 +850,6 @@ class AndroidAgentToolsEngine(
                     allocations = newSplit.allocations,
                     visibleToUids = newSplit.visibleToUids
                 )
-                if ("Divisão" !in changesList) changesList.add("Divisão: ${newSplitType.label}")
             }
 
             repository.updateTransaction(updated)
@@ -763,7 +868,6 @@ class AndroidAgentToolsEngine(
         )
 
         val summaryNow = repository.getMonthSummary().first()
-        val firstDesc = targets.first().description
 
         return ToolExecutionResult(
             text = "✏️ **Lançamento atualizado com sucesso!**\n\n" +
@@ -780,18 +884,23 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeEditFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val searchTerm = jsonObj.getStringOrNull("searchTerm")
-        val transactionId = jsonObj.getStringOrNull("transactionId")
-        val month = jsonObj.getStringOrNull("month")
-        val newAmount = jsonObj.getDoubleOrNull("newAmount")
-        val newDescription = jsonObj.getStringOrNull("newDescription")
-        val newCategory = jsonObj.getStringOrNull("newCategory")
-        val newSubcategory = jsonObj.getStringOrNull("newSubcategory")
-        val newStatusStr = jsonObj.getStringOrNull("newStatus")
-        val newPayMethodStr = jsonObj.getStringOrNull("newPaymentMethod")
-        val newCompetenceMonth = jsonObj.getStringOrNull("newCompetenceMonth")
-        val newDueDate = jsonObj.getStringOrNull("newDueDate")
-        val newSplitTypeStr = jsonObj.getStringOrNull("newSplitType")
+        val searchTerm = jsonObj.getStringOrNull("searchTerm") ?: jsonObj.getStringOrNull("termoBusca")
+        val transactionId = jsonObj.getStringOrNull("transactionId") ?: jsonObj.getStringOrNull("id")
+        val targetIdsArray = jsonObj.getAsJsonArrayOrNull("targetIds") ?: jsonObj.getAsJsonArrayOrNull("ids")
+        val targetIds = targetIdsArray?.mapNotNull { it.asString }
+        val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
+        val newAmount = jsonObj.getDoubleOrNull("newAmount") ?: jsonObj.getDoubleOrNull("novoValor")
+        val newDescription = jsonObj.getStringOrNull("newDescription") ?: jsonObj.getStringOrNull("novaDescricao")
+        val newCategory = jsonObj.getStringOrNull("newCategory") ?: jsonObj.getStringOrNull("novaCategoria")
+        val newSubcategory = jsonObj.getStringOrNull("newSubcategory") ?: jsonObj.getStringOrNull("novaSubcategoria")
+        val newStatusStr = jsonObj.getStringOrNull("newStatus") ?: jsonObj.getStringOrNull("novoStatus")
+        val newPayMethodStr = jsonObj.getStringOrNull("newPaymentMethod") ?: jsonObj.getStringOrNull("novoMetodoPagamento")
+        val newCompetenceMonth = jsonObj.getStringOrNull("newCompetenceMonth") ?: jsonObj.getStringOrNull("novoMesFatura")
+        val newDueDate = jsonObj.getStringOrNull("newDueDate") ?: jsonObj.getStringOrNull("novaDataVencimento")
+        val newSplitTypeStr = jsonObj.getStringOrNull("newSplitType") ?: jsonObj.getStringOrNull("novoTipoDivisao")
+        val confirmed = jsonObj.getBooleanOrNull("confirmed")
+            ?: jsonObj.getBooleanOrNull("__confirmed")
+            ?: false
 
         val newStatus = newStatusStr?.let { TransactionStatus.from(it) }
         val newPayMethod = newPayMethodStr?.let { PaymentMethod.from(it) }
@@ -808,6 +917,7 @@ class AndroidAgentToolsEngine(
         return executeEditTransaction(
             searchTerm = searchTerm,
             transactionId = transactionId,
+            targetIds = targetIds,
             month = month,
             newAmount = newAmount,
             newDescription = newDescription,
@@ -817,7 +927,8 @@ class AndroidAgentToolsEngine(
             newPaymentMethod = newPayMethod,
             newCompetenceMonth = newCompetenceMonth,
             newDueDate = newDueDate,
-            newSplitType = newSplitType
+            newSplitType = newSplitType,
+            confirmed = confirmed
         )
     }
 
@@ -828,39 +939,109 @@ class AndroidAgentToolsEngine(
     suspend fun executeDeleteTransaction(
         searchTerm: String? = null,
         transactionId: String? = null,
+        targetIds: List<String>? = null,
         amount: Double? = null,
         month: String? = null,
-        deleteAllInstallments: Boolean = false
+        deleteAllInstallments: Boolean = false,
+        confirmed: Boolean = false
     ): ToolExecutionResult {
         val all = repository.getTransactions().first()
         val user = repository.currentUser.value
 
-        val target = if (!transactionId.isNullOrBlank()) {
-            all.find { it.id == transactionId }
+        val targets = if (!targetIds.isNullOrEmpty()) {
+            all.filter { it.id in targetIds }
+        } else if (!transactionId.isNullOrBlank()) {
+            all.filter { it.id == transactionId }
         } else if (!searchTerm.isNullOrBlank() || amount != null) {
-            all.filter { t ->
+            val matched = all.filter { t ->
                 if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
                 if (amount != null && kotlin.math.abs(t.effectiveAmount - amount) > 0.05) return@filter false
                 if (!searchTerm.isNullOrBlank() && !matchesSearch(t.description, searchTerm)) return@filter false
                 true
             }.maxByOrNull { it.createdAt }
-        } else null
+            if (matched != null) listOf(matched) else emptyList()
+        } else emptyList()
 
-        if (target == null) {
+        if (targets.isEmpty()) {
             return ToolExecutionResult(
                 text = "⚠️ Não encontrei nenhum lançamento com os dados informados (\"${searchTerm ?: transactionId ?: ""}\") para excluir."
             )
         }
 
-        var deletedCount = 1
-        var totalDeletedVal = target.effectiveAmount
-        val desc = target.description
-
-        if (deleteAllInstallments && !target.installmentGroupId.isNullOrBlank()) {
-            deletedCount = repository.deleteInstallmentGroup(target.installmentGroupId)
-            totalDeletedVal = target.totalAmount * deletedCount
+        val primaryTarget = targets.first()
+        val isGroupDelete = deleteAllInstallments && !primaryTarget.installmentGroupId.isNullOrBlank()
+        val finalTargets = if (isGroupDelete) {
+            all.filter { it.installmentGroupId == primaryTarget.installmentGroupId }
         } else {
-            repository.deleteTransaction(target.id)
+            targets
+        }
+
+        val deletedCount = finalTargets.size
+        val totalDeletedVal = finalTargets.sumOf { it.effectiveAmount }
+        val desc = primaryTarget.description
+
+        // SE AINDA NÃO CONFIRMADO PELO USUÁRIO: Gera rascunho com pedido de confirmação interativo
+        if (!confirmed) {
+            val before = repository.getMonthSummary().first()
+            val myImpactTotal = finalTargets.sumOf { it.userImpact[user.uid] ?: it.effectiveAmount }
+            val isIncome = primaryTarget.type == TransactionType.INCOME
+            val netDiff = if (isIncome) -myImpactTotal else myImpactTotal
+            val estimatedAfter = FinanceEngine.round2(before.freeBalance + netDiff)
+
+            val confirmMessage = if (deletedCount > 1) {
+                "Entendi que você deseja excluir o parcelamento completo de **\"$desc\"** ($deletedCount parcelas no total de **${FinanceEngine.formatCurrency(totalDeletedVal)}**).\n\n" +
+                        "• **Item a remover**: $desc ($deletedCount parcelas)\n" +
+                        "• **Valor total a estornar**: ${FinanceEngine.formatCurrency(totalDeletedVal)}\n" +
+                        "• **Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
+                        "⚠️ Esta ação é irreversível. Por favor, confirme no botão abaixo para excluir definitivamente."
+            } else {
+                "Entendi que você deseja excluir o lançamento **\"$desc\"** no valor de **${FinanceEngine.formatCurrency(totalDeletedVal)}** referente a **${FinanceEngine.monthLabel(primaryTarget.competenceMonth)}**.\n\n" +
+                        "• **Item a remover**: $desc\n" +
+                        "• **Valor a estornar**: ${FinanceEngine.formatCurrency(totalDeletedVal)}\n" +
+                        "• **Competência**: ${FinanceEngine.monthLabel(primaryTarget.competenceMonth)}\n" +
+                        "• **Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
+                        "⚠️ Esta ação removerá o lançamento do seu histórico. Por favor, confirme no botão abaixo para excluir definitivamente."
+            }
+
+            val actionTitle = if (deletedCount > 1) "Confirmar Exclusão ($deletedCount parcelas)" else "Confirmar Exclusão: $desc"
+            val actionDetail = if (deletedCount > 1) "$deletedCount parcelas serão removidas" else "Remover de ${FinanceEngine.monthLabel(primaryTarget.competenceMonth)}"
+
+            val pendingAction = PendingAction(
+                id = "act_" + UUID.randomUUID().toString().take(8),
+                toolName = "DELETE_TRANSACTION",
+                title = actionTitle,
+                description = "$desc — ${FinanceEngine.formatCurrency(totalDeletedVal)}",
+                detail = actionDetail,
+                args = mapOf(
+                    "transactionId" to primaryTarget.id,
+                    "targetIds" to finalTargets.map { it.id },
+                    "searchTerm" to searchTerm,
+                    "amount" to amount,
+                    "month" to month,
+                    "deleteAllInstallments" to deleteAllInstallments,
+                    "confirmed" to true
+                ),
+                status = PendingActionStatus.PENDING
+            )
+
+            return ToolExecutionResult(
+                text = confirmMessage,
+                actionCard = ActionCardData(
+                    title = actionTitle,
+                    description = "$desc — ${FinanceEngine.formatCurrency(totalDeletedVal)}",
+                    detail = actionDetail,
+                    newFreeBalance = "Saldo Livre previsto: ${FinanceEngine.formatCurrency(before.freeBalance)} → ${FinanceEngine.formatCurrency(estimatedAfter)}",
+                    pendingAction = pendingAction
+                )
+            )
+        }
+
+        if (isGroupDelete) {
+            repository.deleteInstallmentGroup(primaryTarget.installmentGroupId!!)
+        } else {
+            for (t in finalTargets) {
+                repository.deleteTransaction(t.id)
+            }
         }
 
         repository.logActivity(
@@ -870,7 +1051,7 @@ class AndroidAgentToolsEngine(
                 title = "Lançamento Excluído",
                 description = "Removeu: $desc (${FinanceEngine.formatCurrency(totalDeletedVal)})",
                 amount = totalDeletedVal,
-                competenceMonth = target.competenceMonth,
+                competenceMonth = primaryTarget.competenceMonth,
                 userUid = user.uid,
                 userName = user.displayName
             )
@@ -893,18 +1074,25 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeDeleteFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        val searchTerm = jsonObj.getStringOrNull("searchTerm")
-        val transactionId = jsonObj.getStringOrNull("transactionId")
-        val amount = jsonObj.getDoubleOrNull("amount")
-        val month = jsonObj.getStringOrNull("month")
+        val searchTerm = jsonObj.getStringOrNull("searchTerm") ?: jsonObj.getStringOrNull("termoBusca")
+        val transactionId = jsonObj.getStringOrNull("transactionId") ?: jsonObj.getStringOrNull("id")
+        val targetIdsArray = jsonObj.getAsJsonArrayOrNull("targetIds") ?: jsonObj.getAsJsonArrayOrNull("ids")
+        val targetIds = targetIdsArray?.mapNotNull { it.asString }
+        val amount = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor")
+        val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
         val deleteAll = jsonObj.getBooleanOrNull("deleteAllInstallments") ?: false
+        val confirmed = jsonObj.getBooleanOrNull("confirmed")
+            ?: jsonObj.getBooleanOrNull("__confirmed")
+            ?: false
 
         return executeDeleteTransaction(
             searchTerm = searchTerm,
             transactionId = transactionId,
+            targetIds = targetIds,
             amount = amount,
             month = month,
-            deleteAllInstallments = deleteAll
+            deleteAllInstallments = deleteAll,
+            confirmed = confirmed
         )
     }
 
@@ -1582,31 +1770,60 @@ class AndroidAgentToolsEngine(
             "EDIT_TRANSACTION", "editarTransacoes" -> {
                 val term = args["searchTerm"] as? String ?: args["termoBusca"] as? String
                 val id = args["transactionId"] as? String
-                val newAmt = (args["newAmount"] as? Number)?.toDouble() ?: (args["novoValor"] as? Number)?.toDouble()
+                val targetIds = (args["targetIds"] as? List<*>)?.mapNotNull { it?.toString() }
+                val month = args["month"] as? String ?: args["mes"] as? String
+                val newAmt = (args["newAmount"] as? Number)?.toDouble() ?: (args["newAmount"] as? String)?.toDoubleOrNull()
+                    ?: (args["novoValor"] as? Number)?.toDouble() ?: (args["novoValor"] as? String)?.toDoubleOrNull()
                 val newDesc = args["newDescription"] as? String ?: args["novaDescricao"] as? String
                 val newCat = args["newCategory"] as? String ?: args["novaCategoria"] as? String
                 val newSub = args["newSubcategory"] as? String ?: args["novaSubcategoria"] as? String
+                val newStatus = (args["newStatus"] as? String ?: args["novoStatus"] as? String)?.let { TransactionStatus.from(it) }
+                val newPayMethod = (args["newPaymentMethod"] as? String ?: args["novoMetodoPagamento"] as? String)?.let { PaymentMethod.from(it) }
+                val newCompMonth = args["newCompetenceMonth"] as? String ?: args["novoMesFatura"] as? String
+                val newDueDate = args["newDueDate"] as? String ?: args["novaDataVencimento"] as? String
+                val newSplitTypeStr = args["newSplitType"] as? String ?: args["novoTipoDivisao"] as? String
+                val newSplitType = when (newSplitTypeStr?.uppercase()) {
+                    "SPLIT_50", "CASAL_50_50" -> SplitType.SPLIT_50
+                    "PARTNER", "PARCEIRO" -> SplitType.PARTNER
+                    "FRIEND", "AMIGO" -> SplitType.FRIEND
+                    "EXTERNAL", "TERCEIRO" -> SplitType.EXTERNAL
+                    else -> if (newSplitTypeStr != null) SplitType.MINE else null
+                }
 
                 executeEditTransaction(
                     searchTerm = term,
                     transactionId = id,
+                    targetIds = targetIds,
+                    month = month,
                     newAmount = newAmt,
                     newDescription = newDesc,
                     newCategory = newCat,
-                    newSubcategory = newSub
+                    newSubcategory = newSub,
+                    newStatus = newStatus,
+                    newPaymentMethod = newPayMethod,
+                    newCompetenceMonth = newCompMonth,
+                    newDueDate = newDueDate,
+                    newSplitType = newSplitType,
+                    confirmed = true
                 )
             }
             "DELETE_TRANSACTION", "excluirTransacoes" -> {
                 val id = args["transactionId"] as? String
+                val targetIds = (args["targetIds"] as? List<*>)?.mapNotNull { it?.toString() }
                 val term = args["searchTerm"] as? String ?: args["termoBusca"] as? String
-                val amt = (args["amount"] as? Number)?.toDouble() ?: (args["valor"] as? Number)?.toDouble()
+                val amt = (args["amount"] as? Number)?.toDouble() ?: (args["amount"] as? String)?.toDoubleOrNull()
+                    ?: (args["valor"] as? Number)?.toDouble() ?: (args["valor"] as? String)?.toDoubleOrNull()
+                val month = args["month"] as? String ?: args["mes"] as? String
                 val deleteAll = (args["deleteAllInstallments"] as? Boolean) ?: false
 
                 executeDeleteTransaction(
                     searchTerm = term,
                     transactionId = id,
+                    targetIds = targetIds,
                     amount = amt,
-                    deleteAllInstallments = deleteAll
+                    month = month,
+                    deleteAllInstallments = deleteAll,
+                    confirmed = true
                 )
             }
             "UPDATE_ESTIMATED", "atualizarContaPrevista" -> {
@@ -1708,7 +1925,8 @@ class AndroidAgentToolsEngine(
             return executeDeleteTransaction(
                 searchTerm = cleanTerm.ifBlank { null },
                 amount = parsedAmt,
-                deleteAllInstallments = deleteAll
+                deleteAllInstallments = deleteAll,
+                confirmed = false
             )
         }
 
@@ -1724,13 +1942,13 @@ class AndroidAgentToolsEngine(
                 val amtChange = neuralClassifier.parseAmount(targetChange)
 
                 return if (amtChange != null) {
-                    executeEditTransaction(searchTerm = term, newAmount = amtChange)
+                    executeEditTransaction(searchTerm = term, newAmount = amtChange, confirmed = false)
                 } else {
                     val catGuess = neuralClassifier.guessCategory(targetChange)
                     if (catGuess != "Outros") {
-                        executeEditTransaction(searchTerm = term, newCategory = catGuess)
+                        executeEditTransaction(searchTerm = term, newCategory = catGuess, confirmed = false)
                     } else {
-                        executeEditTransaction(searchTerm = term, newDescription = targetChange)
+                        executeEditTransaction(searchTerm = term, newDescription = targetChange, confirmed = false)
                     }
                 }
             }

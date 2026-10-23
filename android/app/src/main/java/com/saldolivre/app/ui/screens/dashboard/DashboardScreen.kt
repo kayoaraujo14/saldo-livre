@@ -1,13 +1,15 @@
 package com.saldolivre.app.ui.screens.dashboard
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
@@ -17,34 +19,50 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.Transaction
+import com.saldolivre.app.ui.components.DeleteInstallmentDialog
 import com.saldolivre.app.ui.components.KpiCard
 import com.saldolivre.app.ui.components.MonthSelector
+import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.ui.components.TransactionItem
 import com.saldolivre.app.ui.theme.*
 
 private val HeroBannerShape = RoundedCornerShape(20.dp)
 private val DailyLimitBannerShape = RoundedCornerShape(12.dp)
 private val IncomePillShape = RoundedCornerShape(8.dp)
-private val PositiveHeroBrush = Brush.verticalGradient(colors = listOf(Emerald500.copy(alpha = 0.2f), DarkSurface))
-private val NegativeHeroBrush = Brush.verticalGradient(colors = listOf(Rose500.copy(alpha = 0.2f), DarkSurface))
-private val PositiveHeroBorder = Emerald500.copy(alpha = 0.5f)
-private val NegativeHeroBorder = Rose500.copy(alpha = 0.5f)
+private val PositiveHeroBrush = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF064E3B).copy(alpha = 0.50f),
+        DarkSurface
+    )
+)
+private val NegativeHeroBrush = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF4C0519).copy(alpha = 0.45f),
+        DarkSurface
+    )
+)
+private val PositiveHeroBorder = Emerald500.copy(alpha = 0.4f)
+private val NegativeHeroBorder = Rose500.copy(alpha = 0.4f)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
     onNavigateToTransactions: () -> Unit,
-    onNavigateToChat: () -> Unit,
     onNavigateToReceivables: () -> Unit,
-    onNavigateToInvestments: () -> Unit = {}
+    onNavigateToInvestments: () -> Unit = {},
+    onNavigateToEditTransaction: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
+    var txToDelete by remember { mutableStateOf<Transaction?>(null) }
     val summary = uiState.summary
 
     val formattedIncome = remember(summary.income) { FinanceEngine.formatCurrency(summary.income) }
@@ -106,19 +124,6 @@ fun DashboardScreen(
                     }
                 }
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onNavigateToChat,
-                containerColor = Emerald500,
-                contentColor = DarkBackground,
-                shape = CircleShape
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = "Abrir Copiloto IA"
-                )
-            }
         }
     ) { innerPadding ->
         LazyColumn(
@@ -142,112 +147,117 @@ fun DashboardScreen(
             item(key = "hero_free_balance", contentType = "hero_free_balance") {
                 val isNegative = summary.freeBalance < 0
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(HeroBannerShape)
-                        .background(if (isNegative) NegativeHeroBrush else PositiveHeroBrush)
-                        .border(
-                            1.dp,
-                            if (isNegative) NegativeHeroBorder else PositiveHeroBorder,
-                            HeroBannerShape
-                        )
-                        .padding(20.dp)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = HeroBannerShape,
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isNegative) NegativeHeroBorder else PositiveHeroBorder
+                    )
                 ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (isNegative) NegativeHeroBrush else PositiveHeroBrush)
+                            .padding(20.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "SALDO LIVRE REAL",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp,
-                                color = if (isNegative) Rose400 else Emerald400,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(end = 8.dp)
-                            )
-
-                            Box(
-                                modifier = Modifier
-                                    .background(DarkSurfaceVariant, IncomePillShape)
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "Receitas: $formattedIncome",
-                                    fontSize = 11.sp,
-                                    color = TextSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Text(
-                            text = formattedFreeBalance,
-                            fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isNegative) Rose400 else Emerald400,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        Spacer(modifier = Modifier.height(14.dp))
-
-                        // Daily Safe Limit Banner
-                        val dailyLimit = summary.dailyLimit
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(DailyLimitBannerShape)
-                                .background(DarkSurfaceVariant.copy(alpha = 0.7f))
-                                .border(1.dp, DarkBorder, DailyLimitBannerShape)
-                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        Column(
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Text(
+                                    text = "SALDO LIVRE REAL",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp,
+                                    color = if (isNegative) Rose400 else Emerald400,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier
                                         .weight(1f)
                                         .padding(end = 8.dp)
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .background(DarkSurfaceVariant, IncomePillShape)
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Shield,
-                                        contentDescription = null,
-                                        tint = Cyan400,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = "Disponível por Dia:",
-                                        style = Typography.bodyMedium,
+                                        text = "Receitas: $formattedIncome",
+                                        fontSize = 11.sp,
                                         color = TextSecondary,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
+                            }
 
-                                Text(
-                                    text = formattedDailyLimit,
-                                    style = Typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (dailyLimit != null && dailyLimit > 0) Cyan400 else Rose400,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text(
+                                text = formattedFreeBalance,
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isNegative) Rose400 else Emerald400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Daily Safe Limit Banner
+                            val dailyLimit = summary.dailyLimit
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(DailyLimitBannerShape)
+                                    .background(DarkSurfaceVariant.copy(alpha = 0.7f))
+                                    .border(1.dp, DarkBorder, DailyLimitBannerShape)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Shield,
+                                            contentDescription = null,
+                                            tint = Cyan400,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Disponível por Dia:",
+                                            style = Typography.bodyMedium,
+                                            color = TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Text(
+                                        text = formattedDailyLimit,
+                                        style = Typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (dailyLimit != null && dailyLimit > 0) Cyan400 else Rose400,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -352,17 +362,97 @@ fun DashboardScreen(
                     key = { it.id },
                     contentType = { "recent_transaction_item" }
                 ) { tx ->
+                    val onItemClick = remember(tx) { { selectedTxForDetails = tx } }
                     TransactionItem(
                         transaction = tx,
-                        onClick = onNavigateToTransactions,
+                        onClick = onItemClick,
                         onStatusClick = { viewModel.toggleTransactionStatus(tx.id) }
                     )
                 }
             }
 
             item(key = "bottom_spacer", contentType = "bottom_spacer") {
-                Spacer(modifier = Modifier.height(60.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
+        }
+    }
+
+    // Detail & Actions Dialog
+    selectedTxForDetails?.let { initialTx ->
+        val tx = uiState.recentTransactions.find { it.id == initialTx.id } ?: initialTx
+        TransactionDetailDialog(
+            transaction = tx,
+            onDismissRequest = { selectedTxForDetails = null },
+            onToggleStatus = { viewModel.toggleTransactionStatus(tx.id) },
+            onSetStatus = { status, actualAmount ->
+                viewModel.setStatus(tx.id, status, actualAmount)
+            },
+            onNavigateToEditTransaction = { editTxId ->
+                selectedTxForDetails = null
+                onNavigateToEditTransaction(editTxId)
+            },
+            onDeleteRequest = {
+                txToDelete = tx
+                selectedTxForDetails = null
+            }
+        )
+    }
+
+    txToDelete?.let { tx ->
+        if (tx.isInstallment && !tx.installmentGroupId.isNullOrBlank()) {
+            DeleteInstallmentDialog(
+                transaction = tx,
+                allTransactions = uiState.recentTransactions,
+                onDismissRequest = { txToDelete = null },
+                onDeleteSingle = { singleTx ->
+                    viewModel.deleteTransaction(singleTx.id)
+                    txToDelete = null
+                },
+                onDeleteAll = { groupId ->
+                    viewModel.deleteInstallmentGroup(groupId)
+                    txToDelete = null
+                }
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { txToDelete = null },
+                containerColor = DarkSurface,
+                title = {
+                    Text(
+                        text = "Excluir Lançamento",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                text = {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        Text(
+                            text = "Deseja realmente excluir \"${tx.description}\"?",
+                            color = TextSecondary,
+                            style = Typography.bodyMedium
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteTransaction(tx.id)
+                            txToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Rose500)
+                    ) {
+                        Text(text = "Excluir", color = TextPrimary, maxLines = 1)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { txToDelete = null }) {
+                        Text(text = "Cancelar", color = TextSecondary, maxLines = 1)
+                    }
+                }
+            )
         }
     }
 }

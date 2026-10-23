@@ -1546,22 +1546,30 @@ fun ChatBubble(
         val actionCards = message.allActionCards()
         for (card in actionCards) {
             val pending = card.pendingAction ?: if (card.title.contains("Confirmar", ignoreCase = true)) {
+                val isDelete = card.title.contains("Exclusão", ignoreCase = true) || card.title.contains("Excluir", ignoreCase = true)
+                val isEdit = card.title.contains("Edição", ignoreCase = true) || card.title.contains("Editar", ignoreCase = true)
+                val tool = when {
+                    isDelete -> "DELETE_TRANSACTION"
+                    isEdit -> "EDIT_TRANSACTION"
+                    else -> "CREATE_TRANSACTION"
+                }
                 val parts = card.description.split("—", "-")
                 val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
                 val amountPart = parts.getOrNull(1)?.trim() ?: ""
                 val parsedAmount = Regex("""[\d.,]+""").find(amountPart)?.value
                     ?.replace(".", "")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
-                if (parsedAmount > 0.0) {
+                if (parsedAmount > 0.0 || isDelete || isEdit) {
                     val detailParts = card.detail?.split("•")?.map { it.trim() }
                     val catSubcat = detailParts?.firstOrNull()?.split("›")?.map { it.trim() }
                     PendingAction(
                         id = "act_" + (card.title + card.description).hashCode().toString().take(8),
-                        toolName = "CREATE_TRANSACTION",
+                        toolName = tool,
                         title = card.title,
                         description = card.description,
                         detail = card.detail,
                         args = mapOf(
                             "description" to descPart,
+                            "searchTerm" to descPart,
                             "amount" to parsedAmount,
                             "category" to catSubcat?.firstOrNull(),
                             "subcategory" to catSubcat?.getOrNull(1),
@@ -1573,6 +1581,8 @@ fun ChatBubble(
                 } else null
             } else null
             val isPendingAction = pending != null && pending.status == PendingActionStatus.PENDING
+            val isDeleteAction = pending?.toolName?.contains("DELETE", ignoreCase = true) == true || pending?.toolName?.contains("excluir", ignoreCase = true) == true
+            val isEditAction = pending?.toolName?.contains("EDIT", ignoreCase = true) == true || pending?.toolName?.contains("editar", ignoreCase = true) == true
             val actionShape = RoundedCornerShape(18.dp)
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -1582,7 +1592,8 @@ fun ChatBubble(
                     .shadow(
                         elevation = if (isPendingAction) 8.dp else 4.dp,
                         shape = actionShape,
-                        spotColor = if (isPendingAction) Emerald400.copy(alpha = 0.35f)
+                        spotColor = if (isDeleteAction && isPendingAction) Rose500.copy(alpha = 0.35f)
+                            else if (isPendingAction) Emerald400.copy(alpha = 0.35f)
                             else if (card.isSuccess) Emerald500.copy(alpha = 0.2f)
                             else Rose500.copy(alpha = 0.2f)
                     )
@@ -1594,7 +1605,11 @@ fun ChatBubble(
                     )
                     .border(
                         1.dp,
-                        if (isPendingAction) {
+                        if (isDeleteAction && isPendingAction) {
+                            Brush.linearGradient(
+                                listOf(Rose400.copy(alpha = 0.7f), DarkBorder)
+                            )
+                        } else if (isPendingAction) {
                             Brush.linearGradient(
                                 listOf(Emerald400.copy(alpha = 0.7f), Cyan500.copy(alpha = 0.45f))
                             )
@@ -1617,18 +1632,25 @@ fun ChatBubble(
                             .size(28.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(
-                                if (isPendingAction) Emerald500.copy(alpha = 0.2f)
+                                if (isDeleteAction && isPendingAction) Rose500.copy(alpha = 0.2f)
+                                else if (isEditAction && isPendingAction) Amber500.copy(alpha = 0.2f)
+                                else if (isPendingAction) Emerald500.copy(alpha = 0.2f)
                                 else if (card.isSuccess) Emerald500.copy(alpha = 0.15f)
                                 else Rose500.copy(alpha = 0.15f)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isPendingAction) Icons.AutoMirrored.Filled.ReceiptLong
+                            imageVector = if (isDeleteAction && isPendingAction) Icons.Default.Delete
+                                else if (isEditAction && isPendingAction) Icons.Default.Edit
+                                else if (isPendingAction) Icons.AutoMirrored.Filled.ReceiptLong
                                 else if (card.isSuccess) Icons.Default.CheckCircle
                                 else Icons.Default.Close,
                             contentDescription = null,
-                            tint = if (card.isSuccess || isPendingAction) Emerald400 else Rose400,
+                            tint = if (isDeleteAction && isPendingAction) Rose400
+                                else if (isEditAction && isPendingAction) Amber500
+                                else if (card.isSuccess || isPendingAction) Emerald400
+                                else Rose400,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1637,7 +1659,10 @@ fun ChatBubble(
                         text = card.title,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (card.isSuccess || isPendingAction) Emerald400 else Rose400,
+                        color = if (isDeleteAction && isPendingAction) Rose400
+                            else if (isEditAction && isPendingAction) Amber500
+                            else if (card.isSuccess || isPendingAction) Emerald400
+                            else Rose400,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
@@ -1789,12 +1814,16 @@ fun ChatBubble(
                         }
 
                         // Botão Confirmar
+                        val confirmBtnColor = if (isDeleteAction) Rose500 else Emerald500
+                        val confirmBtnText = if (isDeleteAction) "Excluir" else if (isEditAction) "Salvar Edição" else "Confirmar"
+                        val confirmBtnIcon = if (isDeleteAction) Icons.Default.Delete else Icons.Default.Check
+
                         Button(
                             onClick = { onConfirmAction?.invoke(pending) },
                             enabled = !isActionInProgress,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Emerald500,
-                                disabledContainerColor = Emerald500.copy(alpha = 0.4f)
+                                containerColor = confirmBtnColor,
+                                disabledContainerColor = confirmBtnColor.copy(alpha = 0.4f)
                             ),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
@@ -1811,14 +1840,14 @@ fun ChatBubble(
                                 )
                             } else {
                                 Icon(
-                                    imageVector = Icons.Default.Check,
+                                    imageVector = confirmBtnIcon,
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
                                     tint = DarkBackground
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Confirmar",
+                                    text = confirmBtnText,
                                     color = DarkBackground,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 12.5.sp,
@@ -1828,6 +1857,12 @@ fun ChatBubble(
                         }
                     }
                 } else if (pending?.status == PendingActionStatus.CONFIRMED) {
+                    val confirmedStatusText = when {
+                        isDeleteAction -> "Exclusão confirmada no Saldo Livre"
+                        isEditAction -> "Edição confirmada no Saldo Livre"
+                        else -> "Lançamento confirmado no Saldo Livre"
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1846,7 +1881,7 @@ fun ChatBubble(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Lançamento confirmado no Saldo Livre",
+                            text = confirmedStatusText,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Emerald400

@@ -270,6 +270,8 @@ export interface Card {
   sharedWithUids: string[]
   frequentThirdParties: string[]
   color?: string
+  /** Limite de crédito (opcional; compartilhado com o app Android) */
+  limit?: number | null
 }
 
 /** Coleção `recurring_bills` */

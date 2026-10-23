@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   History,
   TrendingUp,
+  Receipt,
 } from 'lucide-react'
 
 interface HeaderProps {
@@ -38,6 +39,7 @@ interface HeaderProps {
   onOpenFriends: () => void
   onOpenRecentActivity: () => void
   onOpenInvestments?: () => void
+  onOpenInvoices?: () => void
 }
 
 export function Header({
@@ -49,6 +51,7 @@ export function Header({
   onOpenFriends,
   onOpenRecentActivity,
   onOpenInvestments,
+  onOpenInvoices,
 }: HeaderProps) {
   const {
     mode,
@@ -191,6 +194,20 @@ export function Header({
                 </span>
               )}
             </Button>
+
+            {/* Invoices Quick Button (Desktop LG+) */}
+            {onOpenInvoices && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onOpenInvoices}
+                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-slate-800 hover:border-cyan-500/40 hover:bg-cyan-950/20 text-slate-300 hover:text-cyan-300 cursor-pointer rounded-xl hidden lg:flex transition-all"
+                title="Acompanhamento de faturas por cartão"
+              >
+                <Receipt className="size-3.5 text-cyan-400" />
+                <span>Faturas</span>
+              </Button>
+            )}
 
             {/* Investments Quick Button (Desktop XL) */}
             {onOpenInvestments && (

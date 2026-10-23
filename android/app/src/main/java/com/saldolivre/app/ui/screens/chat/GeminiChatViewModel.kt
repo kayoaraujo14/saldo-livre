@@ -999,20 +999,28 @@ class GeminiChatViewModel(
         if (activePending == null && lastCard != null && lastCard.title.contains("Confirmar", ignoreCase = true)) {
             val card = lastCard
             val desc = card.description
+            val isDelete = card.title.contains("Exclusão", ignoreCase = true) || card.title.contains("Excluir", ignoreCase = true)
+            val isEdit = card.title.contains("Edição", ignoreCase = true) || card.title.contains("Editar", ignoreCase = true)
+            val tool = when {
+                isDelete -> "DELETE_TRANSACTION"
+                isEdit -> "EDIT_TRANSACTION"
+                else -> "CREATE_TRANSACTION"
+            }
             val parts = desc.split("—", "-")
             val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
             val amountPart = parts.getOrNull(1)?.trim() ?: ""
             val parsedAmount = Regex("""[\d.,]+""").find(amountPart)?.value
                 ?.replace(".", "")?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
-            if (parsedAmount > 0.0) {
+            if (parsedAmount > 0.0 || isDelete || isEdit) {
                 activePending = PendingAction(
                     id = "act_" + (card.title + card.description).hashCode().toString().take(8),
-                    toolName = "CREATE_TRANSACTION",
+                    toolName = tool,
                     title = card.title,
                     description = card.description,
                     detail = card.detail,
                     args = mapOf(
                         "description" to descPart,
+                        "searchTerm" to descPart,
                         "amount" to parsedAmount,
                         "category" to card.detail?.split("•")?.firstOrNull()?.trim(),
                         "confirmed" to true
@@ -1022,7 +1030,7 @@ class GeminiChatViewModel(
             }
         }
         if (activePending != null && activePending.status == PendingActionStatus.PENDING && rawInput.isNotBlank() && attachment == null) {
-            val isAffirmative = Regex("""^(sim|confirmo|confirma|confirmar|pode|pode lançar|pode lancar|pode salvar|pode cadastrar|pode registrar|ok|beleza|positivo|isso|correto|executar|pode sim|claro|com certeza|salvar|registra|lança|lanca)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
+            val isAffirmative = Regex("""^(sim|confirmo|confirma|confirmar|pode|pode lançar|pode lancar|pode salvar|pode cadastrar|pode registrar|pode excluir|pode apagar|pode deletar|excluir|deletar|apagar|pode editar|pode alterar|alterar|editar|ok|beleza|positivo|isso|correto|executar|pode sim|claro|com certeza|salvar|registra|lança|lanca)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
             val isNegative = Regex("""^(não|nao|cancela|cancelar|esquece|esqueça|deixa pra lá|deixa pra la|abortar|errado|não quero|nao quero)\b""", RegexOption.IGNORE_CASE).containsMatchIn(rawInput)
 
             if (isAffirmative) {
@@ -1605,9 +1613,9 @@ REGRAS DE FUNCIONAMENTO:
   4. EXECUÇÃO EM LOTE: use SEMPRE BATCH_TRANSACTIONS com a lista completa.
 
 11. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA (HUMAN-IN-THE-LOOP):
-- Criações, edições e exclusões são preparadas em modo RASCUNHO. O sistema exibe automaticamente o card com os botões "✓ Confirmar" e "✕ Cancelar"; a gravação real só ocorre após o clique explícito do usuário (ou se ele responder "sim"/"pode lançar").
-- Demonstre que ENTENDEU a solicitação e cite os parâmetros montados (ex: "Preparei o lançamento de **R$ 45,00** em **Padaria** no débito para **Outubro de 2026**. Confira os dados abaixo e confirme para salvar.").
-- NUNCA afirme que a ação já foi salva ou gravada!
+- Criações, edições e exclusões são preparadas em modo RASCUNHO. O sistema exibe automaticamente o card com os botões "✓ Confirmar" e "✕ Cancelar"; a gravação real só ocorre após o clique explícito do usuário (ou se ele responder "sim"/"pode lançar"/"pode editar"/"pode excluir").
+- Demonstre que ENTENDEU a solicitação e cite os parâmetros montados (ex: "Preparei o lançamento de **R$ 45,00** em **Padaria** no débito para **Outubro de 2026**.", "Preparei a alteração de **Padaria** para **R$ 25,00**.", "Preparei a exclusão do lançamento **Burger King** de **R$ 50,00**. Confira os dados abaixo e confirme para prosseguir.").
+- NUNCA afirme que a ação já foi salva, gravada, alterada ou excluída antes da confirmação!
 
 12. CRIAÇÃO DE GRÁFICOS FINANCEIROS INTERATIVOS (DATA VISUALIZATION):
 - Sempre que o usuário pedir uma análise visual, comparativo ou distribuição ("faça um gráfico de...", "distribuição de gastos", "como estão meus investimentos"), ou quando enriquecer a resposta, use a ação GENERATE_CHART (ou um bloco ```chart { "type": "donut", "title": "...", "data": [{ "label": "...", "value": 100.0, "color": "#10b981" }] } ```) com dados numéricos REAIS do contexto (NUNCA invente números).
@@ -1725,7 +1733,7 @@ REGRAS DE FUNCIONAMENTO:
             }
 
             val isPending = allActions.any { it.pendingAction != null }
-            val claimsSaved = Regex("""cadastrad[oa] com sucesso|registrad[oa] com sucesso|salv[oa] com sucesso""", RegexOption.IGNORE_CASE).containsMatchIn(cleanText)
+            val claimsSaved = Regex("""cadastrad[oa] com sucesso|registrad[oa] com sucesso|salv[oa] com sucesso|atualizad[oa] com sucesso|editad[oa] com sucesso|excl[uú][ií]d[oa] com sucesso|removid[oa] com sucesso|apagad[oa] com sucesso""", RegexOption.IGNORE_CASE).containsMatchIn(cleanText)
 
             val isSearchOrQuery = extractedBlocks.any { block ->
                 val upper = block.jsonContent.uppercase()

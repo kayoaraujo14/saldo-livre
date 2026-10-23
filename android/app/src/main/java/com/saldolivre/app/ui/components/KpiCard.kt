@@ -53,7 +53,6 @@ fun KpiCard(
         if (highlight) accentColor.copy(alpha = 0.45f) else DarkBorder
     }
     val iconBgColor = remember(accentColor) { accentColor.copy(alpha = 0.15f) }
-    val iconBorderColor = remember(accentColor) { accentColor.copy(alpha = 0.3f) }
 
     Box(
         modifier = modifier
@@ -84,8 +83,7 @@ fun KpiCard(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .background(iconBgColor, KpiIconShape)
-                        .border(1.dp, iconBorderColor, KpiIconShape),
+                        .background(iconBgColor, KpiIconShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -113,7 +111,7 @@ fun KpiCard(
                 Text(
                     text = subtitle,
                     style = Typography.labelSmall,
-                    color = TextMuted,
+                    color = TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

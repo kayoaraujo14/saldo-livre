@@ -13,6 +13,7 @@ import {
   Sparkles,
   History,
   TrendingUp,
+  Receipt,
 } from 'lucide-react'
 
 interface MobileMenuSheetProps {
@@ -24,6 +25,7 @@ interface MobileMenuSheetProps {
   onGenerateBills: () => void
   onOpenRecentActivity?: () => void
   onOpenInvestments?: () => void
+  onOpenInvoices?: () => void
   generating?: boolean
 }
 
@@ -36,6 +38,7 @@ export function MobileMenuSheet({
   onGenerateBills,
   onOpenRecentActivity,
   onOpenInvestments,
+  onOpenInvoices,
   generating,
 }: MobileMenuSheetProps) {
   const {
@@ -179,6 +182,26 @@ export function MobileMenuSheet({
               <div>
                 <span className="text-sm font-semibold text-white block">Investimentos & Patrimônio</span>
                 <span className="text-xs text-slate-400">Aportes, classes de ativos e simulador</span>
+              </div>
+            </div>
+            <ChevronRight className="size-4 text-slate-500" />
+          </button>
+        )}
+
+        {/* Faturas por Cartão */}
+        {onOpenInvoices && (
+          <button
+            type="button"
+            onClick={onOpenInvoices}
+            className="w-full p-4 flex items-center justify-between hover:bg-slate-800/40 transition-colors text-left cursor-pointer active:bg-slate-800/60"
+          >
+            <div className="flex items-center gap-3">
+              <div className="size-9 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 flex items-center justify-center">
+                <Receipt className="size-4" />
+              </div>
+              <div>
+                <span className="text-sm font-semibold text-white block">Faturas dos Cartões</span>
+                <span className="text-xs text-slate-400">Fechamento, vencimento e pagamento</span>
               </div>
             </div>
             <ChevronRight className="size-4 text-slate-500" />

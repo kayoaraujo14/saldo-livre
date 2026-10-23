@@ -1,15 +1,38 @@
 package com.saldolivre.app.ui.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.ui.graphics.vector.ImageVector
 
 sealed class BottomNavItem(
     val route: String,
     val title: String,
-    val icon: ImageVector
+    val selectedIcon: ImageVector,
+    val unselectedIcon: ImageVector
 ) {
-    data object Dashboard : BottomNavItem("dashboard", "Início", Icons.Default.Dashboard)
-    data object Transactions : BottomNavItem("transactions", "Extrato", Icons.Default.ReceiptLong)
-    data object Menu : BottomNavItem("menu", "Menu", Icons.Default.Menu)
+    val icon: ImageVector get() = selectedIcon
+
+    data object Dashboard : BottomNavItem(
+        route = "dashboard",
+        title = "Início",
+        selectedIcon = Icons.Filled.Home,
+        unselectedIcon = Icons.Outlined.Home
+    )
+    data object Transactions : BottomNavItem(
+        route = "transactions",
+        title = "Extrato",
+        selectedIcon = Icons.AutoMirrored.Filled.ReceiptLong,
+        unselectedIcon = Icons.AutoMirrored.Outlined.ReceiptLong
+    )
+    data object Menu : BottomNavItem(
+        route = "menu",
+        title = "Menu",
+        selectedIcon = Icons.Filled.Menu,
+        unselectedIcon = Icons.Outlined.Menu
+    )
 }

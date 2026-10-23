@@ -5,14 +5,24 @@ import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -34,6 +44,8 @@ import com.saldolivre.app.ui.screens.friends.FriendsScreen
 import com.saldolivre.app.ui.screens.friends.FriendsViewModel
 import com.saldolivre.app.ui.screens.investments.InvestmentsScreen
 import com.saldolivre.app.ui.screens.investments.InvestmentsViewModel
+import com.saldolivre.app.ui.screens.invoices.CardInvoicesScreen
+import com.saldolivre.app.ui.screens.invoices.CardInvoicesViewModel
 import com.saldolivre.app.ui.screens.menu.MenuScreen
 import com.saldolivre.app.ui.screens.menu.MenuViewModel
 import com.saldolivre.app.ui.screens.projections.FutureProjectionsScreen
@@ -73,6 +85,29 @@ fun AppNavHost(
 
     Scaffold(
         containerColor = DarkBackground,
+        floatingActionButton = {
+            AnimatedVisibility(
+                visible = showBottomBar,
+                enter = scaleIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(200)),
+                exit = scaleOut(animationSpec = tween(180, easing = FastOutLinearInEasing)) + fadeOut(animationSpec = tween(150))
+            ) {
+                FloatingActionButton(
+                    onClick = { navController.navigate("chat") },
+                    containerColor = Emerald500,
+                    contentColor = DarkBackground,
+                    shape = CircleShape,
+                    elevation = FloatingActionButtonDefaults.elevation(
+                        defaultElevation = 6.dp,
+                        pressedElevation = 10.dp
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "Abrir Copiloto IA"
+                    )
+                }
+            }
+        },
         bottomBar = {
             AnimatedVisibility(
                 visible = showBottomBar,
@@ -86,8 +121,21 @@ fun AppNavHost(
                 ) + fadeOut(animationSpec = tween(150))
             ) {
                 NavigationBar(
-                    containerColor = DarkSurface,
-                    tonalElevation = 8.dp
+                    modifier = Modifier
+                        .height(54.dp)
+                        .drawWithContent {
+                            drawContent()
+                            val strokeWidth = 0.5.dp.toPx()
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.05f),
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = strokeWidth
+                            )
+                        },
+                    containerColor = DarkSurface.copy(alpha = 0.85f),
+                    tonalElevation = 0.dp,
+                    windowInsets = WindowInsets(0, 0, 0, 0)
                 ) {
                     bottomNavItems.forEach { item ->
                         val isSelected = currentRoute == item.route
@@ -104,23 +152,14 @@ fun AppNavHost(
                             },
                             icon = {
                                 Icon(
-                                    imageVector = item.icon,
-                                    contentDescription = item.title
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = item.title,
-                                    style = Typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
+                                    contentDescription = item.title,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = Emerald400,
-                                selectedTextColor = Emerald400,
                                 unselectedIconColor = TextSecondary,
-                                unselectedTextColor = TextSecondary,
                                 indicatorColor = DarkSurfaceVariant
                             )
                         )
@@ -213,9 +252,9 @@ fun AppNavHost(
                             restoreState = true
                         }
                     },
-                    onNavigateToChat = { navController.navigate("chat") },
                     onNavigateToReceivables = { navController.navigate("receivables") },
-                    onNavigateToInvestments = { navController.navigate("investments") }
+                    onNavigateToInvestments = { navController.navigate("investments") },
+                    onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") }
                 )
             }
 
@@ -281,6 +320,7 @@ fun AppNavHost(
                     viewModel = menuViewModel,
                     onNavigateToReceivables = { navController.navigate("receivables") },
                     onNavigateToCards = { navController.navigate("cards") },
+                    onNavigateToCardInvoices = { navController.navigate("card_invoices") },
                     onNavigateToRecurringBills = { navController.navigate("recurring_bills") },
                     onNavigateToInvestments = { navController.navigate("investments") },
                     onNavigateToFriends = { navController.navigate("friends") },
@@ -345,6 +385,16 @@ fun AppNavHost(
                 RecurringBillsScreen(
                     viewModel = recurringViewModel,
                     onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // Faturas por Cartão (acompanhamento de fechamento/vencimento/pagamento)
+            composable("card_invoices") {
+                val invoicesViewModel = viewModel { CardInvoicesViewModel(repository) }
+                CardInvoicesScreen(
+                    viewModel = invoicesViewModel,
+                    onNavigateBack = { navController.popBackStack() },
+                    onEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") }
                 )
             }
 

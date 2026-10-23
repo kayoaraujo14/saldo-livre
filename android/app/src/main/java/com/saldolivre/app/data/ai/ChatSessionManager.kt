@@ -477,6 +477,13 @@ class ChatSessionManager(
 
         // Fallback de resiliência: card de confirmação pendente sem pendingAction serializado
         if (pendingAction == null && title.contains("Confirmar", ignoreCase = true)) {
+            val isDelete = title.contains("Exclusão", ignoreCase = true) || title.contains("Excluir", ignoreCase = true)
+            val isEdit = title.contains("Edição", ignoreCase = true) || title.contains("Editar", ignoreCase = true)
+            val tool = when {
+                isDelete -> "DELETE_TRANSACTION"
+                isEdit -> "EDIT_TRANSACTION"
+                else -> "CREATE_TRANSACTION"
+            }
             val parts = desc.split("—", "-")
             val descPart = parts.firstOrNull()?.trim() ?: "Lançamento"
             val amountPart = parts.getOrNull(1)?.trim() ?: ""
@@ -486,15 +493,16 @@ class ChatSessionManager(
             val detailParts = detail.orEmpty().split("•").map { it.trim() }
             val catSubcat = detailParts.firstOrNull()?.split("›")?.map { it.trim() }
 
-            if (parsedAmount > 0.0) {
+            if (parsedAmount > 0.0 || isDelete || isEdit) {
                 pendingAction = PendingAction(
                     id = "act_" + (title + desc).hashCode().toString().take(8),
-                    toolName = "CREATE_TRANSACTION",
+                    toolName = tool,
                     title = title,
                     description = desc,
                     detail = detail?.ifBlank { null },
                     args = mapOf(
                         "description" to descPart,
+                        "searchTerm" to descPart,
                         "amount" to parsedAmount,
                         "category" to catSubcat?.firstOrNull(),
                         "subcategory" to catSubcat?.getOrNull(1),

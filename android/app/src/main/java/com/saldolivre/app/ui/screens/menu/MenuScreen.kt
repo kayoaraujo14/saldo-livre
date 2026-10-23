@@ -35,6 +35,7 @@ fun MenuScreen(
     viewModel: MenuViewModel,
     onNavigateToReceivables: () -> Unit,
     onNavigateToCards: () -> Unit,
+    onNavigateToCardInvoices: () -> Unit = {},
     onNavigateToRecurringBills: () -> Unit,
     onNavigateToInvestments: () -> Unit,
     onNavigateToFriends: () -> Unit,
@@ -530,6 +531,16 @@ fun MenuScreen(
                             badgeText = if (uiState.cardsCount > 0) "${uiState.cardsCount}" else null,
                             badgeColor = Cyan500,
                             onClick = onNavigateToCards
+                        )
+                        MenuDivider()
+
+                        // 3.1 Faturas por Cartão
+                        MenuNavigationRow(
+                            icon = Icons.Default.Receipt,
+                            iconColor = Cyan400,
+                            title = "Faturas dos Cartões",
+                            subtitle = "Fechamento, vencimento, composição e pagamento",
+                            onClick = onNavigateToCardInvoices
                         )
                         MenuDivider()
 
