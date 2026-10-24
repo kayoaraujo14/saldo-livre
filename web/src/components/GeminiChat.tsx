@@ -34,7 +34,6 @@ import {
   KeyRound,
   Trash2,
   CheckCircle2,
-  RefreshCw,
   Maximize2,
   Minimize2,
   History,
@@ -164,7 +163,6 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
   const [newRuleInput, setNewRuleInput] = useState('')
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [suggestionOffset, setSuggestionOffset] = useState(0)
   const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null)
   const [isDraggingOver, setIsDraggingOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -707,99 +705,6 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
 
   const [activeModel, setActiveModel] = useState<string>(getSelectedGeminiModel())
 
-  // Sugestões inteligentes avançadas focadas em análise financeira real e tomada de decisão
-  const dynamicSuggestions = useMemo(() => {
-    const list: string[] = []
-    const free = summary?.freeBalance ?? 0
-    const daily = summary?.dailyLimit
-    const invested = summary?.totalInvested ?? 0
-    const income = summary?.income ?? 0
-    const receivables = summary?.receivableTotal ?? 0
-    const label = monthLabel(month)
-
-    // 1. Gráficos & Visualizações Financeiras
-    list.push(`📊 Gerar gráfico de distribuição dos meus gastos em ${label}`)
-    const invList = Array.isArray(summary?.byInvestmentSubcategory) ? summary.byInvestmentSubcategory : []
-    if (invested > 0 || invList.length > 0) {
-      list.push(`📈 Criar gráfico de alocação da minha carteira de investimentos`)
-    } else {
-      list.push(`📊 Criar gráfico comparativo das categorias onde mais gastei`)
-    }
-
-    // 2. Análise Estratégica & Regra 50/30/20
-    list.push(`⚖️ Avaliar meus gastos de ${label} segundo a Regra 50/30/20`)
-
-    // 3. Limite Diário Seguro e Projeção
-    if (daily != null) {
-      list.push(`💡 Qual é o meu limite diário seguro até o final de ${label}?`)
-      list.push(`🎉 Quanto posso gastar no final de semana sem comprometer o mês?`)
-    }
-
-    // 4. Diagnóstico de Saúde do Saldo Livre
-    if (free < 0) {
-      list.push(`⚠️ Meu Saldo Livre está negativo em ${formatBRL(Math.abs(free))}. Onde cortar urgente?`)
-    } else if (free > 0 && income > 0) {
-      list.push(`✨ Tenho ${formatBRL(free)} de Saldo Livre. Quanto você recomenda aportar em investimentos?`)
-    }
-
-    // 5. Investimentos & Acúmulo Patrimonial
-    if (invested > 0) {
-      const rate = income > 0 ? (invested / income) * 100 : 0
-      list.push(`💰 Analisar minha taxa de poupança (${rate.toFixed(1)}%) e aportes acumulados`)
-    } else {
-      list.push(`🌱 Como começar a investir e quanto poupar da minha receita?`)
-    }
-
-    // 6. Contas Fixas vs Variáveis
-    const pendingBills = (monthTransactions || []).filter(
-      (t) => t && t.type === 'expense' && t.status !== 'paid' && (Number(t.totalAmount) || 0) > 0,
-    )
-    if (pendingBills.length > 0) {
-      const bill = pendingBills[0]
-      const cleanName = (bill.description || 'Conta').replace(/\s*\(\d+\/\d+\)/, '').trim()
-      list.push(`⚡ Quanto falta pagar das minhas contas de ${label}?`)
-      list.push(`A conta de ${cleanName} veio R$ ${effectiveAmount(bill)}, atualize para mim`)
-    } else {
-      list.push(`🔍 Onde estão os maiores ralos de dinheiro no meu orçamento deste mês?`)
-    }
-
-    // 7. Análises Inteligentes de Despesas (100% Pessoais, Terceiros, Categorias e Cartões)
-    list.push(`👤 Ver apenas despesas 100% minhas em ${label}`)
-    if (receivables > 0) {
-      list.push(`👥 Ver despesas de terceiros e valores a receber em ${label}`)
-    } else {
-      list.push(`👥 Analisar compras divididas e de terceiros em ${label}`)
-    }
-    list.push(`🏷️ Detalhar despesas com Alimentação em ${label}`)
-
-    // 8. Fatura de Cartões
-    const cardsList = Array.isArray(cards) ? cards : []
-    if (cardsList.length > 0) {
-      const card = cardsList[0]
-      if (card?.cardName) {
-        list.push(`💳 Analisar detalhadamente os gastos no cartão ${card.cardName}`)
-      }
-    }
-
-    // 9. Projeção de Fluxo de Caixa Futuro
-    list.push(`🔮 Projetar meu fluxo de caixa e saldo para os próximos 3 meses`)
-
-    // Remove eventuais duplicatas
-    return Array.from(new Set(list))
-  }, [summary, monthTransactions, cards, month])
-
-  // Pega fatia rotacionada de 4-5 chips
-  const displayedChips = useMemo(() => {
-    if (dynamicSuggestions.length <= 5) return dynamicSuggestions
-    const count = 5
-    const start = (suggestionOffset * count) % dynamicSuggestions.length
-    const slice = dynamicSuggestions.slice(start, start + count)
-    if (slice.length < count) {
-      return [...slice, ...dynamicSuggestions.slice(0, count - slice.length)]
-    }
-    return slice
-  }, [dynamicSuggestions, suggestionOffset])
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -1252,16 +1157,13 @@ Atenção crítica:
             <button
               type="button"
               onClick={onToggleExpand}
-              className={`h-8 px-2.5 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white hidden lg:flex items-center gap-1.5 transition-colors cursor-pointer ${
+              className={`size-8 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white hidden lg:flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
                 isExpanded ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : ''
               }`}
               title={isExpanded ? 'Restaurar visualização (ESC)' : 'Modo Tela Cheia (100%)'}
             >
               {isExpanded ? (
-                <>
-                  <Minimize2 className="size-3.5 text-emerald-400" />
-                  <span className="text-[11px] font-medium text-emerald-300 hidden xl:inline">Restaurar (ESC)</span>
-                </>
+                <Minimize2 className="size-3.5 text-emerald-400" />
               ) : (
                 <Maximize2 className="size-3.5" />
               )}
@@ -1877,44 +1779,6 @@ Atenção crítica:
         )}
 
         <div ref={messagesEndRef} />
-      </div>
-
-      {/* Suggestion Chips */}
-      <div className="px-3 pt-2 pb-1 border-t border-white/[0.04] bg-slate-950/40">
-        <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1.5">
-          <div className="flex items-center gap-1 font-medium">
-            <Sparkles className="size-2.5 text-amber-400" />
-            <span>Sugestões inteligentes:</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSuggestionOffset((prev) => prev + 1)}
-            className="text-[10px] text-slate-400 hover:text-emerald-400 flex items-center gap-1 cursor-pointer transition-colors"
-            title="Ver outras sugestões inteligentes"
-          >
-            <RefreshCw className="size-2.5" />
-            <span>Mais</span>
-          </button>
-        </div>
-        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          {displayedChips.map((chip, idx) => (
-            <button
-              key={idx}
-              type="button"
-              disabled={loading}
-              onClick={() => {
-                if (chip.includes('Anexar fatura')) {
-                  fileInputRef.current?.click()
-                } else {
-                  handleSend(chip)
-                }
-              }}
-              className="text-[11px] py-1 px-3 rounded-full bg-slate-900/80 border border-emerald-500/20 hover:border-emerald-500/40 hover:bg-emerald-500/10 text-slate-300 hover:text-emerald-200 whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 text-left shrink-0 shadow-2xs"
-            >
-              {chip}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Input Box */}

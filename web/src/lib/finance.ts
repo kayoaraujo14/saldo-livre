@@ -287,9 +287,15 @@ export function detectSplit(tx: Transaction, viewerUid: string): SplitType {
   const allocs = tx.allocations || []
   if (tx.splitType === 'custom') return 'custom'
   if (allocs.length > 2) return 'custom'
-  if (tx.assignedFriendUid) return 'friend'
-  if (allocs.some((a) => a.type === 'EXTERNAL')) {
-    if (allocs.length === 1) return 'external'
+  if (tx.assignedFriendUid || tx.assignedFriendName || tx.targetFriendName || tx.splitType === 'friend') return 'friend'
+  if (
+    tx.thirdPartyName ||
+    tx.externalName ||
+    tx.splitType === 'external' ||
+    (tx.splitType as string) === 'THIRD_PARTY' ||
+    allocs.some((a) => a.type === 'EXTERNAL')
+  ) {
+    if (allocs.length <= 1) return 'external'
     return 'custom'
   }
   const users = allocs.filter((a) => a.type === 'PLATFORM_USER')
@@ -301,6 +307,8 @@ export function detectSplit(tx: Transaction, viewerUid: string): SplitType {
     if (Math.abs(myAlloc - otherAlloc) > 0.05) return 'custom'
     return 'split_50'
   }
+  if (tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') return 'split_50'
+  if (tx.splitType === 'partner') return 'partner'
   if (mine) return 'mine'
   return 'partner'
 }
@@ -308,9 +316,11 @@ export function detectSplit(tx: Transaction, viewerUid: string): SplitType {
 export const SPLIT_LABELS: Record<SplitType, { label: string; emoji: string; short: string }> = {
   mine: { label: '100% Meu', emoji: '👤', short: 'Meu' },
   split_50: { label: '50/50 (Casal)', emoji: '🤝', short: '50/50' },
+  SHARED_50_50: { label: '50/50 (Casal)', emoji: '🤝', short: '50/50' },
   partner: { label: '100% Parceiro(a)', emoji: '🔄', short: 'Parceiro(a)' },
   friend: { label: '🧑‍🤝‍🧑 Amigo da Rede', emoji: '🧑‍🤝‍🧑', short: 'Amigo' },
   external: { label: 'Terceiro Externo', emoji: '🏷️', short: 'Terceiro' },
+  THIRD_PARTY: { label: 'Terceiro Externo', emoji: '🏷️', short: 'Terceiro' },
   custom: { label: 'Divisão Personalizada', emoji: '⚖️', short: 'Personalizada' },
 }
 
@@ -330,6 +340,16 @@ export function getThirdPartyInfo(
   currentUid: string,
   partnerName?: string,
 ): ThirdPartyInfo | null {
+  // 0. Nome de terceiro explícito
+  const explicitThird = tx.thirdPartyName || tx.externalName
+  if (explicitThird) {
+    return {
+      name: explicitThird,
+      label: 'Terceiro',
+      type: 'external',
+    }
+  }
+
   // 1. Alocações externas (ex: "Mãe", "Irmão", "Cliente", etc.)
   const externalAllocs = tx.allocations?.filter((a) => a.type === 'EXTERNAL')
   if (externalAllocs && externalAllocs.length > 0) {
@@ -344,10 +364,11 @@ export function getThirdPartyInfo(
     }
   }
 
-  // 2. Amigo atribuído (assignedFriend)
-  if (tx.assignedFriendName) {
+  // 2. Amigo atribuído (assignedFriend ou targetFriendName)
+  const explicitFriend = tx.assignedFriendName || tx.targetFriendName
+  if (explicitFriend) {
     if (tx.assignedFriendUid === currentUid) {
-      const sender = tx.paidByUid !== currentUid && partnerName ? partnerName : (tx.assignedFriendName || 'Amigo')
+      const sender = tx.paidByUid !== currentUid && partnerName ? partnerName : explicitFriend
       return {
         name: sender,
         label: 'Recebido de',
@@ -355,7 +376,7 @@ export function getThirdPartyInfo(
       }
     }
     return {
-      name: tx.assignedFriendName,
+      name: explicitFriend,
       label: 'Amigo',
       type: 'friend',
       percentage: tx.friendSharePct ?? undefined,
@@ -380,7 +401,7 @@ export function getThirdPartyInfo(
   }
 
   // 4. Tipo de divisão explícito
-  if (tx.splitType === 'external') {
+  if (tx.splitType === 'external' || (tx.splitType as string) === 'THIRD_PARTY') {
     return {
       name: 'Terceiro Externo',
       label: 'Terceiro',
@@ -396,7 +417,7 @@ export function getThirdPartyInfo(
     }
   }
 
-  if (tx.splitType === 'split_50' && partnerName) {
+  if ((tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') && partnerName) {
     return {
       name: partnerName,
       label: '50/50',
@@ -414,6 +435,83 @@ export function getThirdPartyInfo(
   }
 
   return null
+}
+
+export interface TxPersonInvolvement {
+  name: string
+  role: 'me' | 'partner' | 'friend' | 'third_party'
+  amount: number
+}
+
+/**
+ * Extrai todos os participantes/responsáveis individuais presentes num lançamento
+ * com seus respectivos valores para exibição e somatórios de cobrança.
+ */
+export function getTxPersons(
+  tx: Transaction,
+  currentUid: string,
+  partnerName?: string,
+  allTransactions: Transaction[] = [],
+): TxPersonInvolvement[] {
+  const result: TxPersonInvolvement[] = []
+  const effAmount = Math.abs(effectiveAmount(tx))
+  const myImpact = Math.abs(impactFor(tx, currentUid, allTransactions))
+
+  const rawThirdPartyName = tx.thirdPartyName || tx.externalName
+  const rawFriendName = tx.assignedFriendName || tx.targetFriendName
+
+  // 1. Caso com allocations explícitas
+  if (Array.isArray(tx.allocations) && tx.allocations.length > 0) {
+    for (const alloc of tx.allocations) {
+      if (!alloc) continue
+      const allocAmount = Math.abs(Number(alloc.amount) || 0)
+      if (alloc.type === 'EXTERNAL') {
+        const name = alloc.name || rawThirdPartyName || 'Terceiro'
+        result.push({ name, role: 'third_party', amount: allocAmount })
+      } else if (alloc.uid === currentUid || alloc.name?.toLowerCase() === 'você' || alloc.name?.toLowerCase() === 'meu') {
+        result.push({ name: '100% Meu', role: 'me', amount: allocAmount })
+      } else if (partnerName && (alloc.name === partnerName || alloc.uid === partnerName)) {
+        result.push({ name: partnerName, role: 'partner', amount: allocAmount })
+      } else {
+        const name = alloc.name || rawFriendName || 'Amigo'
+        result.push({ name, role: 'friend', amount: allocAmount })
+      }
+    }
+  } else {
+    // 2. Sem allocations explícitas - checa campos diretos
+    if (rawThirdPartyName || tx.splitType === 'external' || (tx.splitType as string) === 'THIRD_PARTY') {
+      const name = rawThirdPartyName || 'Terceiro Externo'
+      result.push({ name, role: 'third_party', amount: effAmount })
+      if (myImpact > 0 && myImpact < effAmount) {
+        result.push({ name: '100% Meu', role: 'me', amount: myImpact })
+      }
+    } else if (rawFriendName || tx.splitType === 'friend' || tx.assignedFriendUid) {
+      const name = rawFriendName || 'Amigo'
+      const friendAmt = friendShareOf(tx) || effAmount
+      result.push({ name, role: 'friend', amount: friendAmt })
+      if (myImpact > 0 && myImpact < effAmount) {
+        result.push({ name: '100% Meu', role: 'me', amount: myImpact })
+      }
+    } else if (tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') {
+      const pName = partnerName || 'Parceiro(a)'
+      const half = round2(effAmount / 2)
+      result.push({ name: pName, role: 'partner', amount: half })
+      result.push({ name: '100% Meu', role: 'me', amount: half })
+    } else if (tx.splitType === 'partner') {
+      const pName = partnerName || 'Parceiro(a)'
+      result.push({ name: pName, role: 'partner', amount: effAmount })
+    } else {
+      // 100% Meu
+      result.push({ name: '100% Meu', role: 'me', amount: effAmount })
+    }
+  }
+
+  // Garantia absoluta: nenhuma linha fica sem responsável
+  if (result.length === 0) {
+    result.push({ name: '100% Meu', role: 'me', amount: effAmount })
+  }
+
+  return result
 }
 
 // ------------------------------------------------------------------

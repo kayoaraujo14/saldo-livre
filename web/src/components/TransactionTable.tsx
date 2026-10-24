@@ -21,8 +21,9 @@ import {
   friendShareOf,
   getThirdPartyInfo,
   isSharedCard,
+  getTxPersons,
 } from '@/lib/finance'
-import { formatBRL, formatShortDate } from '@/lib/utils'
+import { formatBRL, formatShortDate, round2 } from '@/lib/utils'
 import {
   Search,
   RefreshCw,
@@ -53,6 +54,7 @@ interface ColumnFilters {
   categories: string[]
   subcategories: string[]
   splits: string[]
+  persons: string[]
   dateStart: string
   dateEnd: string
   specificDays: string[]
@@ -67,6 +69,7 @@ const INITIAL_COLUMN_FILTERS: ColumnFilters = {
   categories: [],
   subcategories: [],
   splits: [],
+  persons: [],
   dateStart: '',
   dateEnd: '',
   specificDays: [],
@@ -102,6 +105,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(INITIAL_COLUMN_FILTERS)
   const [categorySearchQuery, setCategorySearchQuery] = useState('')
+  const [personSearchQuery, setPersonSearchQuery] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDesc, setEditDesc] = useState('')
   const [editDate, setEditDate] = useState('')
@@ -127,6 +131,30 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
     })
     return Array.from(map.entries())
   }, [monthTransactions, currentUid])
+
+  const availablePersons = useMemo(() => {
+    const map = new Map<string, { count: number; totalAmount: number; role: string }>()
+    monthTransactions.forEach((tx) => {
+      const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+      pList.forEach((p) => {
+        const prev = map.get(p.name) || { count: 0, totalAmount: 0, role: p.role }
+        map.set(p.name, {
+          count: prev.count + 1,
+          totalAmount: round2(prev.totalAmount + p.amount),
+          role: p.role,
+        })
+      })
+    })
+    return Array.from(map.entries())
+      .map(([name, data]) => ({ name, ...data }))
+      .sort((a, b) => {
+        if (a.name === '100% Meu') return -1
+        if (b.name === '100% Meu') return 1
+        if (a.role === 'partner' && b.role !== 'partner') return -1
+        if (b.role === 'partner' && a.role !== 'partner') return 1
+        return a.name.localeCompare(b.name)
+      })
+  }, [monthTransactions, currentUid, partner?.name])
 
   const availableDays = useMemo(() => {
     const map = new Map<string, number>()
@@ -211,10 +239,15 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         if (!tx.subcategory || !columnFilters.subcategories.includes(tx.subcategory)) return false
       }
 
-      // 6. Excel Column Filter: Split / Payer
+      // 6. Excel Column Filter: Split & Person / Responsável
       if (columnFilters.splits.length > 0) {
         const sp = detectSplit(tx, currentUid)
         if (!columnFilters.splits.includes(sp)) return false
+      }
+      if (columnFilters.persons.length > 0) {
+        const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+        const hasMatchingPerson = pList.some((p) => columnFilters.persons.includes(p.name))
+        if (!hasMatchingPerson) return false
       }
 
       // 7. Excel Column Filter: Amount Type & Range
@@ -294,6 +327,21 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
     }
   }, [filteredTxs, currentUid, monthTransactions])
 
+  // Total dinâmico exato pertencente à(s) pessoa(s) ou terceiro(s) filtrado(s)
+  const filteredPersonTotal = useMemo(() => {
+    if (columnFilters.persons.length === 0) return 0
+    let total = 0
+    filteredTxs.forEach((tx) => {
+      const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+      pList.forEach((p) => {
+        if (columnFilters.persons.includes(p.name)) {
+          total += p.amount
+        }
+      })
+    })
+    return round2(total)
+  }, [filteredTxs, columnFilters.persons, currentUid, partner?.name, monthTransactions])
+
   // Count if any column filter is active
   const isAnyFilterActive = useMemo(() => {
     return (
@@ -301,6 +349,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
       columnFilters.categories.length > 0 ||
       columnFilters.subcategories.length > 0 ||
       columnFilters.splits.length > 0 ||
+      columnFilters.persons.length > 0 ||
       Boolean(columnFilters.dateStart || columnFilters.dateEnd || columnFilters.specificDays.length > 0) ||
       Boolean(columnFilters.amountMin || columnFilters.amountMax || columnFilters.amountType !== 'all' || columnFilters.sortBy)
     )
@@ -328,6 +377,15 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
     }))
   }
 
+  const togglePersonFilter = (pName: string) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      persons: prev.persons.includes(pName)
+        ? prev.persons.filter((p) => p !== pName)
+        : [...prev.persons, pName],
+    }))
+  }
+
   const toggleDayFilter = (day: string) => {
     setColumnFilters((prev) => ({
       ...prev,
@@ -339,6 +397,8 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
 
   const clearAllFilters = () => {
     setColumnFilters(INITIAL_COLUMN_FILTERS)
+    setCategorySearchQuery('')
+    setPersonSearchQuery('')
     setSearch('')
   }
 
@@ -670,6 +730,24 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                 onClick={() => setColumnFilters((prev) => ({ ...prev, splits: [] }))}
                 className="hover:text-rose-400 cursor-pointer ml-0.5"
                 title="Remover filtro de divisão"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
+          {/* Person / Responsável Pills */}
+          {columnFilters.persons.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/40 text-[11px] text-amber-200">
+              <span className="text-amber-400/80">Pessoa:</span>
+              <span className="text-white font-semibold">
+                {columnFilters.persons.join(', ')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setColumnFilters((prev) => ({ ...prev, persons: [] }))}
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Remover filtro de pessoa"
               >
                 <X className="size-3" />
               </button>
@@ -1105,31 +1183,31 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                 </div>
               </th>
 
-              {/* 5. Division / Payer Column */}
-              <th className="py-2 px-2.5 w-36">
+              {/* 5. Division / Responsible Column */}
+              <th className="py-2 px-2.5 w-44">
                 <div className="flex items-center justify-between gap-1">
-                  <span>Divisão / Pagador</span>
+                  <span>Divisão / Responsável</span>
                   <Popover>
                     <PopoverTrigger asChild>
                       <button
                         type="button"
                         className={`p-1 rounded cursor-pointer transition-colors ${
-                          columnFilters.splits.length > 0
+                          columnFilters.splits.length > 0 || columnFilters.persons.length > 0
                             ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
                             : 'text-slate-400 hover:text-white hover:bg-slate-800'
                         }`}
-                        title="Filtrar por Divisão e Pagador"
+                        title="Filtrar por Responsável, Terceiros ou Divisão"
                       >
-                        <Filter className={`size-3 ${columnFilters.splits.length > 0 ? 'fill-emerald-400' : ''}`} />
+                        <Filter className={`size-3 ${columnFilters.splits.length > 0 || columnFilters.persons.length > 0 ? 'fill-emerald-400' : ''}`} />
                       </button>
                     </PopoverTrigger>
-                    <PopoverContent align="start" className="w-60 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
+                    <PopoverContent align="start" className="w-72 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
                       <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] mb-2 font-sans">
-                        <span className="font-bold text-[11px] text-white">Filtrar Divisão</span>
+                        <span className="font-bold text-[11px] text-white">Filtrar Responsável & Terceiros</span>
                         <div className="flex items-center gap-1.5 text-[10px]">
                           <button
                             type="button"
-                            onClick={() => setColumnFilters((p) => ({ ...p, splits: availableSplits.map(([s]) => s) }))}
+                            onClick={() => setColumnFilters((p) => ({ ...p, persons: availablePersons.map((ap) => ap.name), splits: [] }))}
                             className="text-emerald-400 hover:underline cursor-pointer"
                           >
                             Todos
@@ -1137,49 +1215,116 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                           <span>·</span>
                           <button
                             type="button"
-                            onClick={() => setColumnFilters((p) => ({ ...p, splits: [] }))}
+                            onClick={() => setColumnFilters((p) => ({ ...p, persons: [], splits: [] }))}
                             className="text-slate-400 hover:text-white cursor-pointer"
                           >
                             Limpar
                           </button>
                         </div>
                       </div>
-                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                        {availableSplits.map(([sp, count]) => {
-                          const isChecked = columnFilters.splits.includes(sp)
-                          const label =
-                            sp === 'mine'
-                              ? '👤 100% Meu'
-                              : sp === 'split_50'
-                                ? '🤝 50/50 Dividido'
-                                : sp === 'partner'
-                                  ? `🔄 100% ${partner?.name || 'Parceiro'}`
-                                  : sp === 'external'
-                                    ? '🏷️ Terceiro Externo'
-                                    : sp === 'friend'
-                                      ? '🧑‍🤝‍🧑 Amigo Cobrado'
-                                      : '⚖️ Personalizado'
-                          return (
-                            <label
-                              key={sp}
-                              onClick={() => toggleSplitFilter(sp)}
-                              className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer"
-                            >
-                              <div className="flex items-center gap-2 truncate">
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {}}
-                                  className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/30 size-3.5 cursor-pointer shrink-0"
-                                />
-                                <span className="truncate">{label}</span>
-                              </div>
-                              <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400 shrink-0">
-                                {count}
-                              </Badge>
-                            </label>
-                          )
-                        })}
+
+                      {/* Busca rápida de pessoas/terceiros */}
+                      {availablePersons.length > 4 && (
+                        <div className="relative mb-2">
+                          <Search className="size-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <Input
+                            value={personSearchQuery}
+                            onChange={(e) => setPersonSearchQuery(e.target.value)}
+                            placeholder="Buscar pessoa ou terceiro..."
+                            className="h-7 text-[11px] pl-6 bg-slate-900 border-slate-700"
+                          />
+                        </div>
+                      )}
+
+                      {/* Lista de Pessoas e Terceiros Individuais */}
+                      <div className="space-y-0.5 max-h-48 overflow-y-auto mb-2 pr-1">
+                        <div className="text-[10px] uppercase font-bold text-slate-400 px-1 py-0.5 tracking-wider">
+                          Pessoas & Terceiros
+                        </div>
+                        {availablePersons
+                          .filter((p) => !personSearchQuery || p.name.toLowerCase().includes(personSearchQuery.toLowerCase()))
+                          .map((p) => {
+                            const isChecked = columnFilters.persons.includes(p.name)
+                            const emoji =
+                              p.name === '100% Meu'
+                                ? '👤'
+                                : p.role === 'partner'
+                                  ? '🤝'
+                                  : p.role === 'friend'
+                                    ? '🧑‍🤝‍🧑'
+                                    : '🏷️'
+                            return (
+                              <label
+                                key={p.name}
+                                onClick={() => togglePersonFilter(p.name)}
+                                className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer transition-colors"
+                              >
+                                <div className="flex items-center gap-2 truncate min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {}}
+                                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/30 size-3.5 cursor-pointer shrink-0"
+                                  />
+                                  <span className="truncate text-slate-200">
+                                    {emoji} {p.name}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                                  <span className="text-[10px] text-emerald-400 font-mono font-medium">
+                                    {formatBRL(p.totalAmount)}
+                                  </span>
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400">
+                                    {p.count}
+                                  </Badge>
+                                </div>
+                              </label>
+                            )
+                          })}
+                      </div>
+
+                      {/* Tipos Gerais de Divisão */}
+                      <div className="pt-1.5 border-t border-white/[0.08]">
+                        <div className="text-[10px] uppercase font-bold text-slate-400 px-1 py-0.5 tracking-wider mb-1">
+                          Modos de Rateio
+                        </div>
+                        <div className="space-y-0.5 max-h-32 overflow-y-auto pr-1">
+                          {availableSplits.map(([sp, count]) => {
+                            const isChecked = columnFilters.splits.includes(sp)
+                            const label =
+                              sp === 'mine'
+                                ? '👤 100% Meu'
+                                : sp === 'split_50'
+                                  ? '🤝 50/50 Dividido'
+                                  : sp === 'partner'
+                                    ? `🔄 100% ${partner?.name || 'Parceiro'}`
+                                    : sp === 'external'
+                                      ? '🏷️ Terceiro Externo'
+                                      : sp === 'friend'
+                                        ? '🧑‍🤝‍🧑 Amigo Cobrado'
+                                        : '⚖️ Personalizado'
+                            return (
+                              <label
+                                key={sp}
+                                onClick={() => toggleSplitFilter(sp)}
+                                className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer"
+                              >
+                                <div className="flex items-center gap-2 truncate">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {}}
+                                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/30 size-3.5 cursor-pointer shrink-0"
+                                  />
+                                  <span className="truncate">{label}</span>
+                                </div>
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400 shrink-0">
+                                  {count}
+                                </Badge>
+                              </label>
+                            )
+                          })}
+                        </div>
                       </div>
                     </PopoverContent>
                   </Popover>
@@ -1320,6 +1465,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                 const isReserve = Boolean(tx.reserveCardId)
                 const reserveInfo = isReserve ? getReserveInfo(tx, monthTransactions) : null
                 const thirdParty = getThirdPartyInfo(tx, currentUid, partner?.name)
+                const txPersons = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
 
                 // Estimation vs Actual comparison
                 const hasComparison = tx.recurringBillId && tx.actualAmount != null && tx.estimatedAmount != null
@@ -1616,20 +1762,32 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                     </td>
 
                     {/* 5. Division / Payer (Inline Select) */}
+                    {/* 5. Division / Responsible */}
                     <td className="py-2 px-3 align-middle">
                       {tx.type === 'income' ? (
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <Badge variant="outline" className="text-[10px] py-0.5 px-2 bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
-                            💰 {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita Pessoal'}
-                          </Badge>
-                          {thirdParty && (
-                            <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 bg-sky-500/15 text-sky-300 border-sky-500/35 font-medium">
-                              De: {thirdParty.name}
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Badge variant="outline" className="text-[10px] py-0.5 px-2 bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
+                              💰 {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita Pessoal'}
                             </Badge>
+                            {thirdParty && (
+                              <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 bg-sky-500/15 text-sky-300 border-sky-500/35 font-medium">
+                                De: {thirdParty.name}
+                              </Badge>
+                            )}
+                          </div>
+                          {card && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-1.5 py-0.5 rounded bg-slate-900/60 border border-white/[0.06] w-fit shadow-2xs"
+                              title={`Cartão vinculado: ${card.cardName}`}
+                            >
+                              <CreditCard className="size-2.5 text-slate-400" />
+                              <span className="truncate max-w-[120px]">{card.cardName}</span>
+                            </span>
                           )}
                         </div>
                       ) : (
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1 min-w-[130px]">
                           <Select
                             value={split}
                             onValueChange={(val) => {
@@ -1640,19 +1798,107 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                               }
                             }}
                           >
-                            <SelectTrigger size="inline" className="text-slate-300">
-                              <SelectValue />
+                            <SelectTrigger
+                              size="inline"
+                              className="h-auto py-1 px-1.5 text-left flex items-center justify-between gap-1.5 hover:bg-slate-800/50 rounded-lg border border-transparent hover:border-slate-700/60 transition-colors w-full"
+                            >
+                              <div className="flex flex-col gap-1 items-start text-left">
+                                {(() => {
+                                  // Case A: Multi-person custom allocations or rateio (SHARED_50_50 / allocations)
+                                  if (txPersons.length > 1) {
+                                    return (
+                                      <div className="flex flex-wrap gap-1 max-w-[240px]">
+                                        {txPersons.map((p, idx) => (
+                                          <span
+                                            key={idx}
+                                            className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-slate-200 font-medium inline-flex items-center gap-1 shadow-2xs"
+                                            title={`${p.name}: ${formatBRL(p.amount)}`}
+                                          >
+                                            <span className="text-slate-400 truncate max-w-[65px]">
+                                              {p.name === '100% Meu' ? 'Meu' : p.name}:
+                                            </span>
+                                            <strong className="text-emerald-400 font-mono font-bold">
+                                              {formatBRL(p.amount)}
+                                            </strong>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )
+                                  }
+
+                                  const single = txPersons[0] || { name: '100% Meu', role: 'me', amount: effAmount }
+
+                                  // Case B: Third Party
+                                  if (
+                                    single.role === 'third_party' ||
+                                    tx.splitType === 'external' ||
+                                    (tx.splitType as string) === 'THIRD_PARTY' ||
+                                    tx.thirdPartyName
+                                  ) {
+                                    const tpName = single.name !== '100% Meu' ? single.name : (tx.thirdPartyName || tx.externalName || 'Terceiro')
+                                    return (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] py-0.5 px-2 bg-amber-500/15 text-amber-200 border-amber-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
+                                        title={`Despesa de Terceiro: ${tpName}`}
+                                      >
+                                        <span>🏷️ Terceiro: <strong className="text-white font-bold">{tpName}</strong></span>
+                                      </Badge>
+                                    )
+                                  }
+
+                                  // Case C: Friend
+                                  if (
+                                    single.role === 'friend' ||
+                                    tx.splitType === 'friend' ||
+                                    tx.assignedFriendUid ||
+                                    tx.targetFriendName
+                                  ) {
+                                    const fName = single.name !== '100% Meu' ? single.name : (tx.assignedFriendName || tx.targetFriendName || 'Amigo')
+                                    return (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] py-0.5 px-2 bg-violet-500/15 text-violet-200 border-violet-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
+                                        title={`Despesa de Amigo: ${fName}`}
+                                      >
+                                        <span>🤝 Amigo: <strong className="text-white font-bold">{fName}</strong> ({friendPctOf(tx)}%)</span>
+                                      </Badge>
+                                    )
+                                  }
+
+                                  // Case D: Partner
+                                  if (single.role === 'partner' || tx.splitType === 'partner') {
+                                    const pName = single.name !== '100% Meu' ? single.name : (partner?.name || 'Parceiro(a)')
+                                    return (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] py-0.5 px-2 bg-indigo-500/15 text-indigo-200 border-indigo-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
+                                        title={`100% Parceiro: ${pName}`}
+                                      >
+                                        <span>🔄 100% <strong className="text-white font-bold">{pName}</strong></span>
+                                      </Badge>
+                                    )
+                                  }
+
+                                  // Case E: 100% Meu (default fallback - high contrast)
+                                  return (
+                                    <span className="text-[11px] text-slate-200 font-medium flex items-center gap-1 px-1">
+                                      👤 100% Meu
+                                    </span>
+                                  )
+                                })()}
+                              </div>
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="mine">👤 100% Meu</SelectItem>
                               {partner && <SelectItem value="split_50">🤝 50/50 ({partner.name})</SelectItem>}
                               {partner && <SelectItem value="partner">🔄 100% {partner.name}</SelectItem>}
                               <SelectItem value="external">
-                                🏷️ {thirdParty?.name ? `Terceiro: ${thirdParty.name}` : 'Terceiro Externo'}
+                                🏷️ {thirdParty?.name || tx.thirdPartyName ? `Terceiro: ${thirdParty?.name || tx.thirdPartyName}` : 'Terceiro Externo'}
                               </SelectItem>
-                              {tx.assignedFriendUid && (
+                              {(tx.assignedFriendUid || tx.assignedFriendName || tx.targetFriendName) && (
                                 <SelectItem value="friend">
-                                  🧑‍🤝‍🧑 {tx.assignedFriendName || 'Amigo'} ({friendPctOf(tx)}%)
+                                  🤝 {tx.assignedFriendName || tx.targetFriendName || 'Amigo'} ({friendPctOf(tx)}%)
                                 </SelectItem>
                               )}
                               <SelectItem value="custom">
@@ -1661,33 +1907,20 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             </SelectContent>
                           </Select>
 
-                          {/* Multi-participant custom allocations preview chips */}
-                          {split === 'custom' && Array.isArray(tx.allocations) && tx.allocations.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1 max-w-[220px]">
-                              {tx.allocations.map((a, i) => (
-                                <span
-                                  key={i}
-                                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-slate-300 font-medium inline-flex items-center gap-1 shadow-2xs"
-                                  title={`${a.name || 'Participante'}: ${formatBRL(Math.abs(a.amount))}`}
-                                >
-                                  <span className="text-slate-400 truncate max-w-[65px]">
-                                    {a.name || (a.uid === currentUid ? 'Você' : 'Outro')}:
-                                  </span>
-                                  <span className="text-emerald-400 font-mono font-semibold">
-                                    {formatBRL(Math.abs(a.amount))}
-                                  </span>
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Who paid the bill vs Who benefits */}
+                          {/* Subtle Card Name Badge when paymentMethod === 'CARD' or cardId is linked */}
                           {card && (
-                            <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                              {tx.paidByUid === currentUid ? (
-                                <span className="text-slate-400">Você paga a fatura</span>
-                              ) : (
-                                <span className="text-amber-400 font-medium">Fatura de {card.ownerName}</span>
+                            <div className="flex items-center gap-1 px-1 mt-0.5">
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-1.5 py-0.5 rounded bg-slate-900/80 border border-white/[0.06] hover:border-slate-700 transition-colors shadow-2xs"
+                                title={`Cartão vinculado: ${card.cardName} (${card.ownerName})`}
+                              >
+                                <CreditCard className="size-2.5 text-slate-400" />
+                                <span className="truncate max-w-[120px]">{card.cardName}</span>
+                              </span>
+                              {tx.paidByUid !== currentUid && (
+                                <span className="text-[9px] text-amber-400/90 font-medium truncate max-w-[110px]" title={`Fatura de ${card.ownerName}`}>
+                                  ({card.ownerName})
+                                </span>
                               )}
                             </div>
                           )}
@@ -1753,6 +1986,22 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                               </span>
                             )
                           )}
+
+                          {/* Parcela específica de pessoa/terceiro quando filtro estiver ativo */}
+                          {columnFilters.persons.length > 0 && (() => {
+                            const matchingPersons = txPersons.filter((p) => columnFilters.persons.includes(p.name))
+                            if (matchingPersons.length === 0) return null
+                            return (
+                              <div className="text-[10px] text-amber-300 font-semibold font-mono flex items-center justify-end gap-1 mt-0.5">
+                                <span className="text-[9px] uppercase font-sans text-amber-400/80">Parcela:</span>
+                                <span>
+                                  {matchingPersons
+                                    .map((p) => `${matchingPersons.length > 1 ? `${p.name}: ` : ''}${formatBRL(p.amount)}`)
+                                    .join(' | ')}
+                                </span>
+                              </div>
+                            )
+                          })()}
 
                           {/* Friend Pending / Accepted Tags */}
                           {tx.assignedFriendUid && tx.paidByUid === currentUid && tx.acceptanceStatus !== 'accepted' && (
@@ -1878,6 +2127,17 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         </div>
 
         <div className="flex items-center gap-3 sm:gap-4 font-mono text-[11px] sm:text-xs ml-auto">
+          {columnFilters.persons.length > 0 && (
+            <div className="flex items-center gap-1.5 pl-2 sm:pl-3 border-l border-amber-500/40 bg-amber-500/10 px-2 sm:px-3 py-1 rounded-lg text-amber-300 animate-in fade-in">
+              <span className="font-sans text-[10px] uppercase font-bold tracking-wider text-amber-400">
+                Cobrança {columnFilters.persons.join(', ')}:
+              </span>
+              <span className="font-bold text-amber-200 text-xs sm:text-sm font-mono">
+                {formatBRL(filteredPersonTotal)}
+              </span>
+            </div>
+          )}
+
           <div className="flex items-center gap-1.5">
             <span className="text-slate-400 font-sans text-[10px] uppercase">Entradas:</span>
             <span className="text-emerald-400 font-bold">+{formatBRL(filteredSummary.income)}</span>

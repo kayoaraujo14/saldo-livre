@@ -16,12 +16,12 @@ import java.util.Locale
 /**
  * Motor de Áudio e Fala de Alta Performance e Baixa Latência.
  *
- * Otimizações implementadas:
- * 1. Suporte a Reconhecimento On-Device com aceleração por hardware (Android 12+) para transcrição instantânea offline.
- * 2. Redução agressiva de latência de silêncio (900ms ao invés do padrão do sistema de 2000ms).
- * 3. Streaming de transcrições parciais em tempo real.
- * 4. Eliminação de contenção de microfone (sem MediaRecorder concorrente disputando o hardware de captura).
- * 5. Disparo automático imediato de onFinalTranscript quando o usuário conclui a fala.
+ * Características:
+ * 1. Suporte a Reconhecimento On-Device com aceleração por hardware (Android 12+) para transcrição instantânea.
+ * 2. Streaming de transcrições parciais e cumulativas em tempo real.
+ * 3. Escuta contínua enquanto a gravação estiver ativa sem disparo prematuro por pausas na fala.
+ * 4. Eliminação de envio automático indesejado: a mensagem de voz SOMENTE é enviada quando o usuário
+ *    clica explicitamente no botão de confirmar envio.
  */
 class AndroidSpeechManager(
     private val context: Context
@@ -45,7 +45,6 @@ class AndroidSpeechManager(
 
     fun startListening() {
         if (isRecording) {
-            stopListening(sendImmediately = true)
             return
         }
 
@@ -54,90 +53,21 @@ class AndroidSpeechManager(
         isRecording = true
         onRecordingSeconds?.invoke(0)
 
-        // 1. Inicializa o SpeechRecognizer otimizado para baixa latência
-        val recognitionAvailable = SpeechRecognizer.isRecognitionAvailable(context)
-        if (recognitionAvailable) {
-            try {
-                // Utiliza o recognizer padrão do Google Speech com vocabulário estendido (marcas, inglês e português)
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        initSpeechRecognizer()
 
-                speechRecognizer?.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {}
-                    override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-
-                    override fun onEndOfSpeech() {
-                        // Fim de fala detectado pelo hardware
-                    }
-
-                    override fun onError(error: Int) {
-                        // Se houver erro de silêncio ou recognizer e tivermos texto acumulado, enviamos o que temos
-                        if (isRecording && accumulatedTranscript.isNotBlank()) {
-                            stopListening(sendImmediately = true, currentRecognizedText = accumulatedTranscript)
-                        } else if (isRecording && error != SpeechRecognizer.ERROR_NO_MATCH && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                            onError?.invoke("Erro no microfone ($error)")
-                        }
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull()?.trim() ?: accumulatedTranscript.trim()
-                        if (text.isNotBlank()) {
-                            accumulatedTranscript = text
-                            onPartialTranscript?.invoke(text)
-                        }
-                        // Disparo automático e instantâneo ao concluir
-                        if (isRecording) {
-                            stopListening(sendImmediately = true, currentRecognizedText = text)
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        val text = matches?.firstOrNull()?.trim() ?: ""
-                        if (text.isNotBlank()) {
-                            accumulatedTranscript = text
-                            onPartialTranscript?.invoke(text)
-                        }
-                    }
-
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "pt-BR")
-                    putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-
-                    // Habilita vocabulário multilíngue para marcas em inglês (ex: Two Brothers, Uber, iFood, Air Fryer)
-                    putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-US", "en"))
-
-                    // Ajustes de baixa latência de silêncio (resposta ágil após parar de falar)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 400L)
-                }
-
-                speechRecognizer?.startListening(intent)
-            } catch (e: Exception) {
-                fallbackToAudioRecording()
-            }
-        } else {
-            fallbackToAudioRecording()
-        }
-
-        // 2. Timer de gravação
+        // Timer de gravação
         timerRunnable = object : Runnable {
             override fun run() {
                 if (isRecording) {
                     recordingSeconds++
                     onRecordingSeconds?.invoke(recordingSeconds)
                     if (recordingSeconds >= 60) {
-                        stopListening(sendImmediately = true)
+                        // Limite de 60 segundos de captura contínua atingido:
+                        // Pausa a captura do microfone para poupar recursos, mas NUNCA envia automaticamente.
+                        // Mantém a gravação pronta para o usuário clicar no botão de confirmar envio.
+                        try {
+                            speechRecognizer?.stopListening()
+                        } catch (_: Exception) {}
                     } else {
                         handler.postDelayed(this, 1000L)
                     }
@@ -145,6 +75,116 @@ class AndroidSpeechManager(
             }
         }
         handler.postDelayed(timerRunnable!!, 1000L)
+    }
+
+    private fun initSpeechRecognizer() {
+        val recognitionAvailable = SpeechRecognizer.isRecognitionAvailable(context)
+        if (!recognitionAvailable) {
+            fallbackToAudioRecording()
+            return
+        }
+
+        try {
+            speechRecognizer?.destroy()
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {}
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+
+                    override fun onEndOfSpeech() {
+                        // Fim de fala detectado pelo hardware; aguarda resultados parciais ou finais
+                    }
+
+                    override fun onError(error: Int) {
+                        if (!isRecording) return
+
+                        // Pausas naturais de fala disparam ERROR_NO_MATCH ou ERROR_SPEECH_TIMEOUT no Android.
+                        // NUNCA enviamos a mensagem aqui! Reiniciamos a escuta para permitir fala contínua.
+                        if (error == SpeechRecognizer.ERROR_NO_MATCH ||
+                            error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT ||
+                            error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                            restartListening()
+                        } else if (error == SpeechRecognizer.ERROR_AUDIO || error == SpeechRecognizer.ERROR_CLIENT) {
+                            restartListening()
+                        } else {
+                            if (accumulatedTranscript.isBlank()) {
+                                onError?.invoke("Microfone ($error)")
+                            }
+                        }
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull()?.trim() ?: ""
+                        if (text.isNotBlank()) {
+                            accumulatedTranscript = if (accumulatedTranscript.isBlank()) {
+                                text
+                            } else {
+                                "$accumulatedTranscript $text"
+                            }
+                            onPartialTranscript?.invoke(accumulatedTranscript)
+                        }
+
+                        // REGRA: SOMENTE o clique no botão de confirmar envio dispara o envio da mensagem.
+                        // Se o usuário ainda estiver com a gravação aberta, reinicia a escuta para continuar ouvindo.
+                        if (isRecording) {
+                            restartListening()
+                        }
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        val text = matches?.firstOrNull()?.trim() ?: ""
+                        if (text.isNotBlank()) {
+                            val currentFull = if (accumulatedTranscript.isBlank()) text else "$accumulatedTranscript $text"
+                            onPartialTranscript?.invoke(currentFull)
+                        }
+                    }
+
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+            }
+
+            val intent = createRecognitionIntent()
+            speechRecognizer?.startListening(intent)
+        } catch (e: Exception) {
+            fallbackToAudioRecording()
+        }
+    }
+
+    private fun restartListening() {
+        if (!isRecording) return
+        handler.postDelayed({
+            if (!isRecording) return@postDelayed
+            try {
+                speechRecognizer?.cancel()
+                val intent = createRecognitionIntent()
+                speechRecognizer?.startListening(intent)
+            } catch (_: Exception) {
+                initSpeechRecognizer()
+            }
+        }, 150L)
+    }
+
+    private fun createRecognitionIntent(): Intent {
+        return Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "pt-BR")
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+
+            // Habilita vocabulário multilíngue para marcas em inglês (ex: Two Brothers, Uber, iFood, Air Fryer)
+            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", arrayOf("en-US", "en"))
+
+            // Silêncio mais tolerante para não cortar pausas naturais na fala
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 500L)
+        }
     }
 
     private fun fallbackToAudioRecording() {
@@ -172,6 +212,10 @@ class AndroidSpeechManager(
         }
     }
 
+    /**
+     * Encerra a escuta e, se sendImmediately for verdadeiro, dispara onFinalTranscript.
+     * Este método deve ser chamado apenas por ação voluntária do usuário (ao clicar no botão de confirmar envio).
+     */
     fun stopListening(sendImmediately: Boolean, currentRecognizedText: String = "") {
         if (!isRecording) return
         isRecording = false
@@ -205,6 +249,9 @@ class AndroidSpeechManager(
         }
     }
 
+    /**
+     * Cancela a escuta ativa sem enviar nenhuma mensagem.
+     */
     fun cancelListening() {
         if (!isRecording) return
         isRecording = false

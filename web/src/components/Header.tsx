@@ -104,7 +104,7 @@ export function Header({
   }
 
   return (
-    <header className="border-b border-white/5 bg-slate-950/80 backdrop-blur-md sticky top-0 z-30 transition-all pt-[max(0.4rem,env(safe-area-inset-top,0px))]">
+    <header className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md sticky top-0 z-40 transition-all pt-[max(0.4rem,env(safe-area-inset-top,0px))]">
       <div className="max-w-[1720px] mx-auto px-3 sm:px-6 py-2 sm:py-2.5">
         <div className="flex items-center justify-between gap-2 sm:gap-3">
           {/* 1. Left: Brand & Month Navigator */}

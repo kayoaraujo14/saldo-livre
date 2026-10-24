@@ -42,17 +42,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.saldolivre.app.R
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.parser.ParsedStatementItem
@@ -259,14 +262,13 @@ fun GeminiChatScreen(
                                 tint = TextSecondary
                             )
 
-                            // 3. Botão Dicas / Memória (Regras Aprendidas)
+                            // 3. Botão Regras & Memória do Copiloto (Cérebrozinho)
                             val hasRules = uiState.learnedRules.isNotEmpty()
                             ChatTopBarButton(
                                 onClick = { viewModel.setRulesOpen(true) },
-                                icon = Icons.Rounded.Lightbulb,
-                                contentDescription = "Dicas e regras do Copiloto",
-                                tint = TextSecondary,
-                                hasBadge = hasRules
+                                icon = ImageVector.vectorResource(R.drawable.ic_brain),
+                                contentDescription = "Regras e memória do Copiloto",
+                                tint = if (hasRules) Color(0xFFC084FC) else TextSecondary
                             )
                         }
                     }
@@ -310,28 +312,17 @@ fun GeminiChatScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp)
             ) {
-                itemsIndexed(
+                items(
                     items = uiState.messages,
-                    key = { _, msg -> msg.id },
-                    contentType = { _, _ -> "chat_message" }
-                ) { index, msg ->
+                    key = { it.id },
+                    contentType = { "chat_message" }
+                ) { msg ->
                     ChatBubble(
                         message = msg,
                         isActionInProgress = uiState.isTyping,
                         onConfirmAction = { viewModel.confirmPendingAction(it) },
                         onCancelAction = { viewModel.cancelPendingAction(it) }
                     )
-
-                    // Prompt Starters (Onboarding) logo abaixo da primeira mensagem do assistente
-                    if (index == 0 && msg.sender == MessageSender.ASSISTANT) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        PromptStartersSection(
-                            onQuickExpense = { viewModel.onInputTextChange("Lançar gasto de R$ ") },
-                            onImportPdf = { filePickerLauncher.launch("*/*") },
-                            onViewCharts = { viewModel.sendMessage(overrideText = "Mostrar gráficos dos meus gastos do mês") },
-                            onDailyLimit = { viewModel.sendMessage(overrideText = "Qual meu limite diário para hoje?") }
-                        )
-                    }
                 }
 
                 if (uiState.isTyping) {
@@ -500,10 +491,10 @@ fun GeminiChatScreen(
                             val sec = uiState.recordingSeconds
                             val timerStr = String.format(Locale.getDefault(), "%02d:%02d", sec / 60, sec % 60)
                             Text(
-                                text = "Ouvindo comando de voz... $timerStr",
+                                text = if (uiState.inputText.isNotBlank()) "\"${uiState.inputText}\"" else "Ouvindo voz... $timerStr",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Rose400,
+                                color = if (uiState.inputText.isNotBlank()) TextPrimary else Rose400,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
@@ -612,9 +603,9 @@ fun GeminiChatScreen(
                             ) {
                                 Icon(
                                     imageVector = Icons.Rounded.Check,
-                                    contentDescription = "Concluir áudio",
+                                    contentDescription = "Confirmar envio de áudio",
                                     tint = DarkBackground,
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         }
@@ -674,8 +665,7 @@ private fun ChatTopBarButton(
     icon: ImageVector,
     contentDescription: String?,
     modifier: Modifier = Modifier,
-    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    hasBadge: Boolean = false
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant
 ) {
     Box(
         modifier = modifier
@@ -685,124 +675,12 @@ private fun ChatTopBarButton(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                tint = tint,
-                modifier = Modifier.size(18.dp)
-            )
-            if (hasBadge) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 2.dp, y = (-2).dp)
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(Amber400)
-                )
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// CHIPS DE SUGESTÃO / ONBOARDING (PROMPT STARTERS)
-// -------------------------------------------------------------
-@Composable
-private fun PromptStartersSection(
-    onQuickExpense: () -> Unit,
-    onImportPdf: () -> Unit,
-    onViewCharts: () -> Unit,
-    onDailyLimit: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            PromptStarterCard(
-                icon = Icons.Rounded.FlashOn,
-                label = "Lançar gasto rápido",
-                onClick = onQuickExpense,
-                modifier = Modifier.weight(1f)
-            )
-            PromptStarterCard(
-                icon = Icons.Rounded.PictureAsPdf,
-                label = "Importar fatura PDF",
-                onClick = onImportPdf,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            PromptStarterCard(
-                icon = Icons.Rounded.BarChart,
-                label = "Ver gráficos",
-                onClick = onViewCharts,
-                modifier = Modifier.weight(1f)
-            )
-            PromptStarterCard(
-                icon = Icons.Rounded.Lightbulb,
-                label = "Meu limite diário",
-                onClick = onDailyLimit,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-private fun PromptStarterCard(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = DarkSurfaceVariant.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.28f)),
-        modifier = modifier.heightIn(min = 42.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(Emerald500.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = Emerald400,
-                    modifier = Modifier.size(15.dp)
-                )
-            }
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
@@ -965,21 +843,42 @@ private fun LearnedRulesSheetContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Memória do Copiloto (Regras)",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = "O Copiloto memoriza preferências financeiras para categorizar e lançar gastos automaticamente do seu jeito.",
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                    lineHeight = 16.sp
-                )
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF9333EA).copy(alpha = 0.15f))
+                        .border(1.dp, Color(0xFF9333EA).copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = ImageVector.vectorResource(R.drawable.ic_brain),
+                        contentDescription = null,
+                        tint = Color(0xFFC084FC),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "Memória do Copiloto (Regras)",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "O Copiloto memoriza preferências financeiras para categorizar e lançar gastos automaticamente do seu jeito.",
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        lineHeight = 15.sp
+                    )
+                }
             }
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             ChatTopBarButton(
                 onClick = onClose,
                 icon = Icons.Rounded.Close,
@@ -1030,8 +929,21 @@ private fun LearnedRulesSheetContent(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(imageVector = Icons.Default.Lightbulb, contentDescription = null, tint = TextMuted, modifier = Modifier.size(36.dp))
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF9333EA).copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = ImageVector.vectorResource(R.drawable.ic_brain),
+                            contentDescription = null,
+                            tint = Color(0xFFC084FC),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(text = "Nenhuma regra personalizada ainda.", fontSize = 13.sp, color = TextMuted)
                     Text(text = "Diga no chat: \"Aprenda que almoço no RU é Alimentação...\"", fontSize = 11.sp, color = TextMuted)
                 }
@@ -1087,46 +999,21 @@ private fun LearnedRulesSheetContent(
 }
 
 // -------------------------------------------------------------
-// CONVERSÃO INTELIGENTE DE TABELAS MARKDOWN PARA LISTAS MOBILE
+// MODELO DE BLOCOS DE CONTEÚDO DA MENSAGEM (TEXTO, DIVISOR E TABELA NATIVA)
 // -------------------------------------------------------------
-private fun convertMarkdownTables(rawText: String): String {
-    if (!rawText.contains("|")) return rawText
+private sealed class MessageContentBlock {
+    data class Text(val text: String) : MessageContentBlock()
+    data class Table(val headers: List<String>, val rows: List<List<String>>) : MessageContentBlock()
+    object Divider : MessageContentBlock()
+}
 
-    val lines = rawText.lines()
-    val result = mutableListOf<String>()
-    var i = 0
-
-    while (i < lines.size) {
-        val line = lines[i]
-        val trimmed = line.trim()
-
-        if (isTableRow(trimmed) && i + 1 < lines.size && isTableSeparator(lines[i + 1].trim())) {
-            val headerCells = splitTableRow(trimmed)
-            i += 2 // pula cabeçalho e separador
-
-            val dataRows = mutableListOf<List<String>>()
-            while (i < lines.size && isTableRow(lines[i].trim())) {
-                val rowTrimmed = lines[i].trim()
-                if (!isTableSeparator(rowTrimmed)) {
-                    val rowCells = splitTableRow(rowTrimmed)
-                    if (rowCells.isNotEmpty()) {
-                        dataRows.add(rowCells)
-                    }
-                }
-                i++
-            }
-
-            val formattedTable = formatTableForMobile(headerCells, dataRows)
-            if (formattedTable.isNotBlank()) {
-                result.add(formattedTable)
-            }
-        } else {
-            result.add(line)
-            i++
-        }
-    }
-
-    return result.joinToString("\n")
+private fun isMarkdownHorizontalDivider(line: String): Boolean {
+    val trimmed = line.trim()
+    if (trimmed.length < 3) return false
+    return trimmed.all { it == '-' } ||
+            trimmed.all { it == '*' } ||
+            trimmed.all { it == '_' } ||
+            trimmed.matches(Regex("""^(\-{3,}|\*{3,}|_{3,}|—{3,})$"""))
 }
 
 private fun isTableRow(line: String): Boolean {
@@ -1153,148 +1040,273 @@ private fun splitTableRow(line: String): List<String> {
     return stripped.split("|").map { it.trim() }
 }
 
-private fun formatTableForMobile(headers: List<String>, rows: List<List<String>>): String {
-    if (rows.isEmpty()) return ""
+private fun parseMessageContentBlocks(rawText: String): List<MessageContentBlock> {
+    val blocks = mutableListOf<MessageContentBlock>()
+    val lines = rawText.lines()
+    val textBuffer = StringBuilder()
 
-    val headersLower = headers.map { it.lowercase().trim() }
-
-    val titleIdx = headersLower.indexOfFirst {
-        it.contains("descri") || it.contains("nome") || it.contains("estabelecimento") ||
-        it.contains("contraparte") || it.contains("item") || it.contains("serviço") ||
-        it.contains("servico") || it.contains("conta")
-    }
-
-    val totalValIdx = headersLower.indexOfFirst {
-        it.contains("valor total") || it.contains("total")
-    }
-
-    val valIdx = if (totalValIdx != -1) totalValIdx else headersLower.indexOfFirst {
-        it.contains("valor") || it.contains("preço") || it.contains("preco") || it.contains("quantia")
-    }
-
-    val impactIdx = headersLower.indexOfFirst {
-        it.contains("impacto") || it.contains("cota") || it.contains("sua parte") || it.contains("seu impacto")
-    }
-
-    val dateIdx = headersLower.indexOfFirst {
-        it.contains("data") || it.contains("vencimento") || it.contains("dia")
-    }
-
-    val catIdx = headersLower.indexOfFirst {
-        it.contains("subcategoria") || it.contains("categoria")
-    }
-
-    val statusIdx = headersLower.indexOfFirst {
-        it.contains("status") || it.contains("situação") || it.contains("situacao") ||
-        it.contains("tipo") || it.contains("método") || it.contains("metodo") || it.contains("pagamento")
-    }
-
-    // Tabela simples Chave / Valor de 2 colunas
-    if (headers.size == 2 && (titleIdx == -1 || valIdx == -1)) {
-        return rows.joinToString("\n") { row ->
-            val key = row.getOrNull(0)?.removePrefix("**")?.removeSuffix("**")?.trim().orEmpty()
-            val value = row.getOrNull(1)?.trim().orEmpty()
-            if (key.isNotBlank()) "• **$key**: $value" else value
+    fun flushText() {
+        val str = textBuffer.toString().trim('\n')
+        if (str.isNotBlank()) {
+            blocks.add(MessageContentBlock.Text(str))
         }
+        textBuffer.clear()
     }
 
-    val formattedRows = rows.mapNotNull { row ->
-        val resolvedTitleIdx = if (titleIdx != -1) titleIdx else {
-            if (dateIdx == 0 && row.size > 1) 1 else 0
+    var i = 0
+    while (i < lines.size) {
+        val line = lines[i]
+        val trimmed = line.trim()
+
+        // 1. Linhas divisórias horizontais (--- ou *** ou ___)
+        if (isMarkdownHorizontalDivider(trimmed)) {
+            flushText()
+            blocks.add(MessageContentBlock.Divider)
+            i++
+            continue
         }
 
-        val rawTitle = row.getOrNull(resolvedTitleIdx)?.trim().orEmpty()
-        if (rawTitle.isBlank() || rawTitle == "-") return@mapNotNull null
+        // 2. Blocos de Tabela Markdown nativa
+        if (isTableRow(trimmed) && i + 1 < lines.size && isTableSeparator(lines[i + 1].trim())) {
+            flushText()
+            val headerCells = splitTableRow(trimmed)
+            i += 2 // pula linha de cabeçalho e divisor de cabeçalho
 
-        val cleanTitle = rawTitle.removePrefix("**").removeSuffix("**").trim()
-        val totalVal = if (valIdx != -1 && valIdx != resolvedTitleIdx) row.getOrNull(valIdx)?.trim() else null
-        val impactVal = if (impactIdx != -1 && impactIdx != resolvedTitleIdx && impactIdx != valIdx) row.getOrNull(impactIdx)?.trim() else null
-        val dateVal = if (dateIdx != -1 && dateIdx != resolvedTitleIdx) row.getOrNull(dateIdx)?.trim() else null
-        val catVal = if (catIdx != -1 && catIdx != resolvedTitleIdx) row.getOrNull(catIdx)?.trim() else null
-        val statusVal = if (statusIdx != -1 && statusIdx != resolvedTitleIdx) row.getOrNull(statusIdx)?.trim() else null
-
-        val headerBuilder = StringBuilder("• **$cleanTitle**")
-        if (!totalVal.isNullOrBlank() && totalVal != "-") {
-            headerBuilder.append(": $totalVal")
-        }
-
-        if (!impactVal.isNullOrBlank() && impactVal != "-" && impactVal != totalVal) {
-            val impactClean = if (impactVal.lowercase().contains("parte") || impactVal.lowercase().contains("cota") || impactVal.lowercase().contains("impacto")) {
-                impactVal
-            } else {
-                "Sua parte: $impactVal"
+            val dataRows = mutableListOf<List<String>>()
+            while (i < lines.size && isTableRow(lines[i].trim())) {
+                val rowTrimmed = lines[i].trim()
+                if (!isTableSeparator(rowTrimmed)) {
+                    val rowCells = splitTableRow(rowTrimmed)
+                    if (rowCells.isNotEmpty()) {
+                        dataRows.add(rowCells)
+                    }
+                }
+                i++
             }
-            headerBuilder.append(" ($impactClean)")
+            if (headerCells.isNotEmpty()) {
+                blocks.add(MessageContentBlock.Table(headers = headerCells, rows = dataRows))
+            }
+            continue
         }
 
-        val details = mutableListOf<String>()
-        if (!dateVal.isNullOrBlank() && dateVal != "-") {
-            details.add("📅 $dateVal")
+        // 3. Linha de texto comum
+        if (textBuffer.isNotEmpty()) {
+            textBuffer.append("\n")
         }
-        if (!catVal.isNullOrBlank() && catVal != "-") {
-            details.add(catVal)
-        }
-        if (!statusVal.isNullOrBlank() && statusVal != "-") {
-            details.add(statusVal)
-        }
+        textBuffer.append(line)
+        i++
+    }
 
-        for (colIdx in row.indices) {
-            if (colIdx != resolvedTitleIdx && colIdx != valIdx && colIdx != impactIdx &&
-                colIdx != dateIdx && colIdx != catIdx && colIdx != statusIdx) {
-                val hName = headers.getOrNull(colIdx)?.trim()
-                val cellVal = row.getOrNull(colIdx)?.trim()
-                if (!hName.isNullOrBlank() && !cellVal.isNullOrBlank() && cellVal != "-") {
-                    details.add("$hName: $cellVal")
+    flushText()
+    return blocks
+}
+
+// -------------------------------------------------------------
+// RENDERIZADOR NATIVO DE TABELAS MARKDOWN (JETPACK COMPOSE)
+// -------------------------------------------------------------
+@Composable
+fun MarkdownTableCard(
+    headers: List<String>,
+    rows: List<List<String>>,
+    modifier: Modifier = Modifier
+) {
+    if (headers.isEmpty()) return
+
+    val scrollState = rememberScrollState()
+
+    // Identifica colunas financeiras (R$), percentuais (%) ou numéricas para alinhar à direita
+    val isRightAlignedCol = remember(headers, rows) {
+        headers.indices.map { colIdx ->
+            val headerText = headers.getOrNull(colIdx)?.lowercase() ?: ""
+            val isHeaderMoneyOrPct = headerText.contains("r$") ||
+                    headerText.contains("(r$)") ||
+                    headerText.contains("%") ||
+                    headerText.contains("valor") ||
+                    headerText.contains("bruto") ||
+                    headerText.contains("parte") ||
+                    headerText.contains("total") ||
+                    headerText.contains("cota")
+
+            val cellsLookLikeNumbers = rows.any { r ->
+                val cell = r.getOrNull(colIdx)?.trim() ?: ""
+                cell.startsWith("R$", ignoreCase = true) || cell.endsWith("%") ||
+                        (cell.replace(Regex("""[R$\s.,%–-]"""), "").all { it.isDigit() } && cell.any { it.isDigit() })
+            }
+            isHeaderMoneyOrPct || cellsLookLikeNumbers
+        }
+    }
+
+    // Calcula larguras proporcionais por coluna para garantir alinhamento vertical perfeito
+    val colWidths = remember(headers, rows, isRightAlignedCol) {
+        headers.indices.map { colIdx ->
+            val headerLen = headers.getOrNull(colIdx)?.replace("*", "")?.trim()?.length ?: 0
+            val maxCellLen = rows.maxOfOrNull { r ->
+                r.getOrNull(colIdx)?.replace("*", "")?.trim()?.length ?: 0
+            } ?: 0
+            val maxLen = maxOf(headerLen, maxCellLen)
+            val isNumericOrMoney = isRightAlignedCol.getOrElse(colIdx) { false }
+            val baseWidth = (maxLen * 8.5f + 24f)
+            val minWidth = if (maxLen <= 2) 36f else if (isNumericOrMoney) 88f else 115f
+            baseWidth.coerceIn(minWidth, 240f).dp
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF131E2F),
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .horizontalScroll(scrollState)
+                .padding(vertical = 2.dp)
+        ) {
+            // Cabeçalho destacado em verde-esmeralda/cinza escuro
+            Row(
+                modifier = Modifier
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Emerald500.copy(alpha = 0.22f),
+                                DarkSurfaceVariant.copy(alpha = 0.85f)
+                            )
+                        )
+                    )
+                    .padding(horizontal = 8.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                headers.forEachIndexed { colIdx, rawHeader ->
+                    val cleanHeader = rawHeader.replace("**", "").replace("*", "").trim()
+                    val isRight = isRightAlignedCol.getOrElse(colIdx) { false }
+                    val align = if (isRight) TextAlign.End else TextAlign.Start
+                    Box(
+                        modifier = Modifier
+                            .width(colWidths.getOrElse(colIdx) { 90.dp })
+                            .padding(horizontal = 6.dp),
+                        contentAlignment = if (isRight) Alignment.CenterEnd else Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = cleanHeader,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.5.sp,
+                            color = Emerald400,
+                            textAlign = align,
+                            letterSpacing = 0.2.sp
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(
+                color = Emerald500.copy(alpha = 0.35f),
+                thickness = 1.dp
+            )
+
+            // Linhas com cores alternadas (zebra striping) e destaque para totalizadores
+            rows.forEachIndexed { rowIndex, row ->
+                val isTotalRow = row.any { cell ->
+                    val c = cell.lowercase().replace("*", "").trim()
+                    c.startsWith("total") || c == "soma" || c.startsWith("totalizador")
+                }
+
+                val rowBg = when {
+                    isTotalRow -> Emerald500.copy(alpha = 0.16f)
+                    rowIndex % 2 == 1 -> DarkSurfaceVariant.copy(alpha = 0.35f)
+                    else -> Color.Transparent
+                }
+
+                if (isTotalRow) {
+                    HorizontalDivider(
+                        color = Emerald500.copy(alpha = 0.40f),
+                        thickness = 1.dp
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .background(rowBg)
+                        .padding(horizontal = 8.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    headers.indices.forEach { colIdx ->
+                        val rawCell = row.getOrNull(colIdx)?.trim().orEmpty()
+                        val cleanCell = rawCell.replace("**", "").replace("*", "").trim()
+                        val isRight = isRightAlignedCol.getOrElse(colIdx) { false }
+                        val align = if (isRight) TextAlign.End else TextAlign.Start
+
+                        val cellColor = when {
+                            isTotalRow -> Emerald400
+                            cleanCell.startsWith("R$") || cleanCell.endsWith("%") -> TextPrimary
+                            else -> TextPrimary.copy(alpha = 0.92f)
+                        }
+
+                        val cellWeight = when {
+                            isTotalRow -> FontWeight.Bold
+                            rawCell.contains("**") -> FontWeight.SemiBold
+                            else -> FontWeight.Normal
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .width(colWidths.getOrElse(colIdx) { 90.dp })
+                                .padding(horizontal = 6.dp),
+                            contentAlignment = if (isRight) Alignment.CenterEnd else Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = cleanCell,
+                                fontSize = 11.5.sp,
+                                fontWeight = cellWeight,
+                                color = cellColor,
+                                textAlign = align
+                            )
+                        }
+                    }
                 }
             }
         }
-
-        if (details.isNotEmpty()) {
-            "${headerBuilder}\n  ${details.joinToString(" • ")}"
-        } else {
-            headerBuilder.toString()
-        }
     }
-
-    return formattedRows.joinToString("\n\n")
 }
 
 // -------------------------------------------------------------
 // FORMATAÇÃO INTELIGENTE DE MARKDOWN (NEGRITO, ITÁLICO, CÓDIGO E LISTAS)
 // -------------------------------------------------------------
+private fun cleanOrphanAsterisks(str: String): String {
+    // Remove quaisquer asteriscos órfãos remanescentes no final de palavras ou frases (ex: "Painel Geral**" -> "Painel Geral")
+    return str.replace(Regex("""\*{2,}"""), "")
+}
+
 private fun parseSmartMarkdownText(rawText: String, isUser: Boolean): AnnotatedString {
     val boldColor = if (isUser) Color.White else Emerald400
     val italicColor = if (isUser) Color.White.copy(alpha = 0.92f) else TextPrimary
     val codeColor = if (isUser) Color.White else Cyan400
     val codeBg = DarkSurfaceVariant.copy(alpha = 0.65f)
 
-    // Pré-processamento: converte tabelas Markdown em listas mobile amigáveis
-    val textWithoutTables = convertMarkdownTables(rawText)
-
     // Pré-processamento de linhas: cabeçalhos e marcadores de lista
-    val preprocessed = textWithoutTables.lines().joinToString("\n") { line ->
+    val preprocessed = rawText.lines().joinToString("\n") { line ->
         var l = line
         val trimmed = l.trimStart()
-        if (trimmed.startsWith("### ")) {
+        val headerMatch = Regex("""^(#{1,6})\s+(.*)$""").find(trimmed)
+        if (headerMatch != null) {
             val indent = l.substring(0, l.length - trimmed.length)
-            l = "$indent**${trimmed.substring(4)}**"
-        } else if (trimmed.startsWith("## ")) {
-            val indent = l.substring(0, l.length - trimmed.length)
-            l = "$indent**${trimmed.substring(3)}**"
-        } else if (trimmed.startsWith("# ")) {
-            val indent = l.substring(0, l.length - trimmed.length)
-            l = "$indent**${trimmed.substring(2)}**"
+            var content = headerMatch.groupValues[2].trim()
+            content = content.replace("***", "").replace("**", "").trim()
+            l = "$indent**$content**"
+        } else {
+            val t2 = l.trimStart()
+            if (t2.startsWith("* ") || t2.startsWith("- ")) {
+                val indent = l.substring(0, l.length - t2.length)
+                l = "$indent• " + t2.substring(2)
+            }
         }
-        val t2 = l.trimStart()
-        if (t2.startsWith("* ") || t2.startsWith("- ")) {
-            val indent = l.substring(0, l.length - t2.length)
-            "$indent• " + t2.substring(2)
-        } else l
+        l
     }
 
     // Expressão regular com grupos ordenados por especificidade
     val pattern = Regex(
-        """(\*\*\*(.+?)\*\*\*)|(\*\*(.+?)\*\*)|(\*([^\*\n]+?)\*)|(_([^_\n]+?)_)|(`([^`\n]+?)`)"""
+        """(\*\*\*([^\*\n]+?)\*\*\*)|(\*\*([^\*\n]+?)\*\*)|(\*([^\*\n]+?)\*)|(__([^_\n]+?)__)|(_([^_\n]+?)_)|(`([^`\n]+?)`)"""
     )
 
     return buildAnnotatedString {
@@ -1302,11 +1314,13 @@ private fun parseSmartMarkdownText(rawText: String, isUser: Boolean): AnnotatedS
         for (match in pattern.findAll(preprocessed)) {
             val range = match.range
             if (range.first > lastIndex) {
-                append(preprocessed.substring(lastIndex, range.first))
+                val rawPiece = preprocessed.substring(lastIndex, range.first)
+                append(cleanOrphanAsterisks(rawPiece))
             }
             when {
-                // ***negrito e itálico***
+                // ***negrito e itálico*** (grupo 2)
                 match.groups[2] != null -> {
+                    val content = cleanOrphanAsterisks(match.groups[2]!!.value)
                     withStyle(
                         SpanStyle(
                             fontWeight = FontWeight.Bold,
@@ -1314,44 +1328,57 @@ private fun parseSmartMarkdownText(rawText: String, isUser: Boolean): AnnotatedS
                             color = boldColor
                         )
                     ) {
-                        append(match.groups[2]!!.value)
+                        append(content)
                     }
                 }
-                // **negrito**
+                // **negrito** (grupo 4)
                 match.groups[4] != null -> {
+                    val content = cleanOrphanAsterisks(match.groups[4]!!.value)
                     withStyle(
                         SpanStyle(
                             fontWeight = FontWeight.Bold,
                             color = boldColor
                         )
                     ) {
-                        append(match.groups[4]!!.value)
+                        append(content)
                     }
                 }
-                // *itálico*
+                // *itálico* (grupo 6)
                 match.groups[6] != null -> {
+                    val content = cleanOrphanAsterisks(match.groups[6]!!.value)
                     withStyle(
                         SpanStyle(
                             fontStyle = FontStyle.Italic,
                             color = italicColor
                         )
                     ) {
-                        append(match.groups[6]!!.value)
+                        append(content)
                     }
                 }
-                // _itálico_
+                // __negrito com underscore__ (grupo 8)
                 match.groups[8] != null -> {
                     withStyle(
                         SpanStyle(
-                            fontStyle = FontStyle.Italic,
-                            color = italicColor
+                            fontWeight = FontWeight.Bold,
+                            color = boldColor
                         )
                     ) {
                         append(match.groups[8]!!.value)
                     }
                 }
-                // `código inline`
+                // _itálico com underscore_ (grupo 10)
                 match.groups[10] != null -> {
+                    withStyle(
+                        SpanStyle(
+                            fontStyle = FontStyle.Italic,
+                            color = italicColor
+                        )
+                    ) {
+                        append(match.groups[10]!!.value)
+                    }
+                }
+                // `código inline` (grupo 12)
+                match.groups[12] != null -> {
                     withStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
@@ -1360,14 +1387,15 @@ private fun parseSmartMarkdownText(rawText: String, isUser: Boolean): AnnotatedS
                             fontSize = 12.sp
                         )
                     ) {
-                        append(" ${match.groups[10]!!.value} ")
+                        append(" ${match.groups[12]!!.value} ")
                     }
                 }
             }
             lastIndex = range.last + 1
         }
         if (lastIndex < preprocessed.length) {
-            append(preprocessed.substring(lastIndex))
+            val tail = preprocessed.substring(lastIndex)
+            append(cleanOrphanAsterisks(tail))
         }
     }
 }
@@ -1381,13 +1409,22 @@ fun ChatBubble(
 ) {
     val isUser = message.sender == MessageSender.USER
     val alignment = if (isUser) Alignment.End else Alignment.Start
+    val contentBlocks = remember(message.text) {
+        parseMessageContentBlocks(message.text)
+    }
+    val hasTable = remember(contentBlocks) {
+        contentBlocks.any { it is MessageContentBlock.Table }
+    }
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
-    val maxBubbleWidth = (screenWidthDp * if (isUser) 0.82f else 0.90f).dp
+    val maxBubbleWidth = remember(screenWidthDp, isUser, hasTable) {
+        if (hasTable && !isUser) {
+            (screenWidthDp * 0.96f).dp
+        } else {
+            (screenWidthDp * if (isUser) 0.82f else 0.90f).dp
+        }
+    }
     val timeStr = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
-    }
-    val formattedText = remember(message.text, isUser) {
-        parseSmartMarkdownText(message.text, isUser)
     }
 
     val bubbleShape = remember(isUser) {
@@ -1474,7 +1511,7 @@ fun ChatBubble(
             }
         }
 
-        // Bolha de Texto Principal com Gradiente, Sombra Sutil e Bordas Dinâmicas
+        // Bolha de Texto e Conteúdo Principal com Gradiente, Sombra Sutil e Bordas Dinâmicas
         Box(
             modifier = Modifier
                 .widthIn(max = maxBubbleWidth)
@@ -1508,15 +1545,41 @@ fun ChatBubble(
                     },
                     shape = bubbleShape
                 )
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
-            Text(
-                text = formattedText,
-                fontSize = 13.5.sp,
-                color = if (isUser) Color.White else TextPrimary,
-                lineHeight = 20.sp,
-                letterSpacing = 0.15.sp
-            )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                contentBlocks.forEach { block ->
+                    when (block) {
+                        is MessageContentBlock.Text -> {
+                            val formatted = remember(block.text, isUser) {
+                                parseSmartMarkdownText(block.text, isUser)
+                            }
+                            Text(
+                                text = formatted,
+                                fontSize = 13.5.sp,
+                                color = if (isUser) Color.White else TextPrimary,
+                                lineHeight = 20.sp,
+                                letterSpacing = 0.15.sp
+                            )
+                        }
+                        is MessageContentBlock.Divider -> {
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.08f),
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                        is MessageContentBlock.Table -> {
+                            MarkdownTableCard(
+                                headers = block.headers,
+                                rows = block.rows
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Gráfico Dinâmico Renderizado

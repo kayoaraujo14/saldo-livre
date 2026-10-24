@@ -393,7 +393,8 @@ class GeminiChatViewModel(
         _uiState.update {
             it.copy(
                 isRecordingAudio = true,
-                recordingSeconds = 0
+                recordingSeconds = 0,
+                inputText = ""
             )
         }
         speechManager?.startListening()
@@ -401,7 +402,7 @@ class GeminiChatViewModel(
 
     fun stopVoiceRecording(sendImmediately: Boolean) {
         val currentRecognized = _uiState.value.inputText
-        _uiState.update { it.copy(isRecordingAudio = false) }
+        _uiState.update { it.copy(isRecordingAudio = false, recordingSeconds = 0) }
         speechManager?.stopListening(sendImmediately, currentRecognized)
     }
 
@@ -1652,13 +1653,33 @@ E) DESPESAS POR PERÍODO OU INTERVALO DE DATAS:
 - Quando o usuário pedir despesas de um período específico (ex: "em outubro", "dos últimos 15 dias", "entre 01/10 e 15/10", "esta semana"):
   * Emita SEARCH_TRANSACTIONS com "month" (YYYY-MM) ou "startDate" e "endDate" (YYYY-MM-DD).
 
-F) APRESENTAÇÃO DESCRITIVA SUPERIOR NO APP MOBILE:
-- Estruture SEMPRE sua resposta com:
+F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
+- USO DE TABELAS MARKDOWN:
+  Quando o usuário solicitar uma "tabela", "quadro", "comparativo" ou "visão tabular" (ou ao comparar categorias):
+  * UTILIZE TABELAS MARKDOWN limpas com cabeçalhos claros e pipes (| Coluna | Coluna |). O app Android renderiza essas tabelas em componentes visuais nativos com rolagem horizontal e alinhamento monetário.
+  * Estrutura padrão sugerida para resumo por categoria:
+    | # | Categoria | Itens | Bruto (R$) | Sua Parte (R$) | % |
+    |---|---|---|---|---|---|
+    | 1 | Assinaturas | 3 | R$ 180,89 | R$ 180,89 | 45% |
+    | 2 | Alimentação | 5 | R$ 352,10 | R$ 176,05 | 44% |
+    |---|---|---|---|---|---|
+    | **Total** | **Todas as Categorias** | **8** | **R$ 532,99** | **R$ 356,94** | **100%** |
+  * REGRA FINANCEIRA DE OURO PARA ORDENAÇÃO DE DESPESAS:
+    Ao classificar despesas da "maior para a menor" (ou ranking decrescente):
+    - ORDENE OBRIGATORIAMENTE pelo valor da coluna "Sua Parte (Impacto no Saldo Livre)"! O que determina o impacto real no bolso do usuário é a sua cota (Sua Parte), e NÃO o Valor Bruto total que inclui compras de terceiros.
+    - Se o usuário pedir expressamente para ordenar pelo "Valor Bruto", siga a solicitação e deixe isso evidente no título ou cabeçalho.
+    - Mantenha SEMPRE uma linha final de **Totalizador** na base da tabela (| **Total** | ... |) com os somatórios consistentes.
+  * DETALHAMENTO ENXUTO ABAIXO DA TABELA:
+    Logo abaixo da tabela resumo, apresente apenas os destaques/detalhamentos principais de forma enxuta (2 a 4 tópicos concisos com os itens mais relevantes), sem poluir a leitura ou duplicar todos os lançamentos.
+
+- QUANDO NÃO HOUVER PEDIDO DE TABELA:
+  Estruture sua resposta de forma limpa com marcadores:
   1. 📌 **Visão Geral & Contexto**: Título destacado com emoji, filtro aplicado (cartão referenciado, terceiro, categoria ou período).
   2. 📊 **Painel de Resumo (Métricas em Destaque)**:
-     - **Total Geral**: R$ X,XX
-     - **Seu Impacto Real (Saldo Livre)**: R$ Y,YY
+     - **Total Bruto de Despesas**: R$ X,XX
+     - **Seu Impacto Real nas Despesas (Sua Parte)**: R$ Y,YY
      - **Cota de Terceiros / A Receber**: R$ Z,ZZ (se houver divisão ou terceiros)
+     - **Entradas / Receitas do Período**: R$ W,WW (se houver receitas, exibidas separadamente para nunca distorcerem a soma das despesas)
      - **Quantidade de Lançamentos**: N item(ns)
   3. 📋 **Detalhamento Descritivo com Marcadores Mobile**:
      - Formate como lista limpa com marcadores (bullet points •) e linhas bem diagramadas:
@@ -1669,9 +1690,10 @@ F) APRESENTAÇÃO DESCRITIVA SUPERIOR NO APP MOBILE:
      - Breve comentário inteligente sobre a concentração desses gastos, alertas de fechamento/vencimento do cartão ou dicas práticas para o Saldo Livre.
 
 8. DIRETRIZES DE ASSERTIVIDADE, VERACIDADE E ZERO ALUCINAÇÃO:
-- REGRA CRÍTICA DE INTEGRIDADE FINANCEIRA: é estritamente proibido inventar, estimar ou deduzir valores de transações para fazer a soma bater com um total. Toda listagem deve refletir fielmente o documento original.
-- NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais acima.
-- SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores inventados.
+- REGRA CRÍTICA DE INTEGRIDADE FINANCEIRA E PRECISÃO MATEMÁTICA:
+  * NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais acima.
+  * NUNCA misture a soma de despesas com receitas ou estornos em um único total genérico sem discriminar explicitamente. A soma das categorias de despesas deve fechar com exatidão com o Total Bruto de Despesas.
+  * SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores inventados.
 - Na descrição das transações ("description"), extraia ESTRITAMENTE o nome do produto, serviço ou estabelecimento (ex: "Two Brothers", "Subway", "Uber"). NUNCA inclua frases faladas como "eu comprei", "almoço no", "gastei", valores ou datas.
 - CORREÇÃO FONÉTICA INTELIGENTE: corrija termos falados ou erros de transcrição para os nomes corretos de marcas (ex: "two brothers", "ifood", "starbucks", "mercado livre").
 - Calcule datas relativas com precisão: se hoje é ${FinanceEngine.todayKey()}, "ontem" refere-se ao dia anterior.
@@ -1679,8 +1701,6 @@ F) APRESENTAÇÃO DESCRITIVA SUPERIOR NO APP MOBILE:
 - NÃO faça cálculos soltos para dar saldos: use os dados do CONTEXTO ATUAL acima.
 - Se não encontrar um lançamento, diga com sinceridade: "Não encontrei nenhum lançamento de [X] registrado no mês de ${FinanceEngine.monthLabel(selectedMonth)}."
 - Seja extremamente DIRETO, OBJETIVO e SUCINTO. Sem sermões não solicitados.
-- PROIBIÇÃO ABSOLUTA DE TABELAS MARKDOWN (FORMATAÇÃO MOBILE):
-  NUNCA utilize tabelas Markdown com barras verticais (| Coluna 1 | Coluna 2 |). Dispositivos móveis quebram tabelas tornando-as totalmente desalinhadas e ilegíveis na tela. Apresente SEMPRE listas limpas com marcadores (bullet points •) e detalhes organizados.
 
 9. MENSAGENS DE ÁUDIO E COMANDOS POR VOZ (MULTIMODAL):
 - Quando houver áudio anexado:
@@ -1853,24 +1873,33 @@ O motor nativo (FinanceRepository / FinanceEngine) executou a busca no banco de 
 $fallbackText
 
 INSTRUÇÃO PARA SUA RESPOSTA FINAL AO USUÁRIO:
-- Responda de forma direta, acolhedora e com extrema inteligência e clareza descritiva em linguagem natural.
+- Responda de forma direta, acolhedora e com extrema inteligência e clareza analítica em linguagem natural.
 - Baseie-se EXCLUSIVAMENTE nos dados reais retornados acima pelo motor nativo.
-- ESTRUTURAÇÃO DESCRITIVA DA RESPOSTA:
-  1. Identifique no topo o contexto exato examinado (ex: 👤 Despesas 100% Pessoais, 👥 Despesas de [Pessoa], 💳 Cartão [Nome], 🏷️ Categoria [Nome], ou 📅 Período).
-  2. Apresente um resumo claro com as métricas principais:
-     • **Total Geral**: R$ X
-     • **Seu Impacto (Saldo Livre)**: R$ Y
-     • **Cota de Terceiros / A Receber**: R$ Z (quando houver valores divididos ou de terceiros)
+- PRECISÃO MATEMÁTICA E SEPARAÇÃO DE TOTAIS:
+  1. O **Total Bruto de Despesas** reflete estritamente as saídas. NUNCA misture receitas ou estornos nesse total sem discriminar explicitamente.
+  2. A soma das categorias de despesas deve bater exatamente com o Total Bruto de Despesas informado pelo motor nativo.
+  3. Apresente com clareza:
+     • **Total Bruto de Despesas**: R$ X
+     • **Seu Impacto Real nas Despesas (Sua Parte)**: R$ Y
+     • **Cota de Terceiros (A Receber)**: R$ Z (quando houver compras divididas ou de terceiros)
+     • Se houver estornos ou receitas, exiba-os separadamente sem contaminar o total das despesas.
      • **Quantidade de Lançamentos**: N item(ns)
-  3. FORMATAÇÃO VISUAL MOBILE (RIGOROSO):
-     É ESTRITAMENTE PROIBIDO usar tabelas Markdown com barras verticais (| Coluna | Coluna |). O aplicativo mobile NÃO renderiza tabelas e elas ficam totalmente quebradas e ilegíveis na tela do smartphone.
-     Formate SEMPRE como uma lista limpa com marcadores (bullet points •) e linhas bem organizadas, por exemplo:
-     • **Oficina Della Pizza**: R$ 135,45 no total (Sua parte: **R$ 67,73** • 50% com Amigo)
-       📅 19/10/2026 • Alimentação › Restaurante • Pendente (Cartão Nubank)
-  4. ATENÇÃO RIGOROSA A DESPESAS 100% PESSOAIS vs TERCEIROS:
-     - Se o usuário pediu despesas 100% dele, enfatize que todos os itens listados são de responsabilidade exclusiva dele (sem divisões nem terceiros).
-     - Se o usuário pediu despesas de um terceiro ou cartão cadastrado, referencie o terceiro/cartão explicitamente, detalhando quanto é a parte dele e o que deve ser ressarcido.
-  5. Se o motor nativo retornou distribuição por subcategoria, mencione o subtotal de cada subgrupo.
+- TABELAS MARKDOWN E FORMATAÇÃO VISUAL:
+  Sempre que o usuário pedir uma "tabela", "quadro" ou "comparativo" (ou quando uma visão tabular for mais clara):
+  * UTILIZE TABELAS MARKDOWN limpas com pipes (| Coluna | Coluna |). O app Android possui renderizador nativo em Jetpack Compose para tabelas com rolagem horizontal e alinhamento à direita para moedas.
+  * Exemplo de colunas para categorias:
+    | # | Categoria | Itens | Bruto (R$) | Sua Parte (R$) | % |
+    |---|---|---|---|---|---|
+  * REGRA FINANCEIRA DE OURO: Ao ordenar categorias da maior para a menor, ORDENE OBRIGATORIAMENTE pela coluna "Sua Parte (Impacto no Saldo Livre)" (a menos que o usuário peça explicitamente por Valor Bruto). Mantenha SEMPRE uma linha final de Totalizador (| **Total** | ... |) na base da tabela.
+  * Logo abaixo da tabela resumo, apresente apenas os destaques/detalhamentos principais de forma enxuta (2 a 4 tópicos concisos), sem poluir a leitura.
+- QUANDO NÃO HOUVER PEDIDO DE TABELA:
+  Formate como uma lista limpa com marcadores (bullet points •) e linhas bem organizadas, por exemplo:
+  • **Oficina Della Pizza**: R$ 135,45 no total (Sua parte: **R$ 67,73** • 50% com Amigo)
+    📅 19/10/2026 • Alimentação › Restaurante • Pendente (Cartão Nubank)
+- ATENÇÃO RIGOROSA A DESPESAS 100% PESSOAIS vs TERCEIROS:
+  - Se o usuário pediu despesas 100% dele, enfatize que todos os itens listados são de responsabilidade exclusiva dele (sem divisões nem terceiros).
+  - Se o usuário pediu despesas de um terceiro ou cartão cadastrado, referencie o terceiro/cartão explicitamente, detalhando quanto é a parte dele e o que deve ser ressarcido.
+- Se o motor nativo retornou distribuição por subcategoria, mencione o subtotal de cada subgrupo.
 - Se o valor real faturado/pago for diferente da previsão/configuração da Conta Recorrente, explique a diferença ao usuário com clareza.
 - Se o banco de dados informou que não há lançamentos reais neste mês, informe com total clareza que existe apenas a previsão/configuração cadastrada, mas nenhum lançamento real foi registrado ou pago ainda.
 - NÃO gere novos blocos JSON nesta resposta final.

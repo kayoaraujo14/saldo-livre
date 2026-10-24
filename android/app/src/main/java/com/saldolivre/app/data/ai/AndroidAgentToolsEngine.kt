@@ -1370,20 +1370,56 @@ class AndroidAgentToolsEngine(
             )
         }
 
-        val totalAmount = filtered.sumOf { it.totalAmount }
-        val myImpactTotal = filtered.sumOf { it.userImpact[user.uid] ?: it.totalAmount }
-        val thirdPartyTotal = kotlin.math.max(0.0, totalAmount - myImpactTotal)
+        // Separação matemática rigorosa entre Despesas, Estornos e Receitas
+        val isRefund: (Transaction) -> Boolean = { t ->
+            t.category.equals("Estorno", ignoreCase = true) ||
+            t.subcategory?.contains("Estorno", ignoreCase = true) == true ||
+            t.description.contains("Estorno", ignoreCase = true)
+        }
 
-        // Agrupamento por subcategoria se houver múltiplos itens
-        val subcategoryGroups = filtered.groupBy { it.subcategory ?: "Geral" }
+        val isExpense: (Transaction) -> Boolean = { t ->
+            t.type == TransactionType.EXPENSE && !isRefund(t)
+        }
+
+        val isIncome: (Transaction) -> Boolean = { t ->
+            t.type == TransactionType.INCOME && !isRefund(t)
+        }
+
+        val expenseTxs = filtered.filter(isExpense)
+        val refundTxs = filtered.filter(isRefund)
+        val incomeTxs = filtered.filter(isIncome)
+
+        // 1. Total Bruto de Despesas (apenas saídas)
+        val totalExpensesGross = expenseTxs.sumOf { it.effectiveAmount }
+        val totalRefunds = refundTxs.sumOf { kotlin.math.abs(it.effectiveAmount) }
+        val netExpenses = kotlin.math.max(0.0, totalExpensesGross - totalRefunds)
+
+        // 2. Seu Impacto Real nas Despesas (Sua Parte)
+        val myExpensesGrossImpact = expenseTxs.sumOf { it.userImpact[user.uid] ?: it.effectiveAmount }
+        val myRefundsImpact = refundTxs.sumOf { it.userImpact[user.uid] ?: it.effectiveAmount }
+        val myImpactTotal = kotlin.math.max(0.0, myExpensesGrossImpact - myRefundsImpact)
+
+        // 3. Cota de Terceiros (A Receber)
+        val thirdPartyTotal = kotlin.math.max(0.0, totalExpensesGross - myExpensesGrossImpact)
+
+        // 4. Entradas / Receitas do Período (separadas para nunca distorcerem a soma das despesas)
+        val totalIncome = incomeTxs.sumOf { it.effectiveAmount }
+
+        // Agrupamento por subcategoria calculado exclusivamente sobre as despesas para totalizar fielmente
+        val subcategoryGroups = expenseTxs.groupBy { it.subcategory ?: it.category.ifBlank { "Geral" } }
         val subcategoryBreakdownText = if (subcategoryGroups.size > 1) {
             val breakdownLines = subcategoryGroups.entries
-                .sortedByDescending { it.value.sumOf { tx -> tx.totalAmount } }
-                .take(5)
+                .sortedByDescending { it.value.sumOf { tx -> tx.effectiveAmount } }
+                .take(6)
                 .joinToString("\n") { (sub, txs) ->
-                    "  * **$sub**: ${FinanceEngine.formatCurrency(txs.sumOf { it.totalAmount })} (${txs.size} item(ns))"
+                    val subTotal = txs.sumOf { it.effectiveAmount }
+                    val subMyPart = txs.sumOf { it.userImpact[user.uid] ?: it.effectiveAmount }
+                    val subPartNote = if (kotlin.math.abs(subTotal - subMyPart) > 0.01) {
+                        " (Sua parte: ${FinanceEngine.formatCurrency(subMyPart)})"
+                    } else ""
+                    "  * **$sub**: ${FinanceEngine.formatCurrency(subTotal)}$subPartNote (${txs.size} item(ns))"
                 }
-            "\n\n📊 **Distribuição por Subcategoria:**\n$breakdownLines"
+            "\n\n📊 **Distribuição das Despesas por Subcategoria:**\n$breakdownLines"
         } else ""
 
         val lines = filtered.take(15).joinToString("\n") { t ->
@@ -1409,22 +1445,19 @@ class AndroidAgentToolsEngine(
                 " (Sua parte: ${FinanceEngine.formatCurrency(myImpact)} • $who)"
             } else ""
 
-            "• **${t.description}**: ${FinanceEngine.formatCurrency(t.effectiveAmount)}$splitNote • ${t.category}$sub • ${t.status.label} (${FinanceEngine.formatShortDate(t.dueDate)}) • $methodOrCard$monthNote"
+            val typeBadge = if (t.type == TransactionType.INCOME) "🟢 Entrada" else "🔴 Despesa"
+            "• **${t.description}**: ${FinanceEngine.formatCurrency(t.effectiveAmount)}$splitNote • $typeBadge • ${t.category}$sub • ${t.status.label} (${FinanceEngine.formatShortDate(t.dueDate)}) • $methodOrCard$monthNote"
         }
 
         val extraNote = if (filtered.size > 15) "\n*(e mais ${filtered.size - 15} lançamentos)*" else ""
 
-        val recurringDivergenceNote = if (matchingRecurring != null && !foundInOtherMonth) {
-            val diff = totalAmount - matchingRecurring.defaultAmount
+        val recurringDivergenceNote = if (matchingRecurring != null && !foundInOtherMonth && expenseTxs.isNotEmpty()) {
+            val diff = totalExpensesGross - matchingRecurring.defaultAmount
             if (kotlin.math.abs(diff) > 0.01) {
-                "\n\nℹ️ **Divergência com Molde Recorrente:** O molde de previsão cadastrado previa **${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)}**, mas o **valor real registrado no mês é ${FinanceEngine.formatCurrency(totalAmount)}**."
+                "\n\nℹ️ **Divergência com Molde Recorrente:** O molde de previsão cadastrado previa **${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)}**, mas o **valor real registrado no mês é ${FinanceEngine.formatCurrency(totalExpensesGross)}**."
             } else {
                 "\n\nℹ️ **Conta Recorrente:** O valor real lançado confere exatamente com o molde previsto (${FinanceEngine.formatCurrency(matchingRecurring.defaultAmount)})."
             }
-        } else ""
-
-        val thirdPartySummaryNote = if (thirdPartyTotal > 0.01) {
-            "\n• **Cota de Terceiros (A Receber / Reembolso)**: ${FinanceEngine.formatCurrency(thirdPartyTotal)}"
         } else ""
 
         val displayMonth = if (foundInOtherMonth) filtered.first().competenceMonth else (activeMonth ?: "Ano")
@@ -1434,7 +1467,7 @@ class AndroidAgentToolsEngine(
             foundInOtherMonth ->
                 "🔍 **Lançamentos reais encontrados em outros meses (nenhum em $monthLabelText):**"
             onlyMine ->
-                "👤 **Despesas 100% Pessoais (Suas Despesas Exclusivas)** em $monthLabelText (${filtered.size} item(ns)):"
+                "👤 **Despesas 100% Pessoais (Suas Despesas Exclusivas)** em $monthLabelText (${expenseTxs.size} item(ns)):"
             !person.isNullOrBlank() ->
                 "👥 **Despesas Vinculadas a $person** em $monthLabelText (${filtered.size} item(ns)):"
             onlyThirdParties ->
@@ -1452,33 +1485,75 @@ class AndroidAgentToolsEngine(
         }
 
         var cardTitle = "Busca: ${filtered.size} lançamento(s)"
-        if (onlyMine) cardTitle = "100% Pessoais: ${filtered.size} item(ns)"
+        if (onlyMine) cardTitle = "100% Pessoais: ${expenseTxs.size} item(ns)"
         else if (!person.isNullOrBlank()) cardTitle = "Despesas de $person (${filtered.size})"
         else if (onlyThirdParties) cardTitle = "Terceiros: ${filtered.size} item(ns)"
         else if (matchedCard != null) cardTitle = "Cartão ${matchedCard.cardName} (${filtered.size})"
         else if (!searchTerm.isNullOrBlank()) cardTitle = "$searchTerm (${filtered.size})"
+        else if (expenseTxs.isNotEmpty() && incomeTxs.isEmpty()) cardTitle = "Despesas: ${expenseTxs.size} item(ns)"
 
-        val linesList = listOfNotNull(
-            ActionCardLine("Total Encontrado", "${filtered.size} lançamento(s)"),
-            searchTerm?.takeIf { it.isNotBlank() }?.let { ActionCardLine("Termo de Busca", it) },
-            ActionCardLine("Soma Total", FinanceEngine.formatCurrency(totalAmount)),
-            ActionCardLine("Seu Impacto (Saldo Livre)", FinanceEngine.formatCurrency(myImpactTotal)),
-            if (thirdPartyTotal > 0.01) ActionCardLine("Cota de Terceiros", FinanceEngine.formatCurrency(thirdPartyTotal)) else null,
-            ActionCardLine("Mês / Período", monthLabelText)
-        )
+        val linesList = mutableListOf<ActionCardLine>()
+        linesList.add(ActionCardLine("Total Encontrado", "${filtered.size} lançamento(s)"))
+        searchTerm?.takeIf { it.isNotBlank() }?.let { linesList.add(ActionCardLine("Termo de Busca", it)) }
+
+        if (expenseTxs.isNotEmpty()) {
+            linesList.add(ActionCardLine("Total Bruto de Despesas", FinanceEngine.formatCurrency(totalExpensesGross)))
+            linesList.add(ActionCardLine("Seu Impacto (Sua Parte)", FinanceEngine.formatCurrency(myImpactTotal)))
+            if (thirdPartyTotal > 0.01) {
+                linesList.add(ActionCardLine("Cota de Terceiros (A Receber)", FinanceEngine.formatCurrency(thirdPartyTotal)))
+            }
+            if (totalRefunds > 0.01) {
+                linesList.add(ActionCardLine("Estornos Abatidos", "-${FinanceEngine.formatCurrency(totalRefunds)}"))
+                linesList.add(ActionCardLine("Despesas Líquidas", FinanceEngine.formatCurrency(netExpenses)))
+            }
+        }
+        if (incomeTxs.isNotEmpty()) {
+            linesList.add(ActionCardLine("Entradas / Receitas", FinanceEngine.formatCurrency(totalIncome)))
+        }
+        linesList.add(ActionCardLine("Mês / Período", monthLabelText))
+
+        val cardDesc = when {
+            expenseTxs.isNotEmpty() && incomeTxs.isNotEmpty() ->
+                "Despesas: ${FinanceEngine.formatCurrency(totalExpensesGross)} • Receitas: ${FinanceEngine.formatCurrency(totalIncome)}"
+            expenseTxs.isNotEmpty() ->
+                "Total Bruto: ${FinanceEngine.formatCurrency(totalExpensesGross)}"
+            else ->
+                "Total Receitas: ${FinanceEngine.formatCurrency(totalIncome)}"
+        }
+
+        val cardDetail = when {
+            expenseTxs.isNotEmpty() ->
+                "Sua Parte: ${FinanceEngine.formatCurrency(myImpactTotal)} • Mês: $monthLabelText"
+            else ->
+                "Mês: $monthLabelText"
+        }
 
         val finalCard = ActionCardData(
             title = cardTitle,
-            description = "Total: ${FinanceEngine.formatCurrency(totalAmount)}",
-            detail = "Impacto: ${FinanceEngine.formatCurrency(myImpactTotal)} • Mês: $monthLabelText",
+            description = cardDesc,
+            detail = cardDetail,
             lines = linesList
         )
+
+        val summaryMetricsBuilder = StringBuilder()
+        if (expenseTxs.isNotEmpty()) {
+            summaryMetricsBuilder.append("• **Total Bruto de Despesas**: ${FinanceEngine.formatCurrency(totalExpensesGross)}\n")
+            summaryMetricsBuilder.append("• **Seu Impacto Real nas Despesas (Sua Parte)**: ${FinanceEngine.formatCurrency(myImpactTotal)}\n")
+            if (thirdPartyTotal > 0.01) {
+                summaryMetricsBuilder.append("• **Cota de Terceiros (A Receber)**: ${FinanceEngine.formatCurrency(thirdPartyTotal)}\n")
+            }
+            if (totalRefunds > 0.01) {
+                summaryMetricsBuilder.append("• **Estornos / Devoluções**: -${FinanceEngine.formatCurrency(totalRefunds)} (Despesas Líquidas: ${FinanceEngine.formatCurrency(netExpenses)})\n")
+            }
+        }
+        if (incomeTxs.isNotEmpty()) {
+            summaryMetricsBuilder.append("• **Entradas / Receitas do Período**: ${FinanceEngine.formatCurrency(totalIncome)} (${incomeTxs.size} item(ns) - contabilizadas separadamente de despesas)\n")
+        }
 
         return ToolExecutionResult(
             text = "$headerText\n\n" +
                     "$lines$extraNote\n\n" +
-                    "• **Soma Total Real**: ${FinanceEngine.formatCurrency(totalAmount)}\n" +
-                    "• **Seu Impacto no Saldo Livre**: ${FinanceEngine.formatCurrency(myImpactTotal)}$thirdPartySummaryNote" +
+                    summaryMetricsBuilder.toString().trimEnd() +
                     subcategoryBreakdownText +
                     recurringDivergenceNote,
             actionCard = finalCard,

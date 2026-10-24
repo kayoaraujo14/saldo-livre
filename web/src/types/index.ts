@@ -7,7 +7,7 @@ export type PaymentMethod = 'pix' | 'credit_card' | 'debit' | 'bill'
 export type TransactionStatus = 'estimated' | 'pending' | 'paid'
 export type EstimationRule = 'fixed' | 'last_month' | 'avg_3_months'
 
-export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external' | 'custom'
+export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external' | 'custom' | 'THIRD_PARTY' | 'SHARED_50_50'
 
 export const CATEGORIES = [
   'Alimentação',
@@ -343,6 +343,8 @@ export interface Transaction {
   installmentsTotal?: number | null
   splitType?: SplitType | null
   externalName?: string | null
+  thirdPartyName?: string | null
+  targetFriendName?: string | null
 }
 
 export interface FriendSplitInput {
