@@ -705,10 +705,6 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     })
   }
 
-  const handleClearCurrentChat = () => {
-    updateSessionMessages([INITIAL_MESSAGE])
-  }
-
   const [activeModel, setActiveModel] = useState<string>(getSelectedGeminiModel())
 
   // Sugestões inteligentes avançadas focadas em análise financeira real e tomada de decisão
@@ -1176,130 +1172,100 @@ Atenção crítica:
 
       {/* Chat Top Header */}
       <div className="p-3 sm:p-3.5 border-b border-white/[0.06] flex items-center justify-between bg-slate-900/60 min-w-0">
-        <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
-          <div className="size-7 rounded-lg bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shrink-0">
-            <div className="size-full bg-slate-950 rounded-[6px] flex items-center justify-center">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+          <div className="size-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 flex items-center justify-center shrink-0 shadow-[0_0_15px_-3px_rgba(16,185,129,0.4)]">
+            <div className="size-full bg-slate-950 rounded-[10px] flex items-center justify-center">
               <Bot className="size-4 text-emerald-400" />
             </div>
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <h3 className="text-xs font-bold text-white tracking-tight m-0 truncate">
-                {currentSession.title !== 'Nova Conversa' ? currentSession.title : 'Copiloto Saldo Livre'}
-              </h3>
-              {hasGeminiKey ? (
-                <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-950/60 text-emerald-300 border-emerald-800 gap-1 font-mono shrink-0 hidden sm:inline-flex">
-                  <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  {activeModel}
-                </Badge>
-              ) : (
-                <Badge
-                  variant="outline"
-                  onClick={onOpenApiKey}
-                  className="text-[9px] py-0 px-1.5 bg-slate-800/60 text-slate-300 border-slate-700 hover:border-emerald-500/50 gap-1 font-mono shrink-0 hidden sm:inline-flex cursor-pointer"
-                  title="Configurar Chave do Google Gemini"
-                >
-                  <span className="size-1.5 rounded-full bg-amber-400" />
-                  Configurar Gemini
-                </Badge>
-              )}
-            </div>
+            <h3 className="text-xs font-bold text-white tracking-tight m-0 truncate">
+              Copiloto Saldo Livre
+            </h3>
+            <p className="text-[10px] text-slate-400 m-0 truncate">
+              IA Financeira Pessoal & Compartilhada
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0 ml-auto">
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
           {/* New Chat Button */}
-          <Button
-            variant="ghost"
-            size="icon-sm"
+          <button
+            type="button"
             onClick={handleNewChat}
-            className="size-7 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/60 cursor-pointer"
-            title="Iniciar nova conversa (+)"
+            className="size-8 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+            title="Nova Conversa (+)"
           >
-            <Plus className="size-3.5" />
-          </Button>
+            <Plus className="size-4" />
+          </button>
 
           {/* History Drawer Toggle */}
-          <Button
-            variant="ghost"
-            size="icon-sm"
+          <button
+            type="button"
             onClick={() => {
               setHistoryOpen((prev) => !prev)
               setRulesOpen(false)
             }}
-            className={`size-7 transition-colors cursor-pointer relative ${
-              historyOpen
-                ? 'bg-emerald-500/20 text-emerald-400'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            className={`size-8 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer relative ${
+              historyOpen ? 'bg-white/15 text-white' : ''
             }`}
             title="Histórico de conversas salvas"
           >
-            <History className="size-3.5" />
+            <History className="size-4" />
             {sessions.length > 1 && (
-              <span className="absolute 1 top-0.5 right-0.5 size-1.5 rounded-full bg-emerald-400" />
+              <span className="absolute top-1 right-1 size-1.5 rounded-full bg-emerald-400" />
             )}
-          </Button>
+          </button>
 
           {/* Memory & Rules Drawer Toggle */}
-          <Button
-            variant="ghost"
-            size="icon-sm"
+          <button
+            type="button"
             onClick={() => {
               setRulesOpen((prev) => !prev)
               setHistoryOpen(false)
             }}
-            className={`size-7 transition-colors cursor-pointer relative ${
-              rulesOpen
-                ? 'bg-purple-500/20 text-purple-400'
-                : 'text-slate-400 hover:text-purple-300 hover:bg-slate-800/60'
+            className={`size-8 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer relative ${
+              rulesOpen ? 'bg-white/15 text-white' : ''
             }`}
             title={`Regras & Memória do Agente (${rules.length} ativas)`}
           >
-            <Brain className="size-3.5" />
+            <Brain className="size-4" />
             {rules.length > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[13px] h-3 px-0.5 rounded-full bg-purple-500 text-[8px] font-bold text-white flex items-center justify-center">
+              <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-0.5 rounded-full bg-purple-500 text-[8px] font-bold text-white flex items-center justify-center">
                 {rules.length}
               </span>
             )}
-          </Button>
+          </button>
 
           {/* API Key */}
-          <Button
-            variant="ghost"
-            size="icon-sm"
+          <button
+            type="button"
             onClick={onOpenApiKey}
-            className="size-7 text-slate-400 hover:text-emerald-400 cursor-pointer hidden sm:flex"
+            className="size-8 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white hidden sm:flex items-center justify-center transition-colors cursor-pointer"
             title="Configurar Chave Gemini"
           >
-            <KeyRound className="size-3.5" />
-          </Button>
-
-          {/* Clear Current Chat Messages */}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={handleClearCurrentChat}
-            className="size-7 text-slate-400 hover:text-rose-400 cursor-pointer"
-            title="Limpar mensagens desta conversa"
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
+            <KeyRound className="size-4" />
+          </button>
 
           {/* Expand / Minimize */}
           {onToggleExpand && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
+            <button
+              type="button"
               onClick={onToggleExpand}
-              className={`size-7 text-slate-400 hover:text-white cursor-pointer hidden lg:flex rounded-lg border shrink-0 items-center justify-center transition-all ${
-                isExpanded
-                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25 shadow-xs'
-                  : 'border-transparent hover:border-slate-700 hover:bg-slate-800/60'
+              className={`h-8 px-2.5 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white hidden lg:flex items-center gap-1.5 transition-colors cursor-pointer ${
+                isExpanded ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : ''
               }`}
-              title={isExpanded ? 'Restaurar divisão da tela' : 'Maximizar chat (tela cheia)'}
+              title={isExpanded ? 'Restaurar visualização (ESC)' : 'Modo Tela Cheia (100%)'}
             >
-              {isExpanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-            </Button>
+              {isExpanded ? (
+                <>
+                  <Minimize2 className="size-3.5 text-emerald-400" />
+                  <span className="text-[11px] font-medium text-emerald-300 hidden xl:inline">Restaurar (ESC)</span>
+                </>
+              ) : (
+                <Maximize2 className="size-3.5" />
+              )}
+            </button>
           )}
         </div>
       </div>
@@ -1782,24 +1748,24 @@ Atenção crítica:
                             </p>
 
                             {/* Botoes de Acao */}
-                            <div className="flex items-center gap-2 pt-1">
+                            <div className="flex items-center gap-2 pt-1 font-sans">
                               <button
                                 type="button"
                                 disabled={loading}
                                 onClick={() => handleConfirmPendingAction(msg.id, pAct)}
-                                className="flex-1 h-9 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                                className="flex-1 h-9 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
                               >
                                 <Check className="size-4 stroke-[2.5]" />
-                                <span>Confirmar e Executar</span>
+                                <span>✓ Confirmar</span>
                               </button>
                               <button
                                 type="button"
                                 disabled={loading}
                                 onClick={() => handleCancelPendingAction(msg.id, pAct)}
-                                className="h-9 px-3.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 hover:border-rose-500/40 border border-white/[0.08] font-medium text-xs flex items-center justify-center gap-1 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+                                className="h-9 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 hover:text-white border border-white/10 font-medium text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.99] disabled:opacity-50"
                               >
                                 <X className="size-4" />
-                                <span>Cancelar</span>
+                                <span>✕ Cancelar</span>
                               </button>
                             </div>
                           </div>
@@ -1943,7 +1909,7 @@ Atenção crítica:
                   handleSend(chip)
                 }
               }}
-              className="text-[10px] py-1 px-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-emerald-500/40 text-slate-300 hover:text-white whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 text-left shrink-0"
+              className="text-[11px] py-1 px-3 rounded-full bg-slate-900/80 border border-emerald-500/20 hover:border-emerald-500/40 hover:bg-emerald-500/10 text-slate-300 hover:text-emerald-200 whitespace-nowrap transition-all cursor-pointer disabled:opacity-50 text-left shrink-0 shadow-2xs"
             >
               {chip}
             </button>
@@ -2049,7 +2015,7 @@ Atenção crítica:
           </div>
         )}
 
-        <div className="relative flex items-center gap-1.5 sm:gap-2 w-full max-w-full">
+        <div className="flex items-center gap-2 w-full max-w-full">
           {/* Hidden File Input */}
           <input
             ref={fileInputRef}
@@ -2064,34 +2030,17 @@ Atenção crítica:
           />
 
           {/* Attachment Paperclip Button */}
-          <Button
+          <button
             type="button"
-            variant="ghost"
-            size="icon-sm"
             disabled={isRecording || loading}
             onClick={() => fileInputRef.current?.click()}
-            className="size-8 text-slate-400 hover:text-emerald-400 hover:bg-slate-800/80 rounded-lg shrink-0 cursor-pointer disabled:opacity-30"
+            className="size-9 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-emerald-400 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-30"
             title="Anexar fatura ou extrato bancário em PDF"
           >
             <Paperclip className="size-4" />
-          </Button>
+          </button>
 
-          {/* Audio Message Record Button */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={isRecording ? () => stopRecording(true) : startRecording}
-            className={`size-8 rounded-lg shrink-0 cursor-pointer transition-all ${
-              isRecording
-                ? 'bg-rose-500/25 text-rose-400 border border-rose-500/60 hover:bg-rose-500/35 shadow-md shadow-rose-950/40 animate-pulse'
-                : 'text-slate-400 hover:text-rose-400 hover:bg-slate-800/80'
-            }`}
-            title={isRecording ? 'Concluir e enviar mensagem por áudio' : 'Enviar mensagem por voz / áudio'}
-          >
-            {isRecording ? <Mic className="size-4 text-rose-400 animate-bounce" /> : <Mic className="size-4" />}
-          </Button>
-
+          {/* Text Input Area */}
           <div className="relative flex-1 min-w-0">
             <Textarea
               value={input}
@@ -2101,40 +2050,50 @@ Atenção crítica:
                 isRecording
                   ? 'Ouvindo sua voz... (fale agora)'
                   : pendingAttachment
-                  ? 'Instruções opcionais (ou Enter para analisar o PDF)...'
-                  : 'Pergunte, fale por áudio, lance gastos ou anexe PDFs...'
+                    ? 'Instruções opcionais (ou Enter para analisar o PDF)...'
+                    : 'Pergunte, fale por áudio, lance gastos ou anexe PDFs...'
               }
-              className={`min-h-[42px] max-h-24 pr-11 text-xs bg-slate-950/80 border-slate-800 resize-none focus-visible:ring-emerald-500/40 ${
+              className={`min-h-[42px] max-h-24 px-3.5 py-2.5 text-xs bg-slate-950/80 border-slate-800 rounded-2xl resize-none focus-visible:ring-emerald-500/40 ${
                 isRecording ? 'border-rose-500/40 ring-1 ring-rose-500/30' : ''
               }`}
               rows={1}
             />
-
-            {/* Permanent Send Button: Anchor on right inside input, NEVER covered, ALWAYS visible */}
-            <Button
-              size="icon-sm"
-              disabled={(!input.trim() && !pendingAttachment && !isRecording) || loading}
-              onClick={() => {
-                if (isRecording) {
-                  stopRecording(true)
-                } else {
-                  handleSend()
-                }
-              }}
-              className={`absolute right-1.5 top-1/2 -translate-y-1/2 size-7 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm cursor-pointer transition-all ${
-                isRecording
-                  ? 'bg-emerald-500 hover:bg-emerald-400 animate-pulse'
-                  : 'disabled:opacity-30'
-              }`}
-              title="Enviar mensagem ou áudio"
-            >
-              <Send className="size-3.5" />
-            </Button>
           </div>
+
+          {/* Dynamic Action Button: Mic when empty, Send when has text or attachment */}
+          {isRecording ? (
+            <button
+              type="button"
+              onClick={() => stopRecording(true)}
+              className="size-9 rounded-full bg-rose-500 hover:bg-rose-600 text-white flex items-center justify-center shadow-lg shadow-rose-950/50 animate-pulse cursor-pointer shrink-0 transition-all active:scale-95"
+              title="Concluir e enviar mensagem por áudio"
+            >
+              <Mic className="size-4 animate-bounce" />
+            </button>
+          ) : input.trim() || pendingAttachment ? (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => handleSend()}
+              className="size-9 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-950/50 cursor-pointer shrink-0 transition-all active:scale-95 disabled:opacity-40 animate-in zoom-in-90 duration-150"
+              title="Enviar mensagem"
+            >
+              <Send className="size-4" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={startRecording}
+              className="size-9 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-950/50 cursor-pointer shrink-0 transition-all active:scale-95 disabled:opacity-40 animate-in zoom-in-90 duration-150"
+              title="Falar por voz / áudio"
+            >
+              <Mic className="size-4" />
+            </button>
+          )}
         </div>
-        <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5 px-1">
-          <span>🎙️ Clique no microfone para falar por áudio ou anexe PDFs</span>
-          <span className="hidden sm:inline"><kbd className="font-mono text-slate-400">Enter</kbd> envia</span>
+        <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1.5 px-1 font-sans">
+          <span>🎙️ Fale por voz ou anexe PDFs · <kbd className="font-mono text-slate-400">Enter</kbd> envia</span>
         </div>
       </div>
     </div>

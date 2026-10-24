@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { FinanceProvider, useFinance } from '@/store/FinanceContext'
 import { Header } from '@/components/Header'
 import { KpiGrid } from '@/components/KpiGrid'
@@ -56,6 +56,20 @@ function MainDashboard() {
 
   // Desktop view layout mode: 'chat_focus' (60/40) | 'equal' (50/50) | 'chat_full' (100%) | 'table_full' (100%)
   const [desktopView, setDesktopView] = useState<DesktopViewMode>('chat_focus')
+
+  // ESC shortcut to return from full-screen view mode
+  useEffect(() => {
+    if (desktopView === 'chat_focus') return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setDesktopView('chat_focus')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [desktopView])
 
   const handleSelectMobileTab = (tab: MobileTab) => {
     setMobileTab(tab)
@@ -144,42 +158,42 @@ function MainDashboard() {
           {/* Flexible Main Workspace Grid (Height optimized with compact KPIs) */}
           <div className="grid grid-cols-12 gap-3.5 h-[calc(100vh-160px)] max-h-[calc(100vh-160px)] min-h-[540px]">
             {/* Left Panel: Financial Table */}
-            {desktopView !== 'chat_full' && (
-              <section
-                className={`${
-                  desktopView === 'table_full'
-                    ? 'col-span-12'
-                    : 'col-span-5 xl:col-span-5'
-                } h-full min-h-0 flex flex-col transition-all duration-200`}
-              >
-                <TransactionTable
-                  onEditTx={handleEditTx}
-                  onToggleExpand={() =>
-                    setDesktopView((prev) => (prev === 'table_full' ? 'chat_focus' : 'table_full'))
-                  }
-                  isExpanded={desktopView === 'table_full'}
-                />
-              </section>
-            )}
+            <section
+              className={`${
+                desktopView === 'table_full'
+                  ? 'fixed inset-0 z-50 w-screen h-screen bg-slate-950/95 backdrop-blur-xl p-4 md:p-6 flex flex-col animate-in fade-in duration-200'
+                  : desktopView === 'chat_full'
+                    ? 'hidden'
+                    : 'col-span-5 xl:col-span-5 h-full min-h-0 flex flex-col transition-all duration-200'
+              }`}
+            >
+              <TransactionTable
+                onEditTx={handleEditTx}
+                onToggleExpand={() =>
+                  setDesktopView((prev) => (prev === 'table_full' ? 'chat_focus' : 'table_full'))
+                }
+                isExpanded={desktopView === 'table_full'}
+              />
+            </section>
 
             {/* Right Panel: Gemini AI Agent Chat */}
-            {desktopView !== 'table_full' && (
-              <section
-                className={`${
-                  desktopView === 'chat_full'
-                    ? 'col-span-12'
-                    : 'col-span-7 xl:col-span-7'
-                } h-full min-h-0 flex flex-col transition-all duration-200`}
-              >
-                <GeminiChat
-                  onOpenApiKey={() => setApiKeyModalOpen(true)}
-                  onToggleExpand={() =>
-                    setDesktopView((prev) => (prev === 'chat_full' ? 'chat_focus' : 'chat_full'))
-                  }
-                  isExpanded={desktopView === 'chat_full'}
-                />
-              </section>
-            )}
+            <section
+              className={`${
+                desktopView === 'chat_full'
+                  ? 'fixed inset-0 z-50 w-screen h-screen bg-slate-950/95 backdrop-blur-xl p-4 md:p-6 flex flex-col animate-in fade-in duration-200'
+                  : desktopView === 'table_full'
+                    ? 'hidden'
+                    : 'col-span-7 xl:col-span-7 h-full min-h-0 flex flex-col transition-all duration-200'
+              }`}
+            >
+              <GeminiChat
+                onOpenApiKey={() => setApiKeyModalOpen(true)}
+                onToggleExpand={() =>
+                  setDesktopView((prev) => (prev === 'chat_full' ? 'chat_focus' : 'chat_full'))
+                }
+                isExpanded={desktopView === 'chat_full'}
+              />
+            </section>
           </div>
         </div>
 

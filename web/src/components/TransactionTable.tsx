@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/overlays'
 import { useFinance } from '@/store/FinanceContext'
 import {
   CATEGORIES,
@@ -40,11 +41,40 @@ import {
   Maximize2,
   Minimize2,
   User,
+  X,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 import { MobileTransactionCard } from './mobile/MobileTransactionCard'
 
 type TabFilter = 'all' | 'income' | 'expense' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
+
+interface ColumnFilters {
+  status: ('paid' | 'pending' | 'estimated')[]
+  categories: string[]
+  subcategories: string[]
+  splits: string[]
+  dateStart: string
+  dateEnd: string
+  specificDays: string[]
+  amountMin: string
+  amountMax: string
+  amountType: 'all' | 'income' | 'expense' | 'refund'
+  sortBy: 'date_asc' | 'date_desc' | 'amount_asc' | 'amount_desc' | null
+}
+
+const INITIAL_COLUMN_FILTERS: ColumnFilters = {
+  status: [],
+  categories: [],
+  subcategories: [],
+  splits: [],
+  dateStart: '',
+  dateEnd: '',
+  specificDays: [],
+  amountMin: '',
+  amountMax: '',
+  amountType: 'all',
+  sortBy: null,
+}
 
 interface TransactionTableProps {
   onEditTx: (tx: Transaction) => void
@@ -70,6 +100,8 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
   const [activeTab, setActiveTab] = useState<TabFilter>('all')
   const [search, setSearch] = useState('')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+  const [columnFilters, setColumnFilters] = useState<ColumnFilters>(INITIAL_COLUMN_FILTERS)
+  const [categorySearchQuery, setCategorySearchQuery] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editDesc, setEditDesc] = useState('')
   const [editDate, setEditDate] = useState('')
@@ -78,10 +110,51 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
 
   const currentUid = me?.uid ?? ''
 
-  // Filter and sort list by transaction date
+  // Unique options and counts for Excel popovers
+  const availableCategories = useMemo(() => {
+    const map = new Map<string, number>()
+    monthTransactions.forEach((tx) => {
+      map.set(tx.category, (map.get(tx.category) || 0) + 1)
+    })
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
+  }, [monthTransactions])
+
+  const availableSplits = useMemo(() => {
+    const map = new Map<string, number>()
+    monthTransactions.forEach((tx) => {
+      const s = detectSplit(tx, currentUid)
+      map.set(s, (map.get(s) || 0) + 1)
+    })
+    return Array.from(map.entries())
+  }, [monthTransactions, currentUid])
+
+  const availableDays = useMemo(() => {
+    const map = new Map<string, number>()
+    monthTransactions.forEach((tx) => {
+      const d = (tx.dueDate || tx.competenceMonth || '').slice(8, 10)
+      if (d) {
+        map.set(d, (map.get(d) || 0) + 1)
+      }
+    })
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [monthTransactions])
+
+  const statusCounts = useMemo(() => {
+    let paid = 0
+    let pending = 0
+    let estimated = 0
+    monthTransactions.forEach((tx) => {
+      if (tx.status === 'paid') paid++
+      else if (tx.status === 'pending') pending++
+      else if (tx.status === 'estimated') estimated++
+    })
+    return { paid, pending, estimated }
+  }, [monthTransactions])
+
+  // Filter and sort list by transaction date and excel column filters
   const filteredTxs = useMemo(() => {
     const list = monthTransactions.filter((tx: Transaction) => {
-      // Tab filter
+      // 1. Tab filter
       if (activeTab === 'income') {
         if (tx.type !== 'income') return false
       } else if (activeTab === 'expense') {
@@ -106,7 +179,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         if (!isFriend && !isInst) return false
       }
 
-      // Search filter
+      // 2. Global search filter
       if (search.trim()) {
         const q = search.toLowerCase()
         const matchesDesc = tx.description.toLowerCase().includes(q)
@@ -116,24 +189,158 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         if (!matchesDesc && !matchesCat && !matchesSubcat && !matchesAlloc) return false
       }
 
+      // 3. Excel Column Filter: Status
+      if (columnFilters.status.length > 0) {
+        if (!columnFilters.status.includes(tx.status)) return false
+      }
+
+      // 4. Excel Column Filter: Date
+      const txDate = tx.dueDate || tx.competenceMonth || ''
+      if (columnFilters.dateStart && txDate < columnFilters.dateStart) return false
+      if (columnFilters.dateEnd && txDate > columnFilters.dateEnd) return false
+      if (columnFilters.specificDays.length > 0) {
+        const day = txDate.slice(8, 10)
+        if (!columnFilters.specificDays.includes(day)) return false
+      }
+
+      // 5. Excel Column Filter: Category & Subcategory
+      if (columnFilters.categories.length > 0) {
+        if (!columnFilters.categories.includes(tx.category)) return false
+      }
+      if (columnFilters.subcategories.length > 0) {
+        if (!tx.subcategory || !columnFilters.subcategories.includes(tx.subcategory)) return false
+      }
+
+      // 6. Excel Column Filter: Split / Payer
+      if (columnFilters.splits.length > 0) {
+        const sp = detectSplit(tx, currentUid)
+        if (!columnFilters.splits.includes(sp)) return false
+      }
+
+      // 7. Excel Column Filter: Amount Type & Range
+      const eff = effectiveAmount(tx)
+      const myImpact = impactFor(tx, currentUid, monthTransactions)
+      const isRef = tx.category === 'Estorno' || eff < 0 || tx.totalAmount < 0
+
+      if (columnFilters.amountType === 'income' && tx.type !== 'income') return false
+      if (columnFilters.amountType === 'expense' && (tx.type === 'income' || isRef)) return false
+      if (columnFilters.amountType === 'refund' && !isRef) return false
+
+      if (columnFilters.amountMin) {
+        const minVal = parseFloat(columnFilters.amountMin.replace(',', '.'))
+        if (!isNaN(minVal) && Math.abs(myImpact) < minVal) return false
+      }
+      if (columnFilters.amountMax) {
+        const maxVal = parseFloat(columnFilters.amountMax.replace(',', '.'))
+        if (!isNaN(maxVal) && Math.abs(myImpact) > maxVal) return false
+      }
+
       return true
     })
 
-    // Organize chronologically by transaction date
+    // Sort order
     return [...list].sort((a, b) => {
+      // Custom Excel sort by amount if selected
+      if (columnFilters.sortBy === 'amount_asc') {
+        const impA = impactFor(a, currentUid, monthTransactions)
+        const impB = impactFor(b, currentUid, monthTransactions)
+        return impA - impB
+      }
+      if (columnFilters.sortBy === 'amount_desc') {
+        const impA = impactFor(a, currentUid, monthTransactions)
+        const impB = impactFor(b, currentUid, monthTransactions)
+        return impB - impA
+      }
+
+      // Chronological date sort
       const dateA = a.dueDate || a.competenceMonth || ''
       const dateB = b.dueDate || b.competenceMonth || ''
       const cmp = dateA.localeCompare(dateB)
+      const effectiveSort = columnFilters.sortBy === 'date_desc' ? 'desc' : columnFilters.sortBy === 'date_asc' ? 'asc' : sortOrder
+
       if (cmp !== 0) {
-        return sortOrder === 'asc' ? cmp : -cmp
+        return effectiveSort === 'asc' ? cmp : -cmp
       }
-      // If dates are identical, show income first, then expense
       if (a.type !== b.type) {
         return a.type === 'income' ? -1 : 1
       }
       return (b.createdAt || 0) - (a.createdAt || 0)
     })
-  }, [monthTransactions, activeTab, search, cards, sortOrder])
+  }, [monthTransactions, activeTab, search, cards, sortOrder, columnFilters, currentUid])
+
+  // Real-time Analytical Summary of filtered items
+  const filteredSummary = useMemo(() => {
+    let income = 0
+    let expense = 0
+
+    filteredTxs.forEach((tx) => {
+      const myImpact = impactFor(tx, currentUid, monthTransactions)
+      const eff = effectiveAmount(tx)
+      const isRef = tx.category === 'Estorno' || eff < 0 || tx.totalAmount < 0
+
+      if (tx.type === 'income') {
+        income += myImpact
+      } else if (isRef) {
+        income += Math.abs(myImpact)
+      } else {
+        expense += myImpact
+      }
+    })
+
+    return {
+      income,
+      expense,
+      net: income - expense,
+    }
+  }, [filteredTxs, currentUid, monthTransactions])
+
+  // Count if any column filter is active
+  const isAnyFilterActive = useMemo(() => {
+    return (
+      columnFilters.status.length > 0 ||
+      columnFilters.categories.length > 0 ||
+      columnFilters.subcategories.length > 0 ||
+      columnFilters.splits.length > 0 ||
+      Boolean(columnFilters.dateStart || columnFilters.dateEnd || columnFilters.specificDays.length > 0) ||
+      Boolean(columnFilters.amountMin || columnFilters.amountMax || columnFilters.amountType !== 'all' || columnFilters.sortBy)
+    )
+  }, [columnFilters])
+
+  // Handlers for toggling specific filter items
+  const toggleStatusFilter = (st: 'paid' | 'pending' | 'estimated') => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      status: prev.status.includes(st) ? prev.status.filter((s) => s !== st) : [...prev.status, st],
+    }))
+  }
+
+  const toggleCategoryFilter = (cat: string) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      categories: prev.categories.includes(cat) ? prev.categories.filter((c) => c !== cat) : [...prev.categories, cat],
+    }))
+  }
+
+  const toggleSplitFilter = (sp: string) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      splits: prev.splits.includes(sp) ? prev.splits.filter((s) => s !== sp) : [...prev.splits, sp],
+    }))
+  }
+
+  const toggleDayFilter = (day: string) => {
+    setColumnFilters((prev) => ({
+      ...prev,
+      specificDays: prev.specificDays.includes(day)
+        ? prev.specificDays.filter((d) => d !== day)
+        : [...prev.specificDays, day],
+    }))
+  }
+
+  const clearAllFilters = () => {
+    setColumnFilters(INITIAL_COLUMN_FILTERS)
+    setSearch('')
+  }
 
 
 
@@ -369,6 +576,173 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         </div>
       </div>
 
+      {/* 2. Barra de Filtros Ativos (quando houver filtros aplicados) */}
+      {isAnyFilterActive && (
+        <div className="px-4 py-2 bg-emerald-950/20 border-b border-emerald-500/20 flex flex-wrap items-center gap-1.5 text-xs animate-in fade-in">
+          <div className="flex items-center gap-1.5 text-emerald-400 font-semibold text-[11px] shrink-0 mr-1">
+            <Filter className="size-3.5 fill-emerald-400/20" />
+            <span>Filtros ativos:</span>
+          </div>
+
+          {/* Status Pills */}
+          {columnFilters.status.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
+              <span className="text-slate-400">Status:</span>
+              <span className="text-emerald-300 font-medium">
+                {columnFilters.status
+                  .map((s) => (s === 'paid' ? 'Pago' : s === 'pending' ? 'Pendente' : 'Estimado'))
+                  .join(', ')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setColumnFilters((prev) => ({ ...prev, status: [] }))}
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Remover filtro de status"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
+          {/* Date Pills */}
+          {(columnFilters.dateStart || columnFilters.dateEnd || columnFilters.specificDays.length > 0) && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
+              <span className="text-slate-400">Data:</span>
+              <span className="text-emerald-300 font-medium">
+                {columnFilters.dateStart && columnFilters.dateEnd
+                  ? `${formatShortDate(columnFilters.dateStart)} a ${formatShortDate(columnFilters.dateEnd)}`
+                  : columnFilters.dateStart
+                    ? `A partir de ${formatShortDate(columnFilters.dateStart)}`
+                    : columnFilters.dateEnd
+                      ? `Até ${formatShortDate(columnFilters.dateEnd)}`
+                      : `Dias: ${columnFilters.specificDays.join(', ')}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => setColumnFilters((prev) => ({ ...prev, dateStart: '', dateEnd: '', specificDays: [] }))}
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Remover filtro de data"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
+          {/* Category Pills */}
+          {columnFilters.categories.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
+              <span className="text-slate-400">Cat:</span>
+              <span className="text-emerald-300 font-medium">{columnFilters.categories.join(', ')}</span>
+              <button
+                type="button"
+                onClick={() => setColumnFilters((prev) => ({ ...prev, categories: [] }))}
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Remover filtro de categoria"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
+          {/* Division Pills */}
+          {columnFilters.splits.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
+              <span className="text-slate-400">Divisão:</span>
+              <span className="text-emerald-300 font-medium">
+                {columnFilters.splits
+                  .map((sp) =>
+                    sp === 'mine'
+                      ? '100% Meu'
+                      : sp === 'split_50'
+                        ? '50/50'
+                        : sp === 'partner'
+                          ? partner?.name || 'Parceiro'
+                          : sp === 'external'
+                            ? 'Terceiro'
+                            : sp === 'friend'
+                              ? 'Amigo'
+                              : 'Personalizado'
+                  )
+                  .join(', ')}
+              </span>
+              <button
+                type="button"
+                onClick={() => setColumnFilters((prev) => ({ ...prev, splits: [] }))}
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Remover filtro de divisão"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
+          {/* Amount / Type Pills */}
+          {(columnFilters.amountMin || columnFilters.amountMax || columnFilters.amountType !== 'all') && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
+              <span className="text-slate-400">Valor:</span>
+              <span className="text-emerald-300 font-medium">
+                {columnFilters.amountType === 'income'
+                  ? 'Entradas '
+                  : columnFilters.amountType === 'expense'
+                    ? 'Despesas '
+                    : columnFilters.amountType === 'refund'
+                      ? 'Estornos '
+                      : ''}
+                {columnFilters.amountMin ? `≥ R$ ${columnFilters.amountMin} ` : ''}
+                {columnFilters.amountMax ? `≤ R$ ${columnFilters.amountMax}` : ''}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setColumnFilters((prev) => ({
+                    ...prev,
+                    amountMin: '',
+                    amountMax: '',
+                    amountType: 'all',
+                  }))
+                }
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Remover filtro de valor"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
+          {/* Sort Pill */}
+          {columnFilters.sortBy && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
+              <span className="text-slate-400">Ordem:</span>
+              <span className="text-emerald-300 font-medium">
+                {columnFilters.sortBy === 'amount_desc'
+                  ? 'Maior Valor'
+                  : columnFilters.sortBy === 'amount_asc'
+                    ? 'Menor Valor'
+                    : columnFilters.sortBy === 'date_desc'
+                      ? 'Mais Recentes'
+                      : 'Mais Antigos'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setColumnFilters((prev) => ({ ...prev, sortBy: null }))}
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Restaurar ordenação padrão"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={clearAllFilters}
+            className="text-[11px] text-emerald-400 hover:text-emerald-300 hover:underline cursor-pointer ml-auto font-semibold shrink-0"
+          >
+            Limpar todos os filtros
+          </button>
+        </div>
+      )}
+
       {/* Mobile Transaction Cards Feed (Visible on screens < md) */}
       <div className="md:hidden flex-1 overflow-y-auto p-3 space-y-2.5">
         {filteredTxs.length === 0 ? (
@@ -402,30 +776,527 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
       {/* Main Table (Visible on md and above) */}
       <div className="hidden md:block flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-left text-xs border-collapse">
-          <thead className="sticky top-0 bg-[#0f172a] text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-white/[0.06] z-10">
+          <thead className="sticky top-0 bg-[#0f172a] text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-white/[0.06] z-10 select-none">
             <tr>
-              <th className="py-2 px-2.5 w-24">Status</th>
-              <th
-                onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
-                className="py-2 px-2.5 w-24 cursor-pointer select-none hover:text-white transition-colors group"
-                title="Clique para alternar ordem cronológica (1→31 ou 31→1)"
-              >
-                <div className="flex items-center gap-1">
-                  <span>Data</span>
-                  {sortOrder === 'asc' ? (
-                    <ArrowUp className="size-3 text-emerald-400 shrink-0" />
-                  ) : (
-                    <ArrowDown className="size-3 text-emerald-400 shrink-0" />
-                  )}
-                  <span className="text-[9px] font-mono text-emerald-300 bg-emerald-500/15 px-1 py-0.5 rounded">
-                    {sortOrder === 'asc' ? '1→31' : '31→1'}
-                  </span>
+              {/* 1. Status Column */}
+              <th className="py-2 px-2.5 w-28">
+                <div className="flex items-center justify-between gap-1">
+                  <span>Status</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={`p-1 rounded cursor-pointer transition-colors ${
+                          columnFilters.status.length > 0
+                            ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        title="Filtrar por Status (estilo Excel)"
+                      >
+                        <Filter className={`size-3 ${columnFilters.status.length > 0 ? 'fill-emerald-400' : ''}`} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-56 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] mb-2 font-sans">
+                        <span className="font-bold text-[11px] text-white">Filtrar Status</span>
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setColumnFilters((p) => ({ ...p, status: ['paid', 'pending', 'estimated'] }))}
+                            className="text-emerald-400 hover:underline cursor-pointer"
+                          >
+                            Todos
+                          </button>
+                          <span>·</span>
+                          <button
+                            type="button"
+                            onClick={() => setColumnFilters((p) => ({ ...p, status: [] }))}
+                            className="text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        {(['paid', 'pending', 'estimated'] as const).map((st) => {
+                          const isChecked = columnFilters.status.includes(st)
+                          const label = st === 'paid' ? 'Pago' : st === 'pending' ? 'Pendente' : 'Estimado'
+                          const count = statusCounts[st]
+                          const dotColor = st === 'paid' ? 'bg-emerald-400' : st === 'pending' ? 'bg-amber-400' : 'bg-cyan-400'
+                          return (
+                            <label
+                              key={st}
+                              onClick={() => toggleStatusFilter(st)}
+                              className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/30 size-3.5 cursor-pointer"
+                                />
+                                <span className={`size-2 rounded-full ${dotColor}`} />
+                                <span>{label}</span>
+                              </div>
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400">
+                                {count}
+                              </Badge>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </th>
-              <th className="py-2 px-2.5 min-w-[150px]">Descrição</th>
-              <th className="py-2 px-2.5 w-28">Categoria</th>
-              <th className="py-2 px-2.5 w-32">Divisão / Pagador</th>
-              <th className="py-2 px-2.5 w-36 text-right">Valor & Meu Impacto</th>
+
+              {/* 2. Date Column */}
+              <th className="py-2 px-2.5 w-28">
+                <div className="flex items-center justify-between gap-1">
+                  <div
+                    onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                    className="flex items-center gap-1 cursor-pointer hover:text-white transition-colors"
+                    title="Alternar ordem cronológica"
+                  >
+                    <span>Data</span>
+                    {sortOrder === 'asc' ? (
+                      <ArrowUp className="size-3 text-emerald-400" />
+                    ) : (
+                      <ArrowDown className="size-3 text-emerald-400" />
+                    )}
+                  </div>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={`p-1 rounded cursor-pointer transition-colors ${
+                          columnFilters.dateStart || columnFilters.dateEnd || columnFilters.specificDays.length > 0
+                            ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        title="Filtrar por Data ou Intervalo"
+                      >
+                        <Filter className={`size-3 ${columnFilters.dateStart || columnFilters.dateEnd || columnFilters.specificDays.length > 0 ? 'fill-emerald-400' : ''}`} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-64 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] mb-2 font-sans">
+                        <span className="font-bold text-[11px] text-white">Filtrar por Data</span>
+                        <button
+                          type="button"
+                          onClick={() => setColumnFilters((p) => ({ ...p, dateStart: '', dateEnd: '', specificDays: [] }))}
+                          className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          Limpar
+                        </button>
+                      </div>
+
+                      {/* Ordenação rápida */}
+                      <div className="grid grid-cols-2 gap-1 mb-2.5 font-sans">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSortOrder('asc')
+                            setColumnFilters((p) => ({ ...p, sortBy: 'date_asc' }))
+                          }}
+                          className={`p-1.5 rounded-lg border text-[10px] font-medium text-center cursor-pointer ${
+                            sortOrder === 'asc' && columnFilters.sortBy !== 'amount_desc' && columnFilters.sortBy !== 'amount_asc'
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
+                          }`}
+                        >
+                          1 → 31 (Antigos)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSortOrder('desc')
+                            setColumnFilters((p) => ({ ...p, sortBy: 'date_desc' }))
+                          }}
+                          className={`p-1.5 rounded-lg border text-[10px] font-medium text-center cursor-pointer ${
+                            sortOrder === 'desc' && columnFilters.sortBy !== 'amount_desc' && columnFilters.sortBy !== 'amount_asc'
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
+                          }`}
+                        >
+                          31 → 1 (Recentes)
+                        </button>
+                      </div>
+
+                      {/* Intervalo de datas */}
+                      <div className="space-y-1.5 mb-2.5 font-sans">
+                        <span className="text-[10px] font-semibold text-slate-400">Intervalo de Vencimento:</span>
+                        <div className="grid grid-cols-2 gap-1">
+                          <div>
+                            <span className="text-[9px] text-slate-500 block">De:</span>
+                            <Input
+                              type="date"
+                              value={columnFilters.dateStart}
+                              onChange={(e) => setColumnFilters((p) => ({ ...p, dateStart: e.target.value }))}
+                              className="h-7 text-[10px] bg-slate-900 border-slate-700 p-1"
+                            />
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-500 block">Até:</span>
+                            <Input
+                              type="date"
+                              value={columnFilters.dateEnd}
+                              onChange={(e) => setColumnFilters((p) => ({ ...p, dateEnd: e.target.value }))}
+                              className="h-7 text-[10px] bg-slate-900 border-slate-700 p-1"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Dias específicos presentes no mês */}
+                      {availableDays.length > 0 && (
+                        <div>
+                          <span className="text-[10px] font-semibold text-slate-400 block mb-1">Dias com Lançamentos:</span>
+                          <div className="max-h-28 overflow-y-auto grid grid-cols-3 gap-1 p-1 bg-slate-900/60 rounded-lg border border-slate-800">
+                            {availableDays.map(([day, count]) => {
+                              const isChecked = columnFilters.specificDays.includes(day)
+                              return (
+                                <button
+                                  key={day}
+                                  type="button"
+                                  onClick={() => toggleDayFilter(day)}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono flex items-center justify-between cursor-pointer border ${
+                                    isChecked
+                                      ? 'bg-emerald-500/25 border-emerald-500/40 text-emerald-300'
+                                      : 'border-transparent text-slate-400 hover:bg-slate-800 hover:text-white'
+                                  }`}
+                                >
+                                  <span>Dia {day}</span>
+                                  <span className="text-[9px] opacity-70">({count})</span>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </th>
+
+              {/* 3. Description Column */}
+              <th className="py-2 px-2.5 min-w-[150px]">
+                <div className="flex items-center justify-between gap-1">
+                  <span>Descrição</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={`p-1 rounded cursor-pointer transition-colors ${
+                          search.trim()
+                            ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        title="Busca rápida por descrição"
+                      >
+                        <Search className="size-3" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-60 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] mb-2 font-sans">
+                        <span className="font-bold text-[11px] text-white">Buscar na Coluna</span>
+                        {search && (
+                          <button
+                            type="button"
+                            onClick={() => setSearch('')}
+                            className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            Limpar
+                          </button>
+                        )}
+                      </div>
+                      <Input
+                        autoFocus
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Digite o texto do lançamento..."
+                        className="h-8 text-xs bg-slate-900 border-slate-700"
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </th>
+
+              {/* 4. Category Column */}
+              <th className="py-2 px-2.5 w-32">
+                <div className="flex items-center justify-between gap-1">
+                  <span>Categoria</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={`p-1 rounded cursor-pointer transition-colors ${
+                          columnFilters.categories.length > 0
+                            ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        title="Filtrar por Categoria (estilo Excel)"
+                      >
+                        <Filter className={`size-3 ${columnFilters.categories.length > 0 ? 'fill-emerald-400' : ''}`} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-64 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] mb-2 font-sans">
+                        <span className="font-bold text-[11px] text-white">Filtrar Categorias</span>
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setColumnFilters((p) => ({ ...p, categories: availableCategories.map(([c]) => c) }))}
+                            className="text-emerald-400 hover:underline cursor-pointer"
+                          >
+                            Todas
+                          </button>
+                          <span>·</span>
+                          <button
+                            type="button"
+                            onClick={() => setColumnFilters((p) => ({ ...p, categories: [] }))}
+                            className="text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Campo de busca interna para filtrar opções de categoria */}
+                      <div className="mb-2">
+                        <Input
+                          value={categorySearchQuery}
+                          onChange={(e) => setCategorySearchQuery(e.target.value)}
+                          placeholder="Pesquisar categoria..."
+                          className="h-7 text-[11px] bg-slate-900 border-slate-700"
+                        />
+                      </div>
+
+                      <div className="max-h-48 overflow-y-auto space-y-0.5">
+                        {availableCategories
+                          .filter(([cat]) => cat.toLowerCase().includes(categorySearchQuery.toLowerCase()))
+                          .map(([cat, count]) => {
+                            const isChecked = columnFilters.categories.includes(cat)
+                            return (
+                              <label
+                                key={cat}
+                                onClick={() => toggleCategoryFilter(cat)}
+                                className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer"
+                              >
+                                <div className="flex items-center gap-2 truncate min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {}}
+                                    className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/30 size-3.5 cursor-pointer shrink-0"
+                                  />
+                                  <span className="truncate">{cat}</span>
+                                </div>
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400 shrink-0">
+                                  {count}
+                                </Badge>
+                              </label>
+                            )
+                          })}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </th>
+
+              {/* 5. Division / Payer Column */}
+              <th className="py-2 px-2.5 w-36">
+                <div className="flex items-center justify-between gap-1">
+                  <span>Divisão / Pagador</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={`p-1 rounded cursor-pointer transition-colors ${
+                          columnFilters.splits.length > 0
+                            ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        title="Filtrar por Divisão e Pagador"
+                      >
+                        <Filter className={`size-3 ${columnFilters.splits.length > 0 ? 'fill-emerald-400' : ''}`} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-60 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] mb-2 font-sans">
+                        <span className="font-bold text-[11px] text-white">Filtrar Divisão</span>
+                        <div className="flex items-center gap-1.5 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => setColumnFilters((p) => ({ ...p, splits: availableSplits.map(([s]) => s) }))}
+                            className="text-emerald-400 hover:underline cursor-pointer"
+                          >
+                            Todos
+                          </button>
+                          <span>·</span>
+                          <button
+                            type="button"
+                            onClick={() => setColumnFilters((p) => ({ ...p, splits: [] }))}
+                            className="text-slate-400 hover:text-white cursor-pointer"
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                      </div>
+                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                        {availableSplits.map(([sp, count]) => {
+                          const isChecked = columnFilters.splits.includes(sp)
+                          const label =
+                            sp === 'mine'
+                              ? '👤 100% Meu'
+                              : sp === 'split_50'
+                                ? '🤝 50/50 Dividido'
+                                : sp === 'partner'
+                                  ? `🔄 100% ${partner?.name || 'Parceiro'}`
+                                  : sp === 'external'
+                                    ? '🏷️ Terceiro Externo'
+                                    : sp === 'friend'
+                                      ? '🧑‍🤝‍🧑 Amigo Cobrado'
+                                      : '⚖️ Personalizado'
+                          return (
+                            <label
+                              key={sp}
+                              onClick={() => toggleSplitFilter(sp)}
+                              className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-900 cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/30 size-3.5 cursor-pointer shrink-0"
+                                />
+                                <span className="truncate">{label}</span>
+                              </div>
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400 shrink-0">
+                                {count}
+                              </Badge>
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </th>
+
+              {/* 6. Amount & Impact Column */}
+              <th className="py-2 px-2.5 w-40 text-right">
+                <div className="flex items-center justify-end gap-1">
+                  <span>Valor & Impacto</span>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className={`p-1 rounded cursor-pointer transition-colors ${
+                          columnFilters.amountMin || columnFilters.amountMax || columnFilters.amountType !== 'all' || columnFilters.sortBy?.startsWith('amount')
+                            ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                        title="Filtrar por Faixa de Valor ou Ordenar por Impacto"
+                      >
+                        <Filter className={`size-3 ${columnFilters.amountMin || columnFilters.amountMax || columnFilters.amountType !== 'all' || columnFilters.sortBy?.startsWith('amount') ? 'fill-emerald-400' : ''}`} />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-64 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-white/[0.08] mb-2 font-sans">
+                        <span className="font-bold text-[11px] text-white">Filtrar por Valor</span>
+                        <button
+                          type="button"
+                          onClick={() => setColumnFilters((p) => ({ ...p, amountMin: '', amountMax: '', amountType: 'all', sortBy: null }))}
+                          className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          Limpar
+                        </button>
+                      </div>
+
+                      {/* Ordenação por valor */}
+                      <div className="grid grid-cols-2 gap-1 mb-2.5 font-sans">
+                        <button
+                          type="button"
+                          onClick={() => setColumnFilters((p) => ({ ...p, sortBy: p.sortBy === 'amount_desc' ? null : 'amount_desc' }))}
+                          className={`p-1.5 rounded-lg border text-[10px] font-medium text-center cursor-pointer ${
+                            columnFilters.sortBy === 'amount_desc'
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
+                          }`}
+                        >
+                          Maior → Menor
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setColumnFilters((p) => ({ ...p, sortBy: p.sortBy === 'amount_asc' ? null : 'amount_asc' }))}
+                          className={`p-1.5 rounded-lg border text-[10px] font-medium text-center cursor-pointer ${
+                            columnFilters.sortBy === 'amount_asc'
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850'
+                          }`}
+                        >
+                          Menor → Maior
+                        </button>
+                      </div>
+
+                      {/* Tipo de fluxo */}
+                      <div className="space-y-1 mb-2.5 font-sans">
+                        <span className="text-[10px] font-semibold text-slate-400">Tipo de Fluxo:</span>
+                        <div className="grid grid-cols-2 gap-1">
+                          {(['all', 'income', 'expense', 'refund'] as const).map((tp) => (
+                            <button
+                              key={tp}
+                              type="button"
+                              onClick={() => setColumnFilters((p) => ({ ...p, amountType: tp }))}
+                              className={`px-1.5 py-1 rounded text-[10px] font-medium text-center cursor-pointer border ${
+                                columnFilters.amountType === tp
+                                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                              }`}
+                            >
+                              {tp === 'all' ? 'Todos' : tp === 'income' ? 'Entradas (+)' : tp === 'expense' ? 'Despesas (−)' : 'Estornos'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Faixa Min / Max */}
+                      <div className="space-y-1 font-sans">
+                        <span className="text-[10px] font-semibold text-slate-400">Faixa de Valor (R$):</span>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <span className="text-[9px] text-slate-500 block">Mínimo:</span>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0,00"
+                              value={columnFilters.amountMin}
+                              onChange={(e) => setColumnFilters((p) => ({ ...p, amountMin: e.target.value }))}
+                              className="h-7 text-xs bg-slate-900 border-slate-700 p-1"
+                            />
+                          </div>
+                          <div>
+                            <span className="text-[9px] text-slate-500 block">Máximo:</span>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="9999,99"
+                              value={columnFilters.amountMax}
+                              onChange={(e) => setColumnFilters((p) => ({ ...p, amountMax: e.target.value }))}
+                              className="h-7 text-xs bg-slate-900 border-slate-700 p-1"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              </th>
+
+              {/* 7. Action Column */}
               <th className="py-2 px-1.5 w-14 text-center">Ações</th>
             </tr>
           </thead>
@@ -993,7 +1864,38 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         </table>
       </div>
 
+      {/* 3. Rodapé Dinâmico de Somatório (Sticky Footer) */}
+      <div className="sticky bottom-0 bg-[#090d16]/95 backdrop-blur-md border-t border-white/[0.08] px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs z-20 shrink-0">
+        <div className="flex items-center gap-2 text-slate-400">
+          <span>
+            Exibindo <strong className="text-white font-mono">{filteredTxs.length}</strong> de <span className="font-mono">{monthTransactions.length}</span> lançamentos
+          </span>
+          {isAnyFilterActive && (
+            <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30">
+              Filtro ativo
+            </span>
+          )}
+        </div>
 
+        <div className="flex items-center gap-3 sm:gap-4 font-mono text-[11px] sm:text-xs ml-auto">
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 font-sans text-[10px] uppercase">Entradas:</span>
+            <span className="text-emerald-400 font-bold">+{formatBRL(filteredSummary.income)}</span>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 font-sans text-[10px] uppercase">Despesas:</span>
+            <span className="text-rose-400 font-bold">−{formatBRL(filteredSummary.expense)}</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 pl-2 sm:pl-3 border-l border-white/10">
+            <span className="text-slate-400 font-sans text-[10px] uppercase">Saldo Seleção:</span>
+            <span className={`font-bold ${filteredSummary.net >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {filteredSummary.net >= 0 ? `+${formatBRL(filteredSummary.net)}` : formatBRL(filteredSummary.net)}
+            </span>
+          </div>
+        </div>
+      </div>
 
       {/* Modal para confirmação de exclusão individual ou de todo o grupo de parcelas */}
       <DeleteInstallmentDialog

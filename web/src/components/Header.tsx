@@ -104,7 +104,7 @@ export function Header({
   }
 
   return (
-    <header className="border-b border-white/[0.08] bg-[#090d16]/90 backdrop-blur-xl sticky top-0 z-40 transition-all pt-[max(0.4rem,env(safe-area-inset-top,0px))]">
+    <header className="border-b border-white/5 bg-slate-950/80 backdrop-blur-md sticky top-0 z-30 transition-all pt-[max(0.4rem,env(safe-area-inset-top,0px))]">
       <div className="max-w-[1720px] mx-auto px-3 sm:px-6 py-2 sm:py-2.5">
         <div className="flex items-center justify-between gap-2 sm:gap-3">
           {/* 1. Left: Brand & Month Navigator */}
@@ -127,12 +127,12 @@ export function Header({
             </div>
 
             {/* Month Navigator (Pill) */}
-            <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-900/90 border border-slate-800 p-0.5 sm:p-1 rounded-xl shadow-inner shrink-0">
+            <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-900/60 border border-white/5 p-0.5 sm:p-1 rounded-xl shadow-inner shrink-0 transition-colors">
               <Button
                 variant="ghost"
                 size="icon-sm"
                 onClick={handlePrevMonth}
-                className="size-6 sm:size-7 text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer p-0"
+                className="size-6 sm:size-7 text-slate-400 hover:text-white hover:bg-slate-800/60 cursor-pointer p-0 transition-colors"
                 title="Mês anterior"
               >
                 <ChevronLeft className="size-3.5 sm:size-4" />
@@ -145,7 +145,7 @@ export function Header({
                 variant="ghost"
                 size="icon-sm"
                 onClick={handleNextMonth}
-                className="size-6 sm:size-7 text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer p-0"
+                className="size-6 sm:size-7 text-slate-400 hover:text-white hover:bg-slate-800/60 cursor-pointer p-0 transition-colors"
                 title="Próximo mês"
               >
                 <ChevronRight className="size-3.5 sm:size-4" />
@@ -168,7 +168,7 @@ export function Header({
             <Button
               size="sm"
               onClick={onOpenNewTx}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-7 sm:h-8 px-2 sm:px-3.5 gap-1 sm:gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer flex items-center rounded-xl transition-all active:scale-95 shrink-0"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-7 sm:h-8 px-2.5 sm:px-3.5 gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer flex items-center rounded-xl transition-all active:scale-95 shrink-0"
               title="Adicionar lançamento (entrada ou despesa)"
             >
               <Plus className="size-3.5 stroke-[2.5]" />
@@ -184,7 +184,7 @@ export function Header({
               className={`text-xs h-8 gap-1.5 transition-all relative cursor-pointer rounded-xl hidden lg:flex ${
                 totalAlerts > 0
                   ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25 font-semibold'
-                  : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                  : 'bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300'
               }`}
               title="Rede de amigos, parceiro e aprovações no cartão"
             >
@@ -203,7 +203,7 @@ export function Header({
                 variant="outline"
                 size="sm"
                 onClick={onOpenInvoices}
-                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-slate-800 hover:border-cyan-500/40 hover:bg-cyan-950/20 text-slate-300 hover:text-cyan-300 cursor-pointer rounded-xl hidden lg:flex transition-all"
+                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300 hover:text-cyan-300 cursor-pointer rounded-xl hidden lg:flex transition-all"
                 title="Acompanhamento de faturas por cartão"
               >
                 <Receipt className="size-3.5 text-cyan-400" />
@@ -217,7 +217,7 @@ export function Header({
                 variant="outline"
                 size="sm"
                 onClick={onOpenInvestments}
-                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-slate-800 hover:border-purple-500/40 hover:bg-purple-950/20 text-slate-300 hover:text-purple-300 cursor-pointer rounded-xl hidden xl:flex transition-all"
+                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300 hover:text-purple-300 cursor-pointer rounded-xl hidden xl:flex transition-all"
                 title="Controle de Investimentos e Patrimônio"
               >
                 <TrendingUp className="size-3.5 text-purple-400" />
@@ -232,7 +232,7 @@ export function Header({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-xs h-8 gap-1.5 bg-slate-900/60 border-slate-800 hover:border-slate-700 text-slate-300 cursor-pointer rounded-xl"
+                    className="text-xs h-8 gap-1.5 bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300 cursor-pointer rounded-xl transition-all"
                     title="Acessar ferramentas, projeções e configurações de cartões"
                   >
                     <SlidersHorizontal className="size-3.5 text-cyan-400" />
@@ -352,7 +352,7 @@ export function Header({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex items-center gap-1 sm:gap-2 bg-slate-900/90 border border-slate-800 h-7 sm:h-8 px-1.5 sm:px-2 rounded-xl hover:border-slate-700 transition-all cursor-pointer outline-none shrink-0"
+                  className="flex items-center gap-1 sm:gap-2 bg-slate-900/60 border border-white/5 h-7 sm:h-8 px-1.5 sm:px-2 rounded-xl hover:border-white/10 hover:bg-slate-900 transition-all cursor-pointer outline-none shrink-0"
                   title="Abrir opções de perfil e usuário"
                 >
                   <div className="size-5 sm:size-6 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-[9px] sm:text-[10px] shrink-0">
