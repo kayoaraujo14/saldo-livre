@@ -87,8 +87,13 @@ class DashboardViewModel(
             cushionAmount = cushion
         )
         viewModelScope.launch {
-            repository.saveMonthClosure(closure)
-            _uiState.update { it.copy(showClosureDialog = false) }
+            try {
+                repository.saveMonthClosure(closure)
+                _uiState.update { it.copy(showClosureDialog = false) }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao salvar fechamento de mês", e)
+                _uiState.update { it.copy(showClosureDialog = false) }
+            }
         }
     }
 

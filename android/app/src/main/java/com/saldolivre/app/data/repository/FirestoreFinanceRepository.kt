@@ -237,44 +237,52 @@ class FirestoreFinanceRepository(
         val currentUid = auth.currentUser?.uid ?: closure.uid
         if (currentUid.isBlank()) return
 
-        val docRef = if (closure.id.isNotBlank()) {
-            firestore.collection("users").document(currentUid).collection("month_closures").document(closure.id)
-        } else {
-            firestore.collection("users").document(currentUid).collection("month_closures").document(closure.closedMonth)
-        }
-        val finalClosure = closure.copy(id = docRef.id, uid = currentUid)
-        docRef.set(monthClosureToMap(finalClosure)).await()
+        try {
+            val docRef = if (closure.id.isNotBlank()) {
+                firestore.collection("users").document(currentUid).collection("month_closures").document(closure.id)
+            } else {
+                firestore.collection("users").document(currentUid).collection("month_closures").document(closure.closedMonth)
+            }
+            val finalClosure = closure.copy(id = docRef.id, uid = currentUid)
+            docRef.set(monthClosureToMap(finalClosure)).await()
 
-        if (closure.investedAmount > 0.0) {
-            val user = _currentUser.value
-            val lastDay = FinanceEngine.daysInMonth(closure.closedMonth)
-            val investDate = FinanceEngine.dateInMonth(closure.closedMonth, lastDay)
-            val investTx = Transaction(
-                id = "",
-                createdByUid = currentUid,
-                paidByUid = currentUid,
-                visibleToUids = listOf(currentUid),
-                description = "Aporte Sobra ${FinanceEngine.formatMonthLabel(closure.closedMonth)}",
-                category = "Investimentos",
-                subcategory = "Reserva de Emergência",
-                type = TransactionType.EXPENSE,
-                paymentMethod = PaymentMethod.DEBIT,
-                status = TransactionStatus.PAID,
-                estimatedAmount = closure.investedAmount,
-                actualAmount = closure.investedAmount,
-                dueDate = investDate,
-                competenceMonth = closure.closedMonth,
-                allocations = listOf(
-                    Allocation(
-                        type = "PLATFORM_USER",
-                        uid = currentUid,
-                        name = user.displayName.ifBlank { "Eu" },
-                        amount = closure.investedAmount
-                    )
-                ),
-                createdAt = System.currentTimeMillis()
-            )
-            addTransaction(investTx)
+            if (closure.investedAmount > 0.0) {
+                val user = _currentUser.value
+                val lastDay = FinanceEngine.daysInMonth(closure.closedMonth)
+                val investDate = FinanceEngine.dateInMonth(closure.closedMonth, lastDay)
+                val investTx = Transaction(
+                    id = "",
+                    createdByUid = currentUid,
+                    paidByUid = currentUid,
+                    visibleToUids = listOf(currentUid),
+                    description = "Aporte Sobra ${FinanceEngine.formatMonthLabel(closure.closedMonth)}",
+                    category = "Investimentos",
+                    subcategory = "Reserva de Emergência",
+                    type = TransactionType.EXPENSE,
+                    paymentMethod = PaymentMethod.DEBIT,
+                    status = TransactionStatus.PAID,
+                    estimatedAmount = closure.investedAmount,
+                    actualAmount = closure.investedAmount,
+                    totalAmount = closure.investedAmount,
+                    userImpact = mapOf(currentUid to closure.investedAmount),
+                    dueDate = investDate,
+                    competenceMonth = closure.closedMonth,
+                    allocations = listOf(
+                        Allocation(
+                            type = "PLATFORM_USER",
+                            uid = currentUid,
+                            name = user.displayName.ifBlank { "Eu" },
+                            amount = closure.investedAmount,
+                            reimbursed = false
+                        )
+                    ),
+                    createdAt = System.currentTimeMillis()
+                )
+                addTransaction(investTx)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FirestoreFinanceRepo", "Erro ao salvar fechamento de mês", e)
+            throw e
         }
     }
 

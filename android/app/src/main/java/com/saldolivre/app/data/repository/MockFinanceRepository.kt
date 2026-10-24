@@ -276,6 +276,8 @@ class MockFinanceRepository(
                 status = TransactionStatus.PAID,
                 estimatedAmount = finalClosure.investedAmount,
                 actualAmount = finalClosure.investedAmount,
+                totalAmount = finalClosure.investedAmount,
+                userImpact = mapOf(finalClosure.uid to finalClosure.investedAmount),
                 dueDate = investDate,
                 competenceMonth = finalClosure.closedMonth,
                 allocations = listOf(
@@ -283,7 +285,8 @@ class MockFinanceRepository(
                         type = "PLATFORM_USER",
                         uid = finalClosure.uid,
                         name = user.displayName.ifBlank { "Eu" },
-                        amount = finalClosure.investedAmount
+                        amount = finalClosure.investedAmount,
+                        reimbursed = false
                     )
                 ),
                 createdAt = System.currentTimeMillis()
