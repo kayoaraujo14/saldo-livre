@@ -231,6 +231,7 @@ interface FinanceContextValue {
   lookupUserByEmail: (email: string) => Promise<UserProfile | null>
   monthClosures: MonthClosure[]
   saveMonthClosure: (closure: MonthClosure) => Promise<void>
+  deleteMonthClosure: (closedMonth: string) => Promise<void>
   // Rede de Amigos (Feature 2)
   friendships: Friendship[]
 
@@ -719,6 +720,25 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
       if (currentUid) {
         await fb.fsSaveMonthClosure(currentUid, closure)
+      }
+    },
+    [mode, commitDemo, currentUid],
+  )
+
+  const deleteMonthClosure = useCallback(
+    async (closedMonth: string) => {
+      if (mode === 'demo') {
+        commitDemo((s) => ({
+          ...s,
+          monthClosures: (s.monthClosures || []).filter(
+            (c) => !(c.closedMonth === closedMonth && c.uid === currentUid),
+          ),
+        }))
+        return
+      }
+
+      if (currentUid) {
+        await fb.fsDeleteMonthClosure(currentUid, closedMonth)
       }
     },
     [mode, commitDemo, currentUid],
@@ -1376,6 +1396,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           lookupUserByEmail,
     monthClosures,
     saveMonthClosure,
+    deleteMonthClosure,
           addTransaction,
           addMany,
           updateTransaction,
@@ -1520,6 +1541,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     lookupUserByEmail,
     monthClosures,
     saveMonthClosure,
+    deleteMonthClosure,
     friendships,
     friends,
     pendingFriendRequests,

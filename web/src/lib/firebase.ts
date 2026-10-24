@@ -738,3 +738,14 @@ export async function fsSaveMonthClosure(uid: string, closure: MonthClosure) {
   }
 }
 
+export async function fsDeleteMonthClosure(uid: string, closedMonth: string) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return
+  try {
+    const { db } = ensure()
+    const ref = doc(db, COLLECTIONS.users, uid, COLLECTIONS.monthClosures, closedMonth)
+    await deleteDoc(ref)
+  } catch (err) {
+    console.warn('Erro ao excluir fechamento no Firestore:', err)
+  }
+}
+

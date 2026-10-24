@@ -286,6 +286,21 @@ class FirestoreFinanceRepository(
         }
     }
 
+    override suspend fun deleteMonthClosure(closedMonth: String) {
+        val currentUid = auth.currentUser?.uid ?: _currentUser.value.uid
+        if (currentUid.isBlank()) return
+        try {
+            firestore.collection("users")
+                .document(currentUid)
+                .collection("month_closures")
+                .document(closedMonth)
+                .delete()
+                .await()
+        } catch (e: Exception) {
+            android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir fechamento de mês", e)
+        }
+    }
+
     override suspend fun addTransaction(tx: Transaction) {
         val docRef = if (tx.id.isNotBlank()) {
             firestore.collection("transactions").document(tx.id)

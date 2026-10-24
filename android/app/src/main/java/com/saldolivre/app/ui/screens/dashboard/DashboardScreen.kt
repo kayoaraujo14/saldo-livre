@@ -63,6 +63,7 @@ fun DashboardScreen(
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
     var txToDelete by remember { mutableStateOf<Transaction?>(null) }
+    var showUndoClosureDialog by remember { mutableStateOf(false) }
     val summary = uiState.summary
 
     val formattedIncome = remember(summary.income) { FinanceEngine.formatCurrency(summary.income) }
@@ -305,6 +306,7 @@ fun DashboardScreen(
                                         .clip(DailyLimitBannerShape)
                                         .background(DarkSurfaceVariant.copy(alpha = 0.5f))
                                         .border(1.dp, Amber500.copy(alpha = 0.35f), DailyLimitBannerShape)
+                                        .clickable { showUndoClosureDialog = true }
                                         .padding(horizontal = 12.dp, vertical = 8.dp)
                                 ) {
                                     Row(
@@ -558,6 +560,59 @@ fun DashboardScreen(
             },
             onDismiss = {
                 viewModel.dismissClosureDialog()
+            }
+        )
+    }
+
+    // Dialog de Desfazer Fechamento de Mês (ao clicar no Colchão de Segurança)
+    if (showUndoClosureDialog) {
+        val prevMonth = summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
+        val prevMonthLabel = FinanceEngine.formatMonthLabel(prevMonth)
+        AlertDialog(
+            onDismissRequest = { showUndoClosureDialog = false },
+            containerColor = DarkSurface,
+            title = {
+                Text(
+                    text = "Colchão de Proteção",
+                    style = Typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Valor reservado: ${FinanceEngine.formatCurrency(summary.cushionAmount)}",
+                        fontWeight = FontWeight.SemiBold,
+                        color = Amber400
+                    )
+                    Text(
+                        text = "Esse montante foi separado no fechamento de $prevMonthLabel para não ser consumido no dia a dia.",
+                        style = Typography.bodyMedium,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "Deseja desfazer este fechamento? O valor voltará para o Saldo Livre Real.",
+                        style = Typography.bodySmall,
+                        color = TextMuted
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.undoMonthClosure(prevMonth)
+                        showUndoClosureDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Rose500)
+                ) {
+                    Text(text = "Desfazer Fechamento", color = TextPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUndoClosureDialog = false }) {
+                    Text(text = "Manter", color = TextSecondary)
+                }
             }
         )
     }

@@ -23,6 +23,7 @@ interface FinanceRepository {
     suspend fun updateTransaction(tx: Transaction)
     suspend fun deleteTransaction(id: String)
     suspend fun saveMonthClosure(closure: MonthClosure)
+    suspend fun deleteMonthClosure(closedMonth: String)
     suspend fun deleteInstallmentGroup(groupId: String): Int
     suspend fun updateInstallmentGroup(groupId: String, input: InstallmentGroupUpdateInput): Int
     suspend fun markTransactionPaid(id: String)

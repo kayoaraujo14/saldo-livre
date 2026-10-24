@@ -1,7 +1,7 @@
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useFinance } from '@/store/FinanceContext'
-import { formatBRL } from '@/lib/utils'
+import { formatBRL, monthLabel, shiftMonth } from '@/lib/utils'
 import {
   Wallet,
   TrendingUp,
@@ -17,7 +17,7 @@ interface KpiGridProps {
 }
 
 export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
-  const { summary } = useFinance()
+  const { summary, month, deleteMonthClosure } = useFinance()
 
   if (!summary) return null
 
@@ -82,10 +82,20 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
         </div>
 
         {summary.cushionAmount && summary.cushionAmount > 0 ? (
-          <div className="flex items-center gap-1 text-[10px] text-amber-400 font-medium mt-0.5">
-            <Shield className="size-3" />
-            <span>Colchão: {formatBRL(summary.cushionAmount)}</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const prev = summary.pendingClosureMonth || shiftMonth(month, -1)
+              if (window.confirm(`Deseja desfazer o fechamento de ${monthLabel(prev)} e devolver ${formatBRL(summary.cushionAmount || 0)} ao Saldo Livre Real?`)) {
+                deleteMonthClosure(prev)
+              }
+            }}
+            title="Clique para desfazer fechamento do mês anterior"
+            className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors font-medium mt-0.5 text-left cursor-pointer"
+          >
+            <Shield className="size-3 shrink-0" />
+            <span className="underline decoration-dotted">Colchão: {formatBRL(summary.cushionAmount)}</span>
+          </button>
         ) : null}
 
         <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 border-t border-white/5 min-w-0 gap-1">

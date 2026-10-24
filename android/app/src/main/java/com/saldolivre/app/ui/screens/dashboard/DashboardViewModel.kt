@@ -97,6 +97,16 @@ class DashboardViewModel(
         }
     }
 
+    fun undoMonthClosure(closedMonth: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteMonthClosure(closedMonth)
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao desfazer fechamento de mês", e)
+            }
+        }
+    }
+
     fun switchUser(uid: String) {
         repository.switchUser(uid)
     }

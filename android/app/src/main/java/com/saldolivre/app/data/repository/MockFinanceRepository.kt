@@ -295,6 +295,15 @@ class MockFinanceRepository(
         }
     }
 
+    override suspend fun deleteMonthClosure(closedMonth: String) {
+        val uid = _currentUser.value.uid
+        _monthClosures.update { current ->
+            val updated = current.filterNot { it.closedMonth == closedMonth && it.uid == uid }
+            persistMonthClosures(updated)
+            updated
+        }
+    }
+
     override suspend fun addTransaction(tx: Transaction) {
         val newTx = if (tx.id.isBlank()) tx.copy(id = "tx_" + UUID.randomUUID().toString().take(8)) else tx
         _transactions.update { current ->
