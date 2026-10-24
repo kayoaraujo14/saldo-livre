@@ -25,6 +25,9 @@ data class TransactionsUiState(
     val totalPaidExpense: Double = 0.0,
     val totalPendingExpense: Double = 0.0,
     val freeBalance: Double = 0.0,
+    val carryoverAmount: Double = 0.0,
+    val previousMonthDeficit: Double = 0.0,
+    val cushionAmount: Double = 0.0,
     val pendingCount: Int = 0,
     val paidCount: Int = 0
 )
@@ -67,6 +70,9 @@ class TransactionsViewModel(
                         totalPaidExpense = summary.paid,
                         totalPendingExpense = summary.committed,
                         freeBalance = summary.freeBalance,
+                        carryoverAmount = summary.carryoverAmount,
+                        previousMonthDeficit = summary.previousMonthDeficit,
+                        cushionAmount = summary.cushionAmount,
                         pendingCount = pendingCount,
                         paidCount = paidCount
                     )

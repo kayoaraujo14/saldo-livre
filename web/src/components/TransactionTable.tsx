@@ -29,6 +29,7 @@ import {
   RefreshCw,
   CreditCard,
   Shield,
+  Landmark,
   Trash2,
   Edit2,
   Filter,
@@ -87,6 +88,7 @@ interface TransactionTableProps {
 
 export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: TransactionTableProps) {
   const {
+    summary,
     monthTransactions,
     cards,
     me,
@@ -823,6 +825,30 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
 
       {/* Mobile Transaction Cards Feed (Visible on screens < md) */}
       <div className="md:hidden flex-1 overflow-y-auto p-3 space-y-2.5">
+        {Boolean(summary?.carryoverAmount || summary?.previousMonthDeficit) && (
+          <div className={`p-3 rounded-xl border flex items-center justify-between ${
+            summary?.previousMonthDeficit 
+              ? 'bg-rose-950/20 border-rose-500/30' 
+              : 'bg-emerald-950/20 border-emerald-500/30'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              <div className={`p-2 rounded-lg ${summary?.previousMonthDeficit ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                <Landmark className="size-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-200">
+                  {summary?.previousMonthDeficit ? 'Déficit Anterior Acumulado' : 'Saldo Inicial do Mês'}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  {summary?.previousMonthDeficit ? 'Débito herdado do período anterior' : 'Sobra transferida do mês anterior'}
+                </p>
+              </div>
+            </div>
+            <span className={`text-sm font-mono font-bold ${summary?.previousMonthDeficit ? 'text-rose-400' : 'text-emerald-400'}`}>
+              {summary?.previousMonthDeficit ? `-${formatBRL(summary.previousMonthDeficit)}` : `+${formatBRL(summary?.carryoverAmount || 0)}`}
+            </span>
+          </div>
+        )}
         {filteredTxs.length === 0 ? (
           <div className="text-center py-12 text-slate-400">
             <Filter className="size-8 mx-auto mb-2 opacity-30" />
@@ -1446,6 +1472,45 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.04]">
+            {Boolean(summary?.carryoverAmount || summary?.previousMonthDeficit) && (
+              <tr className={summary?.previousMonthDeficit ? "bg-rose-950/20 hover:bg-rose-950/30 transition-colors" : "bg-emerald-950/20 hover:bg-emerald-950/30 transition-colors"}>
+                <td className="py-2.5 px-3 text-center">
+                  <span className="text-[10px] font-mono text-slate-400">01</span>
+                </td>
+                <td className="py-2.5 px-3">
+                  <div className="flex items-center gap-2">
+                    <div className={`p-1 rounded-md ${summary?.previousMonthDeficit ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                      <Landmark className="size-3.5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-200">
+                        {summary?.previousMonthDeficit ? 'Déficit Anterior Acumulado' : 'Saldo Inicial do Mês'}
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {summary?.previousMonthDeficit ? 'Débito acumulado de meses anteriores' : 'Sobra transferida do mês anterior'}
+                      </p>
+                    </div>
+                  </div>
+                </td>
+                <td className="py-2.5 px-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Saldo de Abertura</span>
+                </td>
+                <td className="py-2.5 px-2">
+                  <span className="text-[10px] text-slate-500">—</span>
+                </td>
+                <td className="py-2.5 px-2">
+                  <span className="text-[10px] text-slate-500">Conta Corrente</span>
+                </td>
+                <td className="py-2.5 px-3 text-right">
+                  <span className={`text-xs font-mono font-bold ${summary?.previousMonthDeficit ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {summary?.previousMonthDeficit ? `-${formatBRL(summary.previousMonthDeficit)}` : `+${formatBRL(summary?.carryoverAmount || 0)}`}
+                  </span>
+                </td>
+                <td className="py-2.5 px-1.5 text-center">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400 font-medium">Fixo</span>
+                </td>
+              </tr>
+            )}
             {filteredTxs.length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-center py-12 text-slate-400">

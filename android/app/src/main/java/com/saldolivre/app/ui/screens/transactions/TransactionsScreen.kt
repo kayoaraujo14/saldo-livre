@@ -325,6 +325,139 @@ fun TransactionsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
+                    if (uiState.carryoverAmount > 0.0 || uiState.previousMonthDeficit > 0.0) {
+                        item(key = "opening_balance_item", contentType = "opening_balance") {
+                            val isDeficit = uiState.previousMonthDeficit > 0.0
+                            val prevMonth = FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
+                            val prevMonthLabel = FinanceEngine.formatMonthLabel(prevMonth)
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        if (isDeficit) Rose500.copy(alpha = 0.12f)
+                                        else Emerald500.copy(alpha = 0.12f)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isDeficit) Rose500.copy(alpha = 0.35f)
+                                        else Emerald500.copy(alpha = 0.35f),
+                                        RoundedCornerShape(14.dp)
+                                    )
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .background(
+                                                    if (isDeficit) Rose500.copy(alpha = 0.2f)
+                                                    else Emerald500.copy(alpha = 0.2f),
+                                                    RoundedCornerShape(10.dp)
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isDeficit) Icons.Default.Warning else Icons.Default.AccountBalance,
+                                                contentDescription = null,
+                                                tint = if (isDeficit) Rose400 else Emerald400,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(10.dp))
+
+                                        Column {
+                                            Text(
+                                                text = if (isDeficit) "Déficit Anterior Acumulado" else "Saldo Inicial do Mês",
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary
+                                            )
+                                            Text(
+                                                text = if (isDeficit) "Débito herdado de $prevMonthLabel" else "Sobra transferida de $prevMonthLabel",
+                                                fontSize = 11.sp,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = if (isDeficit) "- ${FinanceEngine.formatCurrency(uiState.previousMonthDeficit)}"
+                                        else "+ ${FinanceEngine.formatCurrency(uiState.carryoverAmount)}",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = if (isDeficit) Rose400 else Emerald400
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (uiState.cushionAmount > 0.0) {
+                        item(key = "cushion_balance_item", contentType = "cushion_balance") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(Amber500.copy(alpha = 0.10f))
+                                    .border(1.dp, Amber500.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
+                                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(end = 8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Shield,
+                                            contentDescription = null,
+                                            tint = Amber400,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(
+                                                text = "Colchão de Proteção do Mês",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextPrimary
+                                            )
+                                            Text(
+                                                text = "Reserva blindada para imprevistos",
+                                                fontSize = 10.sp,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = FinanceEngine.formatCurrency(uiState.cushionAmount),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Amber400
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     items(
                         items = uiState.filteredTransactions,
                         key = { it.id },
