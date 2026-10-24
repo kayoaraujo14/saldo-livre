@@ -544,21 +544,21 @@ fun DashboardScreen(
                 }
             )
         }
+    }
 
-        // Dialog de Fechamento de Mês (comemoração e distribuição)
-        if (uiState.showClosureDialog && summary.pendingClosureSurplus != null && summary.pendingClosureSurplus > 0.0) {
-            val closedMonth = summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
-            MonthClosureDialog(
-                closedMonthKey = closedMonth,
-                targetMonthKey = uiState.selectedMonth,
-                totalSurplus = summary.pendingClosureSurplus,
-                onConfirm = { carryover, invested, cushion ->
-                    viewModel.confirmMonthClosure(carryover, invested, cushion)
-                },
-                onDismiss = {
-                    viewModel.dismissClosureDialog()
-                }
-            )
-        }
+    // Dialog de Fechamento de Mês (comemoração e distribuição)
+    if (uiState.showClosureDialog && summary.pendingClosureSurplus != null && summary.pendingClosureSurplus > 0.0) {
+        val closedMonth = summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
+        MonthClosureDialog(
+            closedMonthKey = closedMonth,
+            targetMonthKey = uiState.selectedMonth,
+            totalSurplus = summary.pendingClosureSurplus,
+            onConfirm = { carryover, invested, cushion ->
+                viewModel.confirmMonthClosure(carryover, invested, cushion)
+            },
+            onDismiss = {
+                viewModel.dismissClosureDialog()
+            }
+        )
     }
 }
