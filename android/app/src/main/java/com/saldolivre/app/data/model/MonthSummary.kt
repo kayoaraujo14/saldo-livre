@@ -48,5 +48,12 @@ data class MonthSummary(
     val totalInvested: Double = 0.0,
     val byCategory: List<CategoryExpense> = emptyList(),
     val byInvestmentSubcategory: List<InvestmentSubcat> = emptyList(),
-    val receivables: List<ReceivableItem> = emptyList()
+    val receivables: List<ReceivableItem> = emptyList(),
+    val cushionAmount: Double = 0.0,
+    val carryoverAmount: Double = 0.0,
+    val previousMonthDeficit: Double = 0.0,
+    val rawFreeBalance: Double = 0.0,
+    val pendingClosureSurplus: Double? = null,
+    val pendingClosureMonth: String? = null,
+    val closure: MonthClosure? = null
 )

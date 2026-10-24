@@ -15,12 +15,14 @@ interface FinanceRepository {
     fun getTransactions(): Flow<List<Transaction>>
     fun getCards(): Flow<List<Card>>
     fun getRecurringBills(): Flow<List<RecurringBill>>
+    fun getMonthClosures(): Flow<List<MonthClosure>>
     fun getMonthSummary(): Flow<MonthSummary>
 
     suspend fun addTransaction(tx: Transaction)
     suspend fun addTransactions(transactions: List<Transaction>)
     suspend fun updateTransaction(tx: Transaction)
     suspend fun deleteTransaction(id: String)
+    suspend fun saveMonthClosure(closure: MonthClosure)
     suspend fun deleteInstallmentGroup(groupId: String): Int
     suspend fun updateInstallmentGroup(groupId: String, input: InstallmentGroupUpdateInput): Int
     suspend fun markTransactionPaid(id: String)

@@ -17,7 +17,9 @@ data class DashboardUiState(
     val selectedMonth: String = FinanceEngine.currentMonthKey(),
     val summary: MonthSummary = MonthSummary(),
     val recentTransactions: List<Transaction> = emptyList(),
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val showClosureDialog: Boolean = false,
+    val closureDialogDismissed: Boolean = false
 )
 
 class DashboardViewModel(
@@ -40,17 +42,53 @@ class DashboardViewModel(
                     .sortedByDescending { it.createdAt }
                     .take(6)
 
+                val shouldShowPopup = summary.pendingClosureSurplus != null && 
+                    summary.pendingClosureSurplus > 0.0 && 
+                    !_uiState.value.closureDialogDismissed
+
                 DashboardUiState(
                     currentUser = user,
                     allUsers = repository.allUsers,
                     selectedMonth = month,
                     summary = summary,
                     recentTransactions = recent,
-                    isLoading = false
+                    isLoading = false,
+                    showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
+                    closureDialogDismissed = _uiState.value.closureDialogDismissed
                 )
             }.collect { newState ->
                 _uiState.value = newState
             }
+        }
+    }
+
+    fun openClosureDialog() {
+        _uiState.update { it.copy(showClosureDialog = true) }
+    }
+
+    fun dismissClosureDialog() {
+        _uiState.update { it.copy(showClosureDialog = false, closureDialogDismissed = true) }
+    }
+
+    fun confirmMonthClosure(carryover: Double, invested: Double, cushion: Double) {
+        val summary = _uiState.value.summary
+        val closedMonth = summary.pendingClosureMonth ?: return
+        val targetMonth = _uiState.value.selectedMonth
+        val surplus = summary.pendingClosureSurplus ?: (carryover + invested + cushion)
+        val uid = _uiState.value.currentUser.uid
+
+        val closure = com.saldolivre.app.data.model.MonthClosure(
+            uid = uid,
+            closedMonth = closedMonth,
+            targetMonth = targetMonth,
+            totalSurplus = surplus,
+            carryoverToNextMonth = carryover,
+            investedAmount = invested,
+            cushionAmount = cushion
+        )
+        viewModelScope.launch {
+            repository.saveMonthClosure(closure)
+            _uiState.update { it.copy(showClosureDialog = false) }
         }
     }
 

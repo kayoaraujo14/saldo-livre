@@ -248,7 +248,7 @@ fun TransactionsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "${uiState.filteredTransactions.size} lançamentos • Toque no status ou deslize p/ confirmar",
+                        text = "${uiState.filteredTransactions.size} lançamentos • Toque no status p/ confirmar",
                         style = Typography.labelSmall,
                         color = TextSecondary,
                         maxLines = 1,
@@ -333,69 +333,12 @@ fun TransactionsScreen(
                         val onItemClick = remember(tx) { { selectedTxForDetails = tx } }
                         val onStatusToggle = remember(tx.id) { { viewModel.toggleStatus(tx.id) } }
 
-                        val dismissState = rememberSwipeToDismissBoxState(
-                            confirmValueChange = { value ->
-                                if (value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart) {
-                                    viewModel.toggleStatus(tx.id)
-                                }
-                                false
-                            }
-                        )
-
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            backgroundContent = {
-                                val willMarkPaid = tx.status != TransactionStatus.PAID
-                                val bgColor = if (willMarkPaid) Emerald500.copy(alpha = 0.22f) else Amber500.copy(alpha = 0.22f)
-                                val borderColor = if (willMarkPaid) Emerald500.copy(alpha = 0.5f) else Amber500.copy(alpha = 0.5f)
-                                val contentColor = if (willMarkPaid) Emerald400 else Amber400
-                                val alignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
-                                    Alignment.CenterEnd
-                                } else {
-                                    Alignment.CenterStart
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(bgColor)
-                                        .border(1.dp, borderColor, RoundedCornerShape(14.dp))
-                                        .padding(horizontal = 18.dp),
-                                    contentAlignment = alignment
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = if (willMarkPaid) Icons.Default.CheckCircle else Icons.Default.Schedule,
-                                            contentDescription = null,
-                                            tint = contentColor,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Text(
-                                            text = if (willMarkPaid) {
-                                                if (tx.type == TransactionType.INCOME) "Confirmar Recebimento" else "Confirmar Pagamento"
-                                            } else {
-                                                "Marcar como Pendente"
-                                            },
-                                            color = contentColor,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.sp
-                                        )
-                                    }
-                                }
-                            },
-                            content = {
-                                TransactionItem(
-                                    transaction = tx,
-                                    currentUserId = uiState.currentUser.uid,
-                                    allTransactions = uiState.transactions,
-                                    onClick = onItemClick,
-                                    onStatusClick = onStatusToggle
-                                )
-                            }
+                        TransactionItem(
+                            transaction = tx,
+                            currentUserId = uiState.currentUser.uid,
+                            allTransactions = uiState.transactions,
+                            onClick = onItemClick,
+                            onStatusClick = onStatusToggle
                         )
                     }
                 }

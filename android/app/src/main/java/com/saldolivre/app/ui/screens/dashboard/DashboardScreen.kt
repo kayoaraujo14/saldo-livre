@@ -143,6 +143,18 @@ fun DashboardScreen(
                 )
             }
 
+            // 1.1 Banner de Fechamento Pendente (se houver sobra do mês anterior aguardando decisão)
+            if (summary.pendingClosureSurplus != null && summary.pendingClosureSurplus > 0.0) {
+                item(key = "pending_closure_banner", contentType = "pending_closure_banner") {
+                    val prevMonth = summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
+                    PendingClosureBanner(
+                        monthKey = prevMonth,
+                        surplusAmount = summary.pendingClosureSurplus,
+                        onOpenClosure = { viewModel.openClosureDialog() }
+                    )
+                }
+            }
+
             // 2. Hero KPI Card: Saldo Livre Real & Limite Diário Seguro
             item(key = "hero_free_balance", contentType = "hero_free_balance") {
                 val isNegative = summary.freeBalance < 0
@@ -201,14 +213,38 @@ fun DashboardScreen(
 
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            Text(
-                                text = formattedFreeBalance,
-                                fontSize = 32.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (isNegative) Rose400 else Emerald400,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                Text(
+                                    text = formattedFreeBalance,
+                                    fontSize = 32.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = if (isNegative) Rose400 else Emerald400,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+
+                                if (summary.carryoverAmount > 0.0) {
+                                    Text(
+                                        text = "+ ${FinanceEngine.formatCurrency(summary.carryoverAmount)} sobra",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Cyan400,
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
+                                } else if (summary.previousMonthDeficit > 0.0) {
+                                    Text(
+                                        text = "- ${FinanceEngine.formatCurrency(summary.previousMonthDeficit)} déficit",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Rose400,
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
+                                }
+                            }
 
                             Spacer(modifier = Modifier.height(14.dp))
 
@@ -257,6 +293,56 @@ fun DashboardScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                }
+                            }
+
+                            // Colchão de Proteção (se houver reserva alocada para imprevistos)
+                            if (summary.cushionAmount > 0.0) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(DailyLimitBannerShape)
+                                        .background(DarkSurfaceVariant.copy(alpha = 0.5f))
+                                        .border(1.dp, Amber500.copy(alpha = 0.35f), DailyLimitBannerShape)
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(end = 8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Shield,
+                                                contentDescription = null,
+                                                tint = Amber400,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "Colchão de Proteção:",
+                                                style = Typography.bodyMedium,
+                                                color = TextSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Text(
+                                            text = FinanceEngine.formatCurrency(summary.cushionAmount),
+                                            style = Typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Amber400,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -455,6 +541,22 @@ fun DashboardScreen(
                     TextButton(onClick = { txToDelete = null }) {
                         Text(text = "Cancelar", color = TextSecondary, maxLines = 1)
                     }
+                }
+            )
+        }
+
+        // Dialog de Fechamento de Mês (comemoração e distribuição)
+        if (uiState.showClosureDialog && summary.pendingClosureSurplus != null && summary.pendingClosureSurplus > 0.0) {
+            val closedMonth = summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
+            MonthClosureDialog(
+                closedMonthKey = closedMonth,
+                targetMonthKey = uiState.selectedMonth,
+                totalSurplus = summary.pendingClosureSurplus,
+                onConfirm = { carryover, invested, cushion ->
+                    viewModel.confirmMonthClosure(carryover, invested, cushion)
+                },
+                onDismiss = {
+                    viewModel.dismissClosureDialog()
                 }
             )
         }

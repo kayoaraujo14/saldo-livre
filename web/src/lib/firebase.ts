@@ -30,8 +30,8 @@ import {
   writeBatch,
   type Firestore,
 } from 'firebase/firestore'
-import type { Card, ChatSession, Friendship, NewTransaction, RecurringBill, SharedUser, Transaction, UserLearnedRule, UserProfile } from '@/types'
-import { stripUndefined } from './utils'
+import type { Card, ChatSession, Friendship, MonthClosure, NewTransaction, RecurringBill, SharedUser, Transaction, UserLearnedRule, UserProfile } from '@/types'
+import { dateInMonth, daysInMonth, monthLabel, stripUndefined } from './utils'
 
 const FIREBASE_CONFIG_STORAGE_KEY = 'saldo-livre:firebase-config'
 
@@ -123,6 +123,7 @@ export const COLLECTIONS = {
   friendships: 'friendships',
   agentRules: 'agent_rules',
   chatSessions: 'chat_sessions',
+  monthClosures: 'month_closures',
 } as const
 
 // ------------------------------------------------------------------
@@ -666,6 +667,74 @@ export async function fsDeleteChatSession(uid: string, sessionId: string) {
     await deleteDoc(ref)
   } catch (err) {
     console.warn('Erro ao excluir sessão de chat no Firestore:', err)
+  }
+}
+
+// ------------------------------------------------------------------
+// Fechamento de Mês e Rollover (Persistência no Firestore)
+// ------------------------------------------------------------------
+export function subscribeMonthClosures(uid: string, cb: (closures: MonthClosure[]) => void) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return () => {}
+  try {
+    const { db } = ensure()
+    const q = collection(db, COLLECTIONS.users, uid, COLLECTIONS.monthClosures)
+    return onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ ...(d.data() as MonthClosure), id: d.id }))
+        cb(list)
+      },
+      (err) => {
+        console.warn('Erro ao sincronizar fechamentos do Firestore:', err)
+      }
+    )
+  } catch (err) {
+    console.warn('Falha ao inicializar listener de fechamentos do Firestore:', err)
+    return () => {}
+  }
+}
+
+export async function fsSaveMonthClosure(uid: string, closure: MonthClosure) {
+  if (!isFirebaseConfigured || !uid || uid === 'guest') return
+  try {
+    const { db } = ensure()
+    const closureId = closure.id || closure.closedMonth
+    const ref = doc(db, COLLECTIONS.users, uid, COLLECTIONS.monthClosures, closureId)
+    await setDoc(ref, stripUndefined({ ...closure, id: closureId, uid }), { merge: true })
+
+    if (closure.investedAmount > 0) {
+      const lastDay = daysInMonth(closure.closedMonth)
+      const investDate = dateInMonth(closure.closedMonth, lastDay)
+      await fsAddTransaction({
+        createdByUid: uid,
+        paidByUid: uid,
+        visibleToUids: [uid],
+        description: `Aporte Sobra ${monthLabel(closure.closedMonth)}`,
+        category: 'Investimentos',
+        subcategory: 'Reserva de Emergência',
+        type: 'expense',
+        paymentMethod: 'debit',
+        status: 'paid',
+        estimatedAmount: closure.investedAmount,
+        actualAmount: closure.investedAmount,
+        totalAmount: closure.investedAmount,
+        userImpact: { [uid]: closure.investedAmount },
+        dueDate: investDate,
+        competenceMonth: closure.closedMonth,
+        allocations: [
+          {
+            type: 'PLATFORM_USER',
+            uid,
+            name: 'Eu',
+            amount: closure.investedAmount,
+            reimbursed: false,
+          },
+        ],
+        createdAt: Date.now(),
+      })
+    }
+  } catch (err) {
+    console.warn('Erro ao salvar fechamento no Firestore:', err)
   }
 }
 

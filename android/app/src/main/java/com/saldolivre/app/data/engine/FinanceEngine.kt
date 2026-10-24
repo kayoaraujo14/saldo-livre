@@ -634,11 +634,31 @@ object FinanceEngine {
         return if (uid == tx.createdByUid || uid == tx.paidByUid) effectiveAmount(tx) else 0.0
     }
 
+    fun computeMonthRawBalance(
+        all: List<Transaction>,
+        uid: String,
+        monthKey: String
+    ): Double {
+        val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
+        var inc = 0.0
+        var exp = 0.0
+        for (tx in monthTxs) {
+            val impact = impactFor(tx, uid, all)
+            if (tx.type == TransactionType.INCOME) {
+                inc += impact
+            } else {
+                exp += impact
+            }
+        }
+        return round2(inc - exp)
+    }
+
     fun computeSummary(
         all: List<Transaction>,
         uid: String,
         monthKey: String,
-        cards: List<Card> = emptyList()
+        cards: List<Card> = emptyList(),
+        closures: List<MonthClosure> = emptyList()
     ): MonthSummary {
         val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
 
@@ -748,7 +768,39 @@ object FinanceEngine {
         }
 
         val committed = committedEstimated + committedPending
-        val freeBalance = income - (paid + committed)
+        val rawFreeBalance = round2(income - (paid + committed))
+
+        var carryoverAmount = 0.0
+        var previousMonthDeficit = 0.0
+        var cushionAmount = 0.0
+        var pendingClosureSurplus: Double? = null
+        var pendingClosureMonth: String? = null
+
+        // Mês futuro NUNCA antecipa sobra nem herda provisoriamente
+        if (monthState != "future") {
+            val prevMonthKey = shiftMonth(monthKey, -1)
+            val prevClosure = closures.firstOrNull { it.closedMonth == prevMonthKey && it.uid == uid }
+
+            if (prevClosure != null) {
+                // Já houve fechamento formal do mês anterior
+                carryoverAmount = round2(prevClosure.carryoverToNextMonth)
+                cushionAmount = round2(prevClosure.cushionAmount)
+            } else {
+                // Sem fechamento formal: verifica se o mês anterior fechou no vermelho ou azul
+                val prevRawBalance = computeMonthRawBalance(all, uid, prevMonthKey)
+                if (prevRawBalance < 0.0) {
+                    // Déficit anterior obrigatoriamente abate o mês atual
+                    previousMonthDeficit = round2(kotlin.math.abs(prevRawBalance))
+                } else if (prevRawBalance > 0.0 && monthState == "current") {
+                    // Mês anterior teve sobra positiva aguardando decisão no mês atual
+                    pendingClosureSurplus = round2(prevRawBalance)
+                    pendingClosureMonth = prevMonthKey
+                }
+            }
+        }
+
+        val effectiveAvailable = income + carryoverAmount - previousMonthDeficit - cushionAmount
+        val freeBalance = round2(effectiveAvailable - (paid + committed))
         val dailyLimit = if (daysRemaining > 0) round2(freeBalance / daysRemaining) else null
 
         val byCategory = categoryMap.entries.map {
@@ -763,6 +815,8 @@ object FinanceEngine {
             )
         }.sortedByDescending { it.amount }
 
+        val thisMonthClosure = closures.firstOrNull { it.closedMonth == monthKey && it.uid == uid }
+
         return MonthSummary(
             monthKey = monthKey,
             income = round2(income),
@@ -771,6 +825,13 @@ object FinanceEngine {
             committedEstimated = round2(committedEstimated),
             committedPending = round2(committedPending),
             freeBalance = round2(freeBalance),
+            rawFreeBalance = rawFreeBalance,
+            cushionAmount = cushionAmount,
+            carryoverAmount = carryoverAmount,
+            previousMonthDeficit = previousMonthDeficit,
+            pendingClosureSurplus = pendingClosureSurplus,
+            pendingClosureMonth = pendingClosureMonth,
+            closure = thisMonthClosure,
             daysRemaining = daysRemaining,
             daysInMonth = dim,
             dailyLimit = dailyLimit,

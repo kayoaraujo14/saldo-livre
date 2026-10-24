@@ -186,19 +186,95 @@ class FirestoreFinanceRepository(
         awaitClose { registration.remove() }
     }
 
+    override fun getMonthClosures(): Flow<List<MonthClosure>> = callbackFlow {
+        val currentUid = auth.currentUser?.uid
+        if (currentUid.isNullOrBlank()) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val registration = firestore.collection("users")
+            .document(currentUid)
+            .collection("month_closures")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(emptyList())
+                    return@addSnapshotListener
+                }
+                val closures = snapshot?.documents?.mapNotNull { doc ->
+                    try {
+                        parseMonthClosure(doc)
+                    } catch (_: Exception) {
+                        null
+                    }
+                } ?: emptyList()
+                trySend(closures)
+            }
+
+        awaitClose { registration.remove() }
+    }
+
     override fun getMonthSummary(): Flow<MonthSummary> {
         return combine(
             getTransactions(),
             _currentUser,
             _selectedMonth,
-            getCards()
-        ) { txs, user, month, cards ->
+            getCards(),
+            getMonthClosures()
+        ) { txs, user, month, cards, closures ->
             FinanceEngine.computeSummary(
                 all = txs,
                 uid = user.uid,
                 monthKey = month,
-                cards = cards
+                cards = cards,
+                closures = closures
             )
+        }
+    }
+
+    override suspend fun saveMonthClosure(closure: MonthClosure) {
+        val currentUid = auth.currentUser?.uid ?: closure.uid
+        if (currentUid.isBlank()) return
+
+        val docRef = if (closure.id.isNotBlank()) {
+            firestore.collection("users").document(currentUid).collection("month_closures").document(closure.id)
+        } else {
+            firestore.collection("users").document(currentUid).collection("month_closures").document(closure.closedMonth)
+        }
+        val finalClosure = closure.copy(id = docRef.id, uid = currentUid)
+        docRef.set(monthClosureToMap(finalClosure)).await()
+
+        if (closure.investedAmount > 0.0) {
+            val user = _currentUser.value
+            val lastDay = FinanceEngine.daysInMonth(closure.closedMonth)
+            val investDate = FinanceEngine.dateInMonth(closure.closedMonth, lastDay)
+            val investTx = Transaction(
+                id = "",
+                createdByUid = currentUid,
+                paidByUid = currentUid,
+                visibleToUids = listOf(currentUid),
+                description = "Aporte Sobra ${FinanceEngine.formatMonthLabel(closure.closedMonth)}",
+                category = "Investimentos",
+                subcategory = "Reserva de Emergência",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.DEBIT,
+                status = TransactionStatus.PAID,
+                estimatedAmount = closure.investedAmount,
+                actualAmount = closure.investedAmount,
+                dueDate = investDate,
+                competenceMonth = closure.closedMonth,
+                allocations = listOf(
+                    Allocation(
+                        type = "PLATFORM_USER",
+                        uid = currentUid,
+                        name = user.displayName.ifBlank { "Eu" },
+                        amount = closure.investedAmount
+                    )
+                ),
+                createdAt = System.currentTimeMillis()
+            )
+            addTransaction(investTx)
         }
     }
 
@@ -898,6 +974,36 @@ class FirestoreFinanceRepository(
             "installmentNumber" to tx.installmentNumber,
             "installmentsTotal" to tx.installmentsTotal,
             "splitType" to tx.splitType?.value
+        )
+    }
+
+    private fun parseMonthClosure(doc: com.google.firebase.firestore.DocumentSnapshot): MonthClosure {
+        return MonthClosure(
+            id = doc.id,
+            uid = doc.getString("uid") ?: "",
+            closedMonth = doc.getString("closedMonth") ?: "",
+            targetMonth = doc.getString("targetMonth") ?: "",
+            totalSurplus = doc.getDouble("totalSurplus") ?: 0.0,
+            carryoverToNextMonth = doc.getDouble("carryoverToNextMonth") ?: 0.0,
+            investedAmount = doc.getDouble("investedAmount") ?: 0.0,
+            cushionAmount = doc.getDouble("cushionAmount") ?: 0.0,
+            investmentTransactionId = doc.getString("investmentTransactionId"),
+            closedAt = doc.getLong("closedAt") ?: System.currentTimeMillis()
+        )
+    }
+
+    private fun monthClosureToMap(closure: MonthClosure): Map<String, Any?> {
+        return mapOf(
+            "id" to closure.id,
+            "uid" to closure.uid,
+            "closedMonth" to closure.closedMonth,
+            "targetMonth" to closure.targetMonth,
+            "totalSurplus" to closure.totalSurplus,
+            "carryoverToNextMonth" to closure.carryoverToNextMonth,
+            "investedAmount" to closure.investedAmount,
+            "cushionAmount" to closure.cushionAmount,
+            "investmentTransactionId" to closure.investmentTransactionId,
+            "closedAt" to closure.closedAt
         )
     }
 }

@@ -390,6 +390,19 @@ export interface PendingChargeGroup {
 
 export type NewTransaction = Omit<Transaction, 'id'>
 
+export interface MonthClosure {
+  id: string
+  uid: string
+  closedMonth: string // YYYY-MM
+  targetMonth: string // YYYY-MM
+  totalSurplus: number
+  carryoverToNextMonth: number
+  investedAmount: number
+  cushionAmount: number
+  investmentTransactionId?: string | null
+  closedAt: number
+}
+
 export interface MonthSummary {
   income: number
   paid: number
@@ -397,6 +410,13 @@ export interface MonthSummary {
   committedEstimated: number
   committedPending: number
   freeBalance: number
+  rawFreeBalance?: number
+  cushionAmount?: number
+  carryoverAmount?: number
+  previousMonthDeficit?: number
+  pendingClosureSurplus?: number | null
+  pendingClosureMonth?: string | null
+  closure?: MonthClosure | null
   daysRemaining: number
   daysInMonth: number
   dailyLimit: number | null

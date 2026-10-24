@@ -10,6 +10,7 @@ import type {
   Friendship,
   FriendSplitInput,
   InstallmentGroupUpdateInput,
+  MonthClosure,
   MonthSummary,
   NewTransaction,
   PendingBatchTransaction,
@@ -38,7 +39,7 @@ import * as fb from '@/lib/firebase'
 import { DEMO_CARDS, DEMO_RECURRING, DEMO_USERS, buildDemoTransactions } from '@/lib/mockData'
 import { createToolExecutor, getLearnedRules, saveLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
 import type { ToolExecutor } from '@/lib/gemini'
-import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, formatInstallmentDesc, stripInstallmentSuffix } from '@/lib/utils'
+import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, daysInMonth, monthLabel, formatInstallmentDesc, stripInstallmentSuffix } from '@/lib/utils'
 
 type Mode = 'demo' | 'firebase'
 
@@ -48,6 +49,8 @@ interface DemoState {
   recurring: RecurringBill[]
   transactions: Transaction[]
   friendships: Friendship[]
+  monthClosures?: MonthClosure[]
+
 }
 
 const DEMO_KEY = 'saldo-livre:demo-state:v3'
@@ -226,8 +229,11 @@ interface FinanceContextValue {
   deleteRecurring: (id: string) => Promise<void>
   updateProfile: (patch: Partial<UserProfile>) => Promise<void>
   lookupUserByEmail: (email: string) => Promise<UserProfile | null>
+  monthClosures: MonthClosure[]
+  saveMonthClosure: (closure: MonthClosure) => Promise<void>
   // Rede de Amigos (Feature 2)
   friendships: Friendship[]
+
   friends: FriendItem[]
   pendingFriendRequests: Friendship[]
   pendingChargeRequests: Transaction[]
@@ -285,6 +291,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [fbRecurring, setFbRecurring] = useState<RecurringBill[]>([])
   const [fbFriendships, setFbFriendships] = useState<Friendship[]>([])
   const [fbRules, setFbRules] = useState<UserRule[]>([])
+  const [fbMonthClosures, setFbMonthClosures] = useState<MonthClosure[]>([])
 
   useEffect(() => {
     if (mode !== 'firebase') {
@@ -340,6 +347,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       fb.subscribeCards(uid, setFbCards),
       fb.subscribeRecurring(uid, setFbRecurring),
       fb.subscribeFriendships(uid, setFbFriendships),
+      fb.subscribeMonthClosures(uid, setFbMonthClosures),
       fb.subscribeAgentRules(uid, (rules) => {
         setFbRules(rules)
         saveLearnedRules(uid, rules)
@@ -353,6 +361,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const cards = mode === 'demo' ? (demo?.cards || []) : (fbCards || [])
   const recurring = mode === 'demo' ? (demo?.recurring || []) : (fbRecurring || [])
   const friendships = mode === 'demo' ? (demo?.friendships || []) : (fbFriendships || [])
+  const monthClosures = mode === 'demo' ? (demo?.monthClosures || []) : (fbMonthClosures || [])
   const currentUid = mode === 'demo' ? sessionUid : (authUser?.uid ?? null)
 
   const users: UserProfile[] = useMemo(() => {
@@ -656,8 +665,64 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   const summary = useMemo(() => {
     if (!currentUid) return null
-    return computeSummary(transactions, currentUid, month)
-  }, [transactions, currentUid, month])
+    return computeSummary(transactions, currentUid, month, monthClosures)
+  }, [transactions, currentUid, month, monthClosures])
+
+  const saveMonthClosure = useCallback(
+    async (closure: MonthClosure) => {
+      if (mode === 'demo') {
+        commitDemo((s) => {
+          const list = (s.monthClosures || []).filter(
+            (c) => !(c.closedMonth === closure.closedMonth && c.uid === closure.uid),
+          )
+          const updatedClosures = [...list, closure]
+          let updatedTxs = s.transactions
+
+          if (closure.investedAmount > 0) {
+            const lastDay = daysInMonth(closure.closedMonth)
+            const investDate = dateInMonth(closure.closedMonth, lastDay)
+            const investTx: Transaction = {
+              id: 'tx_invest_' + Math.random().toString(36).slice(2, 9),
+              createdByUid: closure.uid,
+              paidByUid: closure.uid,
+              visibleToUids: [closure.uid],
+              description: `Aporte Sobra ${monthLabel(closure.closedMonth)}`,
+              category: 'Investimentos',
+              subcategory: 'Reserva de Emergência',
+              type: 'expense',
+              paymentMethod: 'debit',
+              status: 'paid',
+              estimatedAmount: closure.investedAmount,
+              actualAmount: closure.investedAmount,
+              totalAmount: closure.investedAmount,
+              userImpact: { [closure.uid]: closure.investedAmount },
+              dueDate: investDate,
+              competenceMonth: closure.closedMonth,
+              allocations: [
+                {
+                  type: 'PLATFORM_USER',
+                  uid: closure.uid,
+                  name: 'Eu',
+                  amount: closure.investedAmount,
+                  reimbursed: false,
+                },
+              ],
+              createdAt: Date.now(),
+            }
+            updatedTxs = [investTx, ...updatedTxs]
+          }
+
+          return { ...s, monthClosures: updatedClosures, transactions: updatedTxs }
+        })
+        return
+      }
+
+      if (currentUid) {
+        await fb.fsSaveMonthClosure(currentUid, closure)
+      }
+    },
+    [mode, commitDemo, currentUid],
+  )
 
   // ---------------- Ações de sessão ----------------
   const signIn = useCallback(async () => {
@@ -1309,6 +1374,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
             setPendingBatchTransactions(txs)
           },
           lookupUserByEmail,
+    monthClosures,
+    saveMonthClosure,
           addTransaction,
           addMany,
           updateTransaction,
@@ -1451,6 +1518,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     deleteRecurring,
     updateProfile,
     lookupUserByEmail,
+    monthClosures,
+    saveMonthClosure,
     friendships,
     friends,
     pendingFriendRequests,

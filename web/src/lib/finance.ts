@@ -7,6 +7,7 @@ import type {
   Allocation,
   Card,
   Category,
+  MonthClosure,
   MonthSummary,
   NewTransaction,
   ReceivableItem,
@@ -578,7 +579,27 @@ export function getDaysRemaining(monthKey: string) {
   return dim - new Date().getDate() + 1 // inclui o dia de hoje
 }
 
-export function computeSummary(all: Transaction[], uid: string, monthKey: string): MonthSummary {
+export function computeMonthRawBalance(all: Transaction[], uid: string, monthKey: string): number {
+  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
+  let inc = 0
+  let exp = 0
+  for (const tx of monthTxs) {
+    const impact = impactFor(tx, uid, all)
+    if (tx.type === 'income') {
+      inc += impact
+    } else {
+      exp += impact
+    }
+  }
+  return round2(inc - exp)
+}
+
+export function computeSummary(
+  all: Transaction[],
+  uid: string,
+  monthKey: string,
+  closures: MonthClosure[] = []
+): MonthSummary {
   const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
   let income = 0
   let paid = 0
@@ -667,8 +688,37 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
   }
 
   const committed = committedEstimated + committedPending
-  const freeBalance = income - (paid + committed)
+  const rawFreeBalance = round2(income - (paid + committed))
+  const state = getMonthState(monthKey)
+
+  let carryoverAmount = 0
+  let previousMonthDeficit = 0
+  let cushionAmount = 0
+  let pendingClosureSurplus: number | null = null
+  let pendingClosureMonth: string | null = null
+
+  if (state !== 'future') {
+    const prevMonthKey = shiftMonth(monthKey, -1)
+    const prevClosure = (closures || []).find((c) => c.closedMonth === prevMonthKey && c.uid === uid)
+
+    if (prevClosure) {
+      carryoverAmount = round2(prevClosure.carryoverToNextMonth)
+      cushionAmount = round2(prevClosure.cushionAmount)
+    } else {
+      const prevRawBalance = computeMonthRawBalance(all, uid, prevMonthKey)
+      if (prevRawBalance < 0) {
+        previousMonthDeficit = round2(Math.abs(prevRawBalance))
+      } else if (prevRawBalance > 0 && state === 'current') {
+        pendingClosureSurplus = round2(prevRawBalance)
+        pendingClosureMonth = prevMonthKey
+      }
+    }
+  }
+
+  const effectiveAvailable = income + carryoverAmount - previousMonthDeficit - cushionAmount
+  const freeBalance = round2(effectiveAvailable - (paid + committed))
   const daysRemaining = getDaysRemaining(monthKey)
+  const thisMonthClosure = (closures || []).find((c) => c.closedMonth === monthKey && c.uid === uid) || null
 
   return {
     income: round2(income),
@@ -677,10 +727,17 @@ export function computeSummary(all: Transaction[], uid: string, monthKey: string
     committedEstimated: round2(committedEstimated),
     committedPending: round2(committedPending),
     freeBalance: round2(freeBalance),
+    rawFreeBalance,
+    cushionAmount,
+    carryoverAmount,
+    previousMonthDeficit,
+    pendingClosureSurplus,
+    pendingClosureMonth,
+    closure: thisMonthClosure,
     daysRemaining,
     daysInMonth: daysInMonth(monthKey),
     dailyLimit: daysRemaining > 0 ? round2(freeBalance / daysRemaining) : null,
-    monthState: getMonthState(monthKey),
+    monthState: state,
     receivableFromPartner: round2(receivableFromPartner),
     receivableFromExternal: round2(receivableFromExternal),
     receivableFromFriends: round2(receivableFromFriends),

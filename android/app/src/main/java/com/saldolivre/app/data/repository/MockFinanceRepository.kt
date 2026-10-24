@@ -24,6 +24,7 @@ class MockFinanceRepository(
     private val PREF_KEY_FRIENDSHIPS = "demo_friendships"
     private val PREF_KEY_CURRENT_USER = "demo_current_user_uid"
     private val PREF_KEY_ACTIVITY_LOGS = "demo_activity_logs"
+    private val PREF_KEY_MONTH_CLOSURES = "demo_month_closures"
 
     private val userKayo = UserProfile(
         uid = "demo-kayo",
@@ -66,8 +67,30 @@ class MockFinanceRepository(
     private val _transactions = MutableStateFlow(loadStoredTransactions())
     private val _friendships = MutableStateFlow(loadStoredFriendships())
     private val _activityLogs = MutableStateFlow(loadStoredActivityLogs())
+    private val _monthClosures = MutableStateFlow(loadStoredMonthClosures())
 
     override fun getActivityLogs(): Flow<List<ActivityLog>> = _activityLogs.asStateFlow()
+    override fun getMonthClosures(): Flow<List<MonthClosure>> = _monthClosures.asStateFlow()
+
+    private fun loadStoredMonthClosures(): List<MonthClosure> {
+        val json = prefs?.getString(PREF_KEY_MONTH_CLOSURES, null)
+        if (!json.isNullOrBlank()) {
+            try {
+                val type = object : TypeToken<List<MonthClosure>>() {}.type
+                val list: List<MonthClosure>? = gson.fromJson(json, type)
+                if (!list.isNullOrEmpty()) return list
+            } catch (_: Exception) {
+            }
+        }
+        return emptyList()
+    }
+
+    private fun persistMonthClosures(list: List<MonthClosure>) {
+        try {
+            prefs?.edit()?.putString(PREF_KEY_MONTH_CLOSURES, gson.toJson(list))?.apply()
+        } catch (_: Exception) {
+        }
+    }
 
     private fun loadStoredActivityLogs(): List<ActivityLog> {
         val json = prefs?.getString(PREF_KEY_ACTIVITY_LOGS, null)
@@ -214,14 +237,58 @@ class MockFinanceRepository(
             _transactions,
             _currentUser,
             _selectedMonth,
-            _cards
-        ) { txs, user, month, cards ->
+            _cards,
+            _monthClosures
+        ) { txs, user, month, cards, closures ->
             FinanceEngine.computeSummary(
                 all = txs,
                 uid = user.uid,
                 monthKey = month,
-                cards = cards
+                cards = cards,
+                closures = closures
             )
+        }
+    }
+
+    override suspend fun saveMonthClosure(closure: MonthClosure) {
+        val finalClosure = if (closure.id.isBlank()) closure.copy(id = "cls_" + UUID.randomUUID().toString().take(8)) else closure
+        _monthClosures.update { current ->
+            val filtered = current.filterNot { it.closedMonth == finalClosure.closedMonth && it.uid == finalClosure.uid }
+            val updated = filtered + finalClosure
+            persistMonthClosures(updated)
+            updated
+        }
+
+        if (finalClosure.investedAmount > 0.0) {
+            val user = _currentUser.value
+            val lastDay = FinanceEngine.daysInMonth(finalClosure.closedMonth)
+            val investDate = FinanceEngine.dateInMonth(finalClosure.closedMonth, lastDay)
+            val investTx = Transaction(
+                id = "tx_invest_" + UUID.randomUUID().toString().take(8),
+                createdByUid = finalClosure.uid,
+                paidByUid = finalClosure.uid,
+                visibleToUids = listOf(finalClosure.uid),
+                description = "Aporte Sobra ${FinanceEngine.formatMonthLabel(finalClosure.closedMonth)}",
+                category = "Investimentos",
+                subcategory = "Reserva de Emergência",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.DEBIT,
+                status = TransactionStatus.PAID,
+                estimatedAmount = finalClosure.investedAmount,
+                actualAmount = finalClosure.investedAmount,
+                dueDate = investDate,
+                competenceMonth = finalClosure.closedMonth,
+                allocations = listOf(
+                    Allocation(
+                        type = "PLATFORM_USER",
+                        uid = finalClosure.uid,
+                        name = user.displayName.ifBlank { "Eu" },
+                        amount = finalClosure.investedAmount
+                    )
+                ),
+                createdAt = System.currentTimeMillis()
+            )
+            addTransaction(investTx)
         }
     }
 
