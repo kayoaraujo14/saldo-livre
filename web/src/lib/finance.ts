@@ -705,12 +705,40 @@ export function computeSummary(
       carryoverAmount = round2(prevClosure.carryoverToNextMonth)
       cushionAmount = round2(prevClosure.cushionAmount)
     } else {
-      const prevRawBalance = computeMonthRawBalance(all, uid, prevMonthKey)
-      if (prevRawBalance < 0) {
-        previousMonthDeficit = round2(Math.abs(prevRawBalance))
-      } else if (prevRawBalance > 0 && state === 'current') {
-        pendingClosureSurplus = round2(prevRawBalance)
-        pendingClosureMonth = prevMonthKey
+      const pastMonths = Array.from(
+        new Set(
+          (all || [])
+            .filter((t) => (t.visibleToUids || []).includes(uid) && t.competenceMonth < monthKey)
+            .map((t) => t.competenceMonth)
+        )
+      ).sort()
+
+      if (pastMonths.length > 0) {
+        const startMonth = pastMonths[0]
+        const endMonth = prevMonthKey
+        let runningBalance = 0
+        let currentIter = startMonth
+
+        while (currentIter <= endMonth) {
+          const closure = (closures || []).find((c) => c.closedMonth === currentIter && c.uid === uid)
+          const raw = computeMonthRawBalance(all, uid, currentIter)
+          const finalBalance = runningBalance + raw
+
+          if (closure) {
+            runningBalance = closure.carryoverToNextMonth
+          } else {
+            runningBalance = finalBalance
+          }
+
+          currentIter = shiftMonth(currentIter, 1)
+        }
+
+        if (runningBalance < 0) {
+          previousMonthDeficit = round2(Math.abs(runningBalance))
+        } else if (runningBalance > 0 && state === 'current') {
+          pendingClosureSurplus = round2(runningBalance)
+          pendingClosureMonth = prevMonthKey
+        }
       }
     }
   }

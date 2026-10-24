@@ -782,19 +782,47 @@ object FinanceEngine {
             val prevClosure = closures.firstOrNull { it.closedMonth == prevMonthKey && it.uid == uid }
 
             if (prevClosure != null) {
-                // Já houve fechamento formal do mês anterior
+                // Já houve fechamento formal do mês imediatamente anterior
                 carryoverAmount = round2(prevClosure.carryoverToNextMonth)
                 cushionAmount = round2(prevClosure.cushionAmount)
             } else {
-                // Sem fechamento formal: verifica se o mês anterior fechou no vermelho ou azul
-                val prevRawBalance = computeMonthRawBalance(all, uid, prevMonthKey)
-                if (prevRawBalance < 0.0) {
-                    // Déficit anterior obrigatoriamente abate o mês atual
-                    previousMonthDeficit = round2(kotlin.math.abs(prevRawBalance))
-                } else if (prevRawBalance > 0.0 && monthState == "current") {
-                    // Mês anterior teve sobra positiva aguardando decisão no mês atual
-                    pendingClosureSurplus = round2(prevRawBalance)
-                    pendingClosureMonth = prevMonthKey
+                // Cadeia contínua de saldo acumulado:
+                // Itera mês a mês desde o primeiro registro no passado até o mês anterior imediato
+                val pastMonths = all
+                    .filter { it.visibleToUids.contains(uid) && it.competenceMonth < monthKey }
+                    .map { it.competenceMonth }
+                    .distinct()
+                    .sorted()
+
+                if (pastMonths.isNotEmpty()) {
+                    val startMonth = pastMonths.first()
+                    val endMonth = prevMonthKey
+                    var runningBalance = 0.0
+                    var currentIter = startMonth
+
+                    while (currentIter <= endMonth) {
+                        val closure = closures.firstOrNull { it.closedMonth == currentIter && it.uid == uid }
+                        val raw = computeMonthRawBalance(all, uid, currentIter)
+                        val finalBalance = runningBalance + raw
+
+                        if (closure != null) {
+                            // Mês foi fechado formalmente: reinicia a cadeia com a sobra destinada para o próximo
+                            runningBalance = closure.carryoverToNextMonth
+                        } else {
+                            runningBalance = finalBalance
+                        }
+
+                        currentIter = shiftMonth(currentIter, 1)
+                    }
+
+                    if (runningBalance < 0.0) {
+                        // Déficit acumulado total de toda a sequência passada abate o mês atual
+                        previousMonthDeficit = round2(kotlin.math.abs(runningBalance))
+                    } else if (runningBalance > 0.0 && monthState == "current") {
+                        // Sobra acumulada total de meses anteriores aguardando destinação
+                        pendingClosureSurplus = round2(runningBalance)
+                        pendingClosureMonth = prevMonthKey
+                    }
                 }
             }
         }

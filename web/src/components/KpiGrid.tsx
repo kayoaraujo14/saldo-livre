@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   HandCoins,
   ArrowRight,
+  Shield,
 } from 'lucide-react'
 
 interface KpiGridProps {
@@ -61,7 +62,7 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           </Badge>
         </div>
 
-        <div className="flex items-baseline justify-between gap-1">
+        <div className="flex items-baseline justify-between gap-1 flex-wrap">
           <span
             className={`text-xl sm:text-2xl font-extrabold tracking-tight drop-shadow-xs font-mono ${
               isPositiveBalance ? 'text-emerald-400' : 'text-rose-400'
@@ -69,7 +70,23 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           >
             {formatBRL(summary.freeBalance)}
           </span>
+          {summary.carryoverAmount && summary.carryoverAmount > 0 ? (
+            <span className="text-[10px] font-semibold text-cyan-400 font-mono">
+              +{formatBRL(summary.carryoverAmount)} mês ant.
+            </span>
+          ) : summary.previousMonthDeficit && summary.previousMonthDeficit > 0 ? (
+            <span className="text-[10px] font-semibold text-rose-400 font-mono">
+              -{formatBRL(summary.previousMonthDeficit)} déficit ant.
+            </span>
+          ) : null}
         </div>
+
+        {summary.cushionAmount && summary.cushionAmount > 0 ? (
+          <div className="flex items-center gap-1 text-[10px] text-amber-400 font-medium mt-0.5">
+            <Shield className="size-3" />
+            <span>Colchão: {formatBRL(summary.cushionAmount)}</span>
+          </div>
+        ) : null}
 
         <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 border-t border-white/5 min-w-0 gap-1">
           <span className="truncate min-w-0 text-slate-400">Rec: <strong className="text-slate-300 font-semibold">{formatBRL(summary.income)}</strong></span>
