@@ -71,8 +71,18 @@ enum class SplitType(val value: String, val label: String, val emoji: String) {
     CUSTOM("custom", "Personalizada", "⚖️");
 
     companion object {
-        fun from(value: String?): SplitType =
-            entries.find { it.value.equals(value, ignoreCase = true) } ?: MINE
+        fun from(value: String?): SplitType? {
+            if (value.isNullOrBlank()) return null
+            return when (value.lowercase().trim()) {
+                "mine", "100% meu" -> MINE
+                "split_50", "shared_50_50", "50/50", "casal" -> SPLIT_50
+                "partner", "parceiro" -> PARTNER
+                "friend", "amigo" -> FRIEND
+                "external", "third_party", "terceiro" -> EXTERNAL
+                "custom", "personalizada" -> CUSTOM
+                else -> entries.find { it.value.equals(value.trim(), ignoreCase = true) }
+            }
+        }
     }
 }
 

@@ -782,30 +782,47 @@ class FirestoreFinanceRepository(
         val createdUid = doc.getString("createdByUid") ?: ""
         val visibleUids = if (rawVisible.isEmpty() && createdUid.isNotBlank()) listOf(createdUid) else rawVisible
 
-        val rawAllocations = (doc.get("allocations") as? List<*>)?.mapNotNull { item ->
+        val rawAllocationsData = doc.get("allocations")
+        val allocationsList: List<*> = when (rawAllocationsData) {
+            is List<*> -> rawAllocationsData
+            is Map<*, *> -> rawAllocationsData.values.toList()
+            else -> emptyList<Any>()
+        }
+        val rawAllocations = allocationsList.mapNotNull { item ->
             if (item is Map<*, *>) {
                 Allocation(
                     type = item["type"]?.toString() ?: "PLATFORM_USER",
                     uid = item["uid"]?.toString(),
                     name = item["name"]?.toString() ?: "",
-                    amount = (item["amount"] as? Number)?.toDouble() ?: 0.0,
+                    amount = (item["amount"] as? Number)?.toDouble()
+                        ?: item["amount"]?.toString()?.toDoubleOrNull() ?: 0.0,
                     reimbursed = item["reimbursed"] as? Boolean ?: false
                 )
             } else null
-        } ?: emptyList()
+        }
 
         val rawUserImpact = (doc.get("userImpact") as? Map<*, *>)?.mapNotNull { (k, v) ->
             val uidKey = k?.toString() ?: return@mapNotNull null
-            val valDouble = (v as? Number)?.toDouble() ?: 0.0
+            val valDouble = (v as? Number)?.toDouble()
+                ?: v?.toString()?.toDoubleOrNull() ?: 0.0
             uidKey to valDouble
         }?.toMap() ?: emptyMap()
+
+        val resolvedUserImpact = if (rawUserImpact.isNotEmpty()) {
+            rawUserImpact
+        } else if (rawAllocations.isNotEmpty()) {
+            FinanceEngine.deriveImpact(rawAllocations, visibleUids)
+        } else {
+            emptyMap()
+        }
 
         val typeStr = doc.getString("type") ?: "expense"
         val payStr = doc.getString("paymentMethod") ?: "pix"
         val statusStr = doc.getString("status") ?: "pending"
         val splitStr = doc.getString("splitType")
+        val parsedSplitType = SplitType.from(splitStr)
 
-        return Transaction(
+        val tx = Transaction(
             id = doc.id,
             createdByUid = createdUid,
             paidByUid = doc.getString("paidByUid") ?: createdUid,
@@ -822,7 +839,7 @@ class FirestoreFinanceRepository(
             dueDate = doc.getString("dueDate") ?: FinanceEngine.todayKey(),
             competenceMonth = doc.getString("competenceMonth") ?: FinanceEngine.currentMonthKey(),
             visibleToUids = visibleUids,
-            userImpact = rawUserImpact,
+            userImpact = resolvedUserImpact,
             allocations = rawAllocations,
             recurringBillId = doc.getString("recurringBillId"),
             reserveCardId = doc.getString("reserveCardId"),
@@ -835,8 +852,10 @@ class FirestoreFinanceRepository(
             installmentGroupId = doc.getString("installmentGroupId"),
             installmentNumber = doc.getLong("installmentNumber")?.toInt(),
             installmentsTotal = doc.getLong("installmentsTotal")?.toInt(),
-            splitType = SplitType.from(splitStr)
+            splitType = parsedSplitType
         )
+        val finalSplit = parsedSplitType ?: FinanceEngine.detectSplit(tx, createdUid)
+        return tx.copy(splitType = finalSplit)
     }
 
     private fun transactionToMap(tx: Transaction): Map<String, Any?> {

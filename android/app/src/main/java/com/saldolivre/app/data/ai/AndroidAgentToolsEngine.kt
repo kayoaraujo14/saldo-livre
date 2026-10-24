@@ -1297,7 +1297,7 @@ class AndroidAgentToolsEngine(
                 if (t.splitType != null && t.splitType != SplitType.MINE) return@filter false
                 if (!t.assignedFriendUid.isNullOrBlank() || !t.assignedFriendName.isNullOrBlank()) return@filter false
                 if (t.allocations.any { it.uid != user.uid && it.amount > 0 }) return@filter false
-                val myImp = t.userImpact[user.uid] ?: t.effectiveAmount
+                val myImp = FinanceEngine.impactFor(t, user.uid, all)
                 if (kotlin.math.abs(myImp - t.totalAmount) > 0.01) return@filter false
             }
 
@@ -1319,7 +1319,7 @@ class AndroidAgentToolsEngine(
                 val isSharedSplit = t.splitType != null && t.splitType != SplitType.MINE
                 val hasFriend = !t.assignedFriendUid.isNullOrBlank() || !t.assignedFriendName.isNullOrBlank()
                 val hasOtherAlloc = t.allocations.any { it.uid != user.uid && it.amount > 0 }
-                val myImp = t.userImpact[user.uid] ?: t.effectiveAmount
+                val myImp = FinanceEngine.impactFor(t, user.uid, all)
                 val hasThirdShare = t.totalAmount - myImp > 0.01
 
                 if (!isThirdCat && !isSharedSplit && !hasFriend && !hasOtherAlloc && !hasThirdShare) {
@@ -1395,15 +1395,15 @@ class AndroidAgentToolsEngine(
         val netExpenses = kotlin.math.max(0.0, totalExpensesGross - totalRefunds)
 
         // 2. Seu Impacto Real nas Despesas (Sua Parte)
-        val myExpensesGrossImpact = expenseTxs.sumOf { it.userImpact[user.uid] ?: it.effectiveAmount }
-        val myRefundsImpact = refundTxs.sumOf { it.userImpact[user.uid] ?: it.effectiveAmount }
+        val myExpensesGrossImpact = expenseTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
+        val myRefundsImpact = refundTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
         val myImpactTotal = kotlin.math.max(0.0, myExpensesGrossImpact - myRefundsImpact)
 
         // 3. Cota de Terceiros (A Receber)
         val thirdPartyTotal = kotlin.math.max(0.0, totalExpensesGross - myExpensesGrossImpact)
 
         // 4. Entradas / Receitas do Período (separadas para nunca distorcerem a soma das despesas)
-        val totalIncome = incomeTxs.sumOf { it.effectiveAmount }
+        val totalIncome = incomeTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
 
         // Agrupamento por subcategoria calculado exclusivamente sobre as despesas para totalizar fielmente
         val subcategoryGroups = expenseTxs.groupBy { it.subcategory ?: it.category.ifBlank { "Geral" } }
@@ -1413,7 +1413,7 @@ class AndroidAgentToolsEngine(
                 .take(6)
                 .joinToString("\n") { (sub, txs) ->
                     val subTotal = txs.sumOf { it.effectiveAmount }
-                    val subMyPart = txs.sumOf { it.userImpact[user.uid] ?: it.effectiveAmount }
+                    val subMyPart = txs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
                     val subPartNote = if (kotlin.math.abs(subTotal - subMyPart) > 0.01) {
                         " (Sua parte: ${FinanceEngine.formatCurrency(subMyPart)})"
                     } else ""
@@ -1428,7 +1428,7 @@ class AndroidAgentToolsEngine(
             val methodOrCard = if (!cName.isNullOrBlank()) "Cartão $cName" else t.paymentMethod.label
             val monthNote = if (foundInOtherMonth) " [Mês: ${FinanceEngine.monthLabel(t.competenceMonth)}]" else ""
 
-            val myImpact = t.userImpact[user.uid] ?: t.effectiveAmount
+            val myImpact = FinanceEngine.impactFor(t, user.uid, all)
             val isSplit = kotlin.math.abs(myImpact - t.effectiveAmount) > 0.01 || (t.splitType != null && t.splitType != SplitType.MINE)
             val splitNote = if (isSplit) {
                 val friendName = t.assignedFriendName?.takeIf { it.isNotBlank() }

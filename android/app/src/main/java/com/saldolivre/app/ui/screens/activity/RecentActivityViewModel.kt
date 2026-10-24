@@ -82,7 +82,7 @@ class RecentActivityViewModel(
 
                 val items = sortedTxs.map { tx ->
                     val effAmount = tx.effectiveAmount
-                    val myImpact = tx.userImpact[user.uid] ?: if (tx.createdByUid == user.uid) effAmount else 0.0
+                    val myImpact = FinanceEngine.impactFor(tx, user.uid, txs)
                     val isIncome = tx.type == TransactionType.INCOME
                     val isRefund = tx.category.equals("Estorno", ignoreCase = true) || effAmount < 0
 

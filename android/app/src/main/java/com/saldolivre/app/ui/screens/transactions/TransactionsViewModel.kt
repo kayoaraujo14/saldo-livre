@@ -7,10 +7,12 @@ import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.data.repository.FinanceRepository
+import com.saldolivre.app.data.model.UserProfile
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 data class TransactionsUiState(
+    val currentUser: UserProfile = UserProfile(),
     val transactions: List<Transaction> = emptyList(),
     val filteredTransactions: List<Transaction> = emptyList(),
     val selectedMonth: String = FinanceEngine.currentMonthKey(),
@@ -46,13 +48,18 @@ class TransactionsViewModel(
                     it.competenceMonth == month && it.visibleToUids.contains(user.uid)
                 }.sortedByDescending { it.dueDate }
 
-                val income = monthTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
-                val expense = monthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.effectiveAmount }
+                val income = monthTxs.filter { it.type == TransactionType.INCOME }.sumOf {
+                    FinanceEngine.impactFor(it, user.uid, allTxs)
+                }
+                val expense = monthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf {
+                    FinanceEngine.impactFor(it, user.uid, allTxs)
+                }
                 val paidCount = monthTxs.count { it.status == TransactionStatus.PAID }
                 val pendingCount = monthTxs.count { it.status != TransactionStatus.PAID }
 
                 _uiState.update { current ->
                     current.copy(
+                        currentUser = user,
                         transactions = monthTxs,
                         selectedMonth = month,
                         totalIncome = FinanceEngine.round2(income),

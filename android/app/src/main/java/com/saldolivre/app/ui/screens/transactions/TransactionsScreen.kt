@@ -390,6 +390,8 @@ fun TransactionsScreen(
                             content = {
                                 TransactionItem(
                                     transaction = tx,
+                                    currentUserId = uiState.currentUser.uid,
+                                    allTransactions = uiState.transactions,
                                     onClick = onItemClick,
                                     onStatusClick = onStatusToggle
                                 )
@@ -406,6 +408,8 @@ fun TransactionsScreen(
         val tx = uiState.transactions.find { it.id == initialTx.id } ?: initialTx
         TransactionDetailDialog(
             transaction = tx,
+            currentUserId = uiState.currentUser.uid,
+            allTransactions = uiState.transactions,
             onDismissRequest = { selectedTxForDetails = null },
             onToggleStatus = { viewModel.toggleStatus(tx.id) },
             onSetStatus = { status, actualAmount ->

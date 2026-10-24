@@ -33,6 +33,8 @@ private val InstallmentBadgeShape = RoundedCornerShape(4.dp)
 fun TransactionItem(
     transaction: Transaction,
     modifier: Modifier = Modifier,
+    currentUserId: String? = null,
+    allTransactions: List<Transaction> = emptyList(),
     onClick: (() -> Unit)? = null,
     onStatusClick: (() -> Unit)? = null
 ) {
@@ -50,9 +52,26 @@ fun TransactionItem(
     val shortDate = remember(transaction.dueDate) {
         FinanceEngine.formatShortDate(transaction.dueDate)
     }
-    val formattedAmount = remember(transaction.effectiveAmount, isIncome) {
+
+    val myImpact = remember(transaction, currentUserId, allTransactions) {
+        if (!currentUserId.isNullOrBlank()) {
+            FinanceEngine.impactFor(transaction, currentUserId, allTransactions)
+        } else {
+            transaction.effectiveAmount
+        }
+    }
+
+    val isSplit = remember(transaction, myImpact) {
+        kotlin.math.abs(myImpact - transaction.effectiveAmount) > 0.01 ||
+                (transaction.splitType != null && transaction.splitType != com.saldolivre.app.data.model.SplitType.MINE) ||
+                !transaction.assignedFriendUid.isNullOrBlank()
+    }
+
+    val displayAmount = if (!currentUserId.isNullOrBlank() && isSplit) myImpact else transaction.effectiveAmount
+
+    val formattedAmount = remember(displayAmount, isIncome) {
         val prefix = if (isIncome) "+ " else "- "
-        prefix + FinanceEngine.formatCurrency(transaction.effectiveAmount)
+        prefix + FinanceEngine.formatCurrency(displayAmount)
     }
     val amountColor = if (isIncome) Emerald400 else TextPrimary
     val itemBorderColor = if (isPaid) Emerald500.copy(alpha = 0.25f) else DarkBorder
@@ -164,6 +183,70 @@ fun TransactionItem(
                         SplitBadge(splitType = transaction.splitType)
                     }
                 }
+
+                // Sub-tags: Friend and Payer responsibility
+                if (!currentUserId.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (transaction.paidByUid != currentUserId && myImpact > 0.0) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF451A03).copy(alpha = 0.7f))
+                                    .border(1.dp, Color(0xFF9A3412).copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                            ) {
+                                Text(
+                                    text = "Você deve ao titular",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFFDBA74),
+                                    maxLines = 1
+                                )
+                            }
+                        } else if (transaction.paidByUid == currentUserId && transaction.effectiveAmount > myImpact) {
+                            val toReceive = transaction.effectiveAmount - myImpact
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Emerald500.copy(alpha = 0.15f))
+                                    .border(1.dp, Emerald500.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                            ) {
+                                Text(
+                                    text = "+${FinanceEngine.formatCurrency(toReceive)} a receber",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Emerald400,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        if (transaction.assignedFriendUid == currentUserId) {
+                            val isAccepted = transaction.acceptanceStatus == "accepted"
+                            val pctStr = (transaction.friendSharePct ?: 50.0).toInt()
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(if (isAccepted) Emerald500.copy(alpha = 0.15f) else Amber500.copy(alpha = 0.15f))
+                                    .border(1.dp, if (isAccepted) Emerald500.copy(alpha = 0.4f) else Amber500.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                            ) {
+                                Text(
+                                    text = if (isAccepted) "✓ Aceito ($pctStr%)" else "🕒 Aguarda aceite ($pctStr%)",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isAccepted) Emerald400 else Amber400,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.width(10.dp))
@@ -180,6 +263,15 @@ fun TransactionItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
+                if (isSplit && displayAmount != transaction.effectiveAmount && displayAmount > 0.0) {
+                    Text(
+                        text = "Total: ${FinanceEngine.formatCurrency(transaction.effectiveAmount)}",
+                        fontSize = 10.sp,
+                        color = TextMuted,
+                        maxLines = 1
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 

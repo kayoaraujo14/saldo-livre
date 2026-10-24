@@ -497,6 +497,52 @@ object FinanceEngine {
         )
     }
 
+    fun friendShareOf(tx: Transaction): Double {
+        if (tx.assignedFriendUid.isNullOrBlank()) return 0.0
+        val friendAlloc = tx.allocations.filter { it.uid == tx.assignedFriendUid }
+        val allocSum = friendAlloc.sumOf { it.amount }
+        if (allocSum > 0.0) {
+            return round2(allocSum)
+        }
+
+        // Fallback 1: se userImpact tem o assignedFriendUid com valor > 0
+        val impactVal = tx.userImpact[tx.assignedFriendUid]
+        if (impactVal != null && impactVal > 0.0) {
+            return round2(impactVal)
+        }
+
+        // Fallback 2: se tem friendSharePct
+        if (tx.friendSharePct != null && tx.friendSharePct > 0.0) {
+            val total = effectiveAmount(tx)
+            return round2((total * (tx.friendSharePct / 100.0)))
+        }
+
+        // Fallback 3: total da transação
+        return round2(effectiveAmount(tx))
+    }
+
+    fun detectSplit(tx: Transaction, viewerUid: String): SplitType {
+        if (tx.splitType != null) return tx.splitType
+        val allocs = tx.allocations
+        if (allocs.size > 2) return SplitType.CUSTOM
+        if (!tx.assignedFriendUid.isNullOrBlank() || !tx.assignedFriendName.isNullOrBlank()) return SplitType.FRIEND
+        if (allocs.any { it.type == "EXTERNAL" }) return SplitType.EXTERNAL
+        if (allocs.isEmpty()) {
+            return SplitType.MINE
+        }
+        val users = allocs.filter { it.type == "PLATFORM_USER" }
+        val mine = users.any { it.uid == viewerUid || it.name.equals("você", true) || it.name.equals("meu", true) }
+        val others = users.any { it.uid != viewerUid && !it.name.equals("você", true) && !it.name.equals("meu", true) }
+        if (mine && others) {
+            val myAlloc = users.find { it.uid == viewerUid || it.name.equals("você", true) || it.name.equals("meu", true) }?.amount ?: 0.0
+            val otherAlloc = users.find { it.uid != viewerUid && !it.name.equals("você", true) && !it.name.equals("meu", true) }?.amount ?: 0.0
+            if (kotlin.math.abs(myAlloc - otherAlloc) > 0.05) return SplitType.CUSTOM
+            return SplitType.SPLIT_50
+        }
+        if (mine) return SplitType.MINE
+        return SplitType.PARTNER
+    }
+
     fun impactFor(tx: Transaction, uid: String, all: List<Transaction>): Double {
         if (!tx.reserveCardId.isNullOrBlank()) {
             if (tx.createdByUid != uid) return 0.0
@@ -513,21 +559,79 @@ object FinanceEngine {
             return round2(max(0.0, reserve - consumed))
         }
 
+        // Caso com amigo vinculado
         if (!tx.assignedFriendUid.isNullOrBlank()) {
-            val friendAlloc = tx.allocations.filter { it.uid == tx.assignedFriendUid }
-            val friendShare = round2(friendAlloc.sumOf { it.amount }.takeIf { it > 0 } ?: tx.totalAmount)
+            val friendShare = friendShareOf(tx)
 
             if (tx.acceptanceStatus == "accepted") {
+                // Amigo aceitou: amigo sofre a cota dele
                 if (uid == tx.assignedFriendUid) return friendShare
-                return tx.userImpact[uid] ?: 0.0
+                // Se o próprio usuário tem um valor explícito em userImpact
+                val ownImpact = tx.userImpact[uid]
+                if (ownImpact != null && ownImpact > 0.0) return ownImpact
+                // Se o usuário foi quem pagou ou criou, o impacto dele é o total da compra menos o que o amigo deve
+                if (uid == tx.createdByUid || uid == tx.paidByUid) {
+                    return round2(max(0.0, effectiveAmount(tx) - friendShare))
+                }
+                return 0.0
             }
 
+            // Amigo ainda não aceitou (pendente ou recusado)
             if (uid == tx.assignedFriendUid) return 0.0
-            val own = tx.userImpact[uid] ?: 0.0
-            return if (uid == tx.createdByUid) round2(own + friendShare) else own
+            // Quem lançou provisiona o total até o aceite
+            val ownImpact = tx.userImpact[uid] ?: if (uid == tx.createdByUid || uid == tx.paidByUid) {
+                round2(max(0.0, effectiveAmount(tx) - friendShare))
+            } else 0.0
+            return if (uid == tx.createdByUid || uid == tx.paidByUid) round2(ownImpact + friendShare) else ownImpact
         }
 
-        return tx.userImpact[uid] ?: 0.0
+        // Se userImpact possui o UID com valor maior que zero
+        val directImpact = tx.userImpact[uid]
+        if (directImpact != null && directImpact > 0.0) {
+            return directImpact
+        }
+
+        // Se temos allocations explícitas cadastradas
+        if (tx.allocations.isNotEmpty()) {
+            val userAllocs = tx.allocations.filter {
+                it.type == "PLATFORM_USER" && (it.uid == uid || it.name.equals("você", true) || it.name.equals("meu", true))
+            }
+            if (userAllocs.isNotEmpty()) {
+                return round2(userAllocs.sumOf { it.amount })
+            }
+            // Se nenhuma alocação pertence ao usuário mas ele é quem pagou a compra no cartão
+            if (uid == tx.paidByUid && tx.paidByUid != tx.createdByUid) {
+                // Ele pagou mas não consome (será reembolsado)
+                return 0.0
+            }
+        }
+
+        // Divisão 50/50
+        if (tx.splitType == SplitType.SPLIT_50) {
+            if (tx.visibleToUids.contains(uid) || uid == tx.createdByUid || uid == tx.paidByUid) {
+                return round2(effectiveAmount(tx) / 2.0)
+            }
+        }
+
+        // 100% Parceiro
+        if (tx.splitType == SplitType.PARTNER) {
+            if (uid == tx.createdByUid || uid == tx.paidByUid) return 0.0
+            if (tx.visibleToUids.contains(uid)) return effectiveAmount(tx)
+        }
+
+        // 100% Meu ou Terceiro Externo
+        if (tx.splitType == SplitType.MINE || tx.splitType == SplitType.EXTERNAL) {
+            if (uid == tx.createdByUid || uid == tx.paidByUid) return effectiveAmount(tx)
+            return 0.0
+        }
+
+        // Se o usuário está em userImpact (mesmo que 0.0, ex: neutro)
+        if (directImpact != null) {
+            return directImpact
+        }
+
+        // Padrão de segurança: se criado ou pago pelo usuário, impacta o valor total; senão, 0
+        return if (uid == tx.createdByUid || uid == tx.paidByUid) effectiveAmount(tx) else 0.0
     }
 
     fun computeSummary(
@@ -936,14 +1040,6 @@ object FinanceEngine {
         }
 
         return projections
-    }
-
-    fun friendShareOf(tx: Transaction): Double {
-        val friendAlloc = tx.allocations.filter { it.uid == tx.assignedFriendUid }
-        if (friendAlloc.isNotEmpty()) {
-            return round2(friendAlloc.sumOf { it.amount })
-        }
-        return round2(tx.totalAmount)
     }
 
     fun groupPendingCharges(

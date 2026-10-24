@@ -30,12 +30,26 @@ import com.saldolivre.app.ui.theme.*
 @Composable
 fun TransactionDetailDialog(
     transaction: Transaction,
+    currentUserId: String? = null,
+    allTransactions: List<Transaction> = emptyList(),
     onDismissRequest: () -> Unit,
     onToggleStatus: () -> Unit,
     onSetStatus: (TransactionStatus, Double?) -> Unit,
     onNavigateToEditTransaction: (String) -> Unit,
     onDeleteRequest: () -> Unit
 ) {
+    val myImpact = remember(transaction, currentUserId, allTransactions) {
+        if (!currentUserId.isNullOrBlank()) {
+            FinanceEngine.impactFor(transaction, currentUserId, allTransactions)
+        } else {
+            transaction.effectiveAmount
+        }
+    }
+    val isSplit = remember(transaction, myImpact) {
+        kotlin.math.abs(myImpact - transaction.effectiveAmount) > 0.01 ||
+                (transaction.splitType != null && transaction.splitType != com.saldolivre.app.data.model.SplitType.MINE) ||
+                !transaction.assignedFriendUid.isNullOrBlank()
+    }
     var customActualInput by remember(transaction.id, transaction.effectiveAmount) {
         mutableStateOf(String.format(java.util.Locale.US, "%.2f", transaction.effectiveAmount))
     }
@@ -59,7 +73,17 @@ fun TransactionDetailDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                DetailRow(label = "Valor Efetivo", value = FinanceEngine.formatCurrency(transaction.effectiveAmount))
+                if (!currentUserId.isNullOrBlank() && isSplit && myImpact != transaction.effectiveAmount) {
+                    DetailRow(label = "Sua Cota (Impacto)", value = FinanceEngine.formatCurrency(myImpact))
+                    DetailRow(label = "Valor Total da Compra", value = FinanceEngine.formatCurrency(transaction.effectiveAmount))
+                    if (transaction.paidByUid != currentUserId && myImpact > 0.0) {
+                        DetailRow(label = "Responsabilidade", value = "Você deve ao titular da compra")
+                    } else if (transaction.paidByUid == currentUserId && transaction.effectiveAmount > myImpact) {
+                        DetailRow(label = "A Receber", value = "+${FinanceEngine.formatCurrency(transaction.effectiveAmount - myImpact)}")
+                    }
+                } else {
+                    DetailRow(label = "Valor Efetivo", value = FinanceEngine.formatCurrency(transaction.effectiveAmount))
+                }
                 if (transaction.estimatedAmount != null) {
                     DetailRow(label = "Valor Estimado", value = FinanceEngine.formatCurrency(transaction.estimatedAmount))
                 }
@@ -69,6 +93,20 @@ fun TransactionDetailDialog(
                 DetailRow(label = "Forma de Pagamento", value = transaction.paymentMethod.label)
                 transaction.splitType?.let {
                     DetailRow(label = "Divisão", value = "${it.emoji} ${it.label}")
+                }
+                if (transaction.allocations.isNotEmpty()) {
+                    DetailRow(
+                        label = "Rateio / Participantes",
+                        value = transaction.allocations.joinToString(", ") { "${it.name}: ${FinanceEngine.formatCurrency(it.amount)}" }
+                    )
+                }
+                if (!transaction.assignedFriendUid.isNullOrBlank()) {
+                    val statusText = if (transaction.acceptanceStatus == "accepted") "Aceito" else "Aguardando aceite"
+                    val pct = (transaction.friendSharePct ?: 50.0).toInt()
+                    DetailRow(
+                        label = "Amigo Vinculado",
+                        value = "${transaction.assignedFriendName ?: "Amigo"} ($pct%) • $statusText"
+                    )
                 }
 
                 HorizontalDivider(color = DarkBorder, modifier = Modifier.padding(vertical = 2.dp))
