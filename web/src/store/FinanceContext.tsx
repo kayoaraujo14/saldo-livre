@@ -1216,7 +1216,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
         if (input.paymentMethod === 'credit_card' && card) {
           const cardDates = calculateCardInvoiceDates(curDate, card)
-          curDueDate = cardDates.dueDate
+          curDueDate = curDate
           curCompetenceMonth = cardDates.competenceMonth
         }
         const curDesc = isInstallment

@@ -921,6 +921,10 @@ class FirestoreFinanceRepository(
         val splitStr = doc.getString("splitType")
         val parsedSplitType = SplitType.from(splitStr)
 
+        val extName = doc.getString("externalName")
+            ?: doc.getString("thirdPartyName")
+            ?: rawAllocations.find { it.type == "EXTERNAL" }?.name
+
         val tx = Transaction(
             id = doc.id,
             createdByUid = createdUid,
@@ -951,7 +955,8 @@ class FirestoreFinanceRepository(
             installmentGroupId = doc.getString("installmentGroupId"),
             installmentNumber = doc.getLong("installmentNumber")?.toInt(),
             installmentsTotal = doc.getLong("installmentsTotal")?.toInt(),
-            splitType = parsedSplitType
+            splitType = parsedSplitType,
+            externalName = extName
         )
         val finalSplit = parsedSplitType ?: FinanceEngine.detectSplit(tx, createdUid)
         return tx.copy(splitType = finalSplit)
@@ -996,7 +1001,9 @@ class FirestoreFinanceRepository(
             "installmentGroupId" to tx.installmentGroupId,
             "installmentNumber" to tx.installmentNumber,
             "installmentsTotal" to tx.installmentsTotal,
-            "splitType" to tx.splitType?.value
+            "splitType" to tx.splitType?.value,
+            "externalName" to tx.externalName,
+            "thirdPartyName" to tx.externalName
         )
     }
 

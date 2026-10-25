@@ -112,6 +112,16 @@ data class Allocation(
 )
 
 @Immutable
+data class CustomParticipantRow(
+    val id: String,
+    val type: String, // "me" | "partner" | "friend" | "external"
+    val uid: String? = null,
+    val name: String = "",
+    val amount: Double = 0.0,
+    val percentage: Double = 0.0
+)
+
+@Immutable
 data class FriendSplitInput(
     val uid: String = "",
     val name: String = "",

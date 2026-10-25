@@ -372,7 +372,9 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
 
   if (method === 'credit_card') {
     const invoiceDates = calculateCardInvoiceDates(date, card, explicitDueDate, explicitMonth)
-    finalDueDate = invoiceDates.dueDate
+    // Para compras no cartão, a data do lançamento deve ser a data da compra (date),
+    // e competenceMonth define a qual fatura ele pertence.
+    finalDueDate = date
     competenceMonth = invoiceDates.competenceMonth
   } else if (explicitDueDate) {
     finalDueDate = explicitDueDate
@@ -425,7 +427,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
         : []),
       { label: 'Categoria', value: subcategory ? `${category} › ${subcategory}` : category },
       { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
-      { label: 'Vencimento', value: formatShortDate(finalDueDate) },
+      { label: method === 'credit_card' ? 'Data da Compra' : 'Vencimento', value: formatShortDate(finalDueDate) },
       {
         label: 'Divisão',
         value: assignedFriend
@@ -452,7 +454,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       response: {
         ok: true,
         aguardandoConfirmacao: true,
-        mensagem: `Entendi que você deseja cadastrar uma ${type === 'income' ? 'receita' : 'despesa'}: "${finalDescription}" no valor de ${money(total)}${card ? ` no cartão ${card.cardName}` : ''} para ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
+        mensagem: `Entendi que você deseja cadastrar uma ${type === 'income' ? 'receita' : 'despesa'}: "${finalDescription}" no valor de ${money(total)}${card ? ` no cartão ${card.cardName}` : ''} realizada em ${formatShortDate(date)} para a fatura de ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
         descricao: finalDescription,
         valorParcela: total,
         tipo: type,
@@ -643,7 +645,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
           : []),
         { label: 'Categoria', value: subcategory ? `${category} › ${subcategory}` : category },
         { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
-        { label: 'Vencimento', value: formatShortDate(finalDueDate) },
+        { label: method === 'credit_card' ? 'Data da Compra' : 'Vencimento', value: formatShortDate(finalDueDate) },
         {
           label: 'Divisão',
           value: assignedFriend

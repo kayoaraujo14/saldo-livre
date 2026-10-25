@@ -554,9 +554,8 @@ export function impactFor(tx: Transaction, uid: string, all: Transaction[]) {
     }
     // Pendente ou recusado: amigo ainda NÃO tem o saldo comprometido
     if (uid === tx.assignedFriendUid) return 0
-    // Quem lançou provisiona também a parte do amigo até o aceite
-    const own = tx.userImpact?.[uid] ?? 0
-    return uid === tx.createdByUid ? round2(own + friendShare) : own
+    // Quem lançou tem apenas o seu próprio impacto (a cota do amigo é valor a receber em receivables)
+    return tx.userImpact?.[uid] ?? 0
   }
 
   return tx.userImpact?.[uid] ?? 0

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useFinance } from '@/store/FinanceContext'
 import { CATEGORIES, CATEGORY_GROUPS, type Allocation, type Category, type PaymentMethod, type SplitType, type Transaction, type TransactionStatus } from '@/types'
-import { clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory } from '@/lib/finance'
+import { calculateCardInvoiceDates, clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory } from '@/lib/finance'
 import { todayKey, formatBRL, stripInstallmentSuffix, round2 } from '@/lib/utils'
 import {
   CreditCard,
@@ -495,11 +495,16 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             customAllocations,
           })
         } else {
+          const card = cards.find((c) => c.id === cardId)
+          const newCompetenceMonth = paymentMethod === 'credit_card' && card
+            ? calculateCardInvoiceDates(date, card).competenceMonth
+            : date.slice(0, 7)
           await updateTransaction(editingTx.id, {
             description: description.trim(),
             category,
             subcategory: subcategory || null,
             dueDate: date,
+            competenceMonth: newCompetenceMonth,
             paymentMethod,
             cardId: paymentMethod === 'credit_card' ? (cardId || null) : null,
             splitType: isCustom ? 'custom' : splitType,
@@ -750,7 +755,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
                 <Calendar className="size-3.5 text-slate-400" />
-                <span>{isIncomeType ? 'Data de Recebimento' : 'Data de Vencimento'}</span>
+                <span>{isIncomeType ? 'Data de Recebimento' : paymentMethod === 'credit_card' ? 'Data da Compra' : 'Data de Vencimento'}</span>
               </label>
               <Input
                 type="date"

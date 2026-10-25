@@ -192,6 +192,21 @@ object FinanceEngine {
         }
     }
 
+    fun shiftDateMonth(dateStr: String?, delta: Int): String {
+        val key = if (!dateStr.isNullOrBlank() && dateStr.contains("-")) dateStr.trim() else todayKey()
+        return try {
+            val parts = key.split("-")
+            val year = parts[0].toInt()
+            val month = parts[1].toInt()
+            val day = if (parts.size >= 3) parts[2].take(2).toInt() else 1
+            val ym = YearMonth.of(year, month).plusMonths(delta.toLong())
+            val clampedDay = kotlin.math.min(day, ym.lengthOfMonth())
+            String.format(Locale.US, "%04d-%02d-%02d", ym.year, ym.monthValue, clampedDay)
+        } catch (_: Exception) {
+            key
+        }
+    }
+
     fun effectiveAmount(tx: Transaction): Double {
         return tx.actualAmount ?: tx.estimatedAmount ?: tx.totalAmount
     }
@@ -285,10 +300,14 @@ object FinanceEngine {
         externalName: String? = null,
         assignedFriendUid: String? = null,
         assignedFriendName: String? = null,
-        friendSharePct: Double? = null
+        friendSharePct: Double? = null,
+        customAllocations: List<Allocation>? = null
     ): SplitResult {
         val allocations = mutableListOf<Allocation>()
         val visible = mutableSetOf(myUid, payerUid)
+        if (!assignedFriendUid.isNullOrBlank()) {
+            visible.add(assignedFriendUid)
+        }
 
         when (splitType) {
             SplitType.MINE -> {
@@ -412,15 +431,32 @@ object FinanceEngine {
                 )
             }
             SplitType.CUSTOM -> {
-                allocations.add(
-                    Allocation(
-                        type = "PLATFORM_USER",
-                        uid = myUid,
-                        name = myName,
-                        amount = round2(total),
-                        reimbursed = true
+                if (!customAllocations.isNullOrEmpty()) {
+                    for (a in customAllocations) {
+                        allocations.add(
+                            Allocation(
+                                type = a.type,
+                                uid = a.uid,
+                                name = a.name.ifBlank { "Participante" },
+                                amount = round2(a.amount),
+                                reimbursed = (a.uid == payerUid)
+                            )
+                        )
+                        if (!a.uid.isNullOrBlank()) {
+                            visible.add(a.uid)
+                        }
+                    }
+                } else {
+                    allocations.add(
+                        Allocation(
+                            type = "PLATFORM_USER",
+                            uid = myUid,
+                            name = myName,
+                            amount = round2(total),
+                            reimbursed = true
+                        )
                     )
-                )
+                }
             }
         }
 
@@ -430,6 +466,26 @@ object FinanceEngine {
             userImpact = deriveImpact(allocations, visibleList),
             visibleToUids = visibleList
         )
+    }
+
+    /**
+     * Resolve o parceiro a partir dos cartões compartilhados ou da lista de usuários.
+     */
+    fun resolvePartner(meUid: String, cards: List<Card>, allUsers: List<UserProfile>): UserProfile? {
+        for (c in cards) {
+            if (c.ownerUid == meUid && c.sharedWithUsers.isNotEmpty()) {
+                val s = c.sharedWithUsers.firstOrNull()
+                if (s != null) {
+                    val matched = allUsers.find { it.uid == s.uid }
+                    return matched ?: UserProfile(uid = s.uid, displayName = s.name, email = s.email)
+                }
+            }
+            if (c.ownerUid != meUid && c.sharedWithUids.contains(meUid)) {
+                val matched = allUsers.find { it.uid == c.ownerUid }
+                return matched ?: UserProfile(uid = c.ownerUid, displayName = c.ownerName, email = "")
+            }
+        }
+        return allUsers.find { it.uid != meUid && it.uid.isNotBlank() }
     }
 
     val STATUS_ORDER: List<TransactionStatus> = listOf(
@@ -568,7 +624,7 @@ object FinanceEngine {
                 if (uid == tx.assignedFriendUid) return friendShare
                 // Se o próprio usuário tem um valor explícito em userImpact
                 val ownImpact = tx.userImpact[uid]
-                if (ownImpact != null && ownImpact > 0.0) return ownImpact
+                if (ownImpact != null) return ownImpact
                 // Se o usuário foi quem pagou ou criou, o impacto dele é o total da compra menos o que o amigo deve
                 if (uid == tx.createdByUid || uid == tx.paidByUid) {
                     return round2(max(0.0, effectiveAmount(tx) - friendShare))
@@ -578,19 +634,20 @@ object FinanceEngine {
 
             // Amigo ainda não aceitou (pendente ou recusado)
             if (uid == tx.assignedFriendUid) return 0.0
-            // Quem lançou provisiona o total até o aceite
+            // Quem lançou tem apenas a sua própria parte (a cota do amigo é valor a receber em receivables, não despesa própria)
             val ownImpact = tx.userImpact[uid] ?: if (uid == tx.createdByUid || uid == tx.paidByUid) {
                 round2(max(0.0, effectiveAmount(tx) - friendShare))
             } else 0.0
-            return if (uid == tx.createdByUid || uid == tx.paidByUid) round2(ownImpact + friendShare) else ownImpact
+            return ownImpact
         }
 
-        // Se userImpact possui o UID com valor maior que zero
+        // Se userImpact possui o UID (inclusive se for 0.0, ex: compras para terceiros ou parceiro)
         val directImpact = tx.userImpact[uid]
-        if (directImpact != null && directImpact > 0.0) {
+        if (directImpact != null) {
             return directImpact
         }
 
+        // Fallbacks para dados legados sem userImpact explícito:
         // Se temos allocations explícitas cadastradas
         if (tx.allocations.isNotEmpty()) {
             val userAllocs = tx.allocations.filter {
@@ -599,11 +656,13 @@ object FinanceEngine {
             if (userAllocs.isNotEmpty()) {
                 return round2(userAllocs.sumOf { it.amount })
             }
-            // Se nenhuma alocação pertence ao usuário mas ele é quem pagou a compra no cartão
-            if (uid == tx.paidByUid && tx.paidByUid != tx.createdByUid) {
-                // Ele pagou mas não consome (será reembolsado)
-                return 0.0
-            }
+            // Se nenhuma alocação pertence ao usuário (ex: EXTERNAL ou apenas outro usuário), não há consumo
+            return 0.0
+        }
+
+        // Terceiro Externo: nunca consome o saldo livre do usuário (é 100% valor a receber em receivables)
+        if (tx.splitType == SplitType.EXTERNAL) {
+            return 0.0
         }
 
         // Divisão 50/50
@@ -611,23 +670,20 @@ object FinanceEngine {
             if (tx.visibleToUids.contains(uid) || uid == tx.createdByUid || uid == tx.paidByUid) {
                 return round2(effectiveAmount(tx) / 2.0)
             }
+            return 0.0
         }
 
         // 100% Parceiro
         if (tx.splitType == SplitType.PARTNER) {
             if (uid == tx.createdByUid || uid == tx.paidByUid) return 0.0
             if (tx.visibleToUids.contains(uid)) return effectiveAmount(tx)
-        }
-
-        // 100% Meu ou Terceiro Externo
-        if (tx.splitType == SplitType.MINE || tx.splitType == SplitType.EXTERNAL) {
-            if (uid == tx.createdByUid || uid == tx.paidByUid) return effectiveAmount(tx)
             return 0.0
         }
 
-        // Se o usuário está em userImpact (mesmo que 0.0, ex: neutro)
-        if (directImpact != null) {
-            return directImpact
+        // 100% Meu
+        if (tx.splitType == SplitType.MINE) {
+            if (uid == tx.createdByUid || uid == tx.paidByUid) return effectiveAmount(tx)
+            return 0.0
         }
 
         // Padrão de segurança: se criado ou pago pelo usuário, impacta o valor total; senão, 0

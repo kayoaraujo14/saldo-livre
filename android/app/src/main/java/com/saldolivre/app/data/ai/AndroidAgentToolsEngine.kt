@@ -89,17 +89,7 @@ class AndroidAgentToolsEngine(
     }
 
     fun shiftDateMonth(dateStr: String, delta: Int): String {
-        return try {
-            val parts = dateStr.split("-")
-            val year = parts[0].toInt()
-            val month = parts[1].toInt()
-            val day = parts[2].take(2).toInt()
-            val ym = java.time.YearMonth.of(year, month).plusMonths(delta.toLong())
-            val clampedDay = kotlin.math.min(day, ym.lengthOfMonth())
-            String.format(java.util.Locale.US, "%04d-%02d-%02d", ym.year, ym.monthValue, clampedDay)
-        } catch (_: Exception) {
-            dateStr
-        }
+        return FinanceEngine.shiftDateMonth(dateStr, delta)
     }
 
     // -------------------------------------------------------------
@@ -184,7 +174,8 @@ class AndroidAgentToolsEngine(
         }
 
         val finalCompetenceMonth = customCompetenceMonth?.takeIf { it.isNotBlank() } ?: calcCompetenceMonth
-        val finalDueDate = customDueDate?.takeIf { it.isNotBlank() } ?: calcDueDate
+        // Para cartão de crédito, a data do lançamento é a data em que a compra foi realizada (baseDate)
+        val finalDueDate = if (isCreditCard) baseDate else (customDueDate?.takeIf { it.isNotBlank() } ?: calcDueDate)
 
         // Categorização inteligente se não informada
         var finalCat = category?.takeIf { it.isNotBlank() && it != "Outros" }
@@ -196,9 +187,36 @@ class AndroidAgentToolsEngine(
             finalSubcat = guess.subcategory ?: finalSubcat
         }
 
-        val partner = repository.allUsers.find { it.uid != user.uid }
+        val partner = FinanceEngine.resolvePartner(user.uid, cards, repository.allUsers)
+        val friendships = repository.getFriendships().first()
+        val matchedFriend = if (!friendEmail.isNullOrBlank()) {
+            friendships.find {
+                it.status == FriendshipStatus.ACCEPTED &&
+                (it.recipientEmail.equals(friendEmail, true) || it.requesterEmail.equals(friendEmail, true))
+            }
+        } else if (!friendName.isNullOrBlank()) {
+            friendships.find {
+                it.status == FriendshipStatus.ACCEPTED &&
+                (it.recipientName.contains(friendName, true) || it.requesterName.contains(friendName, true))
+            }
+        } else null
+
+        val assignedFriendUid = matchedFriend?.let {
+            if (it.requesterUid == user.uid) it.recipientUid else it.requesterUid
+        }
+        val assignedFriendName = matchedFriend?.let {
+            if (it.requesterUid == user.uid) it.recipientName else it.requesterName
+        } ?: friendName ?: friendEmail
+
+        val effectiveSplitType = if (assignedFriendUid != null || !friendName.isNullOrBlank()) SplitType.FRIEND
+            else if (!thirdPartyName.isNullOrBlank()) SplitType.EXTERNAL
+            else splitType
+
+        val friendPct = if (effectiveSplitType == SplitType.FRIEND) 100.0 else null
+        val acceptanceStatus = if (assignedFriendUid != null) "pending_approval" else null
+
         val splitResult = FinanceEngine.buildSplit(
-            splitType = splitType,
+            splitType = effectiveSplitType,
             total = amount,
             myUid = user.uid,
             myName = user.displayName,
@@ -206,7 +224,9 @@ class AndroidAgentToolsEngine(
             partnerName = partner?.displayName,
             payerUid = user.uid,
             externalName = thirdPartyName,
-            assignedFriendName = friendName ?: friendEmail
+            assignedFriendUid = assignedFriendUid,
+            assignedFriendName = assignedFriendName,
+            friendSharePct = friendPct
         )
 
         val cleanDesc = FinanceEngine.stripInstallmentSuffix(description)
@@ -229,7 +249,8 @@ class AndroidAgentToolsEngine(
                         "Por favor, confirme se os dados estão corretos para registrar no Saldo Livre."
             } else {
                 val typeName = if (type == TransactionType.INCOME) "receita" else "despesa"
-                "Entendi que você deseja cadastrar uma $typeName: **\"$cleanDesc\"** no valor de **${FinanceEngine.formatCurrency(amount)}**${if (matchedCard != null) " no cartão **${matchedCard.cardName}**" else ""} para **${FinanceEngine.monthLabel(finalCompetenceMonth)}** (vencimento: ${FinanceEngine.formatShortDate(finalDueDate)}).\n\n" +
+                val dateDetail = if (isCreditCard) " realizada em **${FinanceEngine.formatShortDate(finalDueDate)}** para a fatura de **${FinanceEngine.monthLabel(finalCompetenceMonth)}**" else " para **${FinanceEngine.monthLabel(finalCompetenceMonth)}** (data: ${FinanceEngine.formatShortDate(finalDueDate)})"
+                "Entendi que você deseja cadastrar uma $typeName: **\"$cleanDesc\"** no valor de **${FinanceEngine.formatCurrency(amount)}**${if (matchedCard != null) " no cartão **${matchedCard.cardName}**" else ""}$dateDetail.\n\n" +
                         "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
                         "• **Método**: ${effectiveMethod.label}\n" +
                         "• **Divisão**: ${splitType.label} (Seu impacto: ${FinanceEngine.formatCurrency(myImpact)})\n" +
@@ -291,11 +312,7 @@ class AndroidAgentToolsEngine(
             for (i in 1..totalInstallments) {
                 val delta = i - currentInstallment
                 val targetMonth = FinanceEngine.shiftMonth(finalCompetenceMonth, delta)
-                val targetDueDate = if (isCreditCard && matchedCard != null) {
-                    FinanceEngine.dateInMonth(targetMonth, matchedCard.dueDay)
-                } else {
-                    shiftDateMonth(finalDueDate, delta)
-                }
+                val targetDueDate = shiftDateMonth(finalDueDate, delta)
 
                 val isPast = i < currentInstallment
                 val status = if (isPast) TransactionStatus.PAID else TransactionStatus.PENDING
@@ -319,10 +336,15 @@ class AndroidAgentToolsEngine(
                         visibleToUids = splitResult.visibleToUids,
                         userImpact = splitResult.userImpact,
                         allocations = if (isPast) splitResult.allocations.map { it.copy(reimbursed = true) } else splitResult.allocations,
-                        splitType = splitType,
+                        splitType = effectiveSplitType,
                         installmentGroupId = groupId,
                         installmentNumber = i,
-                        installmentsTotal = totalInstallments
+                        installmentsTotal = totalInstallments,
+                        assignedFriendUid = assignedFriendUid,
+                        assignedFriendName = assignedFriendName,
+                        acceptanceStatus = acceptanceStatus,
+                        friendSharePct = friendPct,
+                        externalName = thirdPartyName
                     )
                 )
             }
@@ -377,7 +399,12 @@ class AndroidAgentToolsEngine(
                 visibleToUids = splitResult.visibleToUids,
                 userImpact = splitResult.userImpact,
                 allocations = splitResult.allocations,
-                splitType = splitType
+                splitType = effectiveSplitType,
+                assignedFriendUid = assignedFriendUid,
+                assignedFriendName = assignedFriendName,
+                acceptanceStatus = acceptanceStatus,
+                friendSharePct = friendPct,
+                externalName = thirdPartyName
             )
 
             repository.addTransaction(tx)
@@ -399,12 +426,14 @@ class AndroidAgentToolsEngine(
 
             val typeLabel = if (type == TransactionType.INCOME) "Receita" else "Despesa"
 
+            val dateLabel = if (isCreditCard) "Data da Compra" else "Vencimento"
+
             return ToolExecutionResult(
                 text = "✅ **$typeLabel registrada com sucesso!**\n\n" +
                         "• **Descrição**: $cleanDesc\n" +
                         "• **Valor**: ${FinanceEngine.formatCurrency(amount)}\n" +
                         "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
-                        "• **Competência**: ${FinanceEngine.monthLabel(finalCompetenceMonth)} (Vencimento: ${FinanceEngine.formatShortDate(finalDueDate)})$cardText\n" +
+                        "• **Competência**: ${FinanceEngine.monthLabel(finalCompetenceMonth)} ($dateLabel: ${FinanceEngine.formatShortDate(finalDueDate)})$cardText\n" +
                         "• **Divisão**: ${splitType.label} (Seu impacto: ${FinanceEngine.formatCurrency(myImpact)})\n\n" +
                         "Seu **Saldo Livre** foi atualizado em tempo real!",
                 actionCard = ActionCardData(
@@ -431,14 +460,48 @@ class AndroidAgentToolsEngine(
         val friendEmail = jsonObj.getStringOrNull("friendEmail")
         val thirdPartyName = jsonObj.getStringOrNull("thirdPartyName")
         val competenceMonth = jsonObj.getStringOrNull("competenceMonth")
-        val dueDate = jsonObj.getStringOrNull("dueDate")
+        val dueDate = jsonObj.getStringOrNull("date")
+            ?: jsonObj.getStringOrNull("data")
+            ?: jsonObj.getStringOrNull("dataCompra")
+            ?: jsonObj.getStringOrNull("dueDate")
         val confirmed = jsonObj.getBooleanOrNull("confirmed")
             ?: jsonObj.getBooleanOrNull("__confirmed")
             ?: false
 
         val installmentsObj = jsonObj.getAsJsonObjectOrNull("installments")
-        val currentInstallment = installmentsObj.getIntOrNull("current") ?: 1
-        val totalInstallments = installmentsObj.getIntOrNull("total") ?: 1
+        val rawCurrent = installmentsObj?.getIntOrNull("current")
+            ?: installmentsObj?.getIntOrNull("currentInstallment")
+            ?: jsonObj.getIntOrNull("currentInstallment")
+            ?: jsonObj.getIntOrNull("parcelaAtual")
+            ?: jsonObj.getIntOrNull("parcela")
+            ?: 1
+
+        val rawTotal = installmentsObj?.getIntOrNull("total")
+            ?: installmentsObj?.getIntOrNull("totalInstallments")
+            ?: jsonObj.getIntOrNull("totalInstallments")
+            ?: jsonObj.getIntOrNull("totalParcelas")
+            ?: jsonObj.getIntOrNull("parcelas")
+            ?: (jsonObj.get("installments")?.let { if (it.isJsonPrimitive && it.asJsonPrimitive.isNumber) it.asInt else null })
+            ?: 1
+
+        val detectedFromDesc = if (rawTotal <= 1) neuralClassifier.detectInstallments(desc) else null
+        val currentInstallment = if (rawTotal > 1) rawCurrent else (detectedFromDesc?.first ?: rawCurrent)
+        val totalInstallments = if (rawTotal > 1) rawTotal else (detectedFromDesc?.second ?: rawTotal)
+
+        val explicitInstallmentAmt = jsonObj.getDoubleOrNull("valorParcela")
+            ?: jsonObj.getDoubleOrNull("installmentAmount")
+            ?: jsonObj.getDoubleOrNull("amountPerInstallment")
+
+        val explicitTotalAmt = jsonObj.getDoubleOrNull("valorTotal")
+            ?: jsonObj.getDoubleOrNull("totalAmount")
+
+        val finalAmount = when {
+            explicitInstallmentAmt != null && explicitInstallmentAmt > 0 -> explicitInstallmentAmt
+            explicitTotalAmt != null && explicitTotalAmt > 0 && totalInstallments > 1 -> FinanceEngine.round2(explicitTotalAmt / totalInstallments)
+            totalInstallments > 1 && (jsonObj.getBooleanOrNull("isTotalAmount") == true || jsonObj.getBooleanOrNull("ehValorTotal") == true) ->
+                FinanceEngine.round2(amount / totalInstallments)
+            else -> amount
+        }
 
         val txType = if (typeStr.equals("income", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
         val payMethod = PaymentMethod.from(payMethodStr)
@@ -453,7 +516,7 @@ class AndroidAgentToolsEngine(
 
         return executeCreateTransaction(
             description = desc,
-            amount = amount,
+            amount = finalAmount,
             type = txType,
             category = category,
             subcategory = subcategory,
@@ -533,26 +596,75 @@ class AndroidAgentToolsEngine(
             )
             if (filterStatus.equals("ignorada", ignoreCase = true)) continue
 
-            val tx = Transaction(
-                id = "tx_" + UUID.randomUUID().toString().take(8),
-                createdByUid = user.uid,
-                paidByUid = user.uid,
-                description = desc,
-                category = cat,
-                subcategory = subcat,
-                type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
-                paymentMethod = PaymentMethod.from(payMethodStr),
-                status = if (isIncome) TransactionStatus.PAID else TransactionStatus.PENDING,
-                actualAmount = amt,
-                totalAmount = amt,
-                dueDate = dt,
-                competenceMonth = comp,
-                visibleToUids = listOf(user.uid),
-                userImpact = mapOf(user.uid to amt),
-                allocations = listOf(Allocation(type = "PLATFORM_USER", uid = user.uid, name = user.displayName, amount = amt, reimbursed = true))
-            )
-            createdList.add(tx)
-            if (isIncome) totalIncomes += amt else totalExpenses += amt
+            val itemInstObj = item.getAsJsonObjectOrNull("installments")
+            val itemCur = itemInstObj?.getIntOrNull("current")
+                ?: item.getIntOrNull("currentInstallment")
+                ?: item.getIntOrNull("parcelaAtual")
+                ?: 1
+            val itemTot = itemInstObj?.getIntOrNull("total")
+                ?: item.getIntOrNull("totalInstallments")
+                ?: item.getIntOrNull("totalParcelas")
+                ?: (item.get("installments")?.let { if (it.isJsonPrimitive && it.asJsonPrimitive.isNumber) it.asInt else null })
+                ?: 1
+
+            val detectedBatchInst = if (itemTot <= 1) neuralClassifier.detectInstallments(desc) else null
+            val finalCur = if (itemTot > 1) itemCur else (detectedBatchInst?.first ?: itemCur)
+            val finalTot = if (itemTot > 1) itemTot else (detectedBatchInst?.second ?: itemTot)
+
+            if (finalTot > 1 && !isIncome) {
+                val cleanDesc = FinanceEngine.stripInstallmentSuffix(desc)
+                val groupId = "inst_" + UUID.randomUUID().toString().take(8)
+                for (i in 1..finalTot) {
+                    val delta = i - finalCur
+                    val targetMonth = FinanceEngine.shiftMonth(comp, delta)
+                    val targetDueDate = shiftDateMonth(dt, delta)
+                    val isPast = i < finalCur
+                    val tx = Transaction(
+                        id = "tx_" + UUID.randomUUID().toString().take(8),
+                        createdByUid = user.uid,
+                        paidByUid = user.uid,
+                        description = FinanceEngine.formatInstallmentDesc(cleanDesc, i, finalTot),
+                        category = cat,
+                        subcategory = subcat,
+                        type = TransactionType.EXPENSE,
+                        paymentMethod = PaymentMethod.from(payMethodStr),
+                        status = if (isPast) TransactionStatus.PAID else TransactionStatus.PENDING,
+                        actualAmount = amt,
+                        totalAmount = amt,
+                        dueDate = targetDueDate,
+                        competenceMonth = targetMonth,
+                        visibleToUids = listOf(user.uid),
+                        userImpact = mapOf(user.uid to amt),
+                        allocations = listOf(Allocation(type = "PLATFORM_USER", uid = user.uid, name = user.displayName, amount = amt, reimbursed = isPast)),
+                        installmentGroupId = groupId,
+                        installmentNumber = i,
+                        installmentsTotal = finalTot
+                    )
+                    createdList.add(tx)
+                }
+                totalExpenses += amt
+            } else {
+                val tx = Transaction(
+                    id = "tx_" + UUID.randomUUID().toString().take(8),
+                    createdByUid = user.uid,
+                    paidByUid = user.uid,
+                    description = desc,
+                    category = cat,
+                    subcategory = subcat,
+                    type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
+                    paymentMethod = PaymentMethod.from(payMethodStr),
+                    status = if (isIncome) TransactionStatus.PAID else TransactionStatus.PENDING,
+                    actualAmount = amt,
+                    totalAmount = amt,
+                    dueDate = dt,
+                    competenceMonth = comp,
+                    visibleToUids = listOf(user.uid),
+                    userImpact = mapOf(user.uid to amt),
+                    allocations = listOf(Allocation(type = "PLATFORM_USER", uid = user.uid, name = user.displayName, amount = amt, reimbursed = true))
+                )
+                createdList.add(tx)
+                if (isIncome) totalIncomes += amt else totalExpenses += amt
+            }
         }
 
         if (createdList.isEmpty()) {

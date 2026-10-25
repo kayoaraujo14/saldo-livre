@@ -242,14 +242,14 @@ export const functionDeclarations: FunctionDeclaration[] = [
           enum: ['estimated', 'pending', 'paid'],
           description: 'pending para compras no cartão de crédito na fatura; paid se já pago; estimated para previsão.',
         },
-        data: { type: Type.STRING, description: 'Data da compra no formato YYYY-MM-DD. Padrão: hoje.' },
+        data: { type: Type.STRING, description: 'Data da realização da compra no formato YYYY-MM-DD (ex: se disse "ontem", calcule a data de ontem; se "hoje", hoje). Padrão: hoje.' },
         mesFatura: {
           type: Type.STRING,
           description: 'Mês de competência (YYYY-MM) que comprometerá o Saldo Livre. Ex: "2026-11". Essencial para cartão cuja fatura já fechou ou vence no mês seguinte!',
         },
         dataVencimento: {
           type: Type.STRING,
-          description: 'Data de vencimento da fatura/conta (YYYY-MM-DD). Ex: "2026-11-14".',
+          description: 'Opcional: Data de vencimento da fatura/conta (YYYY-MM-DD). Ex: "2026-11-14". Não confunda com a data da compra!',
         },
         tipoDivisao: {
           type: Type.STRING,
@@ -731,10 +731,9 @@ Se o usuário pedir para você aprender uma nova regra, memorizar um comportamen
 REGRAS DE FUNCIONAMENTO:
 
 1. CARTÕES DE CRÉDITO, FATURA E MÊS DE COMPETÊNCIA:
-- Compras no cartão de crédito comprometem a renda do MÊS DE VENCIMENTO DA FATURA (competenceMonth), e NÃO a data em que a compra foi feita!
-- Se o usuário disser que os gastos virão para a fatura com vencimento em determinado dia/mês (ex: "vence 14/11" ou "fatura de novembro"):
-  Defina obrigatoriamente: dataVencimento = "2026-11-14" e mesFatura = "2026-11"! O orçamento que deve ser comprometido é novembro, e não outubro!
-- Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay).
+- O parâmetro "data" É SEMPRE A DATA EM QUE A COMPRA FOI REALIZADA (ex: se o usuário disser "ontem", envie a data de ontem YYYY-MM-DD; se "hoje", envie a data de hoje). NUNCA coloque a data de vencimento da fatura no campo "data"!
+- Compras no cartão de crédito comprometem a renda do MÊS DE VENCIMENTO DA FATURA (mesFatura/competenceMonth), e NÃO a data em que a compra foi feita!
+- Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay). Envie "mesFatura" com o mês correto da fatura (ex: "2026-11").
 
 2. AMIGOS NA REDE E DIVISÃO DE CONTAS (PORCENTAGEM, VALORES ESPECÍFICOS E MULTI-PESSOAS):
 - Se o usuário disser que um gasto é de um amigo na plataforma (ex: "KAYO", "kayoaraujo2002@gmail.com"):

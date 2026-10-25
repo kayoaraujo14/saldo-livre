@@ -644,10 +644,11 @@ class GeminiChatViewModel(
                 val transactions = selectedItems.map { item ->
                     val isCard = item.paymentMethod == PaymentMethod.CREDIT_CARD && targetCard != null
                     val (dueDate, compMonth) = if (isCard && targetCard != null) {
-                        FinanceEngine.calculateCardInvoiceDates(
+                        val cardDates = FinanceEngine.calculateCardInvoiceDates(
                             purchaseDate = item.date,
                             card = targetCard
                         )
+                        Pair(item.date, cardDates.second)
                     } else {
                         val m = if (item.date.length >= 7) item.date.substring(0, 7) else defaultMonth
                         Pair(item.date, m)
@@ -1414,10 +1415,13 @@ Sempre que você precisar realizar uma ação, explique brevemente ao usuário e
   "friendEmail": null,
   "thirdPartyName": null,
   "installments": { "current": 1, "total": 1 },
-  "competenceMonth": "2026-11",
-  "dueDate": "2026-11-10"
+  "date": "2026-10-24",
+  "competenceMonth": "2026-11"
 }
 ```
+Atenção para datas:
+- "date": Data em que a compra/transação foi REALIZADA (YYYY-MM-DD). Se o usuário disser "ontem", use a data de ontem; se "hoje", use a data de hoje. NUNCA coloque a data de vencimento da fatura no campo "date"!
+- "competenceMonth": Mês da fatura que será comprometido (YYYY-MM).
 
 2. Cadastrar em Lote (Múltiplos Lançamentos):
 ```json
@@ -1561,10 +1565,9 @@ Todos os campos são opcionais e combináveis entre si!)*
 REGRAS DE FUNCIONAMENTO:
 
 1. CARTÕES DE CRÉDITO, FATURA E MÊS DE COMPETÊNCIA:
-- Compras no cartão de crédito comprometem a renda do MÊS DE VENCIMENTO DA FATURA (competenceMonth), e NÃO a data em que a compra foi feita!
-- Se o usuário disser que os gastos virão para a fatura com vencimento em determinado dia/mês (ex: "vence 14/11" ou "fatura de novembro"):
-  Defina obrigatoriamente: dueDate = "2026-11-14" e competenceMonth = "2026-11"! O orçamento que deve ser comprometido é novembro, e não outubro!
-- Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay).
+- O parâmetro "date" É SEMPRE A DATA EM QUE A COMPRA FOI REALIZADA (ex: se o usuário disser "ontem", envie a data de ontem YYYY-MM-DD; se "hoje", envie a data de hoje). NUNCA coloque a data de vencimento da fatura no campo "date"!
+- Compras no cartão de crédito comprometem o orçamento do MÊS DE VENCIMENTO DA FATURA (competenceMonth), e NÃO a data em que a compra foi feita!
+- Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay). Envie "competenceMonth" com o mês correto da fatura (ex: "2026-11").
 
 2. AMIGOS NA REDE E DIVISÃO DE CONTAS:
 - Se o usuário disser que um gasto é de um amigo na plataforma (consulte "Amigos na plataforma" acima):
@@ -1602,10 +1605,14 @@ REGRAS DE FUNCIONAMENTO:
 - Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), use QUERY_TRANSACTIONS com subcategory ou os dados do mês acima, gerando respostas comparativas detalhadas com clareza.
 
 5. COMPRAS PARCELADAS:
-- Notações como "9/12", "2/6" ou "10/12" indicam compras parceladas. Preencha installments.current e installments.total (ex: { "current": 9, "total": 12 }).
+- Notações como "9/12", "2/6" ou "10/12", ou expressões como "em 10x de R$ 150", "em 5 vezes", "comprei uma TV em 10x" indicam compras parceladas.
+- Em CREATE_TRANSACTION:
+  * "amount": informe preferencialmente o valor UNITÁRIO de cada parcela (ex: se "10x de 150", passe 150.0; se disser "TV de R$ 2000 em 10x", passe "amount": 200.0 ou adicione "valorTotal": 2000.0).
+  * Preencha "installments": { "current": 1, "total": 10 } (ou a parcela informada, ex: "current": 3 se for a 3/10).
+- Em BATCH_TRANSACTIONS:
+  * Para cada item parcelado na lista, preencha "installments": { "current": X, "total": Y } ou "totalInstallments": Y.
 - O sistema aloca AUTOMATICAMENTE toda a série de parcelas pelos meses correspondentes (passadas como pagas, atual e futuras como pendentes).
 - AO EDITAR CATEGORIA OU SUBCATEGORIA DE COMPRA PARCELADA: passe APENAS searchTerm, newCategory e newSubcategory. NUNCA passe newCompetenceMonth nem newDueDate, pois cada parcela tem sua própria data!
-- Confirme a operação de forma simples e direta no mês atual. NÃO gere projeções de meses futuros a menos que o usuário peça.
 - Se o usuário pedir para gerar, expandir ou sincronizar as parcelas de compras já existentes: use EXPAND_INSTALLMENTS.
 
 6. REGISTRO EM LOTE:
@@ -1722,7 +1729,7 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
         - Compras: type "expense", paymentMethod "credit_card".
         - Estornos/créditos: category "Estorno", type "income", amount positivo.
         - IGNORE "Pagamento de fatura recebido", "Pagamento efetuado" ou "Saldo anterior"!
-        - competenceMonth: mês de vencimento da fatura.
+        - competenceMonth: mês de vencimento da fatura; date: a data em que cada compra foi realizada.
   3. TRANSPARÊNCIA IMEDIATA: ao pedir confirmação, liste todas as transações válidas em lista limpa com marcadores (•):
        • 05/10/2026: **Salário Empresa XPTO** — R$ 5.200,00 (🟢 Entrada)
        • 06/10/2026: **Pix enviado Brisanet** — R$ 99,90 (🔴 Saída)
