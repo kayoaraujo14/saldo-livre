@@ -70,7 +70,9 @@ data class CardInvoice(
     val bestPurchaseDate: String = "",
     val isBestPurchaseTime: Boolean = false,
     val bestPurchaseHint: String = "",
-    val cycleProgressPct: Int = 0
+    val cycleProgressPct: Int = 0,
+    val availableLimit: Double? = null,
+    val totalCommitted: Double = 0.0
 ) {
     val itemsCount: Int get() = items.size
     val unpaidExpenses: List<Transaction>
@@ -228,12 +230,13 @@ object InvoiceEngine {
         val futureItems = all.filter {
             it.cardId == card.id &&
                 it.competenceMonth > monthKey &&
-                it.type == TransactionType.EXPENSE &&
                 it.reserveCardId == null &&
                 it.visibleToUids.contains(uid)
         }
-        val futureInstallmentsTotal = FinanceEngine.round2(futureItems.sumOf { it.effectiveAmount })
-        val futureInstallmentsCount = futureItems.size
+        val futureExpenses = futureItems.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
+        val futureCredits = futureItems.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+        val futureInstallmentsTotal = FinanceEngine.round2(max(0.0, futureExpenses.sumOf { it.effectiveAmount } - futureCredits))
+        val futureInstallmentsCount = futureExpenses.size
 
         val bestPurchaseDay = card.closingDay
         val bestPurchaseDate = closingDate
@@ -251,6 +254,11 @@ object InvoiceEngine {
         val cyclePassedDays = max(0, diffDays(prevClosingDate, today))
         val cycleProgressPct = ((cyclePassedDays.toDouble() / cycleTotalDays) * 100).roundToInt().coerceIn(0, 100)
 
+        val currentCommitted = if (status == InvoiceStatus.PAID) 0.0 else open
+        val totalCommitted = FinanceEngine.round2(currentCommitted + futureInstallmentsTotal)
+        val limitUsagePct = limit?.let { ((totalCommitted / it) * 100).roundToInt().coerceIn(0, 100) }
+        val availableLimit = limit?.let { max(0.0, FinanceEngine.round2(it - totalCommitted)) }
+
         return CardInvoice(
             card = card,
             monthKey = monthKey,
@@ -265,7 +273,9 @@ object InvoiceEngine {
             myShare = myShare,
             othersShare = othersShare,
             limit = limit,
-            limitUsagePct = limit?.let { ((total / it) * 100).roundToInt().coerceIn(0, 100) },
+            limitUsagePct = limitUsagePct,
+            availableLimit = availableLimit,
+            totalCommitted = totalCommitted,
             daysToDue = diffDays(today, dueDate),
             daysToClose = diffDays(today, closingDate),
             items = items,

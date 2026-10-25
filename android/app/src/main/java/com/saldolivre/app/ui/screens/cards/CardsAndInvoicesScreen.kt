@@ -560,7 +560,7 @@ private fun CardsManagementTabContent(
             item(key = "cards_summary_banner") {
                 CardsSummaryBanner(
                     selectedMonth = uiState.viewMonth,
-                    totalInvoices = uiState.totalInvoicesAmount,
+                    totalInvoices = uiState.totalCommittedAmount.takeIf { it > 0 } ?: uiState.totalInvoicesAmount,
                     totalLimits = uiState.totalLimitsAmount
                 )
             }
@@ -872,8 +872,9 @@ private fun InvoiceSummaryCard(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Uso do limite ($usage%)", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
+                    val avail = invoice.availableLimit ?: (limit - invoice.total).coerceAtLeast(0.0)
                     Text(
-                        "Disponível: ${FinanceEngine.formatCurrency((limit - invoice.total).coerceAtLeast(0.0))}",
+                        "Disponível: ${FinanceEngine.formatCurrency(avail)}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )
@@ -1707,7 +1708,7 @@ private fun CardItemView(
                             text = "Disponível: $formattedAvailable",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Emerald400,
+                            color = if (item.availableLimit <= 0) Rose400 else Emerald400,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -1723,6 +1724,16 @@ private fun CardItemView(
                         trackColor = usageColor.copy(alpha = 0.14f),
                         strokeCap = StrokeCap.Round
                     )
+
+                    if (item.futureInvoicesAmount > 0) {
+                        Text(
+                            text = "Inclui ${FinanceEngine.formatCurrency(item.futureInvoicesAmount)} em faturas futuras",
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 // Frequent Third Parties Tags

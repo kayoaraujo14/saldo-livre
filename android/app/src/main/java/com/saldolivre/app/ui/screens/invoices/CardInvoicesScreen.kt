@@ -525,8 +525,9 @@ private fun InvoiceSummaryCard(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Uso do limite ($usage%)", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
+                    val avail = invoice.availableLimit ?: (limit - invoice.total).coerceAtLeast(0.0)
                     Text(
-                        "Disponível: ${FinanceEngine.formatCurrency((limit - invoice.total).coerceAtLeast(0.0))}",
+                        "Disponível: ${FinanceEngine.formatCurrency(avail)}",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.8f)
                     )

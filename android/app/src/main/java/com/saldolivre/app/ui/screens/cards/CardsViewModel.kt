@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.Transaction
+import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.data.repository.FinanceRepository
@@ -22,7 +23,9 @@ data class CardWithInvoice(
     val availableLimit: Double,
     val usagePercentage: Int,
     val isClosed: Boolean,
-    val transactions: List<Transaction>
+    val transactions: List<Transaction>,
+    val futureInvoicesAmount: Double = 0.0,
+    val totalCommitted: Double = invoiceAmount + futureInvoicesAmount
 )
 
 data class CardsUiState(
@@ -32,6 +35,7 @@ data class CardsUiState(
     val cardsWithInvoices: List<CardWithInvoice> = emptyList(),
     val totalInvoicesAmount: Double = 0.0,
     val totalLimitsAmount: Double = 0.0,
+    val totalCommittedAmount: Double = 0.0,
     val isFormOpen: Boolean = false,
     val editingCard: Card? = null,
     val cardToDelete: Card? = null,
@@ -73,9 +77,28 @@ class CardsViewModel(
                         cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
                     ).coerceAtLeast(0.0)
 
+                    // Futuras faturas (despesas em meses posteriores a vencer)
+                    val futureTxs = transactions.filter { tx ->
+                        tx.competenceMonth > month &&
+                        tx.cardId == card.id &&
+                        tx.reserveCardId == null &&
+                        tx.visibleToUids.contains(user.uid)
+                    }
+                    val futureExpenses = futureTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
+                    val futureCredits = futureTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+                    val futureTotal = FinanceEngine.round2(max(0.0, futureExpenses.sumOf { it.effectiveAmount } - futureCredits))
+
+                    // Lançamentos pendentes na fatura atual
+                    val currentUnpaidExpenses = cardTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }.sumOf { it.effectiveAmount }
+                    val currentCredits = cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+                    val currentCommitted = FinanceEngine.round2(max(0.0, currentUnpaidExpenses - currentCredits))
+
+                    // Total comprometido = fatura atual em aberto + faturas futuras
+                    val totalCommitted = FinanceEngine.round2(currentCommitted + futureTotal)
+
                     val cardLimit = card.limit?.takeIf { it > 0.0 } ?: 5000.0
-                    val available = max(0.0, cardLimit - invoiceTotal)
-                    val usagePct = if (cardLimit > 0) ((invoiceTotal / cardLimit) * 100).toInt().coerceIn(0, 100) else 0
+                    val available = max(0.0, cardLimit - totalCommitted)
+                    val usagePct = if (cardLimit > 0) ((totalCommitted / cardLimit) * 100).toInt().coerceIn(0, 100) else 0
 
                     val isClosed = if (month == FinanceEngine.currentMonthKey()) {
                         currentDay >= card.closingDay
@@ -90,11 +113,14 @@ class CardsViewModel(
                         availableLimit = available,
                         usagePercentage = usagePct,
                         isClosed = isClosed,
-                        transactions = cardTxs
+                        transactions = cardTxs,
+                        futureInvoicesAmount = futureTotal,
+                        totalCommitted = totalCommitted
                     )
                 }
 
                 val totalInvoices = FinanceEngine.round2(cardsInvoices.sumOf { it.invoiceAmount })
+                val totalCommittedAll = FinanceEngine.round2(cardsInvoices.sumOf { it.totalCommitted })
                 val totalLimits = FinanceEngine.round2(cardsInvoices.sumOf { it.limit })
 
                 CardsUiState(
@@ -104,6 +130,7 @@ class CardsViewModel(
                     cardsWithInvoices = cardsInvoices,
                     totalInvoicesAmount = totalInvoices,
                     totalLimitsAmount = totalLimits,
+                    totalCommittedAmount = totalCommittedAll,
                     isFormOpen = _uiState.value.isFormOpen,
                     editingCard = _uiState.value.editingCard,
                     cardToDelete = _uiState.value.cardToDelete,

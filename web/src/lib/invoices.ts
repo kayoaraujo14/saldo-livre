@@ -60,6 +60,8 @@ export interface CardInvoice {
   /** Comprometimento futuro deste cartão (soma de parcelas em meses futuros) */
   futureInstallmentsTotal: number
   futureInstallmentsCount: number
+  availableLimit?: number | null
+  totalCommitted?: number
   /** Melhor dia para compras neste cartão */
   bestPurchaseDay: number
   bestPurchaseDate: string
@@ -232,6 +234,10 @@ export function buildCardInvoice(
   const cyclePassedDays = Math.max(0, diffDays(prevClosingDate, today))
   const cycleProgressPct = Math.min(100, Math.max(0, Math.round((cyclePassedDays / cycleTotalDays) * 100)))
 
+  const currentCommitted = status === 'paid' ? 0 : openAmount
+  const totalCommitted = round2(currentCommitted + futureInstallmentsTotal)
+  const availableLimit = limit != null ? Math.max(0, round2(limit - totalCommitted)) : null
+
   return {
     card,
     monthKey,
@@ -246,7 +252,9 @@ export function buildCardInvoice(
     myShare,
     othersShare,
     limit,
-    limitUsagePct: limit ? Math.min(100, Math.round((total / limit) * 100)) : null,
+    limitUsagePct: limit ? Math.min(100, Math.round((totalCommitted / limit) * 100)) : null,
+    availableLimit,
+    totalCommitted,
     daysToDue: diffDays(today, dueDate),
     daysToClose: diffDays(today, closingDate),
     itemsCount: items.length,

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.CardInvoice
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
+import com.saldolivre.app.data.engine.InvoiceStatus
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
@@ -30,6 +31,7 @@ data class CardsAndInvoicesUiState(
     val totalOpenAmount: Double = 0.0,
     val totalMineAmount: Double = 0.0,
     val totalLimitsAmount: Double = 0.0,
+    val totalCommittedAmount: Double = 0.0,
     val nextDueInvoice: CardInvoice? = null,
     val itemFilter: InvoiceItemFilter = InvoiceItemFilter.ALL,
     val searchQuery: String = "",
@@ -105,9 +107,26 @@ class CardsAndInvoicesViewModel(
                         cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
                     ).coerceAtLeast(0.0)
 
+                    val matchingInv = invoices.find { it.card.id == card.id }
+                    val futureTotal = matchingInv?.futureInstallmentsTotal ?: run {
+                        val futureTxs = transactions.filter { tx ->
+                            tx.competenceMonth > month &&
+                            tx.cardId == card.id &&
+                            tx.reserveCardId == null &&
+                            tx.visibleToUids.contains(user.uid)
+                        }
+                        val futureExpenses = futureTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
+                        val futureCredits = futureTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+                        FinanceEngine.round2(max(0.0, futureExpenses.sumOf { it.effectiveAmount } - futureCredits))
+                    }
+
+                    // Se a fatura atual foi quitada (PAID), ela não consome mais limite. Caso contrário, considera o saldo em aberto.
+                    val currentCommitted = if (matchingInv?.status == InvoiceStatus.PAID) 0.0 else (matchingInv?.openAmount ?: invoiceTotal)
+                    val totalCommitted = FinanceEngine.round2(currentCommitted + futureTotal)
+
                     val cardLimit = card.limit?.takeIf { it > 0.0 } ?: 5000.0
-                    val available = max(0.0, cardLimit - invoiceTotal)
-                    val usagePct = if (cardLimit > 0) ((invoiceTotal / cardLimit) * 100).toInt().coerceIn(0, 100) else 0
+                    val available = max(0.0, FinanceEngine.round2(cardLimit - totalCommitted))
+                    val usagePct = if (cardLimit > 0) ((totalCommitted / cardLimit) * 100).toInt().coerceIn(0, 100) else 0
 
                     val isClosed = if (month == FinanceEngine.currentMonthKey()) {
                         currentDay >= card.closingDay
@@ -122,11 +141,14 @@ class CardsAndInvoicesViewModel(
                         availableLimit = available,
                         usagePercentage = usagePct,
                         isClosed = isClosed,
-                        transactions = cardTxs
+                        transactions = cardTxs,
+                        futureInvoicesAmount = futureTotal,
+                        totalCommitted = totalCommitted
                     )
                 }
 
                 val totalLimits = FinanceEngine.round2(cardsWithInvoices.sumOf { it.limit })
+                val totalCommittedAll = FinanceEngine.round2(cardsWithInvoices.sumOf { it.totalCommitted })
 
                 _uiState.update { current ->
                     current.copy(
@@ -140,6 +162,7 @@ class CardsAndInvoicesViewModel(
                         totalOpenAmount = totalOpen,
                         totalMineAmount = totalMine,
                         totalLimitsAmount = totalLimits,
+                        totalCommittedAmount = totalCommittedAll,
                         nextDueInvoice = nextDue,
                         isLoading = false,
                         cardsWithInvoices = cardsWithInvoices

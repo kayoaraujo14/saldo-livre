@@ -353,7 +353,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                       <div className="space-y-1 mt-3 relative z-10">
                         <div className="flex justify-between text-[11px] text-white/80">
                           <span>Uso do limite ({selected.limitUsagePct}%)</span>
-                          <span>Disponível: {formatBRL(Math.max(0, selected.limit - selected.total))}</span>
+                          <span>Disponível: {formatBRL(selected.availableLimit ?? Math.max(0, selected.limit - selected.total))}</span>
                         </div>
                         <div className="h-1.5 rounded-full bg-black/40 overflow-hidden">
                           <div

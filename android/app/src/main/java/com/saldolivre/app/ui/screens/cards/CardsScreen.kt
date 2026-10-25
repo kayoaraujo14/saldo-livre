@@ -113,7 +113,7 @@ fun CardsScreen(
                 item(key = "cards_summary_banner", contentType = "cards_summary_banner") {
                     CardsSummaryBanner(
                         selectedMonth = uiState.selectedMonth,
-                        totalInvoices = uiState.totalInvoicesAmount,
+                        totalInvoices = uiState.totalCommittedAmount.takeIf { it > 0 } ?: uiState.totalInvoicesAmount,
                         totalLimits = uiState.totalLimitsAmount
                     )
                 }
@@ -600,7 +600,7 @@ private fun CardItemView(
                             text = "Disponível: $formattedAvailable",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Emerald400,
+                            color = if (item.availableLimit <= 0) Rose400 else Emerald400,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -616,6 +616,16 @@ private fun CardItemView(
                         trackColor = usageColor.copy(alpha = 0.14f),
                         strokeCap = StrokeCap.Round
                     )
+
+                    if (item.futureInvoicesAmount > 0) {
+                        Text(
+                            text = "Inclui ${FinanceEngine.formatCurrency(item.futureInvoicesAmount)} em faturas futuras",
+                            fontSize = 11.sp,
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 // Frequent Third Parties Tags
