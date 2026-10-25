@@ -494,22 +494,24 @@ private fun InvoiceSummaryCard(
             InfoBox("Vencimento", FinanceEngine.formatShortDate(invoice.dueDate), Modifier.weight(1f))
         }
 
-        // Progresso de pagamento
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Pago: ${FinanceEngine.formatCurrency(invoice.paidAmount)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
-                Text("Em aberto: ${FinanceEngine.formatCurrency(invoice.openAmount)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.8f))
+        // Progresso de pagamento (exibido quando há pagamentos parciais para evitar repetição redundante)
+        if (invoice.paidAmount > 0.0) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Pago: ${FinanceEngine.formatCurrency(invoice.paidAmount)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
+                    Text("Restante em aberto: ${FinanceEngine.formatCurrency(invoice.openAmount)}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
+                }
+                LinearProgressIndicator(
+                    progress = { paidProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape),
+                    color = Emerald400,
+                    trackColor = Emerald400.copy(alpha = 0.14f),
+                    strokeCap = StrokeCap.Round
+                )
             }
-            LinearProgressIndicator(
-                progress = { paidProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(CircleShape),
-                color = Emerald400,
-                trackColor = Emerald400.copy(alpha = 0.15f),
-                strokeCap = StrokeCap.Round
-            )
         }
 
         // Limite do Cartão
@@ -893,24 +895,25 @@ private fun ItemsHeader(
             )
         }
 
-        // Filtros por chip (Formato pílula CircleShape)
+        // Filtros por chip (Formato pílula CircleShape com fundos translúcidos suaves)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(InvoiceItemFilter.entries) { f ->
+                val isSelected = f == filter
                 FilterChip(
-                    selected = f == filter,
+                    selected = isSelected,
                     onClick = { onFilter(f) },
-                    label = { Text(f.label, fontSize = 12.sp, fontWeight = if (f == filter) FontWeight.Bold else FontWeight.Medium) },
+                    label = { Text(f.label, fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium) },
                     shape = CircleShape,
                     colors = FilterChipDefaults.filterChipColors(
-                        containerColor = DarkSurface,
+                        containerColor = Color.White.copy(alpha = 0.05f),
                         labelColor = TextSecondary,
                         selectedContainerColor = Emerald500.copy(alpha = 0.2f),
                         selectedLabelColor = Emerald400
                     ),
                     border = FilterChipDefaults.filterChipBorder(
                         enabled = true,
-                        selected = f == filter,
-                        borderColor = DarkBorder,
+                        selected = isSelected,
+                        borderColor = Color.White.copy(alpha = 0.08f),
                         selectedBorderColor = Emerald500.copy(alpha = 0.4f),
                         borderWidth = 1.dp,
                         selectedBorderWidth = 1.dp
@@ -919,7 +922,7 @@ private fun ItemsHeader(
             }
         }
 
-        // Campo de busca (Formato pílula CircleShape)
+        // Campo de busca (Formato pílula CircleShape com fundo translúcido suave)
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
@@ -937,9 +940,9 @@ private fun ItemsHeader(
             shape = CircleShape,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = DarkSurface,
-                unfocusedContainerColor = DarkSurface,
-                focusedBorderColor = Cyan400,
-                unfocusedBorderColor = DarkBorder,
+                unfocusedContainerColor = Color.White.copy(alpha = 0.05f),
+                focusedBorderColor = Emerald400.copy(alpha = 0.5f),
+                unfocusedBorderColor = Color.White.copy(alpha = 0.08f),
                 focusedTextColor = TextPrimary,
                 unfocusedTextColor = TextPrimary
             )
