@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 data class TransactionsUiState(
     val currentUser: UserProfile = UserProfile(),
     val transactions: List<Transaction> = emptyList(),
+    val allTransactions: List<Transaction> = emptyList(),
     val filteredTransactions: List<Transaction> = emptyList(),
     val selectedMonth: String = FinanceEngine.currentMonthKey(),
     val searchQuery: String = "",
@@ -64,6 +65,7 @@ class TransactionsViewModel(
                     current.copy(
                         currentUser = user,
                         transactions = monthTxs,
+                        allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
                         selectedMonth = month,
                         totalIncome = FinanceEngine.round2(income),
                         totalExpense = FinanceEngine.round2(expense),

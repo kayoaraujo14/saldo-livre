@@ -38,10 +38,15 @@ export function DeleteInstallmentDialog({
   const groupTxs = isInstallment
     ? transactions.filter((t) => t.installmentGroupId === groupId)
     : [tx]
-  const totalCount = groupTxs.length || tx.installmentsTotal || 1
-  const groupTotal = groupTxs.reduce((s, t) => s + effectiveAmount(t), 0)
+  const totalCount = Math.max(groupTxs.length, tx.installmentsTotal || 1)
   const curAmount = effectiveAmount(tx)
+  const groupTotal =
+    groupTxs.length >= totalCount && groupTxs.length > 0
+      ? groupTxs.reduce((s, t) => s + effectiveAmount(t), 0)
+      : curAmount * totalCount
   const baseDesc = stripInstallmentSuffix(tx.description)
+  const installmentBadgeText = totalCount === 1 ? '1 parcela' : `${totalCount} parcelas`
+  const deleteAllButtonTitle = totalCount === 1 ? 'Excluir esta parcela' : `Excluir TODAS as ${totalCount} parcelas`
 
   const handleDeleteSingle = async () => {
     setLoading(true)
@@ -102,7 +107,7 @@ export function DeleteInstallmentDialog({
               className="text-[10px] bg-violet-500/10 text-violet-300 border-violet-500/30 gap-1 shrink-0 font-mono"
             >
               <Layers className="size-3" />
-              {totalCount} parcelas
+              {installmentBadgeText}
             </Badge>
           </div>
 
@@ -131,7 +136,7 @@ export function DeleteInstallmentDialog({
               <div className="space-y-1">
                 <div className="flex items-center gap-1.5 font-bold text-xs text-rose-300">
                   <Trash2 className="size-3.5" />
-                  <span>Excluir TODAS as {totalCount} parcelas</span>
+                  <span>{deleteAllButtonTitle}</span>
                 </div>
                 <p className="text-[11px] text-rose-300/80 leading-relaxed">
                   Remove de uma só vez todos os lançamentos passados e futuros desta compra ({formatBRL(groupTotal)}).

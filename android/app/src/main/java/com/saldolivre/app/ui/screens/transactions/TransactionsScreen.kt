@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -34,7 +35,7 @@ import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.ui.components.TransactionItem
 import com.saldolivre.app.ui.theme.*
 
-private val FilterChipShape = RoundedCornerShape(20.dp)
+private val FilterChipShape = CircleShape
 private val SelectedFilterChipBg = Emerald500.copy(alpha = 0.2f)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -146,7 +147,7 @@ fun TransactionsScreen(
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = CircleShape,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Emerald500,
                     unfocusedBorderColor = DarkBorder,
@@ -506,7 +507,7 @@ fun TransactionsScreen(
         if (tx.isInstallment && !tx.installmentGroupId.isNullOrBlank()) {
             DeleteInstallmentDialog(
                 transaction = tx,
-                allTransactions = uiState.transactions,
+                allTransactions = uiState.allTransactions,
                 onDismissRequest = { txToDelete = null },
                 onDeleteSingle = { singleTx ->
                     viewModel.deleteTransaction(singleTx.id)

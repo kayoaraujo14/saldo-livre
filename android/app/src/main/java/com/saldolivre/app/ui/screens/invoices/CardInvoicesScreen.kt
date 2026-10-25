@@ -18,8 +18,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -28,6 +30,7 @@ import com.saldolivre.app.data.engine.CardInvoice
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.engine.InvoiceStatus
+import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
@@ -61,7 +64,7 @@ private fun statusColor(status: InvoiceStatus): Color = when (status) {
 
 private fun itemStatusColor(status: TransactionStatus): Color = when (status) {
     TransactionStatus.ESTIMATED -> Amber400
-    TransactionStatus.PENDING -> CardInterOrange
+    TransactionStatus.PENDING -> Rose400
     TransactionStatus.PAID -> Emerald400
 }
 
@@ -87,6 +90,13 @@ fun CardInvoicesScreen(
         val items = selected?.items.orEmpty()
         val filtered = when (uiState.itemFilter) {
             InvoiceItemFilter.ALL -> items
+            InvoiceItemFilter.THIRD_PARTY -> items.filter { tx ->
+                tx.splitType == SplitType.EXTERNAL ||
+                !tx.assignedFriendUid.isNullOrBlank() ||
+                !tx.assignedFriendName.isNullOrBlank() ||
+                tx.allocations.any { it.type == "EXTERNAL" } ||
+                tx.category.contains("Terceiro", ignoreCase = true)
+            }
             InvoiceItemFilter.OPEN -> items.filter { it.status != TransactionStatus.PAID }
             InvoiceItemFilter.PAID -> items.filter { it.status == TransactionStatus.PAID }
             InvoiceItemFilter.INSTALLMENTS -> items.filter { (it.installmentsTotal ?: 1) > 1 }
@@ -153,33 +163,43 @@ fun CardInvoicesScreen(
                 return@LazyColumn
             }
 
-            item(key = "kpis") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KpiTile("Total das faturas", FinanceEngine.formatCurrency(uiState.totalAmount), TextPrimary, Modifier.weight(1f))
-                        KpiTile("Em aberto", FinanceEngine.formatCurrency(uiState.totalOpen), Amber400, Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KpiTile("Minha parte", FinanceEngine.formatCurrency(uiState.totalMine), Emerald400, Modifier.weight(1f))
-                        KpiTile(
-                            label = "Próximo vencimento",
-                            value = uiState.nextDue?.let { FinanceEngine.formatShortDate(it.dueDate) } ?: "—",
-                            color = Rose400,
-                            modifier = Modifier.weight(1f),
-                            hint = uiState.nextDue?.card?.cardName ?: "Tudo em dia"
-                        )
+            // Oculta KPIs redundantes se houver apenas 1 cartão ou se o valor for idêntico ao do cartão selecionado
+            val hideKpis = selected != null && (
+                uiState.invoices.size <= 1 ||
+                (kotlin.math.abs(uiState.totalOpen - selected.openAmount) < 0.01 && kotlin.math.abs(uiState.totalAmount - selected.total) < 0.01)
+            )
+
+            if (!hideKpis) {
+                item(key = "kpis") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            KpiTile("Total das faturas", FinanceEngine.formatCurrency(uiState.totalAmount), TextPrimary, Modifier.weight(1f))
+                            KpiTile("Em aberto", FinanceEngine.formatCurrency(uiState.totalOpen), Amber400, Modifier.weight(1f))
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            KpiTile("Minha parte", FinanceEngine.formatCurrency(uiState.totalMine), Emerald400, Modifier.weight(1f))
+                            KpiTile(
+                                label = "Próximo vencimento",
+                                value = uiState.nextDue?.let { FinanceEngine.formatShortDate(it.dueDate) } ?: "—",
+                                color = Rose400,
+                                modifier = Modifier.weight(1f),
+                                hint = uiState.nextDue?.card?.cardName ?: "Tudo em dia"
+                            )
+                        }
                     }
                 }
             }
 
-            item(key = "card_selector") {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    items(uiState.invoices, key = { it.card.id }) { inv ->
-                        CardChip(
-                            invoice = inv,
-                            selected = inv.card.id == uiState.selectedCardId,
-                            onClick = { viewModel.selectCard(inv.card.id) }
-                        )
+            if (uiState.invoices.size > 1) {
+                item(key = "card_selector") {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(uiState.invoices, key = { it.card.id }) { inv ->
+                            CardChip(
+                                invoice = inv,
+                                selected = inv.card.id == uiState.selectedCardId,
+                                onClick = { viewModel.selectCard(inv.card.id) }
+                            )
+                        }
                     }
                 }
             }
@@ -322,14 +342,13 @@ private fun StatusPill(status: InvoiceStatus) {
     Row(
         modifier = Modifier
             .clip(CircleShape)
-            .background(c.copy(alpha = 0.14f))
-            .border(1.dp, c.copy(alpha = 0.4f), CircleShape)
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .background(c.copy(alpha = 0.15f))
+            .padding(horizontal = 8.dp, vertical = 2.5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         Box(Modifier.size(6.dp).clip(CircleShape).background(c))
-        Text(status.label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = c)
+        Text(status.label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = c)
     }
 }
 
@@ -391,6 +410,12 @@ private fun InvoiceSummaryCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = 8.dp,
+                shape = RoundedCornerShape(22.dp),
+                spotColor = cardColor(invoice.card.color).copy(alpha = 0.45f),
+                ambientColor = Color.Black.copy(alpha = 0.4f)
+            )
             .clip(RoundedCornerShape(22.dp))
             .background(Brush.linearGradient(gradientColors))
             .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(22.dp))
@@ -414,9 +439,9 @@ private fun InvoiceSummaryCard(
                     )
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.12f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
                         Text(
                             invoice.card.ownerName.ifBlank { "Titular" },
@@ -477,9 +502,13 @@ private fun InvoiceSummaryCard(
             }
             LinearProgressIndicator(
                 progress = { paidProgress },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(CircleShape),
                 color = Emerald400,
-                trackColor = Color.Black.copy(alpha = 0.45f)
+                trackColor = Emerald400.copy(alpha = 0.15f),
+                strokeCap = StrokeCap.Round
             )
         }
 
@@ -502,9 +531,13 @@ private fun InvoiceSummaryCard(
                 }
                 LinearProgressIndicator(
                     progress = { usage / 100f },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape),
                     color = usageColor,
-                    trackColor = Color.Black.copy(alpha = 0.45f)
+                    trackColor = usageColor.copy(alpha = 0.15f),
+                    strokeCap = StrokeCap.Round
                 )
             }
         }
@@ -615,9 +648,13 @@ private fun SmartInsightsCard(invoice: CardInvoice) {
             }
             LinearProgressIndicator(
                 progress = { invoice.cycleProgressPct / 100f },
-                modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(CircleShape),
                 color = Cyan400,
-                trackColor = DarkBackground
+                trackColor = Cyan400.copy(alpha = 0.14f),
+                strokeCap = StrokeCap.Round
             )
         }
 
@@ -675,6 +712,7 @@ private fun SplitBreakdownCard(invoice: CardInvoice) {
     SectionCard("Divisão da Fatura (Quem Divide Comigo)", Icons.Default.People, Emerald400) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             invoice.splitBreakdown.forEach { part ->
+                val itemColor = if (part.isMe) Emerald400 else Cyan400
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -682,7 +720,7 @@ private fun SplitBreakdownCard(invoice: CardInvoice) {
                         .background(DarkBackground.copy(alpha = 0.6f))
                         .padding(10.dp)
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(
                                 part.name,
@@ -699,9 +737,13 @@ private fun SplitBreakdownCard(invoice: CardInvoice) {
                         }
                         LinearProgressIndicator(
                             progress = { part.pct / 100f },
-                            modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
-                            color = if (part.isMe) Emerald400 else Cyan400,
-                            trackColor = DarkSurface
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(CircleShape),
+                            color = itemColor,
+                            trackColor = itemColor.copy(alpha = 0.14f),
+                            strokeCap = StrokeCap.Round
                         )
                     }
                 }
@@ -809,16 +851,20 @@ private fun CategoryBreakdown(invoice: CardInvoice) {
     SectionCard("Para onde foi o dinheiro", Icons.Default.PieChart, Purple400) {
         invoice.byCategory.take(6).forEachIndexed { index, slice ->
             val color = palette[index % palette.size]
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(slice.category, fontSize = 11.sp, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text("${FinanceEngine.formatCurrency(slice.amount)} · ${slice.pct}%", fontSize = 11.sp, color = TextMuted)
                 }
                 LinearProgressIndicator(
                     progress = { slice.pct / 100f },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape),
                     color = color,
-                    trackColor = DarkBackground
+                    trackColor = color.copy(alpha = 0.14f),
+                    strokeCap = StrokeCap.Round
                 )
             }
         }
@@ -847,24 +893,33 @@ private fun ItemsHeader(
             )
         }
 
-        // Filtros por chip
+        // Filtros por chip (Formato pílula CircleShape)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(InvoiceItemFilter.entries) { f ->
                 FilterChip(
                     selected = f == filter,
                     onClick = { onFilter(f) },
-                    label = { Text(f.label, fontSize = 12.sp) },
+                    label = { Text(f.label, fontSize = 12.sp, fontWeight = if (f == filter) FontWeight.Bold else FontWeight.Medium) },
+                    shape = CircleShape,
                     colors = FilterChipDefaults.filterChipColors(
                         containerColor = DarkSurface,
                         labelColor = TextSecondary,
                         selectedContainerColor = Emerald500.copy(alpha = 0.2f),
                         selectedLabelColor = Emerald400
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = f == filter,
+                        borderColor = DarkBorder,
+                        selectedBorderColor = Emerald500.copy(alpha = 0.4f),
+                        borderWidth = 1.dp,
+                        selectedBorderWidth = 1.dp
                     )
                 )
             }
         }
 
-        // Campo de busca
+        // Campo de busca (Formato pílula CircleShape)
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
@@ -879,7 +934,7 @@ private fun ItemsHeader(
             },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
+            shape = CircleShape,
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = DarkSurface,
                 unfocusedContainerColor = DarkSurface,
@@ -919,7 +974,14 @@ private fun InvoiceItemRow(tx: Transaction, onClick: () -> Unit) {
                 )
                 tx.installmentTag?.let {
                     Spacer(Modifier.width(6.dp))
-                    Text(it, fontSize = 10.sp, color = Cyan400, fontWeight = FontWeight.SemiBold)
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Cyan400.copy(alpha = 0.15f))
+                            .padding(horizontal = 6.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(it, fontSize = 9.sp, color = Cyan400, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
             Text(
@@ -942,10 +1004,15 @@ private fun InvoiceItemRow(tx: Transaction, onClick: () -> Unit) {
                 modifier = Modifier
                     .padding(top = 2.dp)
                     .clip(CircleShape)
-                    .background(stColor.copy(alpha = 0.14f))
-                    .padding(horizontal = 6.dp, vertical = 1.dp)
+                    .background(stColor.copy(alpha = 0.15f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
             ) {
-                Text(tx.status.label, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = stColor)
+                Text(
+                    text = tx.status.label,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = stColor
+                )
             }
         }
     }

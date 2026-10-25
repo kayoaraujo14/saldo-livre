@@ -21,8 +21,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -106,13 +108,15 @@ fun CardsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header Summary Banner
-            item(key = "cards_summary_banner", contentType = "cards_summary_banner") {
-                CardsSummaryBanner(
-                    selectedMonth = uiState.selectedMonth,
-                    totalInvoices = uiState.totalInvoicesAmount,
-                    totalLimits = uiState.totalLimitsAmount
-                )
+            // Header Summary Banner (exibido apenas se houver mais de 1 cartão para evitar redundância de valor)
+            if (uiState.cardsWithInvoices.size > 1) {
+                item(key = "cards_summary_banner", contentType = "cards_summary_banner") {
+                    CardsSummaryBanner(
+                        selectedMonth = uiState.selectedMonth,
+                        totalInvoices = uiState.totalInvoicesAmount,
+                        totalLimits = uiState.totalLimitsAmount
+                    )
+                }
             }
 
             // Cards Section Title
@@ -323,15 +327,17 @@ private fun CardsSummaryBanner(
             }
 
             val overallUsage = if (totalLimits > 0) ((totalInvoices / totalLimits) * 100).toInt().coerceIn(0, 100) else 0
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val progressColor = if (overallUsage > 80) Rose400 else Emerald400
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 LinearProgressIndicator(
                     progress = { (overallUsage / 100f) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = if (overallUsage > 80) Rose400 else Emerald400,
-                    trackColor = DarkSurfaceVariant
+                        .height(8.dp)
+                        .clip(CircleShape),
+                    color = progressColor,
+                    trackColor = progressColor.copy(alpha = 0.14f),
+                    strokeCap = StrokeCap.Round
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -385,182 +391,188 @@ private fun CardItemView(
     val formattedLimit = remember(item.limit) { FinanceEngine.formatCurrency(item.limit) }
     val formattedAvailable = remember(item.availableLimit) { FinanceEngine.formatCurrency(item.availableLimit) }
 
-    Surface(
-        color = DarkSurface,
-        shape = RoundedCornerShape(20.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Visual Credit Card Surface
-            Box(
+        // Floating Visual Credit Card (sem contêiner externo / elimina box-in-box)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 176.dp)
+                .shadow(
+                    elevation = 8.dp,
+                    shape = RoundedCornerShape(22.dp),
+                    spotColor = gradientColors.first().copy(alpha = 0.5f),
+                    ambientColor = Color.Black.copy(alpha = 0.4f)
+                )
+                .clip(RoundedCornerShape(22.dp))
+                .background(Brush.linearGradient(gradientColors))
+                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(22.dp))
+                .padding(18.dp)
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 176.dp)
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                    .background(Brush.linearGradient(gradientColors))
-                    .padding(18.dp)
+                    .heightIn(min = 140.dp),
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 140.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
+                // Top: Card Name, Chip, Status Badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Top: Card Name, Chip, Status Badge
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 8.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CreditCard,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.9f),
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Text(
-                                text = card.cardName,
-                                style = Typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        // Invoice Status Badge
-                        Surface(
-                            color = if (item.isClosed) Color(0xFFF59E0B).copy(alpha = 0.3f) else Color(0xFF10B981).copy(alpha = 0.3f),
-                            shape = RoundedCornerShape(12.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (item.isClosed) Color(0xFFFBBF24).copy(alpha = 0.6f) else Color(0xFF34D399).copy(alpha = 0.6f)
-                            )
-                        ) {
-                            Text(
-                                text = if (item.isClosed) "Fatura Fechada" else "Fatura Aberta",
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-
-                    // Middle: Dates & Ownership
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Column {
-                                Text(
-                                    text = "FECHA",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                                Text(
-                                    text = "Dia ${card.closingDay}",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = "VENCE",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                                Text(
-                                    text = "Dia ${card.dueDay}",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
-                            }
-                        }
-
-                        if (item.isShared) {
-                            Surface(
-                                color = Color.Black.copy(alpha = 0.25f),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Group,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(12.dp)
-                                    )
-                                    Text(
-                                        text = "Compartilhado",
-                                        fontSize = 10.sp,
-                                        color = Color.White,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Bottom: Invoice Amount
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 8.dp)
-                        ) {
-                            Text(
-                                text = "FATURA ATUAL",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White.copy(alpha = 0.8f),
-                                maxLines = 1
-                            )
-                            Text(
-                                text = formattedInvoice,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
+                        Icon(
+                            imageVector = Icons.Default.CreditCard,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier.size(24.dp)
+                        )
                         Text(
-                            text = "Titular: ${card.ownerName}",
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.85f),
+                            text = card.cardName,
+                            style = Typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 150.dp)
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Invoice Status Badge (Formato pílula translúcido sem bordas pesadas)
+                    Surface(
+                        color = if (item.isClosed) Amber400.copy(alpha = 0.15f) else Emerald400.copy(alpha = 0.15f),
+                        shape = CircleShape
+                    ) {
+                        Text(
+                            text = if (item.isClosed) "Fatura Fechada" else "Fatura Aberta",
+                            color = if (item.isClosed) Amber400 else Emerald400,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                 }
-            }
 
-            // Lower Section: Limits, Progress and Actions
+                // Middle: Dates & Ownership
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Column {
+                            Text(
+                                text = "FECHA",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                            Text(
+                                text = "Dia ${card.closingDay}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "VENCE",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                            Text(
+                                text = "Dia ${card.dueDay}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    if (item.isShared) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.25f),
+                            shape = CircleShape
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Group,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = "Compartilhado",
+                                    fontSize = 10.sp,
+                                    color = Color.White,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Bottom: Invoice Amount
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = "FATURA ATUAL",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.8f),
+                            maxLines = 1
+                        )
+                        Text(
+                            text = formattedInvoice,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Text(
+                        text = "Titular: ${card.ownerName}",
+                        fontSize = 11.sp,
+                        color = Color.White.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 150.dp)
+                    )
+                }
+            }
+        }
+
+        // Lower Section: Limits, Progress and Actions
+        Surface(
+            color = DarkSurface,
+            shape = RoundedCornerShape(18.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -568,6 +580,7 @@ private fun CardItemView(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Limit Progress
+                val usageColor = if (item.usagePercentage > 85) Rose400 else if (item.usagePercentage > 50) Amber400 else Emerald400
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -597,10 +610,11 @@ private fun CardItemView(
                         progress = { (item.usagePercentage / 100f) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
-                        color = if (item.usagePercentage > 85) Rose400 else if (item.usagePercentage > 50) Amber400 else Emerald400,
-                        trackColor = DarkSurfaceVariant
+                            .height(8.dp)
+                            .clip(CircleShape),
+                        color = usageColor,
+                        trackColor = usageColor.copy(alpha = 0.14f),
+                        strokeCap = StrokeCap.Round
                     )
                 }
 
@@ -640,9 +654,9 @@ private fun CardItemView(
                     Row(
                         modifier = Modifier
                             .weight(1f, fill = false)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(CircleShape)
                             .clickable { onToggleDetails() }
-                            .padding(vertical = 4.dp, horizontal = 6.dp),
+                            .padding(vertical = 4.dp, horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -728,10 +742,15 @@ private fun CardItemView(
 private fun CardTransactionRow(tx: Transaction) {
     val isExpense = tx.type == TransactionType.EXPENSE
     val formattedAmount = remember(tx.effectiveAmount) { FinanceEngine.formatCurrency(tx.effectiveAmount) }
+    val statusColor = when (tx.status) {
+        com.saldolivre.app.data.model.TransactionStatus.PAID -> Emerald400
+        com.saldolivre.app.data.model.TransactionStatus.PENDING -> Rose400
+        com.saldolivre.app.data.model.TransactionStatus.ESTIMATED -> Amber400
+    }
 
     Surface(
         color = DarkBackground.copy(alpha = 0.5f),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -767,15 +786,16 @@ private fun CardTransactionRow(tx: Transaction) {
 
                     tx.installmentTag?.let { tag ->
                         Surface(
-                            color = DarkSurfaceVariant,
-                            shape = RoundedCornerShape(4.dp)
+                            color = Cyan400.copy(alpha = 0.15f),
+                            shape = CircleShape
                         ) {
                             Text(
                                 text = tag,
                                 fontSize = 9.sp,
-                                color = TextSecondary,
+                                color = Cyan400,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                             )
                         }
                     }
@@ -785,7 +805,7 @@ private fun CardTransactionRow(tx: Transaction) {
                     if (!thirdParty.isNullOrBlank()) {
                         Surface(
                             color = Amber500.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(4.dp),
+                            shape = CircleShape,
                             modifier = Modifier.weight(1f, fill = false)
                         ) {
                             Text(
@@ -794,21 +814,37 @@ private fun CardTransactionRow(tx: Transaction) {
                                 color = Amber400,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                             )
                         }
                     }
                 }
             }
 
-            Text(
-                text = "${if (isExpense) "-" else "+"}$formattedAmount",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isExpense) Rose400 else Emerald400,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "${if (isExpense) "-" else "+"}$formattedAmount",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isExpense) Rose400 else Emerald400,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .clip(CircleShape)
+                        .background(statusColor.copy(alpha = 0.15f))
+                        .padding(horizontal = 6.dp, vertical = 1.5.dp)
+                ) {
+                    Text(
+                        text = tx.status.label,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = statusColor
+                    )
+                }
+            }
         }
     }
 }

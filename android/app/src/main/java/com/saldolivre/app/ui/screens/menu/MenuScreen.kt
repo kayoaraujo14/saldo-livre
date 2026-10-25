@@ -34,8 +34,6 @@ import com.saldolivre.app.ui.theme.*
 fun MenuScreen(
     viewModel: MenuViewModel,
     onNavigateToReceivables: () -> Unit,
-    onNavigateToCards: () -> Unit,
-    onNavigateToCardInvoices: () -> Unit = {},
     onNavigateToRecurringBills: () -> Unit,
     onNavigateToInvestments: () -> Unit,
     onNavigateToFriends: () -> Unit,
@@ -522,29 +520,7 @@ fun MenuScreen(
                         )
                         MenuDivider()
 
-                        // 3. Meus Cartões & Faturas
-                        MenuNavigationRow(
-                            icon = Icons.Default.CreditCard,
-                            iconColor = Cyan400,
-                            title = "Cartões de Crédito",
-                            subtitle = "Limites, fechamento, faturas e cartões compartilhados",
-                            badgeText = if (uiState.cardsCount > 0) "${uiState.cardsCount}" else null,
-                            badgeColor = Cyan500,
-                            onClick = onNavigateToCards
-                        )
-                        MenuDivider()
-
-                        // 3.1 Faturas por Cartão
-                        MenuNavigationRow(
-                            icon = Icons.Default.Receipt,
-                            iconColor = Cyan400,
-                            title = "Faturas dos Cartões",
-                            subtitle = "Fechamento, vencimento, composição e pagamento",
-                            onClick = onNavigateToCardInvoices
-                        )
-                        MenuDivider()
-
-                        // 4. Contas Recorrentes & Salário
+                        // 3. Contas Recorrentes & Salário
                         MenuNavigationRow(
                             icon = Icons.Default.Repeat,
                             iconColor = Amber400,

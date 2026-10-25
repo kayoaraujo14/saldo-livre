@@ -17,6 +17,7 @@ data class DashboardUiState(
     val selectedMonth: String = FinanceEngine.currentMonthKey(),
     val summary: MonthSummary = MonthSummary(),
     val recentTransactions: List<Transaction> = emptyList(),
+    val allTransactions: List<Transaction> = emptyList(),
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
     val closureDialogDismissed: Boolean = false
@@ -52,6 +53,7 @@ class DashboardViewModel(
                     selectedMonth = month,
                     summary = summary,
                     recentTransactions = recent,
+                    allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
                     closureDialogDismissed = _uiState.value.closureDialogDismissed

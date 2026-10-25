@@ -14,7 +14,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class InvoiceItemFilter(val label: String) { ALL("Todos"), OPEN("Em aberto"), PAID("Pagos"), INSTALLMENTS("Parcelados") }
+enum class InvoiceItemFilter(val label: String) {
+    ALL("Todos"),
+    THIRD_PARTY("Terceiros"),
+    OPEN("Em aberto"),
+    PAID("Pagos"),
+    INSTALLMENTS("Parcelados")
+}
 
 data class CardInvoicesUiState(
     val viewMonth: String = FinanceEngine.currentMonthKey(),

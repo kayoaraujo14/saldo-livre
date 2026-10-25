@@ -47,10 +47,16 @@ fun DeleteInstallmentDialog(
         listOf(transaction)
     }
 
-    val totalCount = if (groupTxs.isNotEmpty()) groupTxs.size else (transaction.installmentsTotal ?: 1)
-    val groupTotal = groupTxs.sumOf { it.effectiveAmount }
+    val totalCount = maxOf(groupTxs.size, transaction.installmentsTotal ?: 1)
     val curAmount = transaction.effectiveAmount
+    val groupTotal = if (groupTxs.size >= totalCount && groupTxs.isNotEmpty()) {
+        groupTxs.sumOf { it.effectiveAmount }
+    } else {
+        curAmount * totalCount
+    }
     val baseDesc = FinanceEngine.stripInstallmentSuffix(transaction.description)
+    val installmentBadgeText = if (totalCount == 1) "1 parcela" else "$totalCount parcelas"
+    val deleteAllButtonTitle = if (totalCount == 1) "Excluir parcela" else "Excluir TODAS as $totalCount parcelas"
 
     Dialog(onDismissRequest = onDismissRequest) {
         Surface(
@@ -101,7 +107,7 @@ fun DeleteInstallmentDialog(
                             text = "Esta despesa faz parte de uma série vinculada",
                             color = TextSecondary,
                             fontSize = 12.sp,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -152,7 +158,7 @@ fun DeleteInstallmentDialog(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "$totalCount parcelas",
+                                        text = installmentBadgeText,
                                         color = Purple400,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Medium,
@@ -261,7 +267,7 @@ fun DeleteInstallmentDialog(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Excluir TODAS as $totalCount parcelas",
+                                    text = deleteAllButtonTitle,
                                     color = Rose400,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 12.sp,

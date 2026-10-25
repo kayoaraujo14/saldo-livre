@@ -494,7 +494,7 @@ fun DashboardScreen(
         if (tx.isInstallment && !tx.installmentGroupId.isNullOrBlank()) {
             DeleteInstallmentDialog(
                 transaction = tx,
-                allTransactions = uiState.recentTransactions,
+                allTransactions = uiState.allTransactions,
                 onDismissRequest = { txToDelete = null },
                 onDeleteSingle = { singleTx ->
                     viewModel.deleteTransaction(singleTx.id)
