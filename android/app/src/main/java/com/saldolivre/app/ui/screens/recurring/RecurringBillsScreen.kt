@@ -530,15 +530,15 @@ private fun RecurringBillItemCard(
                         modifier = Modifier
                             .size(34.dp)
                             .background(
-                                (if (isIncome) Emerald500 else categoryDetail.color).copy(alpha = 0.2f),
+                                categoryDetail.color.copy(alpha = 0.2f),
                                 CircleShape
                             ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isIncome) Icons.Default.AttachMoney else categoryDetail.icon,
+                            imageVector = categoryDetail.icon,
                             contentDescription = null,
-                            tint = if (isIncome) Emerald400 else categoryDetail.color,
+                            tint = categoryDetail.color,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -786,13 +786,16 @@ private fun RecurringBillFormDialog(
         mutableStateOf(initialBill.installmentsCount ?: 3)
     }
 
-    val availableCategories = remember {
-        CategoryRegistry.CATEGORIES.filter { it.name != "Receita" }
+    val availableCategories = remember(billType) {
+        if (billType == TransactionType.INCOME) {
+            CategoryRegistry.INCOME_CATEGORIES
+        } else {
+            CategoryRegistry.EXPENSE_CATEGORIES
+        }
     }
 
-    val currentSubcategories = remember(billType, category) {
-        val targetCat = if (billType == TransactionType.INCOME) "Receita" else category
-        CategoryRegistry.get(targetCat).subcategories
+    val currentSubcategories = remember(category) {
+        CategoryRegistry.get(category).subcategories
     }
 
     var expandedCategoryDropdown by remember { mutableStateOf(false) }
@@ -876,7 +879,9 @@ private fun RecurringBillFormDialog(
                                 .background(if (billType == TransactionType.EXPENSE) Amber500.copy(alpha = 0.25f) else Color.Transparent)
                                 .clickable {
                                     billType = TransactionType.EXPENSE
-                                    if (category == "Receita") category = "Moradia"
+                                    if (CategoryRegistry.INCOME_CATEGORIES.any { it.name == category } || category == "Receita") {
+                                        category = "Moradia"
+                                    }
                                     subcategory = CategoryRegistry.get(category).subcategories.firstOrNull()
                                 }
                                 .padding(vertical = 10.dp, horizontal = 6.dp),
@@ -899,8 +904,10 @@ private fun RecurringBillFormDialog(
                                 .background(if (billType == TransactionType.INCOME) Emerald500.copy(alpha = 0.25f) else Color.Transparent)
                                 .clickable {
                                     billType = TransactionType.INCOME
-                                    category = "Receita"
-                                    subcategory = CategoryRegistry.get("Receita").subcategories.firstOrNull()
+                                    if (CategoryRegistry.EXPENSE_CATEGORIES.any { it.name == category }) {
+                                        category = "Salário & Remuneração"
+                                    }
+                                    subcategory = CategoryRegistry.get(category).subcategories.firstOrNull()
                                 }
                                 .padding(vertical = 10.dp, horizontal = 6.dp),
                             contentAlignment = Alignment.Center
@@ -937,54 +944,52 @@ private fun RecurringBillFormDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    // Categoria (apenas para despesas)
-                    if (billType == TransactionType.EXPENSE) {
-                        ExposedDropdownMenuBox(
+                    // Categoria (Despesas ou Receitas)
+                    ExposedDropdownMenuBox(
+                        expanded = expandedCategoryDropdown,
+                        onExpandedChange = { expandedCategoryDropdown = it }
+                    ) {
+                        OutlinedTextField(
+                            value = category,
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            label = { Text(if (billType == TransactionType.INCOME) "Categoria de Receita" else "Categoria de Despesa", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategoryDropdown) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = if (billType == TransactionType.INCOME) Emerald400 else Amber400,
+                                unfocusedBorderColor = DarkBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                        )
+                        ExposedDropdownMenu(
                             expanded = expandedCategoryDropdown,
-                            onExpandedChange = { expandedCategoryDropdown = it }
+                            onDismissRequest = { expandedCategoryDropdown = false },
+                            modifier = Modifier.background(DarkSurface)
                         ) {
-                            OutlinedTextField(
-                                value = category,
-                                onValueChange = {},
-                                readOnly = true,
-                                singleLine = true,
-                                label = { Text("Categoria", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategoryDropdown) },
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = Amber400,
-                                    unfocusedBorderColor = DarkBorder,
-                                    focusedTextColor = TextPrimary,
-                                    unfocusedTextColor = TextPrimary
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .menuAnchor()
-                            )
-                            ExposedDropdownMenu(
-                                expanded = expandedCategoryDropdown,
-                                onDismissRequest = { expandedCategoryDropdown = false },
-                                modifier = Modifier.background(DarkSurface)
-                            ) {
-                                availableCategories.forEach { cat ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = cat.name,
-                                                color = TextPrimary,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(imageVector = cat.icon, contentDescription = null, tint = cat.color)
-                                        },
-                                        onClick = {
-                                            category = cat.name
-                                            subcategory = cat.subcategories.firstOrNull()
-                                            expandedCategoryDropdown = false
-                                        }
-                                    )
-                                }
+                            availableCategories.forEach { cat ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = cat.name,
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(imageVector = cat.icon, contentDescription = null, tint = cat.color)
+                                    },
+                                    onClick = {
+                                        category = cat.name
+                                        subcategory = cat.subcategories.firstOrNull()
+                                        expandedCategoryDropdown = false
+                                    }
+                                )
                             }
                         }
                     }
@@ -1479,7 +1484,7 @@ private fun RecurringBillFormDialog(
 
                             val updated = initialBill.copy(
                                 description = description.trim(),
-                                category = if (billType == TransactionType.INCOME) "Receita" else category,
+                                category = category,
                                 subcategory = subcategory,
                                 dueDay = day,
                                 defaultAmount = amount,

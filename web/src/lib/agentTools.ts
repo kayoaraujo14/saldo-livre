@@ -2,7 +2,7 @@
  * Implementação das ferramentas do agente (executadas pelo motor do Google Gemini).
  */
 import type { Allocation, Card, Category, NewTransaction, PaymentMethod, PendingBatchTransaction, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
-import { CATEGORIES } from '@/types'
+import { CATEGORIES, INCOME_CATEGORIES, getCategoryDetail } from '@/types'
 import { extractCounterparty } from './pdfParser'
 import {
   amountPatch,
@@ -190,15 +190,19 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     : guessed.category
   if (total < 0 && category === 'Outros') category = 'Estorno'
   if (splitType === 'external' && category === 'Outros') category = 'Cartão Terceiros'
-  if (type === 'income' && category === 'Outros') category = 'Outras Receitas'
+  if (type === 'income' && (category === 'Outros' || category === 'Receita')) {
+    category = (INCOME_CATEGORIES as readonly string[]).includes(guessed.category)
+      ? (guessed.category as Category)
+      : 'Outras Receitas'
+  }
 
   let subcategory: string | null = null
   if (typeof args.subcategoria === 'string' && args.subcategoria.trim()) {
     subcategory = args.subcategoria.trim()
   } else if (category === guessed.category && guessed.subcategory) {
     subcategory = guessed.subcategory
-  } else if (category === 'Receita') {
-    subcategory = guessed.subcategory || 'Outras Receitas'
+  } else if (category === 'Receita' || (INCOME_CATEGORIES as readonly string[]).includes(category)) {
+    subcategory = guessed.subcategory || getCategoryDetail(category)?.subcategories?.[0] || 'Outras Receitas'
   }
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args.data)) ? String(args.data) : todayKey()

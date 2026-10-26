@@ -86,7 +86,7 @@ export function MobileTransactionCard({
             </Badge>
           ) : isIncome ? (
             <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 truncate max-w-[150px] sm:max-w-none">
-              <ArrowDownLeft className="size-2.5 mr-1 shrink-0" /> {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita'}
+              <ArrowDownLeft className="size-2.5 mr-1 shrink-0" /> {tx.category ? `${tx.category}${tx.subcategory ? ` › ${tx.subcategory}` : ''}` : (tx.subcategory ? `Entrada › ${tx.subcategory}` : 'Receita')}
             </Badge>
           ) : (
             <span

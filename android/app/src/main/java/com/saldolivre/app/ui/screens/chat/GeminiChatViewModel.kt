@@ -1460,7 +1460,7 @@ Atenção para datas:
   "action": "BATCH_TRANSACTIONS",
   "transactions": [
     { "description": "iFood", "amount": 45.0, "type": "expense", "category": "Alimentação", "subcategory": "Delivery & Lanches", "paymentMethod": "credit_card", "date": "2026-10-05", "competenceMonth": "2026-11" },
-    { "description": "Salário", "amount": 5000.0, "type": "income", "category": "Receita", "subcategory": "Salário Principal", "paymentMethod": "pix", "date": "2026-10-05", "competenceMonth": "2026-10" }
+    { "description": "Salário", "amount": 5000.0, "type": "income", "category": "Salário & Remuneração", "subcategory": "Salário Principal", "paymentMethod": "pix", "date": "2026-10-05", "competenceMonth": "2026-10" }
   ]
 }
 ```
@@ -1618,21 +1618,32 @@ REGRAS DE FUNCIONAMENTO:
 
 4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
 - O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:
-  * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
-  * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
-  * Transporte: Combustível, Aplicativos (Uber/99), Transporte Público (Metrô/Ônibus), Estacionamento & Pedágio, Manutenção & Revisão, Seguro & IPVA, Lavagem & Estética Automotiva.
-  * Saúde: Farmácia & Remédios, Consultas & Exames, Plano de Saúde & Dental, Academia & Treinos, Terapia & Psicologia, Cuidados Pessoais & Estética.
-  * Lazer: Cinema, Teatro & Shows, Viagens & Hospedagem, Passeios & Experiências, Jogos & Games, Festas, Baladas & Eventos, Hobbies & Atividades.
-  * Assinaturas: Streaming de Vídeo (Netflix/Max/Disney), Streaming de Música (Spotify/Apple), Softwares, IA & Cloud (iCloud/ChatGPT), Telefonia Celular, Clubes & Assinaturas Recorrentes.
-  * Educação: Cursos Online & Certificações, Faculdade & Pós-Graduação, Livros & E-books, Material Escolar & Papelaria, Idiomas.
-  * Compras: Roupas & Acessórios, Calçados, Eletrônicos & Informática, Casa & Decoração, Presentes.
-  * Financiamentos & Empréstimos: Financiamento Imobiliário, Financiamento Veicular, Empréstimo Pessoal, Empréstimo Consignado, Amortização de Financiamento, Crédito Estudantil (FIES/Pravaler), Renegociação de Dívidas, Juros & Tarifas de Empréstimo, Outros Empréstimos.
-  * Pets: Ração & Petiscos, Veterinário & Medicamentos, Banho, Tosa & Cuidados, Acessórios & Brinquedos.
-  * Receita: Salário Principal, Adiantamento / 13º Salário, Freelance & Prestação de Serviços, Rendimentos & Investimentos, Reembolsos & Devoluções, Pix Recebido, Outras Receitas.
-  * Cartão Terceiros: Compras de Amigos, Compras de Familiares, Outros Terceiros.
-  * Estorno: Crédito na Fatura, Devolução / Cancelamento, Cashback Recebido.
-  * Outros: Tarifas Bancárias & Juros, Impostos & Taxas Governamentais, Doações & Caridade, Diversos.
-- Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "category" e "subcategory" de acordo com o estabelecimento (ex: "iFood" -> Alimentação › Delivery & Lanches; "Pão de Açúcar" -> Alimentação › Supermercado; "Uber" -> Transporte › Aplicativos (Uber/99); "Financiamento Caixa" -> Financiamentos & Empréstimos › Financiamento Imobiliário).
+  * Despesas (EXPENSE):
+    - Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
+    - Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
+    - Transporte: Combustível, Aplicativos (Uber/99), Transporte Público (Metrô/Ônibus), Estacionamento & Pedágio, Manutenção & Revisão, Seguro Auto & Moto, Lavagem & Estética Automotiva.
+    - Saúde: Farmácia & Remédios, Consultas & Exames, Plano de Saúde & Dental, Academia & Treinos, Terapia & Psicologia, Cuidados Pessoais & Estética.
+    - Lazer & Entretenimento: Cinema, Shows & Eventos, Viagens & Hospedagem, Passeios & Parques, Jogos & Games, Festas & Baladas, Hobbies.
+    - Assinaturas & Serviços: Streaming de Vídeo, Streaming de Música, Softwares, IA & Cloud, Telefonia & Celular, Assinaturas e Clubes.
+    - Compras & Vestuário: Roupas & Calçados, Acessórios & Joias, Eletrônicos & Gadgets, Presentes, Compras Online / E-commerce.
+    - Educação: Faculdade & Pós-Graduação, Cursos Online & Certificações, Livros & Material Didático, Idiomas, Escolas & Mensalidades.
+    - Manutenção & Serviços: Diarista & Limpeza, Pequenos Reparos, Lavanderia, Serviços Especializados.
+    - Impostos & Tributos: IPVA, IPTU, Imposto de Renda (DARF), Taxas & Emolumentos.
+    - Investimentos: Aportes Renda Fixa, Aportes Ações / FIIs, Criptoativos, Previdência Privada, Reserva de Emergência.
+    - Financiamentos & Dívidas: Financiamento Imobiliário, Financiamento Veicular, Empréstimo Pessoal, Amortização de Financiamento, Renegociação de Dívidas.
+    - Família & Filhos: Mensalidade Escolar, Atividades Extracurriculares, Vestuário Infantil, Saúde & Especialistas.
+    - Pets: Veterinário & Vacinas, Ração & Alimentação Pet, Medicamentos Pet, Banho & Tosa, Acessórios Pet.
+    - Outros: Tarifas Bancárias, Despesas Diversas, Doações.
+  * Receitas / Entradas (INCOME):
+    - Salário & Remuneração: Salário Principal, Adiantamento / Quinzenal, 13º Salário, Férias, Bônus & PLR.
+    - Benefícios: Vale Refeição (VR), Vale Alimentação (VA), Auxílio Home Office, Auxílio Transporte, Auxílio Saúde.
+    - Investimentos & Rendimentos: Dividendos & JCP, Rendimentos Renda Fixa, Retirada de Lucros, Aluguel Recebido.
+    - Freelance & Serviços: Projetos Freelance, Consultorias, Comissões, Aulas & Mentorias.
+    - Reembolsos & Acertos: Reembolso de Despesas, Acerto de Amigo / Cartão, Reembolso Corporativo.
+    - Presentes & Doações: Presente em Dinheiro, Ajuda Familiar, Doação Recebida.
+    - Outras Receitas: Pix Recebido, Venda de Itens Usados, Prêmios & Sorteios, Restituição do IR, Entradas Diversas.
+- Ao registrar receitas, utilize SEMPRE uma das categorias de Receita específicas (ex: "Salário & Remuneração" para salários, "Benefícios" para VA/VR, "Investimentos & Rendimentos" para dividendos, "Freelance & Serviços" para freelas).
+- Ao registrar ou editar lançamentos, preencha SEMPRE "category" e "subcategory" de acordo com o estabelecimento (ex: "iFood" -> Alimentação › Delivery & Lanches; "Pão de Açúcar" -> Alimentação › Supermercado; "Uber" -> Transporte › Aplicativos (Uber/99)).
 - Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), use QUERY_TRANSACTIONS com subcategory ou os dados do mês acima, gerando respostas comparativas detalhadas com clareza.
 
 5. COMPRAS PARCELADAS:
@@ -1753,7 +1764,7 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
      - IGNORE movimentações internas de reserva (Aplicações RDB, Resgates RDB, Guardar Dinheiro) e pagamentos de fatura de cartão já existentes.
   2. IDENTIFIQUE O TIPO DE DOCUMENTO:
      A) EXTRATO DE CONTA BANCÁRIA (Conta Corrente / Poupança / NuConta / Inter / Itaú / Bradesco):
-        - ENTRADAS / CRÉDITOS (+, C, Pix Recebido, Salário, Depósito, TED Recebida, Rendimento): type "income", category "Receita", paymentMethod "pix" ou "debit". Entradas AUMENTAM o Saldo Livre!
+        - ENTRADAS / CRÉDITOS (+, C, Pix Recebido, Salário, Depósito, TED Recebida, Rendimento): type "income", category específica de receita (ex: "Salário & Remuneração", "Benefícios", "Investimentos & Rendimentos", "Outras Receitas"), paymentMethod "pix" ou "debit". Entradas AUMENTAM o Saldo Livre!
         - SAÍDAS / DÉBITOS (-, D, Pix Enviado, Compra Débito, Pagamento de Boleto): type "expense", paymentMethod "pix", "debit" ou "bill". NUNCA marque como credit_card a menos que a linha diga "Compra Cartão de Crédito"!
         - competenceMonth: mês em que as transações ocorreram; date: a data de cada movimentação.
      B) FATURA DE CARTÃO DE CRÉDITO (Nubank, Itaú, C6, Santander, Bradesco, etc.):

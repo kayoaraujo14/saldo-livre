@@ -708,6 +708,22 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
             </span>
           )}
 
+          {/* Subcategory Pills */}
+          {columnFilters.subcategories.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
+              <span className="text-slate-400">Sub:</span>
+              <span className="text-emerald-300 font-medium">{columnFilters.subcategories.join(', ')}</span>
+              <button
+                type="button"
+                onClick={() => setColumnFilters((prev) => ({ ...prev, subcategories: [] }))}
+                className="hover:text-rose-400 cursor-pointer ml-0.5"
+                title="Remover filtro de subcategoria"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
+
           {/* Division Pills */}
           {columnFilters.splits.length > 0 && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-700/80 text-[11px] text-slate-200">
@@ -1138,13 +1154,13 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                       <button
                         type="button"
                         className={`p-1 rounded cursor-pointer transition-colors ${
-                          columnFilters.categories.length > 0
+                          columnFilters.categories.length > 0 || columnFilters.subcategories.length > 0
                             ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40'
                             : 'text-slate-400 hover:text-white hover:bg-slate-800'
                         }`}
                         title="Filtrar por Categoria (estilo Excel)"
                       >
-                        <Filter className={`size-3 ${columnFilters.categories.length > 0 ? 'fill-emerald-400' : ''}`} />
+                        <Filter className={`size-3 ${columnFilters.categories.length > 0 || columnFilters.subcategories.length > 0 ? 'fill-emerald-400' : ''}`} />
                       </button>
                     </PopoverTrigger>
                     <PopoverContent align="start" className="w-64 bg-slate-950 border border-slate-800 shadow-2xl p-2.5 text-xs text-slate-200">
@@ -1153,7 +1169,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                         <div className="flex items-center gap-1.5 text-[10px]">
                           <button
                             type="button"
-                            onClick={() => setColumnFilters((p) => ({ ...p, categories: availableCategories.map(([c]) => c) }))}
+                            onClick={() => setColumnFilters((p) => ({ ...p, categories: availableCategories.map(([c]) => c), subcategories: [] }))}
                             className="text-emerald-400 hover:underline cursor-pointer"
                           >
                             Todas
@@ -1161,7 +1177,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                           <span>·</span>
                           <button
                             type="button"
-                            onClick={() => setColumnFilters((p) => ({ ...p, categories: [] }))}
+                            onClick={() => setColumnFilters((p) => ({ ...p, categories: [], subcategories: [] }))}
                             className="text-slate-400 hover:text-white cursor-pointer"
                           >
                             Limpar
@@ -1179,11 +1195,15 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                         />
                       </div>
 
-                      <div className="max-h-48 overflow-y-auto space-y-0.5">
+                      <div className="max-h-56 overflow-y-auto space-y-0.5 pr-0.5">
                         {availableCategories
                           .filter(([cat]) => cat.toLowerCase().includes(categorySearchQuery.toLowerCase()))
                           .map(([cat, count]) => {
                             const isChecked = columnFilters.categories.includes(cat)
+                            const detail = getCategoryDetail(cat)
+                            const isLegacy = (LEGACY_CATEGORIES as readonly string[]).includes(cat) &&
+                              !(EXPENSE_CATEGORIES as readonly string[]).includes(cat) &&
+                              !(INCOME_CATEGORIES as readonly string[]).includes(cat)
                             return (
                               <label
                                 key={cat}
@@ -1197,7 +1217,16 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                                     onChange={() => {}}
                                     className="rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500/30 size-3.5 cursor-pointer shrink-0"
                                   />
+                                  <span
+                                    className="size-2 rounded-full shrink-0"
+                                    style={{ backgroundColor: detail?.color || '#94a3b8' }}
+                                  />
                                   <span className="truncate">{cat}</span>
+                                  {isLegacy && (
+                                    <span className="text-[9px] text-amber-400/80 bg-amber-500/10 px-1 py-0.2 rounded font-sans shrink-0">
+                                      Legada
+                                    </span>
+                                  )}
                                 </div>
                                 <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400 shrink-0">
                                   {count}
@@ -1841,7 +1870,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Badge variant="outline" className="text-[10px] py-0.5 px-2 bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
-                              💰 {tx.subcategory ? `Receita › ${tx.subcategory}` : 'Receita Pessoal'}
+                              💰 {tx.category ? `${tx.category}${tx.subcategory ? ` › ${tx.subcategory}` : ''}` : (tx.subcategory ? `Entrada › ${tx.subcategory}` : 'Receita Pessoal')}
                             </Badge>
                             {thirdParty && (
                               <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 bg-sky-500/15 text-sky-300 border-sky-500/35 font-medium">

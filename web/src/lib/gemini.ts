@@ -751,21 +751,32 @@ REGRAS DE FUNCIONAMENTO:
 
 4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
 - O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:
-  * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
-  * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
-  * Transporte: Combustível, Aplicativos (Uber/99), Transporte Público (Metrô/Ônibus), Estacionamento & Pedágio, Manutenção & Revisão, Seguro & IPVA, Lavagem & Estética Automotiva.
-  * Saúde: Farmácia & Remédios, Consultas & Exames, Plano de Saúde & Dental, Academia & Treinos, Terapia & Psicologia, Cuidados Pessoais & Estética.
-  * Lazer: Cinema, Teatro & Shows, Viagens & Hospedagem, Passeios & Experiências, Jogos & Games, Festas, Baladas & Eventos, Hobbies & Atividades.
-  * Assinaturas: Streaming de Vídeo (Netflix/Max/Disney), Streaming de Música (Spotify/Apple), Softwares, IA & Cloud (iCloud/ChatGPT), Telefonia Celular, Clubes & Assinaturas Recorrentes.
-  * Educação: Cursos Online & Certificações, Faculdade & Pós-Graduação, Livros & E-books, Material Escolar & Papelaria, Idiomas.
-  * Compras: Roupas & Acessórios, Calçados, Eletrônicos & Informática, Casa & Decoração, Presentes.
-  * Financiamentos & Empréstimos: Financiamento Imobiliário, Financiamento Veicular, Empréstimo Pessoal, Empréstimo Consignado, Amortização de Financiamento, Crédito Estudantil (FIES/Pravaler), Renegociação de Dívidas, Juros & Tarifas de Empréstimo, Outros Empréstimos.
-  * Pets: Ração & Petiscos, Veterinário & Medicamentos, Banho, Tosa & Cuidados, Acessórios & Brinquedos.
-  * Receita: Salário Principal, Adiantamento / 13º Salário, Freelance & Prestação de Serviços, Rendimentos & Investimentos, Reembolsos & Devoluções, Pix Recebido, Outras Receitas.
-  * Cartão Terceiros: Compras de Amigos, Compras de Familiares, Outros Terceiros.
-  * Estorno: Crédito na Fatura, Devolução / Cancelamento, Cashback Recebido.
-  * Outros: Tarifas Bancárias & Juros, Impostos & Taxas Governamentais, Doações & Caridade, Diversos.
-- Ao registrar ou editar lançamentos (individuais ou lote), preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)"; "Financiamento Habitacional / Caixa" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Financiamento Imobiliário"; "Financiamento Carro" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Financiamento Veicular"; "Empréstimo Pessoal Nubank" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Empréstimo Pessoal"; "Amortização de Parcela" -> categoria: "Financiamentos & Empréstimos", subcategoria: "Amortização de Financiamento").
+  * Despesas (EXPENSE):
+    - Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
+    - Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
+    - Transporte: Combustível, Aplicativos (Uber/99), Transporte Público (Metrô/Ônibus), Estacionamento & Pedágio, Manutenção & Revisão, Seguro & IPVA, Lavagem & Estética Automotiva.
+    - Saúde: Farmácia & Remédios, Consultas & Exames, Plano de Saúde & Dental, Academia & Treinos, Terapia & Psicologia, Cuidados Pessoais & Estética.
+    - Lazer & Entretenimento: Cinema, Shows & Eventos, Viagens & Hospedagem, Passeios & Parques, Jogos & Games, Festas & Baladas, Hobbies.
+    - Assinaturas & Serviços: Streaming de Vídeo, Streaming de Música, Softwares, IA & Cloud, Telefonia & Celular, Assinaturas e Clubes.
+    - Compras & Vestuário: Roupas & Calçados, Acessórios & Joias, Eletrônicos & Gadgets, Presentes, Compras Online / E-commerce.
+    - Educação: Faculdade & Pós-Graduação, Cursos Online & Certificações, Livros & Material Didático, Idiomas, Escolas & Mensalidades.
+    - Manutenção & Serviços: Diarista & Limpeza, Pequenos Reparos, Lavanderia, Serviços Especializados.
+    - Impostos & Tributos: IPVA, IPTU, Imposto de Renda (DARF), Taxas & Emolumentos.
+    - Investimentos: Aportes Renda Fixa, Aportes Ações / FIIs, Criptoativos, Previdência Privada, Reserva de Emergência.
+    - Financiamentos & Dívidas: Financiamento Imobiliário, Financiamento Veicular, Empréstimo Pessoal, Amortização de Financiamento, Renegociação de Dívidas.
+    - Família & Filhos: Mensalidade Escolar, Atividades Extracurriculares, Vestuário Infantil, Saúde & Especialistas.
+    - Pets: Veterinário & Vacinas, Ração & Alimentação Pet, Medicamentos Pet, Banho & Tosa, Acessórios Pet.
+    - Outros: Tarifas Bancárias, Despesas Diversas, Doações.
+  * Receitas / Entradas (INCOME):
+    - Salário & Remuneração: Salário Principal, Adiantamento / Quinzenal, 13º Salário, Férias, Bônus & PLR.
+    - Benefícios: Vale Refeição (VR), Vale Alimentação (VA), Auxílio Home Office, Auxílio Transporte, Auxílio Saúde.
+    - Investimentos & Rendimentos: Dividendos & JCP, Rendimentos Renda Fixa, Retirada de Lucros, Aluguel Recebido.
+    - Freelance & Serviços: Projetos Freelance, Consultorias, Comissões, Aulas & Mentorias.
+    - Reembolsos & Acertos: Reembolso de Despesas, Acerto de Amigo / Cartão, Reembolso Corporativo.
+    - Presentes & Doações: Presente em Dinheiro, Ajuda Familiar, Doação Recebida.
+    - Outras Receitas: Pix Recebido, Venda de Itens Usados, Prêmios & Sorteios, Restituição do IR, Entradas Diversas.
+- Ao registrar receitas, utilize SEMPRE uma das categorias de Receita específicas (ex: "Salário & Remuneração" para salários, "Benefícios" para VA/VR, "Investimentos & Rendimentos" para dividendos, "Freelance & Serviços" para freelas).
+- Ao registrar ou editar lançamentos, preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)").
 - Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), chame "consultarTransacoes" com subcategoria ou utilize o relatório do mês, gerando respostas comparativas detalhadas com clareza.
 
 5. COMPRAS PARCELADAS:

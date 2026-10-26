@@ -3,6 +3,7 @@ package com.saldolivre.app.ui.screens.transactions
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
@@ -33,6 +34,7 @@ data class TransactionsUiState(
 
     // Available dynamic options for filter sheet
     val availableCategories: List<String> = emptyList(),
+    val categoryCounts: Map<String, Int> = emptyMap(),
     val availablePersons: List<String> = emptyList(),
 
     // Dynamic Filtered Sums (reflecting current selection)
@@ -84,6 +86,7 @@ class TransactionsViewModel(
                 val pendingCount = monthTxs.count { it.status != TransactionStatus.PAID }
 
                 val availableCats = monthTxs.map { it.category }.filter { it.isNotBlank() }.distinct().sorted()
+                val catCounts = monthTxs.groupingBy { it.category }.eachCount()
                 val availablePers = monthTxs.flatMap { getPersonsForTransaction(it, user.uid) }
                     .distinct()
                     .sortedWith { a, b ->
@@ -97,6 +100,7 @@ class TransactionsViewModel(
                         allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
                         selectedMonth = month,
                         availableCategories = availableCats,
+                        categoryCounts = catCounts,
                         availablePersons = availablePers,
                         totalIncome = FinanceEngine.round2(income),
                         totalExpense = FinanceEngine.round2(expense),
@@ -285,7 +289,17 @@ class TransactionsViewModel(
             }
 
             val matchesCategory = when {
-                state.selectedCategories.isNotEmpty() -> tx.category in state.selectedCategories
+                state.selectedCategories.isNotEmpty() -> {
+                    if (tx.category in state.selectedCategories) true
+                    else if (tx.category == "Receita") {
+                        // Compatibilidade com transações legadas registradas como "Receita"
+                        state.selectedCategories.any { selCat ->
+                            CategoryRegistry.get(selCat).subcategories.any { sub ->
+                                sub.equals(tx.subcategory, ignoreCase = true)
+                            }
+                        }
+                    } else false
+                }
                 state.selectedCategory != null -> tx.category == state.selectedCategory
                 else -> true
             }

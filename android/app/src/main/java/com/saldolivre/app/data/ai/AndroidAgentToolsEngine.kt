@@ -183,7 +183,10 @@ class AndroidAgentToolsEngine(
 
         if (finalCat == null) {
             val guess = neuralClassifier.guessCategoryAndSubcategory(description, amount)
-            finalCat = if (type == TransactionType.INCOME) "Receita" else guess.category
+            finalCat = if (type == TransactionType.INCOME) {
+                if (CategoryRegistry.INCOME_CATEGORIES.any { it.name.equals(guess.category, ignoreCase = true) }) guess.category
+                else "Outras Receitas"
+            } else guess.category
             finalSubcat = guess.subcategory ?: finalSubcat
         }
 
@@ -575,7 +578,7 @@ class AndroidAgentToolsEngine(
 
             val typeStr = item.getStringOrNull("type") ?: item.getStringOrNull("tipo") ?: if (rawAmt < 0) "income" else "expense"
             val isIncome = typeStr.equals("income", ignoreCase = true) || rawAmt < 0
-            val cat = item.getStringOrNull("category") ?: item.getStringOrNull("categoria") ?: if (isIncome) "Receita" else "Outros"
+            val cat = item.getStringOrNull("category") ?: item.getStringOrNull("categoria") ?: if (isIncome) "Outras Receitas" else "Outros"
             val subcat = item.getStringOrNull("subcategory") ?: item.getStringOrNull("subcategoria")
             val payMethodStr = item.getStringOrNull("paymentMethod") ?: item.getStringOrNull("metodoPagamento") ?: defaultPayMethod
             val dt = item.getStringOrNull("date") ?: item.getStringOrNull("data") ?: item.getStringOrNull("dataVencimento") ?: FinanceEngine.todayKey()
@@ -1383,7 +1386,7 @@ class AndroidAgentToolsEngine(
                 if (t.type != type) return@filter false
             } else if (onlyMine || !person.isNullOrBlank() || onlyThirdParties || !cardFilter.isNullOrBlank() || !category.isNullOrBlank()) {
                 // Em análises de despesas, filtra compras/saídas a menos que categoria seja Receita
-                if (t.type != TransactionType.EXPENSE && !t.category.equals("Receita", ignoreCase = true)) return@filter false
+                if (t.type != TransactionType.EXPENSE && !CategoryRegistry.INCOME_CATEGORIES.any { it.name.equals(t.category, ignoreCase = true) } && !t.category.equals("Receita", ignoreCase = true)) return@filter false
             }
 
             // Intervalo de datas

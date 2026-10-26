@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.ui.components.DeleteInstallmentDialog
 import com.saldolivre.app.ui.components.MonthSelector
@@ -234,8 +235,11 @@ fun TransactionsScreen(
                     }
 
                     uiState.selectedCategories.forEach { cat ->
+                        val catDetail = CategoryRegistry.get(cat)
                         RemovableFilterPill(
                             label = cat,
+                            icon = catDetail.icon,
+                            iconTint = catDetail.color,
                             onRemove = { viewModel.toggleCategoryFilter(cat) }
                         )
                     }
@@ -557,7 +561,9 @@ fun TransactionsScreen(
 @Composable
 private fun RemovableFilterPill(
     label: String,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    iconTint: Color? = null
 ) {
     Box(
         modifier = Modifier
@@ -572,6 +578,14 @@ private fun RemovableFilterPill(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint ?: Emerald400,
+                    modifier = Modifier.size(11.dp)
+                )
+            }
             Text(
                 text = label,
                 fontSize = 11.sp,

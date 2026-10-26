@@ -18,6 +18,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.ui.theme.*
@@ -160,22 +163,88 @@ fun AdvancedFiltersBottomSheet(
                     }
                 }
 
-                // Section 4: Categorias
-                if (uiState.availableCategories.isNotEmpty()) {
+                // Section 4: Categorias organizadas por Despesas e Receitas
+                val selectedTypes = uiState.selectedTypes
+                val showExpenseCats = selectedTypes.isEmpty() || selectedTypes.contains(TransactionType.EXPENSE)
+                val showIncomeCats = selectedTypes.isEmpty() || selectedTypes.contains(TransactionType.INCOME)
+
+                val expenseCategories = CategoryRegistry.EXPENSE_CATEGORIES
+                val incomeCategories = CategoryRegistry.INCOME_CATEGORIES
+                val legacyCategories = uiState.availableCategories.filter { cat ->
+                    expenseCategories.none { it.name.equals(cat, ignoreCase = true) } &&
+                    incomeCategories.none { it.name.equals(cat, ignoreCase = true) }
+                }
+
+                if (showExpenseCats) {
                     FilterSection(
-                        title = "Categorias",
-                        subtitle = "Selecione uma ou mais categorias específicas"
+                        title = "Categorias de Despesa",
+                        subtitle = "Filtre por grupos específicos de saídas"
                     ) {
                         FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            uiState.availableCategories.forEach { cat ->
+                            expenseCategories.forEach { cat ->
+                                val count = uiState.categoryCounts[cat.name] ?: 0
                                 FilterPillChip(
-                                    label = cat,
-                                    isSelected = uiState.selectedCategories.contains(cat),
-                                    onClick = { onToggleCategory(cat) }
+                                    label = cat.name,
+                                    icon = cat.icon,
+                                    iconTint = cat.color,
+                                    count = count,
+                                    isSelected = uiState.selectedCategories.contains(cat.name),
+                                    onClick = { onToggleCategory(cat.name) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (showIncomeCats) {
+                    FilterSection(
+                        title = "Categorias de Receita",
+                        subtitle = "Filtre por tipos de entradas e rendimentos"
+                    ) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            incomeCategories.forEach { cat ->
+                                val count = uiState.categoryCounts[cat.name] ?: 0
+                                FilterPillChip(
+                                    label = cat.name,
+                                    icon = cat.icon,
+                                    iconTint = cat.color,
+                                    count = count,
+                                    isSelected = uiState.selectedCategories.contains(cat.name),
+                                    onClick = { onToggleCategory(cat.name) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (legacyCategories.isNotEmpty()) {
+                    FilterSection(
+                        title = "Categorias Anteriores",
+                        subtitle = "Lançamentos com categorização legada identificados no período"
+                    ) {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            legacyCategories.forEach { catName ->
+                                val detail = CategoryRegistry.get(catName)
+                                val count = uiState.categoryCounts[catName] ?: 0
+                                FilterPillChip(
+                                    label = "$catName (Legada)",
+                                    icon = detail.icon,
+                                    iconTint = detail.color,
+                                    count = count,
+                                    isSelected = uiState.selectedCategories.contains(catName),
+                                    onClick = { onToggleCategory(catName) }
                                 )
                             }
                         }
@@ -241,7 +310,10 @@ fun FilterPillChip(
     label: String,
     isSelected: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    iconTint: Color? = null,
+    count: Int? = null
 ) {
     val bgColor = if (isSelected) Emerald500.copy(alpha = 0.15f) else DarkSurfaceVariant
     val borderColor = if (isSelected) Emerald500.copy(alpha = 0.45f) else DarkBorder
@@ -253,13 +325,21 @@ fun FilterPillChip(
             .background(bgColor, CircleShape)
             .border(1.dp, borderColor, CircleShape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconTint ?: (if (isSelected) Emerald400 else TextSecondary),
+                    modifier = Modifier.size(13.dp)
+                )
+            }
             if (isSelected) {
                 Icon(
                     imageVector = Icons.Default.Check,
@@ -278,6 +358,14 @@ fun FilterPillChip(
                 ),
                 maxLines = 1
             )
+            if (count != null && count > 0) {
+                Text(
+                    text = "($count)",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isSelected) Emerald400.copy(alpha = 0.85f) else TextMuted
+                )
+            }
         }
     }
 }
