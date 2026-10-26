@@ -235,8 +235,8 @@ class TransactionFormViewModel(
     }
 
     fun onTypeChange(type: TransactionType) {
-        val defaultCat = if (type == TransactionType.INCOME) "Receita" else "Alimentação"
-        val defaultSubcat = CategoryRegistry.get(defaultCat).subcategories.firstOrNull()
+        val defaultCat = if (type == TransactionType.INCOME) "Salário & Remuneração" else "Alimentação"
+        val defaultSubcat = if (type == TransactionType.INCOME) "Salário Principal" else "Supermercado"
         _state.update {
             it.copy(
                 type = type,

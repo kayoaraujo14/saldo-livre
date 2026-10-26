@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,18 +67,24 @@ fun MonthSelector(
         ) {
             Text(
                 text = label,
-                style = Typography.titleMedium,
+                style = Typography.titleMedium.copy(
+                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                ),
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(2.dp))
             if (isCurrent) {
                 Text(
                     text = "• MÊS ATUAL •",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Emerald400,
+                    style = Typography.labelSmall.copy(
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -86,6 +93,9 @@ fun MonthSelector(
                     text = "Toque para voltar ao mês atual",
                     fontSize = 10.sp,
                     color = TextMuted,
+                    style = Typography.labelSmall.copy(
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

@@ -234,7 +234,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
       properties: {
         descricao: { type: Type.STRING, description: 'Descrição da despesa ou receita. Ex: "Decolar", "Amazon", "Uber".' },
         valorTotal: { type: Type.NUMBER, description: 'Valor da compra em reais (aceita valores negativos para estornos/reembolsos na fatura).' },
-        categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria da despesa. Use "Cartão Terceiros" para terceiros sem conta.' },
+        categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria da despesa ou receita (ex: Alimentação, Moradia, Transporte, Salário & Remuneração, etc.).' },
         subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Aluguel & Condomínio", "Energia Elétrica", "Presentes", etc.).' },
         metodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Padrão: credit_card.' },
         status: {
@@ -343,7 +343,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
                 description:
                   '"paid" para extrato de conta corrente (já liquidado na conta); "pending" para compras no cartão na fatura a vencer.',
               },
-              categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria. Para entradas e salários use "Receita".' },
+              categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria da despesa ou receita (ex: Alimentação, Moradia, Salário & Remuneração, etc.).' },
               subcategoria: { type: Type.STRING, description: 'Subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Presentes", "Energia Elétrica", etc.).' },
               contraparte: { type: Type.STRING, description: 'Nome limpo do recebedor, pagador ou estabelecimento (ex: "Brisanet Telecom", "João da Silva", "Empresa XPTO").' },
               categoria_filtro: {

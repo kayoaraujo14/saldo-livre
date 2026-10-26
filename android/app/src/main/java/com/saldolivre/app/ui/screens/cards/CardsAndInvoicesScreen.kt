@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -361,53 +362,20 @@ private fun InvoicesTabContent(
             return@LazyColumn
         }
 
-        // 2. KPIs Globais de Fatura (Ocultados quando redundantes com a fatura do cartão exibido)
-        val hideKpis = selectedInvoice != null && (
-            uiState.invoices.size <= 1 ||
-            (kotlin.math.abs(uiState.totalOpenAmount - selectedInvoice.openAmount) < 0.01 &&
-             kotlin.math.abs(uiState.totalInvoicesAmount - selectedInvoice.total) < 0.01)
-        )
-
-        if (!hideKpis) {
-            item(key = "inv_kpis") {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KpiTile(
-                            label = "Total das faturas",
-                            value = FinanceEngine.formatCurrency(uiState.totalInvoicesAmount),
-                            color = TextPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        KpiTile(
-                            label = "Em aberto",
-                            value = FinanceEngine.formatCurrency(uiState.totalOpenAmount),
-                            color = Amber400,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KpiTile(
-                            label = "Minha parte",
-                            value = FinanceEngine.formatCurrency(uiState.totalMineAmount),
-                            color = Emerald400,
-                            modifier = Modifier.weight(1f)
-                        )
-                        KpiTile(
-                            label = "Próximo vencimento",
-                            value = uiState.nextDueInvoice?.let { FinanceEngine.formatShortDate(it.dueDate) } ?: "—",
-                            color = Rose400,
-                            modifier = Modifier.weight(1f),
-                            hint = uiState.nextDueInvoice?.card?.cardName ?: "Tudo em dia"
-                        )
-                    }
-                }
-            }
-        }
-
-        // 3. Carrossel de Cartões (exibido apenas se houver múltiplos cartões para evitar redundância de valor)
+        // 2. Carrossel de Cartões (exibido se houver múltiplos cartões para alternar faturas)
         if (uiState.invoices.size > 1) {
             item(key = "inv_card_selector") {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val listState = rememberLazyListState()
+                LaunchedEffect(uiState.selectedCardId) {
+                    val targetIndex = uiState.invoices.indexOfFirst { it.card.id == uiState.selectedCardId }
+                    if (targetIndex >= 0) {
+                        listState.animateScrollToItem(targetIndex)
+                    }
+                }
+                LazyRow(
+                    state = listState,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     items(uiState.invoices, key = { it.card.id }) { inv ->
                         CardChip(
                             invoice = inv,
@@ -651,24 +619,6 @@ private fun MonthNavigator(monthKey: String, onPrev: () -> Unit, onNext: () -> U
 }
 
 @Composable
-private fun KpiTile(label: String, value: String, color: Color, modifier: Modifier = Modifier, hint: String? = null) {
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(DarkSurface)
-            .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-            .padding(12.dp)
-    ) {
-        Text(label, fontSize = 11.sp, color = TextSecondary, maxLines = 1)
-        Spacer(Modifier.height(2.dp))
-        Text(value, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = color, maxLines = 1)
-        if (hint != null) {
-            Text(hint, fontSize = 10.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
 private fun StatusPill(status: InvoiceStatus) {
     val c = statusColor(status)
     Row(
@@ -688,11 +638,16 @@ private fun StatusPill(status: InvoiceStatus) {
 @Composable
 private fun CardChip(invoice: CardInvoice, selected: Boolean, onClick: () -> Unit) {
     val base = cardColor(invoice.card.color)
+    val formattedName = remember(invoice.card.cardName) {
+        invoice.card.cardName.trim().let { name ->
+            if (name.isNotEmpty()) name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } else "Cartão"
+        }
+    }
     Column(
         modifier = Modifier
-            .width(200.dp)
+            .width(190.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(Brush.linearGradient(listOf(base.copy(alpha = 0.55f), DarkBackground)))
+            .background(Brush.linearGradient(listOf(base.copy(alpha = if (selected) 0.65f else 0.35f), DarkBackground)))
             .border(
                 width = if (selected) 2.dp else 1.dp,
                 color = if (selected) base else DarkBorder,
@@ -703,7 +658,7 @@ private fun CardChip(invoice: CardInvoice, selected: Boolean, onClick: () -> Uni
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                invoice.card.cardName,
+                formattedName,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary,
@@ -720,8 +675,13 @@ private fun CardChip(invoice: CardInvoice, selected: Boolean, onClick: () -> Uni
             fontWeight = FontWeight.ExtraBold,
             color = TextPrimary
         )
+        val subtitle = if (invoice.itemsCount == 0) {
+            "Sem compras no ciclo"
+        } else {
+            "Vence ${FinanceEngine.formatShortDate(invoice.dueDate)} · ${invoice.itemsCount} ${if (invoice.itemsCount == 1) "item" else "itens"}"
+        }
         Text(
-            "Vence ${FinanceEngine.formatShortDate(invoice.dueDate)} · ${invoice.itemsCount} itens",
+            subtitle,
             fontSize = 11.sp,
             color = TextSecondary
         )

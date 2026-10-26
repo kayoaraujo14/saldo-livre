@@ -445,13 +445,25 @@ fun TransactionFormScreen(
                     }
                 }
 
+                val categoriesToShow = remember(state.type, state.category) {
+                    val list = if (state.type == TransactionType.INCOME) {
+                        CategoryRegistry.INCOME_CATEGORIES
+                    } else {
+                        CategoryRegistry.EXPENSE_CATEGORIES
+                    }
+                    if (list.none { it.name == state.category }) {
+                        list + CategoryRegistry.get(state.category)
+                    } else {
+                        list
+                    }
+                }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    CategoryRegistry.CATEGORIES.forEach { cat ->
+                    categoriesToShow.forEach { cat ->
                         val isSelected = state.category == cat.name
                         Box(
                             modifier = Modifier

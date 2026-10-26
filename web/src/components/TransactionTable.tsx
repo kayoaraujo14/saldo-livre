@@ -6,8 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/overlays'
 import { useFinance } from '@/store/FinanceContext'
 import {
-  CATEGORIES,
-  CATEGORY_GROUPS,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  LEGACY_CATEGORIES,
+  getCategoryDetail,
   type Category,
   type SplitType,
   type Transaction,
@@ -1766,7 +1768,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                           value={tx.category}
                           onValueChange={(cat) => {
                             const newCat = cat as Category
-                            const newSub = CATEGORY_GROUPS[newCat]?.subcategories?.[0] || null
+                            const newSub = getCategoryDetail(newCat)?.subcategories?.[0] || null
                             if (tx.installmentGroupId) {
                               updateInstallmentGroup(tx.installmentGroupId, {
                                 category: newCat,
@@ -1784,14 +1786,20 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {CATEGORIES.map((c) => (
+                            {(tx.type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map((c) => (
                               <SelectItem key={c} value={c}>
-                                {c === 'Estorno' ? '🔄 Estorno (Crédito Cartão)' : c}
+                                {c}
                               </SelectItem>
                             ))}
+                            {(LEGACY_CATEGORIES as readonly string[]).includes(tx.category) &&
+                              !(tx.type === 'income' ? (INCOME_CATEGORIES as readonly string[]) : (EXPENSE_CATEGORIES as readonly string[])).includes(tx.category) && (
+                                <SelectItem key={tx.category} value={tx.category}>
+                                  {tx.category} (Legada)
+                                </SelectItem>
+                              )}
                           </SelectContent>
                         </Select>
-                        {(CATEGORY_GROUPS[tx.category]?.subcategories?.length ?? 0) > 0 ? (
+                        {(getCategoryDetail(tx.category)?.subcategories?.length ?? 0) > 0 ? (
                           <Select
                             value={tx.subcategory || ''}
                             onValueChange={(sub) => {
@@ -1811,7 +1819,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                               <span className="truncate">› {tx.subcategory || 'Sem subgrupo'}</span>
                             </SelectTrigger>
                             <SelectContent>
-                              {CATEGORY_GROUPS[tx.category].subcategories.map((sub) => (
+                              {getCategoryDetail(tx.category).subcategories.map((sub) => (
                                 <SelectItem key={sub} value={sub} className="text-xs">
                                   {sub}
                                 </SelectItem>

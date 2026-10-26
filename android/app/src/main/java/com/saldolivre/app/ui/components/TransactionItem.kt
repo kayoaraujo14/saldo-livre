@@ -6,9 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -16,18 +15,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.CategoryRegistry
+import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.ui.theme.*
 
 private val TransactionItemShape = RoundedCornerShape(14.dp)
-private val InstallmentBadgeShape = RoundedCornerShape(4.dp)
 
 @Composable
 fun TransactionItem(
@@ -42,10 +42,10 @@ fun TransactionItem(
         CategoryRegistry.get(transaction.category)
     }
     val catBgColor = remember(categoryDetail.color) {
-        categoryDetail.color.copy(alpha = 0.15f)
+        categoryDetail.color.copy(alpha = 0.12f)
     }
     val catBorderColor = remember(categoryDetail.color) {
-        categoryDetail.color.copy(alpha = 0.35f)
+        categoryDetail.color.copy(alpha = 0.25f)
     }
     val isIncome = transaction.type == TransactionType.INCOME
     val isPaid = transaction.status == com.saldolivre.app.data.model.TransactionStatus.PAID
@@ -76,6 +76,11 @@ fun TransactionItem(
     val amountColor = if (isIncome) Emerald400 else TextPrimary
     val itemBorderColor = if (isPaid) Emerald500.copy(alpha = 0.25f) else DarkBorder
 
+    val isPayerAndHasReceivable = !currentUserId.isNullOrBlank() &&
+            transaction.paidByUid == currentUserId &&
+            transaction.effectiveAmount > myImpact
+    val toReceive = if (isPayerAndHasReceivable) transaction.effectiveAmount - myImpact else 0.0
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -83,16 +88,17 @@ fun TransactionItem(
             .background(DarkSurface)
             .border(1.dp, itemBorderColor, TransactionItemShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(14.dp)
+            .padding(horizontal = 14.dp, vertical = 11.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Category Icon with tinted background
+            // Category Icon with circular translucent background
             Box(
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
                     .background(catBgColor, CircleShape)
                     .border(1.dp, catBorderColor, CircleShape),
                 contentAlignment = Alignment.Center
@@ -101,185 +107,245 @@ fun TransactionItem(
                     imageVector = categoryDetail.icon,
                     contentDescription = transaction.category,
                     tint = categoryDetail.color,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
-            // Main Info
+            // Main Content Area
             Column(
                 modifier = Modifier.weight(1f)
             ) {
+                // ROW 1: Title (left) & Formatted Amount (right) - Perfectly aligned on same horizontal baseline
                 Row(
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = transaction.description,
-                        style = Typography.titleMedium,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
+                    Row(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = transaction.description,
+                            style = Typography.titleMedium.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            ),
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
 
-                    if (transaction.installmentNumber != null && transaction.installmentsTotal != null) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .background(DarkSurfaceVariant, InstallmentBadgeShape)
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = "${transaction.installmentNumber}/${transaction.installmentsTotal}",
-                                fontSize = 10.sp,
-                                color = TextMuted,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
+                        if (transaction.installmentNumber != null && transaction.installmentsTotal != null) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(DarkSurfaceVariant)
+                                    .border(1.dp, DarkBorder, CircleShape)
+                                    .padding(horizontal = 6.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = "${transaction.installmentNumber}/${transaction.installmentsTotal}",
+                                    fontSize = 9.sp,
+                                    color = TextMuted,
+                                    fontWeight = FontWeight.Bold,
+                                    style = LocalTextStyle.current.copy(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Text(
+                        text = formattedAmount,
+                        style = Typography.titleMedium.copy(
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        ),
+                        fontWeight = FontWeight.Bold,
+                        color = amountColor,
+                        maxLines = 1
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                // ROW 2: Metadata (Date, Category, Split) on Left & Status / Receivables on Right
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = shortDate,
-                        style = Typography.labelSmall,
-                        color = TextMuted,
-                        maxLines = 1
-                    )
+                    // Left metadata badges
+                    Row(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text(
+                            text = shortDate,
+                            style = Typography.labelSmall.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            ),
+                            color = TextMuted,
+                            maxLines = 1
+                        )
 
-                    Text(
-                        text = "•",
-                        fontSize = 10.sp,
-                        color = TextMuted
-                    )
+                        val categoryWithSubcategory = remember(transaction.category, transaction.subcategory) {
+                            if (!transaction.subcategory.isNullOrBlank() &&
+                                !transaction.subcategory.equals(transaction.category, ignoreCase = true)
+                            ) {
+                                "${transaction.category} › ${transaction.subcategory}"
+                            } else {
+                                transaction.category
+                            }
+                        }
 
-                    val categoryWithSubcategory = remember(transaction.category, transaction.subcategory) {
-                        if (!transaction.subcategory.isNullOrBlank() &&
-                            !transaction.subcategory.equals(transaction.category, ignoreCase = true)
+                        // Category Pill Badge
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(catBgColor)
+                                .border(1.dp, catBorderColor, CircleShape)
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            "${transaction.category} › ${transaction.subcategory}"
-                        } else {
-                            transaction.category
+                            Text(
+                                text = categoryWithSubcategory,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = categoryDetail.color,
+                                style = LocalTextStyle.current.copy(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        if (transaction.splitType != null) {
+                            val splitLabel = when {
+                                transaction.splitType == SplitType.EXTERNAL && !transaction.externalName.isNullOrBlank() ->
+                                    "🏷️ ${transaction.externalName}"
+                                transaction.splitType == SplitType.FRIEND && !transaction.assignedFriendName.isNullOrBlank() ->
+                                    "🧑‍🤝‍🧑 ${transaction.assignedFriendName}"
+                                else -> null
+                            }
+                            SplitBadge(splitType = transaction.splitType, labelOverride = splitLabel)
                         }
                     }
 
-                    Text(
-                        text = categoryWithSubcategory,
-                        style = Typography.labelSmall,
-                        color = TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
+                    Spacer(modifier = Modifier.width(6.dp))
 
-                    if (transaction.splitType != null) {
-                        SplitBadge(splitType = transaction.splitType)
-                    }
-                }
-
-                // Sub-tags: Friend and Payer responsibility
-                if (!currentUserId.isNullOrBlank()) {
+                    // Right metadata badges (ToReceive + StatusBadge)
                     Row(
-                        modifier = Modifier.padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        if (transaction.paidByUid != currentUserId && myImpact > 0.0) {
+                        if (toReceive > 0.01) {
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFF451A03).copy(alpha = 0.7f))
-                                    .border(1.dp, Color(0xFF9A3412).copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
-                            ) {
-                                Text(
-                                    text = "Você deve ao titular",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFFFDBA74),
-                                    maxLines = 1
-                                )
-                            }
-                        } else if (transaction.paidByUid == currentUserId && transaction.effectiveAmount > myImpact) {
-                            val toReceive = transaction.effectiveAmount - myImpact
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Emerald500.copy(alpha = 0.15f))
-                                    .border(1.dp, Emerald500.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                    .clip(CircleShape)
+                                    .background(Emerald500.copy(alpha = 0.12f))
+                                    .border(1.dp, Emerald500.copy(alpha = 0.25f), CircleShape)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "+${FinanceEngine.formatCurrency(toReceive)} a receber",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Emerald400,
+                                    style = LocalTextStyle.current.copy(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    ),
                                     maxLines = 1
                                 )
                             }
+                        } else if (isSplit && displayAmount != transaction.effectiveAmount && displayAmount > 0.0) {
+                            Text(
+                                text = "Total: ${FinanceEngine.formatCurrency(transaction.effectiveAmount)}",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                style = LocalTextStyle.current.copy(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                ),
+                                maxLines = 1
+                            )
                         }
 
-                        if (transaction.assignedFriendUid == currentUserId) {
-                            val isAccepted = transaction.acceptanceStatus == "accepted"
-                            val pctStr = (transaction.friendSharePct ?: 50.0).toInt()
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(if (isAccepted) Emerald500.copy(alpha = 0.15f) else Amber500.copy(alpha = 0.15f))
-                                    .border(1.dp, if (isAccepted) Emerald500.copy(alpha = 0.4f) else Amber500.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
-                            ) {
-                                Text(
-                                    text = if (isAccepted) "✓ Aceito ($pctStr%)" else "🕒 Aguarda aceite ($pctStr%)",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = if (isAccepted) Emerald400 else Amber400,
-                                    maxLines = 1
-                                )
+                        StatusBadge(
+                            status = transaction.status,
+                            onClick = onStatusClick
+                        )
+                    }
+                }
+
+                // Sub-tags: Only auxiliary status (Titular debt or friend acceptance)
+                if (!currentUserId.isNullOrBlank()) {
+                    val owesTitular = transaction.paidByUid != currentUserId && myImpact > 0.0
+                    val isAssignedFriend = transaction.assignedFriendUid == currentUserId
+
+                    if (owesTitular || isAssignedFriend) {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (owesTitular) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(Amber500.copy(alpha = 0.12f))
+                                        .border(1.dp, Amber500.copy(alpha = 0.25f), CircleShape)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Você deve ao titular",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Amber400,
+                                        style = LocalTextStyle.current.copy(
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                        ),
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            if (isAssignedFriend) {
+                                val isAccepted = transaction.acceptanceStatus == "accepted"
+                                val pctStr = (transaction.friendSharePct ?: 50.0).toInt()
+                                val accColor = if (isAccepted) Emerald400 else Amber400
+                                val accBg = if (isAccepted) Emerald500.copy(alpha = 0.12f) else Amber500.copy(alpha = 0.12f)
+                                val accBorder = if (isAccepted) Emerald500.copy(alpha = 0.25f) else Amber500.copy(alpha = 0.25f)
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(accBg)
+                                        .border(1.dp, accBorder, CircleShape)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isAccepted) "✓ Aceito ($pctStr%)" else "🕒 Aguarda aceite ($pctStr%)",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = accColor,
+                                        style = LocalTextStyle.current.copy(
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                        ),
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
-
-            Spacer(modifier = Modifier.width(10.dp))
-
-            // Right side: Amount & Status
-            Column(
-                horizontalAlignment = Alignment.End
-            ) {
-                Text(
-                    text = formattedAmount,
-                    style = Typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = amountColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                if (isSplit && displayAmount != transaction.effectiveAmount && displayAmount > 0.0) {
-                    Text(
-                        text = "Total: ${FinanceEngine.formatCurrency(transaction.effectiveAmount)}",
-                        fontSize = 10.sp,
-                        color = TextMuted,
-                        maxLines = 1
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                StatusBadge(
-                    status = transaction.status,
-                    isIncome = isIncome,
-                    onClick = onStatusClick
-                )
             }
         }
     }

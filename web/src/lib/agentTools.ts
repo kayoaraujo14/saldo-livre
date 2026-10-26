@@ -184,13 +184,13 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     method = 'debit'
   }
 
-  const guessed = guessCategoryAndSubcategory(description, total)
+  const guessed = guessCategoryAndSubcategory(description, total, type)
   let category: Category = (CATEGORIES as readonly string[]).includes(String(args.categoria))
     ? (args.categoria as Category)
     : guessed.category
   if (total < 0 && category === 'Outros') category = 'Estorno'
   if (splitType === 'external' && category === 'Outros') category = 'Cartão Terceiros'
-  if (type === 'income') category = 'Receita'
+  if (type === 'income' && category === 'Outros') category = 'Outras Receitas'
 
   let subcategory: string | null = null
   if (typeof args.subcategoria === 'string' && args.subcategoria.trim()) {
@@ -719,8 +719,8 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
 
       const txDate = (typeof item.data === 'string' && item.data.trim()) || defaultVenc || `${targetMonth}-01`
 
-      const guessed = guessCategoryAndSubcategory(desc, val)
-      const resolvedCategory = typeof item.categoria === 'string' ? item.categoria : resolvedTipo === 'income' ? 'Receita' : guessed.category
+      const guessed = guessCategoryAndSubcategory(desc, val, resolvedTipo)
+      const resolvedCategory = typeof item.categoria === 'string' ? item.categoria : guessed.category
       const resolvedSubcat = typeof item.subcategoria === 'string' && item.subcategoria.trim()
         ? item.subcategoria.trim()
         : (resolvedCategory === guessed.category ? guessed.subcategory : (resolvedTipo === 'income' ? 'Outras Receitas' : undefined))

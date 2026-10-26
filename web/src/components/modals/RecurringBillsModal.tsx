@@ -5,7 +5,18 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useFinance } from '@/store/FinanceContext'
-import { CATEGORIES, CATEGORY_GROUPS, type Category, type EstimationRule, type PaymentMethod, type RecurringBill, type SplitType, type TransactionType } from '@/types'
+import {
+  CATEGORY_GROUPS,
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  getCategoryDetail,
+  type Category,
+  type EstimationRule,
+  type PaymentMethod,
+  type RecurringBill,
+  type SplitType,
+  type TransactionType,
+} from '@/types'
 import { ESTIMATION_LABELS } from '@/lib/finance'
 import { formatBRL, currentMonthKey, shiftMonth, monthLabel } from '@/lib/utils'
 import { RefreshCw, Plus, Trash2, Calendar, Split, Sparkles, Wallet, Check, Edit2, Clock, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
@@ -116,7 +127,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       endMonthVal = shiftMonth(startMonth, installmentsVal - 1)
     }
 
-    const effectiveCat = billType === 'income' ? 'Receita' : category
+    const effectiveCat = category
     const toSave: RecurringBill = {
       ...editingBill,
       description: description.trim(),
@@ -263,9 +274,9 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   type="button"
                   onClick={() => {
                     setBillType('expense')
-                    if (category === 'Receita') {
+                    if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
                       setCategory('Moradia')
-                      setSubcategory(CATEGORY_GROUPS['Moradia']?.subcategories?.[0] || null)
+                      setSubcategory(getCategoryDetail('Moradia')?.subcategories?.[0] || null)
                     }
                   }}
                   className={`py-1.5 px-3 rounded-lg font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
@@ -281,8 +292,8 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   type="button"
                   onClick={() => {
                     setBillType('income')
-                    setCategory('Receita')
-                    setSubcategory(CATEGORY_GROUPS['Receita']?.subcategories?.[0] || null)
+                    setCategory('Salário & Remuneração')
+                    setSubcategory(getCategoryDetail('Salário & Remuneração')?.subcategories?.[0] || null)
                   }}
                   className={`py-1.5 px-3 rounded-lg font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
                     billType === 'income'
@@ -309,35 +320,37 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                 />
               </div>
 
-              {billType === 'expense' && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">Categoria</label>
-                  <Select
-                    value={category}
-                    onValueChange={(v) => {
-                      const newCat = v as Category
-                      setCategory(newCat)
-                      setSubcategory(CATEGORY_GROUPS[newCat]?.subcategories?.[0] || null)
-                    }}
-                  >
-                    <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs sm:text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CATEGORIES.filter((c) => c !== 'Receita').map((c) => (
-                        <SelectItem key={c} value={c} className="text-xs">
-                          {c}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-300">
+                  {billType === 'income' ? 'Categoria de Entrada' : 'Categoria de Despesa'}
+                </label>
+                <Select
+                  value={category}
+                  onValueChange={(v) => {
+                    const newCat = v as Category
+                    setCategory(newCat)
+                    setSubcategory(getCategoryDetail(newCat)?.subcategories?.[0] || null)
+                  }}
+                >
+                  <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs sm:text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(billType === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map((c) => (
+                      <SelectItem key={c} value={c} className="text-xs">
+                        {c}
+                      </SelectItem>
+                    ))}
+                    {category === 'Receita' && (
+                      <SelectItem value="Receita" className="text-xs">Receita (Legada)</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
 
               {/* Subcategoria */}
               {(() => {
-                const currentCat = billType === 'income' ? 'Receita' : category
-                const availableSubs = CATEGORY_GROUPS[currentCat]?.subcategories || []
+                const availableSubs = getCategoryDetail(category)?.subcategories || []
                 return (
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-300">

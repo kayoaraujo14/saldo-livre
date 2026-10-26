@@ -9,37 +9,75 @@ export type EstimationRule = 'fixed' | 'last_month' | 'avg_3_months'
 
 export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external' | 'custom' | 'THIRD_PARTY' | 'SHARED_50_50'
 
-export const CATEGORIES = [
+export const EXPENSE_CATEGORIES = [
   'Alimentação',
   'Moradia',
   'Transporte',
   'Saúde',
+  'Cuidados Pessoais & Estética',
+  'Lazer & Entretenimento',
+  'Assinaturas & Serviços',
+  'Compras & Estilo de Vida',
+  'Educação & Desenvolvimento',
+  'Família & Dependentes',
+  'Pets',
+  'Investimentos',
+  'Financiamentos & Dívidas',
+  'Impostos & Tributos',
+  'Trabalho / PJ / Carreira',
+  'Outros',
+] as const
+
+export const INCOME_CATEGORIES = [
+  'Salário & Remuneração',
+  'Benefícios',
+  'Freelance & Serviços',
+  'Rendimentos & Investimentos',
+  'Reembolsos & Acertos',
+  'Vendas & Desapegos',
+  'Outras Receitas',
+] as const
+
+export const LEGACY_CATEGORIES = [
   'Lazer',
   'Assinaturas',
-  'Educação',
   'Compras',
-  'Investimentos',
+  'Educação',
   'Financiamentos & Empréstimos',
-  'Pets',
   'Cartão Terceiros',
   'Estorno',
   'Receita',
-  'Outros',
 ] as const
+
+export const CATEGORIES = [
+  ...EXPENSE_CATEGORIES,
+  ...INCOME_CATEGORIES,
+  ...LEGACY_CATEGORIES,
+] as const
+
 export type Category = (typeof CATEGORIES)[number]
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
+export type IncomeCategory = (typeof INCOME_CATEGORIES)[number]
+export type LegacyCategory = (typeof LEGACY_CATEGORIES)[number]
+
+export type BudgetNature = 'need' | 'want' | 'investment' | 'income'
 
 export interface CategoryDetail {
   icon: string
   color: string
   description: string
   subcategories: readonly string[]
+  subcategoriesNature?: Record<string, BudgetNature>
+  defaultNature?: BudgetNature
 }
 
 export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
+  // --- DESPESAS (EXPENSES) ---
   Alimentação: {
     icon: 'Utensils',
     color: '#10b981',
-    description: 'Refeições, mantimentos e consumo alimentar',
+    description: 'Supermercado, feira, refeições e consumo alimentar',
+    defaultNature: 'need',
     subcategories: [
       'Supermercado',
       'Restaurante',
@@ -49,11 +87,21 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
       'Açougue & Peixaria',
       'Bares & Bebidas',
     ],
+    subcategoriesNature: {
+      'Supermercado': 'need',
+      'Feira & Hortifruti': 'need',
+      'Açougue & Peixaria': 'need',
+      'Padaria & Café': 'need',
+      'Restaurante': 'want',
+      'Delivery & Lanches': 'want',
+      'Bares & Bebidas': 'want',
+    },
   },
   Moradia: {
     icon: 'Home',
     color: '#06b6d4',
-    description: 'Despesas com residência e utilidades',
+    description: 'Despesas com residência, aluguel e utilidades',
+    defaultNature: 'need',
     subcategories: [
       'Aluguel & Condomínio',
       'Energia Elétrica',
@@ -64,38 +112,404 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
       'Móveis & Eletrodomésticos',
       'IPTU & Taxas',
     ],
+    subcategoriesNature: {
+      'Aluguel & Condomínio': 'need',
+      'Energia Elétrica': 'need',
+      'Água & Saneamento': 'need',
+      'Gás': 'need',
+      'Internet & TV a Cabo': 'need',
+      'Manutenção & Reparos': 'need',
+      'IPTU & Taxas': 'need',
+      'Móveis & Eletrodomésticos': 'want',
+    },
   },
   Transporte: {
     icon: 'Car',
     color: '#3b82f6',
-    description: 'Locomoção, veículos e mobilidade urbana',
+    description: 'Locomoção diária, veículos e mobilidade urbana',
+    defaultNature: 'need',
     subcategories: [
       'Combustível',
       'Aplicativos (Uber/99)',
       'Transporte Público (Metrô/Ônibus)',
       'Estacionamento & Pedágio',
       'Manutenção & Revisão',
-      'Seguro & IPVA',
+      'Seguro Auto & Moto',
       'Lavagem & Estética Automotiva',
     ],
+    subcategoriesNature: {
+      'Combustível': 'need',
+      'Transporte Público (Metrô/Ônibus)': 'need',
+      'Estacionamento & Pedágio': 'need',
+      'Manutenção & Revisão': 'need',
+      'Seguro Auto & Moto': 'need',
+      'Aplicativos (Uber/99)': 'want',
+      'Lavagem & Estética Automotiva': 'want',
+    },
   },
   Saúde: {
     icon: 'HeartPulse',
     color: '#f43f5e',
-    description: 'Saúde física, mental e bem-estar',
+    description: 'Saúde física, medicamentos, médicos e bem-estar',
+    defaultNature: 'need',
     subcategories: [
       'Farmácia & Remédios',
       'Consultas & Exames',
       'Plano de Saúde & Dental',
       'Academia & Treinos',
       'Terapia & Psicologia',
+      'Odontologia',
       'Cuidados Pessoais & Estética',
     ],
+    subcategoriesNature: {
+      'Farmácia & Remédios': 'need',
+      'Consultas & Exames': 'need',
+      'Plano de Saúde & Dental': 'need',
+      'Academia & Treinos': 'need',
+      'Terapia & Psicologia': 'need',
+      'Odontologia': 'need',
+      'Cuidados Pessoais & Estética': 'want',
+    },
   },
+  'Cuidados Pessoais & Estética': {
+    icon: 'Sparkles',
+    color: '#d946ef',
+    description: 'Barbearia, salão de beleza, cosméticos e estética pessoal',
+    defaultNature: 'want',
+    subcategories: [
+      'Cabelereiro & Barbearia',
+      'Cosméticos & Maquiagem',
+      'Skincare & Perfumaria',
+      'Tratamentos & Estética',
+      'Higiene Pessoal',
+    ],
+    subcategoriesNature: {
+      'Cabelereiro & Barbearia': 'want',
+      'Cosméticos & Maquiagem': 'want',
+      'Skincare & Perfumaria': 'want',
+      'Tratamentos & Estética': 'want',
+      'Higiene Pessoal': 'need',
+    },
+  },
+  'Lazer & Entretenimento': {
+    icon: 'Sparkles',
+    color: '#a855f7',
+    description: 'Entretenimento, cultura, passeios, diversão e viagens',
+    defaultNature: 'want',
+    subcategories: [
+      'Cinema, Teatro & Shows',
+      'Viagens & Hospedagem',
+      'Passeios & Experiências',
+      'Festas, Baladas & Eventos',
+      'Jogos & Games',
+      'Hobbies & Atividades',
+    ],
+    subcategoriesNature: {
+      'Cinema, Teatro & Shows': 'want',
+      'Viagens & Hospedagem': 'want',
+      'Passeios & Experiências': 'want',
+      'Festas, Baladas & Eventos': 'want',
+      'Jogos & Games': 'want',
+      'Hobbies & Atividades': 'want',
+    },
+  },
+  'Assinaturas & Serviços': {
+    icon: 'RefreshCw',
+    color: '#8b5cf6',
+    description: 'Serviços digitais recorrentes, streaming e telefonia',
+    defaultNature: 'want',
+    subcategories: [
+      'Streaming de Vídeo (Netflix/Max/Disney)',
+      'Streaming de Música (Spotify/Apple)',
+      'Softwares, IA & Nuvem (iCloud/ChatGPT)',
+      'Telefonia Celular & Planos',
+      'Clubes & Assinaturas Recorrentes',
+    ],
+    subcategoriesNature: {
+      'Streaming de Vídeo (Netflix/Max/Disney)': 'want',
+      'Streaming de Música (Spotify/Apple)': 'want',
+      'Softwares, IA & Nuvem (iCloud/ChatGPT)': 'want',
+      'Clubes & Assinaturas Recorrentes': 'want',
+      'Telefonia Celular & Planos': 'need',
+    },
+  },
+  'Compras & Estilo de Vida': {
+    icon: 'ShoppingBag',
+    color: '#ec4899',
+    description: 'Vestuário, calçados, eletrônicos e compras em geral',
+    defaultNature: 'want',
+    subcategories: [
+      'Roupas & Acessórios',
+      'Calçados',
+      'Eletrônicos & Informática',
+      'Casa & Decoração',
+      'Presentes',
+    ],
+    subcategoriesNature: {
+      'Roupas & Acessórios': 'want',
+      'Calçados': 'want',
+      'Eletrônicos & Informática': 'want',
+      'Casa & Decoração': 'want',
+      'Presentes': 'want',
+    },
+  },
+  'Educação & Desenvolvimento': {
+    icon: 'GraduationCap',
+    color: '#eab308',
+    description: 'Estudos, capacitação, faculdade, cursos e livros',
+    defaultNature: 'need',
+    subcategories: [
+      'Cursos Online & Certificações',
+      'Faculdade & Pós-Graduação',
+      'Livros & E-books',
+      'Material Escolar & Papelaria',
+      'Idiomas',
+    ],
+    subcategoriesNature: {
+      'Cursos Online & Certificações': 'need',
+      'Faculdade & Pós-Graduação': 'need',
+      'Livros & E-books': 'need',
+      'Material Escolar & Papelaria': 'need',
+      'Idiomas': 'need',
+    },
+  },
+  'Família & Dependentes': {
+    icon: 'Users',
+    color: '#fb923c',
+    description: 'Despesas com filhos, creche/escola, fraldas e dependentes',
+    defaultNature: 'need',
+    subcategories: [
+      'Escola & Creche',
+      'Fraldas & Itens de Bebê',
+      'Pediatra & Saúde Infantil',
+      'Roupas & Calçados Infantis',
+      'Brinquedos & Atividades',
+      'Apoio Familiar & Mesada',
+    ],
+    subcategoriesNature: {
+      'Escola & Creche': 'need',
+      'Fraldas & Itens de Bebê': 'need',
+      'Pediatra & Saúde Infantil': 'need',
+      'Roupas & Calçados Infantis': 'need',
+      'Brinquedos & Atividades': 'want',
+      'Apoio Familiar & Mesada': 'want',
+    },
+  },
+  Pets: {
+    icon: 'Dog',
+    color: '#f97316',
+    description: 'Despesas com animais de estimação',
+    defaultNature: 'need',
+    subcategories: [
+      'Ração & Petiscos',
+      'Veterinário & Medicamentos',
+      'Banho, Tosa & Cuidados',
+      'Acessórios & Brinquedos',
+    ],
+    subcategoriesNature: {
+      'Ração & Petiscos': 'need',
+      'Veterinário & Medicamentos': 'need',
+      'Banho, Tosa & Cuidados': 'want',
+      'Acessórios & Brinquedos': 'want',
+    },
+  },
+  Investimentos: {
+    icon: 'TrendingUp',
+    color: '#059669',
+    description: 'Aportes, patrimônio e aplicações financeiras',
+    defaultNature: 'investment',
+    subcategories: [
+      'Renda Fixa (CDB / Tesouro / LCI / LCA)',
+      'Ações & Fundos Imobiliários (FIIs)',
+      'Criptomoedas & Ativos Digitais',
+      'Reserva de Emergência',
+      'Previdência Privada',
+      'Fundos de Investimento',
+      'Outros Investimentos',
+    ],
+  },
+  'Financiamentos & Dívidas': {
+    icon: 'Landmark',
+    color: '#0284c7',
+    description: 'Financiamentos imobiliários, veiculares, empréstimos e parcelamentos bancários',
+    defaultNature: 'need',
+    subcategories: [
+      'Financiamento Imobiliário',
+      'Financiamento Veicular',
+      'Empréstimo Pessoal',
+      'Empréstimo Consignado',
+      'Amortização de Financiamento',
+      'Crédito Estudantil (FIES/Pravaler)',
+      'Renegociação de Dívidas',
+      'Juros & Tarifas de Empréstimo',
+      'Outros Empréstimos',
+    ],
+    subcategoriesNature: {
+      'Financiamento Imobiliário': 'need',
+      'Financiamento Veicular': 'need',
+      'Empréstimo Pessoal': 'need',
+      'Empréstimo Consignado': 'need',
+      'Amortização de Financiamento': 'need',
+      'Crédito Estudantil (FIES/Pravaler)': 'need',
+      'Renegociação de Dívidas': 'need',
+      'Juros & Tarifas de Empréstimo': 'need',
+      'Outros Empréstimos': 'need',
+    },
+  },
+  'Impostos & Tributos': {
+    icon: 'FileText',
+    color: '#64748b',
+    description: 'IPTU, IPVA, IRPF, DARFs e tributos governamentais',
+    defaultNature: 'need',
+    subcategories: [
+      'IPVA & Licenciamento',
+      'IPTU',
+      'Imposto de Renda (IRPF)',
+      'DARFs & Tributos de Renda',
+      'Taxas Cartorárias & Governamentais',
+    ],
+    subcategoriesNature: {
+      'IPVA & Licenciamento': 'need',
+      'IPTU': 'need',
+      'Imposto de Renda (IRPF)': 'need',
+      'DARFs & Tributos de Renda': 'need',
+      'Taxas Cartorárias & Governamentais': 'need',
+    },
+  },
+  'Trabalho / PJ / Carreira': {
+    icon: 'Briefcase',
+    color: '#0ea5e9',
+    description: 'Despesas de trabalho, equipamentos, coworking, MEI e reembolsáveis',
+    defaultNature: 'need',
+    subcategories: [
+      'Equipamentos & Ferramentas de Trabalho',
+      'Despesas Corporativas (A Reembolsar)',
+      'Coworking & Escritório',
+      'DAS MEI & Contabilidade',
+      'Almoço / Transporte a Trabalho',
+    ],
+    subcategoriesNature: {
+      'Equipamentos & Ferramentas de Trabalho': 'need',
+      'Despesas Corporativas (A Reembolsar)': 'need',
+      'Coworking & Escritório': 'need',
+      'DAS MEI & Contabilidade': 'need',
+      'Almoço / Transporte a Trabalho': 'need',
+    },
+  },
+  Outros: {
+    icon: 'Tag',
+    color: '#94a3b8',
+    description: 'Despesas diversas não classificadas',
+    defaultNature: 'want',
+    subcategories: [
+      'Doações & Caridade',
+      'Tarifas Bancárias & Juros',
+      'Imprevistos',
+      'Diversos',
+    ],
+    subcategoriesNature: {
+      'Tarifas Bancárias & Juros': 'need',
+      'Imprevistos': 'need',
+      'Doações & Caridade': 'want',
+      'Diversos': 'want',
+    },
+  },
+
+  // --- RECEITAS (INCOME) ---
+  'Salário & Remuneração': {
+    icon: 'TrendingUp',
+    color: '#22c55e',
+    description: 'Salário principal, adiantamentos, férias e 13º salário',
+    defaultNature: 'income',
+    subcategories: [
+      'Salário Principal',
+      'Adiantamento / Quinzenal',
+      '13º Salário',
+      'Férias',
+      'Bônus & PLR',
+    ],
+  },
+  Benefícios: {
+    icon: 'Gift',
+    color: '#10b981',
+    description: 'Vales e auxílios corporativos',
+    defaultNature: 'income',
+    subcategories: [
+      'Vale Alimentação (VA)',
+      'Vale Refeição (VR)',
+      'Auxílio Mobilidade / Combustível',
+      'Auxílio Home Office',
+      'Outros Benefícios',
+    ],
+  },
+  'Freelance & Serviços': {
+    icon: 'Briefcase',
+    color: '#06b6d4',
+    description: 'Prestação de serviços, projetos freelancer e MEI',
+    defaultNature: 'income',
+    subcategories: [
+      'Projetos Freelance',
+      'Consultorias & Aulas',
+      'Faturamento MEI / PJ',
+      'Comissões & Bonificações',
+    ],
+  },
+  'Rendimentos & Investimentos': {
+    icon: 'TrendingUp',
+    color: '#059669',
+    description: 'Dividendos, juros sobre capital e rendimentos de aplicações',
+    defaultNature: 'income',
+    subcategories: [
+      'Dividendos & JCP',
+      'Rendimentos de FIIs',
+      'Rendimentos de Renda Fixa',
+      'Resgates de Aplicação',
+      'Lucro na Venda de Ativos',
+    ],
+  },
+  'Reembolsos & Acertos': {
+    icon: 'RotateCcw',
+    color: '#6366f1',
+    description: 'Devoluções de compras compartilhadas e reembolsos corporativos',
+    defaultNature: 'income',
+    subcategories: [
+      'Acerto de Amigo / Cartão',
+      'Divisão de Casal',
+      'Reembolso de Empresa',
+      'Cashback & Estornos Recebidos',
+    ],
+  },
+  'Vendas & Desapegos': {
+    icon: 'ShoppingBag',
+    color: '#f59e0b',
+    description: 'Venda de itens usados, veículos ou patrimônio',
+    defaultNature: 'income',
+    subcategories: [
+      'Venda de Eletrônicos & Bens',
+      'Venda de Veículo',
+      'Desapegos & Brechó',
+      'Outras Vendas',
+    ],
+  },
+  'Outras Receitas': {
+    icon: 'Sparkles',
+    color: '#14b8a6',
+    description: 'Pix recebidos, presentes e entradas eventuais',
+    defaultNature: 'income',
+    subcategories: [
+      'Pix Recebido',
+      'Presentes & Doações Recebidas',
+      'Restituição de Imposto de Renda',
+      'Entradas Diversas',
+    ],
+  },
+
+  // --- COMPATIBILIDADE RETROATIVA (LEGACY CATEGORIES) ---
   Lazer: {
     icon: 'Sparkles',
     color: '#a855f7',
-    description: 'Entretenimento, passeios e viagens',
+    description: 'Entretenimento, passeios e viagens (legado)',
+    defaultNature: 'want',
     subcategories: [
       'Cinema, Teatro & Shows',
       'Viagens & Hospedagem',
@@ -108,7 +522,8 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
   Assinaturas: {
     icon: 'RefreshCw',
     color: '#8b5cf6',
-    description: 'Serviços recorrentes e digitais',
+    description: 'Serviços recorrentes e digitais (legado)',
+    defaultNature: 'want',
     subcategories: [
       'Streaming de Vídeo (Netflix/Max/Disney)',
       'Streaming de Música (Spotify/Apple)',
@@ -117,22 +532,11 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
       'Clubes & Assinaturas Recorrentes',
     ],
   },
-  Educação: {
-    icon: 'GraduationCap',
-    color: '#eab308',
-    description: 'Estudos, capacitação e desenvolvimento',
-    subcategories: [
-      'Cursos Online & Certificações',
-      'Faculdade & Pós-Graduação',
-      'Livros & E-books',
-      'Material Escolar & Papelaria',
-      'Idiomas',
-    ],
-  },
   Compras: {
     icon: 'ShoppingBag',
     color: '#ec4899',
-    description: 'Bens de consumo pessoal e vestuário',
+    description: 'Bens de consumo pessoal e vestuário (legado)',
+    defaultNature: 'want',
     subcategories: [
       'Roupas & Acessórios',
       'Calçados',
@@ -141,24 +545,24 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
       'Presentes',
     ],
   },
-  Investimentos: {
-    icon: 'TrendingUp',
-    color: '#059669',
-    description: 'Aportes, patrimônio e aplicações financeiras',
+  Educação: {
+    icon: 'GraduationCap',
+    color: '#eab308',
+    description: 'Estudos, capacitação e desenvolvimento (legado)',
+    defaultNature: 'need',
     subcategories: [
-      'Renda Fixa (CDB / Tesouro / LCI / LCA)',
-      'Ações & Fundos Imobiliários (FIIs)',
-      'Criptomoedas & Ativos Digitais',
-      'Reserva de Emergência',
-      'Previdência Privada',
-      'Fundos de Investimento',
-      'Outros Investimentos',
+      'Cursos Online & Certificações',
+      'Faculdade & Pós-Graduação',
+      'Livros & E-books',
+      'Material Escolar & Papelaria',
+      'Idiomas',
     ],
   },
   'Financiamentos & Empréstimos': {
     icon: 'Landmark',
     color: '#0284c7',
-    description: 'Financiamentos imobiliários, veiculares, empréstimos e amortizações',
+    description: 'Financiamentos imobiliários, veiculares, empréstimos e amortizações (legado)',
+    defaultNature: 'need',
     subcategories: [
       'Financiamento Imobiliário',
       'Financiamento Veicular',
@@ -171,21 +575,11 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
       'Outros Empréstimos',
     ],
   },
-  Pets: {
-    icon: 'Dog',
-    color: '#f97316',
-    description: 'Despesas com animais de estimação',
-    subcategories: [
-      'Ração & Petiscos',
-      'Veterinário & Medicamentos',
-      'Banho, Tosa & Cuidados',
-      'Acessórios & Brinquedos',
-    ],
-  },
   Receita: {
     icon: 'TrendingUp',
     color: '#22c55e',
-    description: 'Entradas, salários e rendimentos',
+    description: 'Entradas, salários e rendimentos (legado)',
+    defaultNature: 'income',
     subcategories: [
       'Salário Principal',
       'Adiantamento / 13º Salário',
@@ -199,7 +593,8 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
   'Cartão Terceiros': {
     icon: 'Users',
     color: '#6366f1',
-    description: 'Compras passadas para terceiros no cartão',
+    description: 'Compras passadas para terceiros no cartão (legado)',
+    defaultNature: 'want',
     subcategories: [
       'Compras de Amigos',
       'Compras de Familiares',
@@ -209,24 +604,64 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
   Estorno: {
     icon: 'RotateCcw',
     color: '#14b8a6',
-    description: 'Créditos, cancelamentos e cashback na fatura',
+    description: 'Créditos, cancelamentos e cashback na fatura (legado)',
+    defaultNature: 'want',
     subcategories: [
       'Crédito na Fatura',
       'Devolução / Cancelamento',
       'Cashback Recebido',
     ],
   },
-  Outros: {
+}
+
+export function getCategoryDetail(name: string): CategoryDetail {
+  if (name in CATEGORY_GROUPS) {
+    return CATEGORY_GROUPS[name as Category]
+  }
+  // Mapeamentos de tolerância para nomes legados ou similares
+  if (name === 'Lazer') return CATEGORY_GROUPS['Lazer & Entretenimento']
+  if (name === 'Assinaturas') return CATEGORY_GROUPS['Assinaturas & Serviços']
+  if (name === 'Compras') return CATEGORY_GROUPS['Compras & Estilo de Vida']
+  if (name === 'Educação') return CATEGORY_GROUPS['Educação & Desenvolvimento']
+  if (name === 'Financiamentos & Empréstimos') return CATEGORY_GROUPS['Financiamentos & Dívidas']
+
+  return {
     icon: 'Tag',
-    color: '#64748b',
-    description: 'Despesas diversas não classificadas',
-    subcategories: [
-      'Tarifas Bancárias & Juros',
-      'Impostos & Taxas Governamentais',
-      'Doações & Caridade',
-      'Diversos',
-    ],
-  },
+    color: '#94a3b8',
+    description: 'Categoria não classificada',
+    subcategories: [],
+    defaultNature: 'want',
+  }
+}
+
+export function getBudgetNature(category: string, subcategory?: string | null): BudgetNature {
+  if (category === 'Investimentos' || category === 'Rendimentos & Investimentos') {
+    return 'investment'
+  }
+  if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
+    return 'income'
+  }
+
+  const detail = getCategoryDetail(category)
+  if (subcategory && detail.subcategoriesNature?.[subcategory]) {
+    return detail.subcategoriesNature[subcategory]
+  }
+  if (detail.defaultNature) {
+    return detail.defaultNature
+  }
+
+  const needsCats = new Set([
+    'Moradia',
+    'Saúde',
+    'Financiamentos & Dívidas',
+    'Financiamentos & Empréstimos',
+    'Impostos & Tributos',
+    'Família & Dependentes',
+    'Educação',
+    'Educação & Desenvolvimento',
+  ])
+  if (needsCats.has(category)) return 'need'
+  return 'want'
 }
 
 /** Coleção `users` */

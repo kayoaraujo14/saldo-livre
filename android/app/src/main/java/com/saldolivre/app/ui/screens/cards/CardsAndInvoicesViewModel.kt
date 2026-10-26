@@ -73,8 +73,14 @@ class CardsAndInvoicesViewModel(
                 val partner = repository.allUsers.find { it.uid != user.uid }
                 val currentDay = LocalDate.now().dayOfMonth
 
+                // Ordenação determinística e consistente dos cartões (próprios primeiro, depois ordem alfabética)
+                val sortedCards = cards.sortedWith(
+                    compareByDescending<Card> { it.ownerUid == user.uid }
+                        .thenBy { it.cardName.lowercase() }
+                )
+
                 // 1. Invoices computation via InvoiceEngine
-                val invoices = cards.map { card ->
+                val invoices = sortedCards.map { card ->
                     InvoiceEngine.buildInvoice(card, month, transactions, user.uid)
                 }
 
@@ -92,7 +98,7 @@ class CardsAndInvoicesViewModel(
                 val nextDue = invoices.filter { it.openAmount > 0 }.minByOrNull { it.dueDate }
 
                 // 2. Cards with Invoice details (for Meus Cartões tab)
-                val cardsWithInvoices = cards.map { card ->
+                val cardsWithInvoices = sortedCards.map { card ->
                     val isOwner = card.ownerUid == user.uid
                     val isShared = card.sharedWithUsers.isNotEmpty() || card.sharedWithUids.isNotEmpty()
 

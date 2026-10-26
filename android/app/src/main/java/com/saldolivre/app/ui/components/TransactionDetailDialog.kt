@@ -1,10 +1,12 @@
 package com.saldolivre.app.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -126,7 +128,6 @@ fun TransactionDetailDialog(
                     )
                     StatusBadge(
                         status = transaction.status,
-                        isIncome = isIncome,
                         onClick = onToggleStatus
                     )
                 }
@@ -200,6 +201,33 @@ fun TransactionDetailDialog(
                         )
                     )
                 }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Botão de Destaque: Editar Lançamento (Paridade Web)
+                OutlinedButton(
+                    onClick = {
+                        val targetId = transaction.id
+                        onDismissRequest()
+                        onNavigateToEditTransaction(targetId)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Cyan500.copy(alpha = 0.12f),
+                        contentColor = Cyan400
+                    ),
+                    border = BorderStroke(1.dp, Cyan500.copy(alpha = 0.35f))
+                ) {
+                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Editar Lançamento",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        maxLines = 1
+                    )
+                }
             }
         },
         confirmButton = {
@@ -207,26 +235,6 @@ fun TransactionDetailDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                FilledTonalButton(
-                    onClick = {
-                        val targetId = transaction.id
-                        onDismissRequest()
-                        onNavigateToEditTransaction(targetId)
-                    },
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Cyan500.copy(alpha = 0.2f),
-                        contentColor = Cyan400
-                    )
-                ) {
-                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Editar",
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1
-                    )
-                }
-
                 if (transaction.status != TransactionStatus.PAID) {
                     Button(
                         onClick = {

@@ -173,15 +173,13 @@ class InvestmentsViewModel(
                 val income = monthAllTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
                     .takeIf { it > 0.0 } ?: user.monthlyIncome
 
-                val needsCats = setOf(
-                    "Moradia", "Alimentação", "Saúde", "Transporte", "Educação", "Financiamentos & Empréstimos"
-                )
                 var realNeeds = 0.0
                 var realWants = 0.0
 
                 for (t in monthAllTxs) {
                     if (t.type == TransactionType.INCOME || t.category == "Investimentos") continue
-                    if (needsCats.contains(t.category)) {
+                    val nature = CategoryRegistry.getBudgetNature(t.category, t.subcategory)
+                    if (nature == BudgetNature.NEED) {
                         realNeeds += t.effectiveAmount
                     } else {
                         realWants += t.effectiveAmount

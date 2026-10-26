@@ -79,7 +79,7 @@ class NeuralFinanceClassifier(
             Triple("Transporte", "Combustível", Regex("""(gasolina|etanol|combust[ií]vel|posto|ipiranga|shell|br distribuidora|abastecer)""", RegexOption.IGNORE_CASE)),
             Triple("Transporte", "Transporte Público (Metrô/Ônibus)", Regex("""([oô]nibus|metr[oô]|trem|cptm|bilhete [uú]nico|passagem de [oô]nibus|recarga bilhete)""", RegexOption.IGNORE_CASE)),
             Triple("Transporte", "Estacionamento & Pedágio", Regex("""(estacionamento|ped[aá]gio|sem parar|veloe|conectcar|tag)""", RegexOption.IGNORE_CASE)),
-            Triple("Transporte", "Seguro & IPVA", Regex("""(ipva|seguro auto|seguro carro|dpvat|licenciamento)""", RegexOption.IGNORE_CASE)),
+            Triple("Transporte", "Seguro Auto & Moto", Regex("""(ipva|seguro auto|seguro carro|dpvat|licenciamento|porto seguro)""", RegexOption.IGNORE_CASE)),
             Triple("Transporte", "Manutenção & Revisão", Regex("""(oficina|mec[aâ]nico|pneu|troca de [oó]leo|alinhamento|balanceamento|revis[aã]o carro)""", RegexOption.IGNORE_CASE)),
 
             // Saúde
@@ -89,31 +89,52 @@ class NeuralFinanceClassifier(
             Triple("Saúde", "Plano de Saúde & Dental", Regex("""(plano de sa[uú]de|unimed|amil|bradesco sa[uú]de|sulamerica|notredame)""", RegexOption.IGNORE_CASE)),
             Triple("Saúde", "Terapia & Psicologia", Regex("""(terapia|psic[oó]log|psiquiatra|sess[aã]o de terapia)""", RegexOption.IGNORE_CASE)),
 
-            // Assinaturas
-            Triple("Assinaturas", "Streaming de Vídeo (Netflix/Max/Disney)", Regex("""(netflix|disney|hbo|max|prime video|amazon prime|youtube premium|globoplay|telecine)""", RegexOption.IGNORE_CASE)),
-            Triple("Assinaturas", "Streaming de Música (Spotify/Apple)", Regex("""(spotify|deezer|apple music|tidal|amazon music)""", RegexOption.IGNORE_CASE)),
-            Triple("Assinaturas", "Softwares, IA & Cloud (iCloud/ChatGPT)", Regex("""(chatgpt|openai|icloud|google one|google storage|github|adobe|canva|microsoft|dropbox)""", RegexOption.IGNORE_CASE)),
-            Triple("Assinaturas", "Telefonia Celular", Regex("""(tim|claro celular|vivo celular|plano celular|controle vivo)""", RegexOption.IGNORE_CASE)),
+            // Cuidados Pessoais & Estética
+            Triple("Cuidados Pessoais & Estética", "Cabelereiro & Barbearia", Regex("""(barbearia|barbeiro|cabelereiro|cabeleireiro|sal[aã]o de beleza|corte de cabelo)""", RegexOption.IGNORE_CASE)),
+            Triple("Cuidados Pessoais & Estética", "Cosméticos & Maquiagem", Regex("""(sephora|botic[aá]rio|natura|maquiagem|cosm[eé]tico)""", RegexOption.IGNORE_CASE)),
+            Triple("Cuidados Pessoais & Estética", "Skincare & Perfumaria", Regex("""(skincare|protetor solar|perfume|perfumaria)""", RegexOption.IGNORE_CASE)),
+            Triple("Cuidados Pessoais & Estética", "Tratamentos & Estética", Regex("""(est[eé]tica|depila[çc][aã]o|massagem|manicure|pedicure|spa)""", RegexOption.IGNORE_CASE)),
+
+            // Assinaturas & Serviços
+            Triple("Assinaturas & Serviços", "Streaming de Vídeo (Netflix/Max/Disney)", Regex("""(netflix|disney|hbo|max|prime video|amazon prime|youtube premium|globoplay|telecine)""", RegexOption.IGNORE_CASE)),
+            Triple("Assinaturas & Serviços", "Streaming de Música (Spotify/Apple)", Regex("""(spotify|deezer|apple music|tidal|amazon music)""", RegexOption.IGNORE_CASE)),
+            Triple("Assinaturas & Serviços", "Softwares, IA & Nuvem (iCloud/ChatGPT)", Regex("""(chatgpt|openai|icloud|google one|google storage|github|adobe|canva|microsoft|dropbox)""", RegexOption.IGNORE_CASE)),
+            Triple("Assinaturas & Serviços", "Telefonia Celular & Planos", Regex("""(tim|claro celular|vivo celular|plano celular|controle vivo)""", RegexOption.IGNORE_CASE)),
+
+            // Família & Dependentes
+            Triple("Família & Dependentes", "Fraldas & Itens de Bebê", Regex("""(fralda|pampers|huggies|len[çc]o umedecido|mamadeira|chupeta)""", RegexOption.IGNORE_CASE)),
+            Triple("Família & Dependentes", "Escola & Creche", Regex("""(creche|mensalidade escolar|berc[aá]rio|col[eé]gio infantil)""", RegexOption.IGNORE_CASE)),
+            Triple("Família & Dependentes", "Pediatra & Saúde Infantil", Regex("""(pediatra|vacina infantil)""", RegexOption.IGNORE_CASE)),
+            Triple("Família & Dependentes", "Brinquedos & Atividades", Regex("""(ri happy|brinquedo|brinquedos|lego)""", RegexOption.IGNORE_CASE)),
 
             // Pets
             Triple("Pets", "Ração & Petiscos", Regex("""(pet|petz|cobasi|ra[çc][aã]o|petisco)""", RegexOption.IGNORE_CASE)),
             Triple("Pets", "Veterinário & Medicamentos", Regex("""(veterin[aá]rio|vacina pet|banho e tosa|castra[çc][aã]o)""", RegexOption.IGNORE_CASE)),
 
-            // Compras
-            Triple("Compras", "Presentes", Regex("""(presente|lembrancinha|anivers[aá]rio|floricultura|flores|cesta|cacau show|kopenhagen|chocolates|brinquedo|ri happy|natal|dia das m[aã]es|dia dos namorados)""", RegexOption.IGNORE_CASE)),
-            Triple("Compras", "Roupas & Acessórios", Regex("""(zara|renner|riachuelo|c&a|shein|roupa|vestu[aá]rio|acess[oó]rio|nike|adidas|lingerie|joia|bijuteria)""", RegexOption.IGNORE_CASE)),
-            Triple("Compras", "Calçados", Regex("""(cal[çc]ado|t[eê]nis|sapato|sand[aá]lia|havaianas|arezzo|anacapri|vans|olympikus)""", RegexOption.IGNORE_CASE)),
-            Triple("Compras", "Eletrônicos & Informática", Regex("""(kabum|pichau|terabyte|apple|samsung|dell|mercado livre|amazon|shopee|magalu|celular|smartphone|notebook|computador)""", RegexOption.IGNORE_CASE)),
-            Triple("Compras", "Casa & Decoração", Regex("""(decora[çc][aã]o|cama|mesa|banho|tok&stok|etna|camicado|mobly|leroy|marabraz|m[oó]veis)""", RegexOption.IGNORE_CASE)),
+            // Compras & Estilo de Vida
+            Triple("Compras & Estilo de Vida", "Presentes", Regex("""(presente|lembrancinha|anivers[aá]rio|floricultura|flores|cesta|cacau show|kopenhagen|chocolates)""", RegexOption.IGNORE_CASE)),
+            Triple("Compras & Estilo de Vida", "Roupas & Acessórios", Regex("""(zara|renner|riachuelo|c&a|shein|roupa|vestu[aá]rio|acess[oó]rio|nike|adidas|lingerie|joia|bijuteria)""", RegexOption.IGNORE_CASE)),
+            Triple("Compras & Estilo de Vida", "Calçados", Regex("""(cal[çc]ado|t[eê]nis|sapato|sand[aá]lia|havaianas|arezzo|anacapri|vans|olympikus)""", RegexOption.IGNORE_CASE)),
+            Triple("Compras & Estilo de Vida", "Eletrônicos & Informática", Regex("""(kabum|pichau|terabyte|apple|samsung|dell|mercado livre|amazon|shopee|magalu|celular|smartphone|notebook|computador)""", RegexOption.IGNORE_CASE)),
+            Triple("Compras & Estilo de Vida", "Casa & Decoração", Regex("""(decora[çc][aã]o|cama|mesa|banho|tok&stok|etna|camicado|mobly|leroy|marabraz|m[oó]veis)""", RegexOption.IGNORE_CASE)),
 
-            // Educação
-            Triple("Educação", "Cursos Online & Certificações", Regex("""(curso|udemy|alura|hotmart|certifica[çc][aã]o)""", RegexOption.IGNORE_CASE)),
-            Triple("Educação", "Livros & E-books", Regex("""(livro|livraria|saraiva|leitura|kindle|amazon livros)""", RegexOption.IGNORE_CASE)),
-            Triple("Educação", "Faculdade & Pós-Graduação", Regex("""(faculdade|mensalidade escolar|p[oó]s-gradua[çc][aã]o|matr[ií]cula)""", RegexOption.IGNORE_CASE)),
+            // Educação & Desenvolvimento
+            Triple("Educação & Desenvolvimento", "Cursos Online & Certificações", Regex("""(curso|udemy|alura|hotmart|certifica[çc][aã]o)""", RegexOption.IGNORE_CASE)),
+            Triple("Educação & Desenvolvimento", "Livros & E-books", Regex("""(livro|livraria|saraiva|leitura|kindle|amazon livros)""", RegexOption.IGNORE_CASE)),
+            Triple("Educação & Desenvolvimento", "Faculdade & Pós-Graduação", Regex("""(faculdade|p[oó]s-gradua[çc][aã]o|matr[ií]cula)""", RegexOption.IGNORE_CASE)),
 
-            // Lazer
-            Triple("Lazer", "Cinema, Teatro & Shows", Regex("""(cinema|cinemark|ingresso|sympla|eventim|show|teatro)""", RegexOption.IGNORE_CASE)),
-            Triple("Lazer", "Viagens & Hospedagem", Regex("""(viagem|hotel|airbnb|booking|decolar|passagem a[eé]rea|latam|gol|azul)""", RegexOption.IGNORE_CASE)),
+            // Lazer & Entretenimento
+            Triple("Lazer & Entretenimento", "Cinema, Teatro & Shows", Regex("""(cinema|cinemark|ingresso|sympla|eventim|show|teatro)""", RegexOption.IGNORE_CASE)),
+            Triple("Lazer & Entretenimento", "Viagens & Hospedagem", Regex("""(viagem|hotel|airbnb|booking|decolar|passagem a[eé]rea|latam|gol|azul)""", RegexOption.IGNORE_CASE)),
+
+            // Impostos & Tributos
+            Triple("Impostos & Tributos", "IPVA & Licenciamento", Regex("""(ipva|licenciamento|detran)""", RegexOption.IGNORE_CASE)),
+            Triple("Impostos & Tributos", "IPTU", Regex("""(iptu|taxa de lixo prefeitura)""", RegexOption.IGNORE_CASE)),
+            Triple("Impostos & Tributos", "Imposto de Renda (IRPF)", Regex("""(darf irpf|imposto de renda|declara[çc][aã]o irpf)""", RegexOption.IGNORE_CASE)),
+
+            // Trabalho / PJ / Carreira
+            Triple("Trabalho / PJ / Carreira", "DAS MEI & Contabilidade", Regex("""(das mei|pgmei|contabilizei|contabilidade)""", RegexOption.IGNORE_CASE)),
+            Triple("Trabalho / PJ / Carreira", "Coworking & Escritório", Regex("""(coworking|wework|aluguel sala comercial)""", RegexOption.IGNORE_CASE)),
 
             // Investimentos
             Triple("Investimentos", "Renda Fixa (CDB / Tesouro / LCI / LCA)", Regex("""(cdb|tesouro|selic|lci|lca|ipca|renda fixa|deb[eê]nture|cri|cra|nuinvest|inter invest)""", RegexOption.IGNORE_CASE)),
@@ -123,11 +144,19 @@ class NeuralFinanceClassifier(
             Triple("Investimentos", "Previdência Privada", Regex("""(previd[eê]ncia|pgbl|vgbl)""", RegexOption.IGNORE_CASE)),
             Triple("Investimentos", "Outros Investimentos", Regex("""(investimento|aporte|aplica[çc][aã]o|corretora|xp investimentos|rico|clear|btg)""", RegexOption.IGNORE_CASE)),
 
-            // Financiamentos & Empréstimos
-            Triple("Financiamentos & Empréstimos", "Financiamento Imobiliário", Regex("""(financiamento habitacional|caixa habitacional|financ.*imobil|parcela.*(ap[eê]|apartamento|im[oó]vel|casa)|cr[eé]dito imobili[aá]rio)""", RegexOption.IGNORE_CASE)),
-            Triple("Financiamentos & Empréstimos", "Financiamento Veicular", Regex("""(financiamento.*(auto|ve[ií]culo|carro|moto)|parcela.*(carro|ve[ií]culo|moto)|cons[oó]rcio.*(auto|carro|moto)|bv financeira|pan auto)""", RegexOption.IGNORE_CASE)),
-            Triple("Financiamentos & Empréstimos", "Empréstimo Pessoal", Regex("""(empr[eé]stimo pessoal|empr[eé]stimo nubank|empr[eé]stimo inter|cr[eé]dito pessoal|empr[eé]stimo)""", RegexOption.IGNORE_CASE)),
-            Triple("Financiamentos & Empréstimos", "Amortização de Financiamento", Regex("""(amortiza[çc][aã]o|amortizar|redu[çc][aã]o de prazo|abatimento saldo devedor)""", RegexOption.IGNORE_CASE)),
+            // Financiamentos & Dívidas
+            Triple("Financiamentos & Dívidas", "Financiamento Imobiliário", Regex("""(financiamento habitacional|caixa habitacional|financ.*imobil|parcela.*(ap[eê]|apartamento|im[oó]vel|casa)|cr[eé]dito imobili[aá]rio)""", RegexOption.IGNORE_CASE)),
+            Triple("Financiamentos & Dívidas", "Financiamento Veicular", Regex("""(financiamento.*(auto|ve[ií]culo|carro|moto)|parcela.*(carro|ve[ií]culo|moto)|cons[oó]rcio.*(auto|carro|moto)|bv financeira|pan auto)""", RegexOption.IGNORE_CASE)),
+            Triple("Financiamentos & Dívidas", "Empréstimo Pessoal", Regex("""(empr[eé]stimo pessoal|empr[eé]stimo nubank|empr[eé]stimo inter|cr[eé]dito pessoal|empr[eé]stimo)""", RegexOption.IGNORE_CASE)),
+            Triple("Financiamentos & Dívidas", "Amortização de Financiamento", Regex("""(amortiza[çc][aã]o|amortizar|redu[çc][aã]o de prazo|abatimento saldo devedor)""", RegexOption.IGNORE_CASE)),
+
+            // Receitas
+            Triple("Salário & Remuneração", "Salário Principal", Regex("""(sal[aá]rio|folha de pag|holerite|pro-?labore)""", RegexOption.IGNORE_CASE)),
+            Triple("Benefícios", "Vale Alimentação (VA)", Regex("""(vale alimenta[çc][aã]o|\bva\b|alelo alimenta[çc][aã]o|ticket alimenta[çc][aã]o)""", RegexOption.IGNORE_CASE)),
+            Triple("Benefícios", "Vale Refeição (VR)", Regex("""(vale refei[çc][aã]o|\bvr\b|alelo refei[çc][aã]o|ticket refei[çc][aã]o)""", RegexOption.IGNORE_CASE)),
+            Triple("Freelance & Serviços", "Projetos Freelance", Regex("""(freela|freelance|projeto freela)""", RegexOption.IGNORE_CASE)),
+            Triple("Reembolsos & Acertos", "Acerto de Amigo / Cartão", Regex("""(acerto|divis[aã]o de conta|pagamento de amigo|reembolso)""", RegexOption.IGNORE_CASE)),
+            Triple("Outras Receitas", "Pix Recebido", Regex("""(pix recebido|ted recebida|doc recebido|dep[oó]sito)""", RegexOption.IGNORE_CASE)),
 
             // Estorno
             Triple("Estorno", "Crédito na Fatura", Regex("""(estorno|reembolso|devolu[çc][aã]o|cr[eé]dito fatura|cr[eé]dito na fatura|cashback)""", RegexOption.IGNORE_CASE))
@@ -135,17 +164,23 @@ class NeuralFinanceClassifier(
 
         private val CATEGORY_HINTS: List<Pair<String, Regex>> = listOf(
             "Estorno" to Regex("""(estorno|reembolso|devolu[çc][aã]o|cr[eé]dito fatura|cashback)""", RegexOption.IGNORE_CASE),
-            "Financiamentos & Empréstimos" to Regex("""(financiamento|empr[eé]stimo|consignado|amortiza[çc][aã]o|fies|pravaler)""", RegexOption.IGNORE_CASE),
+            "Financiamentos & Dívidas" to Regex("""(financiamento|empr[eé]stimo|consignado|amortiza[çc][aã]o|fies|pravaler)""", RegexOption.IGNORE_CASE),
             "Investimentos" to Regex("""(investimento|aporte|cdb|tesouro|selic|lci|lca|fii|fiis|a[çc][oõ]es|cripto|bitcoin|btc|eth|corretora)""", RegexOption.IGNORE_CASE),
+            "Cuidados Pessoais & Estética" to Regex("""(barbearia|barbeiro|sal[aã]o de beleza|sal[aã]o|cabeleireiro|manicure|est[eé]tica|cosm[eé]tico|perfume|skincare)""", RegexOption.IGNORE_CASE),
+            "Impostos & Tributos" to Regex("""(ipva|iptu|irpf|darf|tributo|licenciamento)""", RegexOption.IGNORE_CASE),
+            "Família & Dependentes" to Regex("""(fralda|creche|berc[aá]rio|pediatra|filho|escola infantil)""", RegexOption.IGNORE_CASE),
+            "Trabalho / PJ / Carreira" to Regex("""(coworking|das mei|contabilidade mei|despesa corporativa)""", RegexOption.IGNORE_CASE),
             "Moradia" to Regex("""(aluguel|condom|luz|energia|[aá]gua|g[aá]s|internet|iptu|casa|apartamento)""", RegexOption.IGNORE_CASE),
             "Alimentação" to Regex("""(jantar|almo[çc]o|caf[eé]|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira)""", RegexOption.IGNORE_CASE),
             "Transporte" to Regex("""(uber|99|gasolina|combust[ií]vel|[oô]nibus|metr[oô]|estacionamento|carro|ped[aá]gio)""", RegexOption.IGNORE_CASE),
             "Saúde" to Regex("""(farm[aá]cia|rem[eé]dio|medic|consulta|exame|dentista|academia|plano de sa[uú]de|drogaria)""", RegexOption.IGNORE_CASE),
-            "Lazer" to Regex("""(cinema|show|viagem|bar|festa|passeio|jogo|livro|teatro)""", RegexOption.IGNORE_CASE),
-            "Assinaturas" to Regex("""(netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one)""", RegexOption.IGNORE_CASE),
-            "Educação" to Regex("""(curso|faculdade|escola|livro|udemy|alura)""", RegexOption.IGNORE_CASE),
-            "Compras" to Regex("""(roupa|t[eê]nis|shopping|eletr[oô]nico|celular|magazine|presente|brinquedo)""", RegexOption.IGNORE_CASE),
-            "Pets" to Regex("""(pet|ra[çc][aã]o|veterin[aá]rio|cobasi)""", RegexOption.IGNORE_CASE)
+            "Lazer & Entretenimento" to Regex("""(cinema|show|viagem|bar|festa|passeio|jogo|teatro)""", RegexOption.IGNORE_CASE),
+            "Assinaturas & Serviços" to Regex("""(netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one)""", RegexOption.IGNORE_CASE),
+            "Educação & Desenvolvimento" to Regex("""(curso|faculdade|escola|livro|udemy|alura)""", RegexOption.IGNORE_CASE),
+            "Compras & Estilo de Vida" to Regex("""(roupa|t[eê]nis|shopping|eletr[oô]nico|celular|magazine|presente|brinquedo)""", RegexOption.IGNORE_CASE),
+            "Pets" to Regex("""(pet|ra[çc][aã]o|veterin[aá]rio|cobasi)""", RegexOption.IGNORE_CASE),
+            "Salário & Remuneração" to Regex("""(sal[aá]rio|folha de pag|holerite|pro-?labore)""", RegexOption.IGNORE_CASE),
+            "Benefícios" to Regex("""(vale alimenta[çc][aã]o|vale refei[çc][aã]o|\bva\b|\bvr\b)""", RegexOption.IGNORE_CASE)
         )
     }
 

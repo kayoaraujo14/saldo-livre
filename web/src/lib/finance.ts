@@ -1147,6 +1147,29 @@ export interface CategoryGuess {
   subcategory?: string
 }
 
+const INCOME_SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
+  ['Salário & Remuneração', 'Salário Principal', /salario|salário|folha de pag|holerite|pro-?labore|empresa.*sal/i],
+  ['Salário & Remuneração', 'Adiantamento / Quinzenal', /adiantamento|quinzena/i],
+  ['Salário & Remuneração', '13º Salário', /13o|13º|decimo terceiro|décimo terceiro/i],
+  ['Salário & Remuneração', 'Férias', /ferias|férias/i],
+  ['Salário & Remuneração', 'Bônus & PLR', /plr|bonus|bônus|participacao nos lucros|participação nos lucros/i],
+  ['Benefícios', 'Vale Alimentação (VA)', /vale alimentacao|vale alimentação|\bva\b|alelo alimentacao|sodexo alimentacao|ticket alimentacao/i],
+  ['Benefícios', 'Vale Refeição (VR)', /vale refeicao|vale refeição|\bvr\b|alelo refeicao|sodexo refeicao|ticket refeicao/i],
+  ['Benefícios', 'Auxílio Mobilidade / Combustível', /mobilidade|auxilio combustivel|auxílio combustível|vale transporte/i],
+  ['Freelance & Serviços', 'Projetos Freelance', /freela|freelance|projeto|prestacao de servico|prestação de serviço|servico prestado/i],
+  ['Freelance & Serviços', 'Faturamento MEI / PJ', /faturamento mei|nota fiscal emitida|nf-e emitida|cliente pj|honorarios|honorários/i],
+  ['Rendimentos & Investimentos', 'Dividendos & JCP', /dividendo|jcp|juros sobre capital/i],
+  ['Rendimentos & Investimentos', 'Rendimentos de FIIs', /rendimento fii|fii.*rendimento|hglg|mxrf/i],
+  ['Rendimentos & Investimentos', 'Rendimentos de Renda Fixa', /rendimento cdb|rendimento lci|rendimento lca|rendimento tesouro/i],
+  ['Rendimentos & Investimentos', 'Resgates de Aplicação', /resgate|resgate investimento|resgate cdb|resgate rdb/i],
+  ['Reembolsos & Acertos', 'Acerto de Amigo / Cartão', /acerto|divisao de conta|pagamento de amigo|reembolso amigo/i],
+  ['Reembolsos & Acertos', 'Reembolso de Empresa', /reembolso empresa|despesa corporativa reembolsada|km rodado/i],
+  ['Reembolsos & Acertos', 'Cashback & Estornos Recebidos', /cashback|estorno recebido/i],
+  ['Vendas & Desapegos', 'Venda de Eletrônicos & Bens', /venda olx|venda enjoei|venda mercado livre|desapego/i],
+  ['Outras Receitas', 'Pix Recebido', /pix recebido|ted recebida|doc recebido|deposito|depósito|transferencia recebida/i],
+  ['Outras Receitas', 'Restituição de Imposto de Renda', /restituicao|restituição|restituicao irpf/i],
+]
+
 const SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
   // Alimentação
   ['Alimentação', 'Supermercado', /mercado|supermercado|assai|assaí|carrefour|pao de acucar|pão de açúcar|extra|atacadao|atacadão|dia%|hortifruti|feira|sacolao|sacolão/i],
@@ -1160,6 +1183,8 @@ const SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
   ['Transporte', 'Aplicativos (Uber/99)', /uber|99|indrive|cabify|pop|corrida/i],
   ['Transporte', 'Estacionamento & Pedágio', /estacionamento|pedagio|pedágio|sem parar|veloe|conectcar|taggy|estapar/i],
   ['Transporte', 'Transporte Público (Metrô/Ônibus)', /onibus|ônibus|metro|metrô|bilhete unico|cptm|sptrans/i],
+  ['Transporte', 'Seguro Auto & Moto', /seguro auto|seguro carro|seguro moto|porto seguro auto|tokio marine/i],
+  ['Transporte', 'Manutenção & Revisão', /mecanico|mecânico|oficina|pneu|troca de oleo|troca de óleo|alinhamento|balanceamento/i],
 
   // Moradia
   ['Moradia', 'Aluguel & Condomínio', /aluguel|condominio|condomínio|locacao|locação|imobiliaria/i],
@@ -1167,92 +1192,138 @@ const SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
   ['Moradia', 'Água & Saneamento', /agua|água|sabesp|sanepar|copasa|cedae|caesb/i],
   ['Moradia', 'Internet & TV a Cabo', /internet|fibra|claro|vivo|oi |tim fibra|brisanet|net virtua/i],
   ['Moradia', 'Gás', /gas|gás|ultragaz|liquigas|comgas/i],
+  ['Moradia', 'Manutenção & Reparos', /encanador|eletricista|pintor|marceneiro|reparo casa|manutencao predial/i],
 
   // Saúde
   ['Saúde', 'Farmácia & Remédios', /farmacia|farmácia|drogaria|drogasil|droga raia|pacheco|sao paulo|são paulo|panvel|remedio|remédio|medicamento/i],
-  ['Saúde', 'Consultas & Exames', /consulta|exame|laboratorio|laboratório|dentista|oftalmo|medico|médico|clinica|clínica/i],
+  ['Saúde', 'Consultas & Exames', /consulta|exame|laboratorio|laboratório|dentista|oftalmo|medico|médico|clinica|clínica|fleury|lavoisier/i],
+  ['Saúde', 'Plano de Saúde & Dental', /unimed|amil|bradesco saude|sulamerica saude|notredame|odontoprev/i],
   ['Saúde', 'Academia & Treinos', /academia|smartfit|smart fit|bluefit|bio ritmo|musculacao|musculação|pilates|crossfit|natacao|natação/i],
+  ['Saúde', 'Terapia & Psicologia', /terapia|psicolog|psiquiatra|sessao terapia/i],
 
-  // Assinaturas
-  ['Assinaturas', 'Streaming de Vídeo (Netflix/Max/Disney)', /netflix|disney|hbo|max|prime video|amazon prime|youtube premium|globoplay|telecine/i],
-  ['Assinaturas', 'Streaming de Música (Spotify/Apple)', /spotify|deezer|apple music|tidal|amazon music/i],
-  ['Assinaturas', 'Softwares, IA & Cloud (iCloud/ChatGPT)', /chatgpt|openai|icloud|google one|google storage|github|adobe|canva|microsoft|dropbox/i],
+  // Cuidados Pessoais & Estética
+  ['Cuidados Pessoais & Estética', 'Cabelereiro & Barbearia', /barbearia|barbeiro|cabelereiro|cabeleireiro|salao de beleza|salão de beleza|corte cabelo/i],
+  ['Cuidados Pessoais & Estética', 'Cosméticos & Maquiagem', /sephora|boticario|o boticário|natura|quem disse berenice|maquiagem|cosmetico|cosmético/i],
+  ['Cuidados Pessoais & Estética', 'Skincare & Perfumaria', /skincare|protetor solar|perfume|perfumaria/i],
+  ['Cuidados Pessoais & Estética', 'Tratamentos & Estética', /estetica|estética|depilacao|depilação|massagem|manicure|pedicure|spa/i],
+  ['Cuidados Pessoais & Estética', 'Higiene Pessoal', /shampoo|sabonete|pasta de dente|desodorante|higiene/i],
+
+  // Assinaturas & Serviços
+  ['Assinaturas & Serviços', 'Streaming de Vídeo (Netflix/Max/Disney)', /netflix|disney|hbo|max|prime video|amazon prime|youtube premium|globoplay|telecine/i],
+  ['Assinaturas & Serviços', 'Streaming de Música (Spotify/Apple)', /spotify|deezer|apple music|tidal|amazon music/i],
+  ['Assinaturas & Serviços', 'Softwares, IA & Nuvem (iCloud/ChatGPT)', /chatgpt|openai|icloud|google one|google storage|github|adobe|canva|microsoft|dropbox/i],
+  ['Assinaturas & Serviços', 'Telefonia Celular & Planos', /plano celular|controle vivo|claro celular|tim celular|recarga celular/i],
+
+  // Família & Dependentes
+  ['Família & Dependentes', 'Fraldas & Itens de Bebê', /fralda|pampers|huggies|lenco umedecido|mamadeira|chupeta/i],
+  ['Família & Dependentes', 'Escola & Creche', /creche|mensalidade escolar|bercario|berçário|colegio infantil/i],
+  ['Família & Dependentes', 'Pediatra & Saúde Infantil', /pediatra|vacina infantil/i],
+  ['Família & Dependentes', 'Brinquedos & Atividades', /ri happy|brinquedo|brinquedos|lego/i],
 
   // Pets
   ['Pets', 'Ração & Petiscos', /pet|petz|cobasi|racao|ração|petisco/i],
   ['Pets', 'Veterinário & Medicamentos', /veterinario|veterinário|vacina pet/i],
+  ['Pets', 'Banho, Tosa & Cuidados', /banho e tosa|tosa pet/i],
 
-  // Compras
-  ['Compras', 'Presentes', /presente|presentes|lembrancinha|lembranca|lembrança|aniversario|aniversário|floricultura|flores|cesta|cacau show|kopenhagen|chocolates|brinquedo|ri happy|dia das maes|dia dos pais|dia dos namorados|natal/i],
-  ['Compras', 'Roupas & Acessórios', /zara|renner|riachuelo|c&a|shein|roupa|vestuario|vestuário|acessorio|acessório|nike|adidas|lingerie|joia|bijuteria/i],
-  ['Compras', 'Calçados', /calcado|calçado|tenis|tênis|sapato|sandalia|sandália|havaianas|arezzo|anacapri|vans|olympikus/i],
-  ['Compras', 'Eletrônicos & Informática', /kabum|pichau|terabyte|apple|samsung|dell|mercado livre|amazon|shopee|magalu|celular|smartphone|notebook|computador/i],
-  ['Compras', 'Casa & Decoração', /decoracao|decoração|cama|mesa|banho|tok&stok|tok e stok|etna|camicado|mobly|leroy|marabraz|utilidade|moveis|móveis/i],
+  // Compras & Estilo de Vida
+  ['Compras & Estilo de Vida', 'Presentes', /presente|presentes|lembrancinha|lembranca|lembrança|aniversario|aniversário|floricultura|flores|cesta|cacau show|kopenhagen|chocolates/i],
+  ['Compras & Estilo de Vida', 'Roupas & Acessórios', /zara|renner|riachuelo|c&a|shein|roupa|vestuario|vestuário|acessorio|acessório|nike|adidas|lingerie|joia|bijuteria/i],
+  ['Compras & Estilo de Vida', 'Calçados', /calcado|calçado|tenis|tênis|sapato|sandalia|sandália|havaianas|arezzo|anacapri|vans|olympikus/i],
+  ['Compras & Estilo de Vida', 'Eletrônicos & Informática', /kabum|pichau|terabyte|apple|samsung|dell|mercado livre|amazon|shopee|magalu|celular|smartphone|notebook|computador/i],
+  ['Compras & Estilo de Vida', 'Casa & Decoração', /decoracao|decoração|cama|mesa|banho|tok&stok|tok e stok|etna|camicado|mobly|leroy|marabraz|utilidade|moveis|móveis/i],
 
-  // Educação
-  ['Educação', 'Cursos Online & Certificações', /curso|udemy|alura|hotmart/i],
-  ['Educação', 'Livros & E-books', /livro|livraria|saraiva|leitura|kindle/i],
+  // Educação & Desenvolvimento
+  ['Educação & Desenvolvimento', 'Cursos Online & Certificações', /curso|udemy|alura|hotmart/i],
+  ['Educação & Desenvolvimento', 'Livros & E-books', /livro|livraria|saraiva|leitura|kindle/i],
+  ['Educação & Desenvolvimento', 'Faculdade & Pós-Graduação', /faculdade|pos-graduacao|pós-graduação|puc|fiap|fgv|estacio/i],
 
-  // Lazer
-  ['Lazer', 'Cinema, Teatro & Shows', /cinema|cinemark|ingresso|sympla|eventim|show|teatro/i],
-  ['Lazer', 'Viagens & Hospedagem', /viagem|hotel|airbnb|booking|decolar|passagem aerea|latam|gol|azul/i],
+  // Lazer & Entretenimento
+  ['Lazer & Entretenimento', 'Cinema, Teatro & Shows', /cinema|cinemark|ingresso|sympla|eventim|show|teatro/i],
+  ['Lazer & Entretenimento', 'Viagens & Hospedagem', /viagem|hotel|airbnb|booking|decolar|passagem aerea|latam|gol|azul/i],
+  ['Lazer & Entretenimento', 'Jogos & Games', /playstation|xbox|nintendo|steam|steamgames|epic games|riot games/i],
 
-  // Receita
-  ['Receita', 'Salário Principal', /salario|salário|folha|pro-?labore|empresa/i],
-  ['Receita', 'Pix Recebido', /pix recebido|ted recebida|deposito|depósito/i],
+  // Impostos & Tributos
+  ['Impostos & Tributos', 'IPVA & Licenciamento', /ipva|licenciamento|detran|taxa detran/i],
+  ['Impostos & Tributos', 'IPTU', /iptu|taxa de lixo prefeitura/i],
+  ['Impostos & Tributos', 'Imposto de Renda (IRPF)', /darf irpf|imposto de renda|declaracao irpf/i],
+  ['Impostos & Tributos', 'DARFs & Tributos de Renda', /darf|receita federal|simples nacional|tributo federal/i],
+
+  // Trabalho / PJ / Carreira
+  ['Trabalho / PJ / Carreira', 'DAS MEI & Contabilidade', /das mei|pgmei|contabilizei|contabilidade/i],
+  ['Trabalho / PJ / Carreira', 'Coworking & Escritório', /coworking|wework|aluguel sala comercial/i],
+  ['Trabalho / PJ / Carreira', 'Equipamentos & Ferramentas de Trabalho', /monitor trabalho|cadeira ergonomica|teclado mecanico trabalho/i],
 
   // Investimentos
   ['Investimentos', 'Renda Fixa (CDB / Tesouro / LCI / LCA)', /cdb|tesouro|selic|lci|lca|ipca|renda fixa|debênture|debenture|cri|cra|nuinvest|inter invest/i],
-  ['Investimentos', 'Ações & Fundos Imobiliários (FIIs)', /acoes|ações|fii|fiis|hglg|mxrf|knip|xpml|bova11|ivvb11|smal11|itub|petr|vale|bbas|wege|dividendo|jcp/i],
+  ['Investimentos', 'Ações & Fundos Imobiliários (FIIs)', /acoes|ações|fii|fiis|hglg|mxrf|knip|xpml|bova11|ivvb11|smal11|itub|petr|vale|bbas|wege/i],
   ['Investimentos', 'Criptomoedas & Ativos Digitais', /bitcoin|btc|ethereum|eth|solana|binance|mercado bitcoin|crypto|cripto/i],
-  ['Investimentos', 'Reserva de Emergência', /reserva|reserva de emergencia|guardar dinheiro|cofrinho|reserva financeira/i],
+  ['Investimentos', 'Reserva de Emergência', /reserva de emergencia|guardar dinheiro|cofrinho|reserva financeira/i],
   ['Investimentos', 'Previdência Privada', /previdencia|previdência|pgbl|vgbl/i],
   ['Investimentos', 'Fundos de Investimento', /fundo de investimento|fundo multimercado|fundo cambial/i],
   ['Investimentos', 'Outros Investimentos', /investimento|aporte|aplicacao|aplicação|corretora|xp investimentos|rico|clear|btg/i],
 
-  // Financiamentos & Empréstimos
-  ['Financiamentos & Empréstimos', 'Financiamento Imobiliário', /financiamento habitacional|habitacional|caixa habitacional|financ(?:iamento)? imobil|parcela (?:do |de )?(?:ape|apê|apartamento|imovel|imóvel|casa)|prestacao (?:ape|casa|imovel)|credito imobiliario|crédito imobiliário/i],
-  ['Financiamentos & Empréstimos', 'Financiamento Veicular', /financiamento (?:auto|veiculo|veículo|carro|moto)|parcela (?:do |de )?(?:carro|veiculo|veículo|moto)|consorcio (?:auto|carro|moto)|consórcio (?:auto|carro|moto)|bv financeira|pan auto|itau veiculos|santander auto/i],
-  ['Financiamentos & Empréstimos', 'Empréstimo Pessoal', /emprestimo pessoal|empréstimo pessoal|emprestimo nubank|emprestimo inter|emprestimo c6|emprestimo mercado pago|credito pessoal|crédito pessoal|emprestimo/i],
-  ['Financiamentos & Empréstimos', 'Empréstimo Consignado', /consignado|inss consignado|emprestimo folha|desconto em folha emprestimo|siape/i],
-  ['Financiamentos & Empréstimos', 'Amortização de Financiamento', /amortizacao|amortização|amortizar|reducao de prazo|redução de prazo|abatimento saldo devedor/i],
-  ['Financiamentos & Empréstimos', 'Crédito Estudantil (FIES/Pravaler)', /fies|pravaler|credito estudantil|crédito estudantil|financiamento estudantil/i],
-  ['Financiamentos & Empréstimos', 'Renegociação de Dívidas', /renegociacao|renegociação|acordo serasa|acordo divida|acordo dívida|recuperacao de credito|desenrola/i],
-  ['Financiamentos & Empréstimos', 'Juros & Tarifas de Empréstimo', /iof emprestimo|tarifa operacao credito|tac emprestimo|juros emprestimo|juros financ/i],
+  // Financiamentos & Dívidas
+  ['Financiamentos & Dívidas', 'Financiamento Imobiliário', /financiamento habitacional|habitacional|caixa habitacional|financ(?:iamento)? imobil|parcela (?:do |de )?(?:ape|apê|apartamento|imovel|imóvel|casa)|prestacao (?:ape|casa|imovel)|credito imobiliario|crédito imobiliário/i],
+  ['Financiamentos & Dívidas', 'Financiamento Veicular', /financiamento (?:auto|veiculo|veículo|carro|moto)|parcela (?:do |de )?(?:carro|veiculo|veículo|moto)|consorcio (?:auto|carro|moto)|consórcio (?:auto|carro|moto)|bv financeira|pan auto|itau veiculos|santander auto/i],
+  ['Financiamentos & Dívidas', 'Empréstimo Pessoal', /emprestimo pessoal|empréstimo pessoal|emprestimo nubank|emprestimo inter|emprestimo c6|emprestimo mercado pago|credito pessoal|crédito pessoal/i],
+  ['Financiamentos & Dívidas', 'Empréstimo Consignado', /consignado|inss consignado|emprestimo folha|desconto em folha emprestimo|siape/i],
+  ['Financiamentos & Dívidas', 'Amortização de Financiamento', /amortizacao|amortização|amortizar|reducao de prazo|redução de prazo|abatimento saldo devedor/i],
+  ['Financiamentos & Dívidas', 'Crédito Estudantil (FIES/Pravaler)', /fies|pravaler|credito estudantil|crédito estudantil|financiamento estudantil/i],
+  ['Financiamentos & Dívidas', 'Renegociação de Dívidas', /renegociacao|renegociação|acordo serasa|acordo divida|acordo dívida|recuperacao de credito|desenrola/i],
+  ['Financiamentos & Dívidas', 'Juros & Tarifas de Empréstimo', /iof emprestimo|tarifa operacao credito|tac emprestimo|juros emprestimo|juros financ/i],
 
-  // Estorno
+  // Estorno (Legado / Modificador)
   ['Estorno', 'Crédito na Fatura', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|cashback/i],
 ]
 
 const CATEGORY_HINTS: [Category, RegExp][] = [
   ['Estorno', /estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|credito na fatura|credit voucher|cashback/i],
-  ['Financiamentos & Empréstimos', /financiamento|emprestimo|empréstimo|consignado|amortizacao|amortização|fies|pravaler|renegociacao|renegociação|parcela habitacional|parcela auto|parcela carro|parcela moto|credito pessoal|crédito pessoal/i],
+  ['Financiamentos & Dívidas', /financiamento|emprestimo|empréstimo|consignado|amortizacao|amortização|fies|pravaler|renegociacao|renegociação|parcela habitacional|parcela auto|parcela carro|parcela moto|credito pessoal|crédito pessoal/i],
   ['Investimentos', /investimento|aporte|cdb|tesouro|selic|lci|lca|fii|fiis|acoes|ações|cripto|bitcoin|btc|eth|corretora|nuinvest|binance/i],
-  ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|iptu|casa|apartamento/i],
+  ['Cuidados Pessoais & Estética', /barbearia|barbeiro|salao de beleza|salão|cabeleireiro|manicure|estetica|estética|cosmetico|perfume|skincare/i],
+  ['Impostos & Tributos', /ipva|iptu|irpf|darf|tributo|licenciamento/i],
+  ['Família & Dependentes', /fralda|creche|bercario|pediatra|filho|escola infantil/i],
+  ['Trabalho / PJ / Carreira', /coworking|das mei|contabilidade mei|despesa corporativa/i],
+  ['Moradia', /aluguel|condom|luz|energia|agua|gas|internet|casa|apartamento/i],
   ['Alimentação', /jantar|almoco|cafe|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira/i],
   ['Transporte', /uber|99|gasolina|combustivel|onibus|metro|estacionamento|carro|pedagio/i],
   ['Saúde', /farmacia|remedio|medic|consulta|exame|dentista|academia|plano de saude|drogaria/i],
-  ['Lazer', /cinema|show|viagem|bar|festa|passeio|jogo|livro|teatro/i],
-  ['Assinaturas', /netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one/i],
-  ['Educação', /curso|faculdade|escola|livro|udemy|alura/i],
-  ['Compras', /roupa|tenis|shopping|eletronico|celular|magazine|presente|lembranc|brinquedo/i],
+  ['Lazer & Entretenimento', /cinema|show|viagem|bar|festa|passeio|jogo|teatro/i],
+  ['Assinaturas & Serviços', /netflix|spotify|prime|disney|hbo|assinatura|youtube|icloud|google one/i],
+  ['Educação & Desenvolvimento', /curso|faculdade|escola|livro|udemy|alura/i],
+  ['Compras & Estilo de Vida', /roupa|tenis|shopping|eletronico|celular|magazine|presente|lembranc/i],
   ['Pets', /pet|racao|veterinario|cobasi/i],
 ]
 
-export function guessCategoryAndSubcategory(text: string, amount?: number): CategoryGuess {
+export function guessCategoryAndSubcategory(text: string, amount?: number, type?: 'income' | 'expense'): CategoryGuess {
   if (typeof amount === 'number' && amount < 0) {
     return { category: 'Estorno', subcategory: 'Crédito na Fatura' }
   }
   const n = normalize(text)
+
+  // Se o contexto for expressamente receita, priorizar hints de receita
+  if (type === 'income') {
+    for (const [cat, sub, re] of INCOME_SUBCATEGORY_HINTS) {
+      if (re.test(n)) return { category: cat, subcategory: sub }
+    }
+    return { category: 'Salário & Remuneração', subcategory: 'Salário Principal' }
+  }
+
   for (const [cat, sub, re] of SUBCATEGORY_HINTS) {
     if (re.test(n)) return { category: cat, subcategory: sub }
   }
   for (const [cat, re] of CATEGORY_HINTS) {
     if (re.test(n)) return { category: cat }
   }
+
+  // Se parecer receita mesmo sem tipo informado
+  for (const [cat, sub, re] of INCOME_SUBCATEGORY_HINTS) {
+    if (re.test(n)) return { category: cat, subcategory: sub }
+  }
+
   return { category: 'Outros' }
 }
 
-export function guessCategory(text: string, amount?: number): Category {
-  return guessCategoryAndSubcategory(text, amount).category
+export function guessCategory(text: string, amount?: number, type?: 'income' | 'expense'): Category {
+  return guessCategoryAndSubcategory(text, amount, type).category
 }

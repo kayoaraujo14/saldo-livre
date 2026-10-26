@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { useFinance } from '@/store/FinanceContext'
 import { effectiveAmount } from '@/lib/finance'
 import { formatBRL, formatShortDate, monthLabel } from '@/lib/utils'
-import { CATEGORY_GROUPS } from '@/types'
+import { CATEGORY_GROUPS, getBudgetNature } from '@/types'
 import {
   TrendingUp,
   PiggyBank,
@@ -133,18 +133,35 @@ export function InvestmentsModal({ open, onOpenChange, onOpenNewTx }: Investment
     const targetWants = income * 0.3
     const targetInvest = income * 0.2
 
-    // Estimate needs from categories
-    const needsCats = new Set(['Moradia', 'Alimentação', 'Saúde', 'Transporte', 'Educação', 'Financiamentos & Empréstimos'])
+    // Cálculo inteligente 50/30/20 baseado em subcategorias e categorias
     let realNeeds = 0
     let realWants = 0
     let realInvest = totalInvestedThisMonth
 
-    for (const item of (summary?.byCategory || [])) {
+    const bySubs = summary?.bySubcategory || []
+    const byCats = summary?.byCategory || []
+
+    for (const item of bySubs) {
       if (item.category === 'Investimentos') continue
-      if (needsCats.has(item.category)) {
+      const nature = getBudgetNature(item.category, item.subcategory)
+      if (nature === 'need') {
         realNeeds += item.amount
       } else {
         realWants += item.amount
+      }
+    }
+
+    // Processar despesas que não possuem subcategoria associada
+    for (const catItem of byCats) {
+      if (catItem.category === 'Investimentos') continue
+      const subSum = bySubs
+        .filter((s) => s.category === catItem.category)
+        .reduce((sum, s) => sum + s.amount, 0)
+      const diff = Math.max(0, catItem.amount - subSum)
+      if (diff > 0.01) {
+        const catNature = getBudgetNature(catItem.category)
+        if (catNature === 'need') realNeeds += diff
+        else realWants += diff
       }
     }
 

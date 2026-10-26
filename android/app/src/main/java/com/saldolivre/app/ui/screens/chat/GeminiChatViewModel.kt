@@ -102,19 +102,17 @@ class GeminiChatViewModel(
         val initialSessions = sessionManager.getLocalSessions(userUid)
         val initialRules = rulesManager.getLocalRules(userUid)
 
-        val activeSession = if (initialSessions.isNotEmpty()) {
-            initialSessions.first()
-        } else {
-            val fresh = sessionManager.createInitialSession()
-            sessionManager.saveSession(userUid, fresh, syncToCloud = false)
-            fresh
-        }
+        // Ao abrir o chat na versão Android, abre sempre em uma nova conversa limpa
+        val existingRealSessions = initialSessions.filterNot { sessionManager.isBlankInitialSession(it) }
+        val fresh = sessionManager.createInitialSession()
+        sessionManager.saveSession(userUid, fresh, syncToCloud = false)
+        val initialList = listOf(fresh) + existingRealSessions
 
         _uiState.update {
             it.copy(
-                sessions = if (initialSessions.isNotEmpty()) initialSessions else listOf(activeSession),
-                currentSessionId = activeSession.id,
-                messages = activeSession.messages,
+                sessions = initialList,
+                currentSessionId = fresh.id,
+                messages = fresh.messages,
                 learnedRules = initialRules
             )
         }
@@ -156,19 +154,23 @@ class GeminiChatViewModel(
         val loadedSessions = sessionManager.getLocalSessions(uid)
         val loadedRules = rulesManager.getLocalRules(uid)
 
-        val currentSession = if (loadedSessions.isNotEmpty()) {
-            loadedSessions.first()
+        val realLoadedSessions = loadedSessions.filterNot { sessionManager.isBlankInitialSession(it) }
+        val currentSessionId = _uiState.value.currentSessionId
+        val existingActive = _uiState.value.sessions.find { it.id == currentSessionId }
+
+        // Preserva a nova conversa já criada na abertura do chat se válida, ou gera uma nova limpa
+        val activeSession = existingActive ?: sessionManager.createInitialSession()
+        val combinedSessions = if (realLoadedSessions.none { it.id == activeSession.id }) {
+            listOf(activeSession) + realLoadedSessions
         } else {
-            val fresh = sessionManager.createInitialSession()
-            sessionManager.saveSession(uid, fresh, syncToCloud = false)
-            fresh
+            realLoadedSessions
         }
 
         _uiState.update {
             it.copy(
-                sessions = if (loadedSessions.isNotEmpty()) loadedSessions else listOf(currentSession),
-                currentSessionId = currentSession.id,
-                messages = currentSession.messages,
+                sessions = combinedSessions,
+                currentSessionId = activeSession.id,
+                messages = activeSession.messages,
                 learnedRules = loadedRules
             )
         }
@@ -178,28 +180,42 @@ class GeminiChatViewModel(
             if (cloudSessions.isNotEmpty()) {
                 _uiState.update { state ->
                     val currentLocal = state.sessions.find { it.id == state.currentSessionId }
-                    val isCurrentBlank = currentLocal == null || sessionManager.isBlankInitialSession(currentLocal)
-                    // Se a sessão atual for apenas uma tela inicial em branco, chaveia para a mais recente da nuvem (igual à Web)
-                    val targetActive = if (isCurrentBlank) {
-                        cloudSessions.first()
+                    // Preserva a conversa ativa atual (inclusive a nova conversa recém-aberta)
+                    val targetActive = if (currentLocal != null) {
+                        val cloudMatch = cloudSessions.find { it.id == currentLocal.id }
+                        if (cloudMatch != null) {
+                            // Se a sessão ativa já sincronizou na nuvem, mescla mensagens locais com nuvem (preservando action cards pendentes)
+                            val mergedMessages = cloudMatch.messages.map { cloudMsg ->
+                                val localMatch = currentLocal.messages.find { it.id == cloudMsg.id }
+                                if (localMatch?.actionCard?.pendingAction != null) {
+                                    cloudMsg.copy(actionCard = localMatch.actionCard, actions = localMatch.actions)
+                                } else {
+                                    cloudMsg
+                                }
+                            }
+                            currentLocal.copy(messages = mergedMessages, title = cloudMatch.title)
+                        } else {
+                            // Nova sessão local que ainda não existe na nuvem (mantém como está)
+                            currentLocal
+                        }
                     } else {
-                        cloudSessions.find { it.id == state.currentSessionId } ?: cloudSessions.first()
+                        // Se não encontrou a sessão atual, cria nova sessão
+                        sessionManager.createInitialSession()
                     }
 
-                    // Preserva pendingActions locais que ainda estão aguardando confirmação
-                    val mergedMessages = targetActive.messages.map { cloudMsg ->
-                        val localMatch = state.messages.find { it.id == cloudMsg.id }
-                        if (localMatch?.actionCard?.pendingAction != null) {
-                            cloudMsg.copy(actionCard = localMatch.actionCard, actions = localMatch.actions)
-                        } else {
-                            cloudMsg
-                        }
+                    // Se a sessão ativa não está na nuvem (ex: nova conversa vazia local), mantém no topo da lista
+                    val mergedSessions = if (cloudSessions.none { it.id == targetActive.id }) {
+                        listOf(targetActive) + cloudSessions
+                    } else {
+                        cloudSessions.map { if (it.id == targetActive.id) targetActive else it }
                     }
+
+                    sessionManager.saveLocalSessions(uid, mergedSessions)
 
                     state.copy(
-                        sessions = cloudSessions,
+                        sessions = mergedSessions,
                         currentSessionId = targetActive.id,
-                        messages = mergedMessages
+                        messages = targetActive.messages
                     )
                 }
             }
@@ -239,12 +255,27 @@ class GeminiChatViewModel(
 
     fun onNewSession() {
         val userUid = repository.currentUser.value.uid
+        val current = _uiState.value.sessions.find { it.id == _uiState.value.currentSessionId }
+        // Se a conversa atual já é uma sessão nova e limpa sem mensagens do usuário, apenas foca nela
+        if (current != null && sessionManager.isBlankInitialSession(current)) {
+            _uiState.update {
+                it.copy(
+                    inputText = "",
+                    pendingAttachment = null,
+                    isHistoryOpen = false,
+                    isRulesOpen = false
+                )
+            }
+            return
+        }
+
         val fresh = sessionManager.createInitialSession()
         sessionManager.saveSession(userUid, fresh, syncToCloud = false)
 
         _uiState.update {
+            val filteredSessions = it.sessions.filterNot { s -> sessionManager.isBlankInitialSession(s) && s.id != fresh.id }
             it.copy(
-                sessions = listOf(fresh) + it.sessions.filter { s -> s.id != fresh.id },
+                sessions = listOf(fresh) + filteredSessions,
                 currentSessionId = fresh.id,
                 messages = fresh.messages,
                 inputText = "",

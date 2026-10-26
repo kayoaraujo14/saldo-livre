@@ -5,7 +5,18 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useFinance } from '@/store/FinanceContext'
-import { CATEGORIES, CATEGORY_GROUPS, type Allocation, type Category, type PaymentMethod, type SplitType, type Transaction, type TransactionStatus } from '@/types'
+import {
+  EXPENSE_CATEGORIES,
+  INCOME_CATEGORIES,
+  LEGACY_CATEGORIES,
+  getCategoryDetail,
+  type Allocation,
+  type Category,
+  type PaymentMethod,
+  type SplitType,
+  type Transaction,
+  type TransactionStatus,
+} from '@/types'
 import { calculateCardInvoiceDates, clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory } from '@/lib/finance'
 import { todayKey, formatBRL, stripInstallmentSuffix, round2 } from '@/lib/utils'
 import {
@@ -118,7 +129,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
       setDescription(isGrp ? stripInstallmentSuffix(editingTx.description) : editingTx.description)
       setAmount(String(Math.abs(effectiveAmount(editingTx))))
       setCategory(editingTx.category)
-      setSubcategory(editingTx.subcategory || CATEGORY_GROUPS[editingTx.category]?.subcategories?.[0] || '')
+      setSubcategory(editingTx.subcategory || getCategoryDetail(editingTx.category)?.subcategories?.[0] || '')
       setDate(editingTx.dueDate)
       setType(editingTx.type)
       setStatus(editingTx.status)
@@ -654,6 +665,10 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                 onClick={() => {
                   setType('expense')
                   if (status === 'estimated') setStatus('pending')
+                  if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
+                    setCategory('Alimentação')
+                    setSubcategory('Supermercado')
+                  }
                 }}
                 className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
                   type === 'expense'
@@ -667,7 +682,8 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                 type="button"
                 onClick={() => {
                   setType('income')
-                  setCategory('Receita')
+                  setCategory('Salário & Remuneração')
+                  setSubcategory('Salário Principal')
                   setSplitType('mine')
                   setIsInstallment(false)
                   setStatus('paid')
@@ -737,12 +753,10 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   const val = e.target.value
                   setDescription(val)
                   if (!editingTx && val.trim().length >= 3) {
-                    const guess = guessCategoryAndSubcategory(val)
-                    if (type === 'expense') {
-                      setCategory(guess.category)
-                      const subs = CATEGORY_GROUPS[guess.category]?.subcategories || []
-                      setSubcategory(guess.subcategory || subs[0] || '')
-                    }
+                    const guess = guessCategoryAndSubcategory(val, undefined, type)
+                    setCategory(guess.category)
+                    const subs = getCategoryDetail(guess.category)?.subcategories || []
+                    setSubcategory(guess.subcategory || subs[0] || '')
                   }
                 }}
                 placeholder={isIncomeType ? 'Ex: Salário, Rendimentos, Pix de Amigo...' : 'Ex: Supermercado, Aluguel, Amazon Prime, Uber...'}
@@ -766,20 +780,47 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
               />
             </div>
 
-            {/* Categoria / Subcategoria de Receita e Forma de Recebimento */}
+            {/* Categoria / Subcategoria de Receita ou Despesa e Forma de Recebimento */}
             {isIncomeType ? (
               <>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-slate-300">Tipo de Receita</label>
+                  <label className="text-xs font-semibold text-slate-300">Categoria de Receita</label>
                   <Select
-                    value={subcategory || 'Salário Principal'}
-                    onValueChange={(v) => setSubcategory(v)}
+                    value={category}
+                    onValueChange={(v) => {
+                      const newCat = v as Category
+                      setCategory(newCat)
+                      const subs = getCategoryDetail(newCat)?.subcategories || []
+                      setSubcategory(subs[0] || '')
+                    }}
                   >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {CATEGORY_GROUPS.Receita.subcategories.map((sub) => (
+                      {INCOME_CATEGORIES.map((cat) => (
+                        <SelectItem key={cat} value={cat}>
+                          {cat}
+                        </SelectItem>
+                      ))}
+                      {category === 'Receita' && (
+                        <SelectItem value="Receita">Receita (Legada)</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Subcategoria de Receita</label>
+                  <Select
+                    value={subcategory || (getCategoryDetail(category)?.subcategories?.[0] ?? '')}
+                    onValueChange={(v) => setSubcategory(v)}
+                  >
+                    <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                      <SelectValue placeholder="Selecione um subgrupo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(getCategoryDetail(category)?.subcategories || []).map((sub) => (
                         <SelectItem key={sub} value={sub}>
                           {sub}
                         </SelectItem>
@@ -788,7 +829,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   </Select>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 sm:col-span-2">
                   <label className="text-xs font-semibold text-slate-300">Forma de Recebimento</label>
                   <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
@@ -811,7 +852,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                     onValueChange={(v) => {
                       const newCat = v as Category
                       setCategory(newCat)
-                      const subs = CATEGORY_GROUPS[newCat]?.subcategories || []
+                      const subs = getCategoryDetail(newCat)?.subcategories || []
                       setSubcategory(subs[0] || '')
                     }}
                   >
@@ -819,11 +860,16 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {CATEGORIES.filter((c) => c !== 'Receita').map((c) => (
+                      {EXPENSE_CATEGORIES.map((c) => (
                         <SelectItem key={c} value={c}>
-                          {c === 'Estorno' ? '🔄 Estorno / Crédito na Fatura' : c}
+                          {c}
                         </SelectItem>
                       ))}
+                      {(LEGACY_CATEGORIES as readonly string[]).includes(category) && !(EXPENSE_CATEGORIES as readonly string[]).includes(category) && (
+                        <SelectItem key={category} value={category}>
+                          {category} (Legada)
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -831,14 +877,14 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-300">Subcategoria</label>
                   <Select
-                    value={subcategory || (CATEGORY_GROUPS[category]?.subcategories?.[0] ?? '')}
+                    value={subcategory || (getCategoryDetail(category)?.subcategories?.[0] ?? '')}
                     onValueChange={(v) => setSubcategory(v)}
                   >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
                       <SelectValue placeholder="Selecione um subgrupo" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(CATEGORY_GROUPS[category]?.subcategories || []).map((sub) => (
+                      {(getCategoryDetail(category)?.subcategories || []).map((sub) => (
                         <SelectItem key={sub} value={sub}>
                           {sub}
                         </SelectItem>
