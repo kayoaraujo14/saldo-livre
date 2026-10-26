@@ -509,8 +509,17 @@ export const functionDeclarations: FunctionDeclaration[] = [
   {
     name: 'obterRelatorioEProjecaoMensal',
     description:
-      'Retorna os totais atualizados do mês do usuário: Saldo Livre Real, Limite Diário Seguro, dias restantes, gastos por categoria, contas pendentes/estimadas, reservas e valores a receber de terceiros/parceiro(a).',
-    parameters: { type: Type.OBJECT, properties: {} },
+      'Retorna os totais consolidados ou a projeção financeira detalhada de qualquer mês (mês atual ou mês futuro, ex: próximo mês): Saldo Livre Real/Projetado, Limite Diário Seguro, receitas previstas, despesas pagas, compras de cartão de crédito pendentes na fatura (status pending), contas estimadas (status estimated) e gastos por categoria.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        mes: {
+          type: Type.STRING,
+          description:
+            'Mês de competência para o relatório ou projeção (YYYY-MM). Ex: "2026-11" para o próximo mês. Se omitido, usa o mês atual em análise.',
+        },
+      },
+    },
   },
   {
     name: 'gerenciarCartoes',
@@ -734,6 +743,22 @@ REGRAS DE FUNCIONAMENTO:
 - O parâmetro "data" É SEMPRE A DATA EM QUE A COMPRA FOI REALIZADA (ex: se o usuário disser "ontem", envie a data de ontem YYYY-MM-DD; se "hoje", envie a data de hoje). NUNCA coloque a data de vencimento da fatura no campo "data"!
 - Compras no cartão de crédito comprometem a renda do MÊS DE VENCIMENTO DA FATURA (mesFatura/competenceMonth), e NÃO a data em que a compra foi feita!
 - Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay). Envie "mesFatura" com o mês correto da fatura (ex: "2026-11").
+
+1.1. PROJEÇÃO E PREVISÃO PARA O PRÓXIMO MÊS E MESES FUTUROS (REGRA DE INTEGRIDADE):
+- Quando o usuário pedir previsão, projeção ou perguntar como ficará o Saldo Livre ou as despesas do próximo mês (ou qualquer mês futuro):
+  * CHAME OBRIGATORIAMENTE a ferramenta "obterRelatorioEProjecaoMensal" passando o parâmetro "mes" com o mês solicitado (ex: mes: "2026-11")!
+  * REGRA CRÍTICA PARA COMPRAS DE CARTÃO DE CRÉDITO COM STATUS PENDENTE:
+    - Compras efetuadas no cartão de crédito cuja fatura vence no próximo mês possuem status "pending" (pendente de pagamento da fatura).
+    - ELAS SÃO DESPESAS COMPROMETIDAS REAIS E DEVEM SER OBRIGATORIAMENTE INCLUÍDAS NA PROJEÇÃO DO PRÓXIMO MÊS!
+    - O total de gastos/despesas projetadas é composto por: (Compras de Cartão Pendentes da Fatura + Contas Fixas Estimadas + Despesas Já Pagas).
+    - O Saldo Livre Projetado é: Receitas Previstas - Total Comprometido (incluindo as compras de cartão pendentes).
+  * REGRA DE OURO PARA O USUÁRIO: NUNCA oriente o usuário a alterar o status de compras de cartão de crédito para "pago" (paid) para que elas entrem na projeção! O status "pending" é a verdade contábil correta para compras de fatura em aberto. Colocar "pago" desorganiza o fluxo de caixa real.
+  * Apresente a projeção detalhando:
+    1. Receitas Previstas (Salário / Renda)
+    2. Fatura do Cartão de Crédito a Vencer (Lançamentos Pendentes comprometidos)
+    3. Contas Fixas Recorrentes / Estimadas
+    4. Total de Despesas Comprometidas
+    5. Saldo Livre Previsto e Limite Diário Seguro para o próximo mês.
 
 2. AMIGOS NA REDE E DIVISÃO DE CONTAS (PORCENTAGEM, VALORES ESPECÍFICOS E MULTI-PESSOAS):
 - Se o usuário disser que um gasto é de um amigo na plataforma (ex: "KAYO", "kayoaraujo2002@gmail.com"):

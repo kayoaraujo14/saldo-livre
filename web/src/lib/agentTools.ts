@@ -1,7 +1,7 @@
 /**
  * Implementação das ferramentas do agente (executadas pelo motor do Google Gemini).
  */
-import type { Allocation, Card, Category, NewTransaction, PaymentMethod, PendingBatchTransaction, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
+import type { Allocation, Card, Category, FutureMonthProjection, MonthClosure, NewTransaction, PaymentMethod, PendingBatchTransaction, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
 import { CATEGORIES, INCOME_CATEGORIES, getCategoryDetail } from '@/types'
 import { extractCounterparty } from './pdfParser'
 import {
@@ -17,6 +17,7 @@ import {
   impactFor,
   listReceivables,
   pickCard,
+  projectFutureMonths,
   SPLIT_LABELS,
   type Party,
 } from './finance'
@@ -43,6 +44,8 @@ export interface AgentEnv {
   getCards: () => Card[]
   getRecurring?: () => RecurringBill[]
   getFriends?: () => Array<{ uid: string; name: string; email?: string }>
+  getProfile?: () => UserProfile | null
+  getClosures?: () => MonthClosure[]
   getPendingTransactions?: () => PendingBatchTransaction[] | undefined
   setPendingTransactions?: (txs: PendingBatchTransaction[]) => void
   lookupUserByEmail?: (email: string) => Promise<UserProfile | null>
@@ -120,7 +123,7 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
       case 'atualizarContaPrevista':
         return atualizar(env, args)
       case 'obterRelatorioEProjecaoMensal':
-        return relatorio(env)
+        return relatorio(env, args)
       case 'gerenciarCartoes':
         return gerenciarCartoes(env, args)
       case 'gerenciarContasRecorrentes':
@@ -1737,7 +1740,11 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   }
 
   const pendingTxs = env.getPendingTransactions?.()
-  if (pendingTxs && pendingTxs.length > 0 && (args.pendentes === true || /pendent|extrato|lote|importad/i.test(termo))) {
+  const isExplicitBatchSearch =
+    args.pendentesExtrato === true ||
+    args.loteExtrato === true ||
+    /lote|extrato.*pendente|importad/i.test(termo)
+  if (pendingTxs && pendingTxs.length > 0 && isExplicitBatchSearch) {
     const validPending = pendingTxs.filter((t) => t.categoria_filtro === 'valida')
     const somaTotal = validPending.reduce((acc, t) => acc + t.valor_exato, 0)
     return {
@@ -2032,16 +2039,56 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   }
 }
 
-async function relatorio(env: AgentEnv): Promise<ToolResult> {
+async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise<ToolResult> {
   const all = env.getTransactions()
-  const s = computeSummary(all, env.me.uid, env.monthKey)
-  const { receivables, payables } = listReceivables(all, env.me.uid, env.monthKey, env.getCards())
-  const monthTxs = all.filter((t) => t.competenceMonth === env.monthKey && t.visibleToUids.includes(env.me.uid))
+  const targetMonth = parseMonthKey(args?.mes) || env.monthKey
+  const closures = env.getClosures?.() || []
+  const s = computeSummary(all, env.me.uid, targetMonth, closures)
+  const { receivables, payables } = listReceivables(all, env.me.uid, targetMonth, env.getCards())
+  const monthTxs = all.filter((t) => t.competenceMonth === targetMonth && (t.visibleToUids || []).includes(env.me.uid))
+
+  const isFutureMonth = targetMonth > currentMonthKey()
+  const bills = env.getRecurring?.() || []
+  const profile = env.getProfile?.() || null
+
+  let projectedFuture: FutureMonthProjection | null = null
+  if (isFutureMonth) {
+    const projections = projectFutureMonths({
+      all,
+      bills,
+      profile,
+      uid: env.me.uid,
+      startMonthKey: targetMonth,
+      count: 1,
+    })
+    projectedFuture = projections[0] || null
+  }
+
+  // Detalhamento de contas em aberto e compras de cartão pendentes
+  const pendingCreditCardTxs = monthTxs
+    .filter((t) => t.type === 'expense' && t.status === 'pending' && impactFor(t, env.me.uid, all) > 0)
+    .map((t) => ({
+      descricao: t.description,
+      status: 'Pendente na Fatura do Cartão',
+      vencimento: t.dueDate,
+      cartao: t.cardId ? env.getCards().find((c) => c.id === t.cardId)?.cardName : undefined,
+      meuImpacto: impactFor(t, env.me.uid, all),
+    }))
+
+  const estimatedTxs = monthTxs
+    .filter((t) => t.type === 'expense' && t.status === 'estimated' && impactFor(t, env.me.uid, all) > 0)
+    .map((t) => ({
+      descricao: t.description,
+      status: 'Estimado (Previsão Recorrente)',
+      vencimento: t.dueDate,
+      meuImpacto: impactFor(t, env.me.uid, all),
+    }))
+
   const open = monthTxs
     .filter((t) => t.type === 'expense' && t.status !== 'paid' && impactFor(t, env.me.uid, all) > 0)
     .map((t) => ({
       descricao: t.description,
-      status: t.status === 'estimated' ? 'Estimado' : 'A Pagar',
+      status: t.status === 'estimated' ? 'Estimado' : 'Pendente (A Pagar na Fatura)',
       vencimento: t.dueDate,
       meuImpacto: impactFor(t, env.me.uid, all),
     }))
@@ -2049,24 +2096,38 @@ async function relatorio(env: AgentEnv): Promise<ToolResult> {
     .filter((t) => t.reserveCardId && t.createdByUid === env.me.uid)
     .map((t) => ({ descricao: t.description, ...getReserveInfo(t, all) }))
 
+  const effectiveIncome = projectedFuture ? projectedFuture.projectedIncome : s.income
+  const effectiveExpense = projectedFuture ? projectedFuture.projectedExpense : (s.paid + s.committed)
+  const effectiveFreeBalance = projectedFuture ? projectedFuture.projectedFreeBalance : s.freeBalance
+  const effectiveDailyLimit = projectedFuture ? projectedFuture.projectedDailyLimit : s.dailyLimit
+
   return {
     response: {
       ok: true,
-      mes: monthLabel(env.monthKey),
-      receitas: s.income,
+      mes: monthLabel(targetMonth),
+      competenceMonth: targetMonth,
+      ehProjecaoFutura: isFutureMonth,
+      receitas: effectiveIncome,
       jaPago: s.paid,
-      comprometido: s.committed,
-      comprometidoEstimado: s.committedEstimated,
-      comprometidoAPagarReal: s.committedPending,
+      comprasCartaoPendentes: s.committedPending,
+      contasEstimadas: s.committedEstimated,
+      totalComprometido: effectiveExpense,
+      saldoLivrePrevisto: effectiveFreeBalance,
       saldoLivreReal: s.freeBalance,
       diasRestantes: s.daysRemaining,
-      limiteDiarioSeguro: s.dailyLimit,
+      limiteDiarioSeguro: effectiveDailyLimit,
+      resumoFaturaCartao: {
+        totalPendenteCartao: s.committedPending,
+        quantidadeItensPendentes: pendingCreditCardTxs.length,
+        itensPendentesFatura: pendingCreditCardTxs,
+      },
       gastosPorCategoria: s.byCategory,
       gastosPorSubcategoria: s.bySubcategory || [],
       totalInvestido: s.totalInvested || 0,
       totalInvestidoAcumulado: s.totalInvestedAccumulated || 0,
       investimentosPorClasse: s.byInvestmentSubcategory || [],
       contasEmAberto: open,
+      contasEstimadasLista: estimatedTxs,
       reservasDeCartao: reserves,
       aReceberTotal: s.receivableTotal,
       aReceberDoParceiro: s.receivableFromPartner,
@@ -2077,12 +2138,13 @@ async function relatorio(env: AgentEnv): Promise<ToolResult> {
     },
     action: {
       kind: 'report',
-      title: `Resumo de ${monthLabel(env.monthKey)}`,
+      title: isFutureMonth ? `Projeção de ${monthLabel(targetMonth)}` : `Resumo de ${monthLabel(targetMonth)}`,
       lines: [
-        { label: 'Saldo Livre Real', value: money(s.freeBalance), tone: s.freeBalance >= 0 ? 'positive' : 'negative' },
-        { label: 'Limite diário', value: s.dailyLimit != null ? `${money(s.dailyLimit)} × ${s.daysRemaining}d` : 'Mês encerrado' },
-        { label: 'Comprometido', value: money(s.committed) },
-        { label: 'A receber', value: money(s.receivableTotal), tone: 'positive' },
+        { label: isFutureMonth ? 'Saldo Livre Previsto' : 'Saldo Livre Real', value: money(effectiveFreeBalance), tone: effectiveFreeBalance >= 0 ? 'positive' : 'negative' },
+        { label: 'Receitas Previstas', value: money(effectiveIncome), tone: 'positive' },
+        { label: 'Fatura Cartão (Pendente)', value: money(s.committedPending) },
+        { label: 'Contas Estimadas', value: money(s.committedEstimated) },
+        { label: 'Total Comprometido', value: money(effectiveExpense) },
       ],
     },
   }

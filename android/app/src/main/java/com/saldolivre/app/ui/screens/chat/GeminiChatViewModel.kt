@@ -1427,6 +1427,25 @@ REGRA DE OURO INVIOLÁVEL: DISTINÇÃO RIGOROSA ENTRE CONTAS RECORRENTES (CONFIG
    - Se nenhuma transação real for encontrada no mês após a busca no banco de dados, informe com total sinceridade que existe apenas a configuração/previsão cadastrada de R$ X, mas que NENHUM lançamento real foi registrado, faturado ou pago no mês de ${FinanceEngine.monthLabel(selectedMonth)} até o momento.
 ======================================================================
 
+======================================================================
+5. PROJEÇÃO E PREVISÃO PARA O PRÓXIMO MÊS E MESES FUTUROS (REGRA DE INTEGRIDADE):
+======================================================================
+- Quando o usuário pedir previsão, projeção ou perguntar como ficará o Saldo Livre ou as despesas do próximo mês (ou qualquer mês futuro):
+  * Emita OBRIGATORIAMENTE a ação `REPORT_PROJECTION`:
+    ```json
+    {
+      "action": "REPORT_PROJECTION",
+      "month": "2026-11"
+    }
+    ```
+  * REGRA CRÍTICA PARA COMPRAS DE CARTÃO DE CRÉDITO COM STATUS PENDENTE:
+    - Compras efetuadas no cartão de crédito cuja fatura vence no próximo mês possuem status "pending" (pendente de pagamento da fatura).
+    - ELAS SÃO DESPESAS COMPROMETIDAS REAIS E DEVEM SER OBRIGATORIAMENTE INCLUÍDAS NA PROJEÇÃO DO PRÓXIMO MÊS!
+    - O total de gastos/despesas projetadas é composto por: (Compras de Cartão Pendentes da Fatura + Contas Fixas Estimadas + Despesas Já Pagas).
+    - O Saldo Livre Projetado é: Receitas Previstas - Total Comprometido (incluindo as compras de cartão pendentes).
+  * REGRA DE OURO PARA O USUÁRIO: NUNCA oriente o usuário a alterar o status de compras de cartão de crédito para "pago" (paid) para que elas entrem na projeção! O status "pending" é a verdade contábil correta para compras de fatura em aberto. Colocar "pago" desorganiza o fluxo de caixa real.
+======================================================================
+
 EXECUÇÃO DE OPERAÇÕES NO BANCO DE DADOS (CRUD COMPLETO):
 Sempre que você precisar realizar uma ação, explique brevemente ao usuário e OBRIGATORIAMENTE INCLUA NO FINAL UM BLOCO JSON delimitado por ```json ... ``` com a ação correspondente! Você pode incluir MAIS DE UM bloco JSON na mesma resposta quando o usuário solicitar múltiplas ações.
 
@@ -1906,6 +1925,7 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
                 val upper = block.jsonContent.uppercase()
                 upper.contains("SEARCH_TRANSACTIONS") || upper.contains("QUERY_TRANSACTIONS") ||
                 upper.contains("BUSCARTRANSACOES") || upper.contains("CONSULTARTRANSACOES") ||
+                upper.contains("REPORT_PROJECTION") || upper.contains("PROJECT_MONTH") || upper.contains("OBTERRELATORIOEPROJECAOMENSAL") ||
                 upper.contains("\"OPERACAO\": \"LISTAR\"") || upper.contains("\"OPERATION\": \"LISTAR\"")
             }
 

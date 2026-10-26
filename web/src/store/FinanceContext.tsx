@@ -1388,6 +1388,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           getTransactions: () => (mode === 'demo' ? demoRef.current.transactions : fbTxRef.current),
           getRecurring: () => (mode === 'demo' ? demoRef.current.recurring : agentEnvRef.current.recurring),
           getFriends: () => friends,
+          getProfile: () => profile,
+          getClosures: () => monthClosures,
           getPendingTransactions: () => pendingBatchRef.current,
           setPendingTransactions: (txs) => {
             pendingBatchRef.current = txs

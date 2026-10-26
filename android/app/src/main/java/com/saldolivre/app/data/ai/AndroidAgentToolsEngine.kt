@@ -105,6 +105,7 @@ class AndroidAgentToolsEngine(
             "DELETE_TRANSACTION", "excluirTransacoes" -> executeDeleteFromJson(jsonObj)
             "UPDATE_ESTIMATED", "atualizarContaPrevista" -> executeUpdateEstimatedFromJson(jsonObj)
             "SEARCH_TRANSACTIONS", "buscarTransacoes", "QUERY_TRANSACTIONS", "consultarTransacoes" -> executeSearchFromJson(jsonObj)
+            "REPORT_PROJECTION", "PROJECT_MONTH", "obterRelatorioEProjecaoMensal" -> executeReportProjectionFromJson(jsonObj)
             "MANAGE_CARDS", "gerenciarCartoes" -> executeManageCardsFromJson(jsonObj)
             "MANAGE_RECURRING", "gerenciarContasRecorrentes" -> executeManageRecurringFromJson(jsonObj)
             "EXPAND_INSTALLMENTS", "expandirParcelamentos" -> executeExpandInstallmentsFromJson(jsonObj)
@@ -2068,6 +2069,76 @@ class AndroidAgentToolsEngine(
         return ToolExecutionResult(
             text = "📊 **$title**\n\n${description ?: "Gráfico gerado com base nos seus lançamentos reais."}",
             chartPayload = payload
+        )
+    }
+
+    // -------------------------------------------------------------
+    // 10.1. REPORT PROJECTION (RELATÓRIO E PROJEÇÃO MENSAL)
+    // -------------------------------------------------------------
+
+    private suspend fun executeReportProjectionFromJson(jsonObj: JsonObject): ToolExecutionResult {
+        val monthStr = jsonObj.getStringOrNull("mes")
+            ?: jsonObj.getStringOrNull("month")
+            ?: jsonObj.getStringOrNull("competenceMonth")
+        return executeReportProjection(monthStr)
+    }
+
+    suspend fun executeReportProjection(month: String? = null): ToolExecutionResult {
+        val all = repository.getTransactions().first()
+        val bills = repository.getRecurringBills().first()
+        val user = repository.currentUser.value
+        val defaultMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val targetMonth = parseMonthKey(month, defaultMonth) ?: defaultMonth
+        val targetMonthLabel = FinanceEngine.formatMonthLabel(targetMonth)
+        val isFutureMonth = targetMonth > FinanceEngine.currentMonthKey()
+        val profile = repository.allUsers.find { it.uid == user.uid }
+
+        val summary = FinanceEngine.computeSummary(all, user.uid, targetMonth)
+        val projections = if (isFutureMonth) {
+            FinanceEngine.projectFutureMonths(all, bills, profile, user.uid, targetMonth, count = 1)
+        } else emptyList()
+        val proj = projections.firstOrNull()
+
+        val effectiveIncome = proj?.projectedIncome ?: summary.income
+        val effectiveExpense = proj?.projectedExpense ?: summary.committed
+        val effectiveFreeBalance = proj?.projectedFreeBalance ?: summary.freeBalance
+        val effectiveDailyLimit = proj?.projectedDailyLimit ?: summary.dailyLimit
+
+        val monthTxs = all.filter { it.competenceMonth == targetMonth && it.visibleToUids.contains(user.uid) }
+        val pendingCardTxs = monthTxs.filter { it.type == TransactionType.EXPENSE && it.status == TransactionStatus.PENDING }
+        val pendingTotal = pendingCardTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
+
+        val cards = repository.getCards().first()
+        val cardsMap = cards.associateBy { it.id }
+
+        val pendingLines = if (pendingCardTxs.isNotEmpty()) {
+            val list = pendingCardTxs.take(10).joinToString("\n") { t ->
+                val cName = t.cardId?.let { cid -> cardsMap[cid]?.cardName } ?: "Cartão"
+                val myImp = FinanceEngine.impactFor(t, user.uid, all)
+                "  * **${t.description}** ($cName): ${FinanceEngine.formatCurrency(myImp)} (Vence ${FinanceEngine.formatShortDate(t.dueDate)})"
+            }
+            "\n\n💳 **Lançamentos Pendentes da Fatura do Cartão (${pendingCardTxs.size} itens — Total: ${FinanceEngine.formatCurrency(pendingTotal)}):**\n$list"
+        } else ""
+
+        val text = """
+📊 **${if (isFutureMonth) "Projeção Financeira Futura" else "Relatório Consolidado"} ($targetMonthLabel):**
+
+• **Receitas Previstas**: ${FinanceEngine.formatCurrency(effectiveIncome)}
+• **Despesas Já Pagas**: ${FinanceEngine.formatCurrency(summary.paid)}
+• **Compras no Cartão Pendentes (Fatura a Vencer)**: ${FinanceEngine.formatCurrency(pendingTotal)}
+• **Contas Fixas / Estimadas**: ${FinanceEngine.formatCurrency(summary.committedEstimated)}
+• **Total de Despesas Comprometidas**: ${FinanceEngine.formatCurrency(effectiveExpense)}
+• **Saldo Livre Projetado**: ${FinanceEngine.formatCurrency(effectiveFreeBalance)}
+• **Limite Diário Seguro**: ${effectiveDailyLimit?.let { "${FinanceEngine.formatCurrency(it)}/dia" } ?: "Mês encerrado"}$pendingLines
+""".trimIndent()
+
+        return ToolExecutionResult(
+            text = text,
+            actionCard = ActionCardData(
+                title = if (isFutureMonth) "Projeção $targetMonthLabel" else "Resumo $targetMonthLabel",
+                description = "Saldo Livre Previsto: ${FinanceEngine.formatCurrency(effectiveFreeBalance)}",
+                detail = "Total Comprometido: ${FinanceEngine.formatCurrency(effectiveExpense)} (Cartão Pendente: ${FinanceEngine.formatCurrency(pendingTotal)})"
+            )
         )
     }
 
