@@ -123,6 +123,66 @@ export function formatShortDate(dateKey?: string | null) {
   return trimmed || '—'
 }
 
+const PT_MONTH_ABBR = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ']
+const PT_WEEKDAYS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado']
+
+export interface NubankDateHeaderInfo {
+  title: string
+  subtitle?: string
+  isToday: boolean
+  isYesterday: boolean
+}
+
+/**
+ * Formata uma data para o cabeçalho de agrupamento estilo Nubank (ex: "HOJE", "ONTEM", "25 OUT", "14 SET").
+ */
+export function formatNubankDateHeader(dateStr?: string | null): NubankDateHeaderInfo {
+  if (!dateStr || typeof dateStr !== 'string') return { title: 'Sem data', isToday: false, isYesterday: false }
+  const clean = dateStr.trim()
+  if (!clean.includes('-')) {
+    return { title: clean, isToday: false, isYesterday: false }
+  }
+  const parts = clean.split('-').map(Number)
+  if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+    return { title: clean, isToday: false, isYesterday: false }
+  }
+  const [y, m, d] = parts
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const target = new Date(y, m - 1, d)
+  const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+
+  const isToday = diffDays === 0
+  const isYesterday = diffDays === -1
+  const monthAbbr = PT_MONTH_ABBR[m - 1] || ''
+  const dayStr = pad(d)
+  const weekday = PT_WEEKDAYS[target.getDay()] || ''
+  const yearSuffix = y !== today.getFullYear() ? ` ${y}` : ''
+
+  if (isToday) {
+    return {
+      title: 'HOJE',
+      subtitle: `${dayStr} ${monthAbbr}`,
+      isToday: true,
+      isYesterday: false,
+    }
+  }
+  if (isYesterday) {
+    return {
+      title: 'ONTEM',
+      subtitle: `${dayStr} ${monthAbbr}`,
+      isToday: false,
+      isYesterday: true,
+    }
+  }
+  return {
+    title: `${dayStr} ${monthAbbr}${yearSuffix}`,
+    subtitle: weekday,
+    isToday: false,
+    isYesterday: false,
+  }
+}
+
 /** Desloca uma data YYYY-MM-DD em N meses para a frente mantendo o dia */
 export function shiftDateMonth(dateKey: string | null | undefined, deltaMonths: number) {
   const key = typeof dateKey === 'string' && dateKey.includes('-') ? dateKey.trim() : todayKey()

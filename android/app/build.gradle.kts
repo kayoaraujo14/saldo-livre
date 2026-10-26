@@ -92,6 +92,9 @@ dependencies {
     // Google Gemini AI SDK for Android
     implementation("com.google.ai.client.generativeai:generativeai:0.4.0")
 
+    // Testing
+    testImplementation("junit:junit:4.13.2")
+
     // Debugging & Tooling
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

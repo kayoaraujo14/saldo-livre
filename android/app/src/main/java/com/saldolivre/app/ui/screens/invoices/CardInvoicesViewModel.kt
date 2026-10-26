@@ -24,6 +24,7 @@ enum class InvoiceItemFilter(val label: String) {
 
 data class CardInvoicesUiState(
     val viewMonth: String = FinanceEngine.currentMonthKey(),
+    val currentUser: com.saldolivre.app.data.model.UserProfile = com.saldolivre.app.data.model.UserProfile(),
     val invoices: List<CardInvoice> = emptyList(),
     val selectedCardId: String? = null,
     val history: List<CardInvoice> = emptyList(),
@@ -32,6 +33,7 @@ data class CardInvoicesUiState(
     val totalMine: Double = 0.0,
     val nextDue: CardInvoice? = null,
     val itemFilter: InvoiceItemFilter = InvoiceItemFilter.ALL,
+    val selectedParticipantName: String? = null,
     val searchQuery: String = "",
     val showPayConfirm: Boolean = false,
     val isPaying: Boolean = false,
@@ -72,6 +74,7 @@ class CardInvoicesViewModel(
 
                 _uiState.value.copy(
                     viewMonth = month,
+                    currentUser = user,
                     invoices = invoices,
                     selectedCardId = resolvedId,
                     history = history,
@@ -90,14 +93,25 @@ class CardInvoicesViewModel(
 
     fun goToMonth(monthKey: String) {
         viewMonth.value = monthKey
-        _uiState.update { it.copy(showPayConfirm = false) }
+        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null) }
     }
 
     private fun changeMonth(delta: Int) = goToMonth(FinanceEngine.shiftMonth(viewMonth.value, delta))
 
     fun selectCard(cardId: String) {
         selectedCardId.value = cardId
-        _uiState.update { it.copy(showPayConfirm = false) }
+        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null) }
+    }
+
+    fun toggleParticipantFilter(name: String) {
+        _uiState.update { current ->
+            val next = if (current.selectedParticipantName == name) null else name
+            current.copy(selectedParticipantName = next)
+        }
+    }
+
+    fun clearParticipantFilter() {
+        _uiState.update { it.copy(selectedParticipantName = null) }
     }
 
     fun setFilter(filter: InvoiceItemFilter) = _uiState.update { it.copy(itemFilter = filter) }

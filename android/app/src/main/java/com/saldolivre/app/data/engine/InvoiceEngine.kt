@@ -154,75 +154,38 @@ object InvoiceEngine {
 
         val limit = card.limit?.takeIf { it > 0.0 }
 
-        // Rateio detalhado por participante
+        // Rateio detalhado por participante baseado nas cotas reais de cada lançamento
         val participantMap = mutableMapOf<String, InvoiceParticipantShare>()
-        if (myShare > 0) {
-            participantMap["__me__"] = InvoiceParticipantShare(
-                name = "Você (Minha parte)",
-                amount = myShare,
-                pct = if (total > 0) ((myShare / total) * 100).roundToInt() else 0,
-                isMe = true
-            )
-        }
 
         for (t in expenses) {
-            if (t.allocations.isNotEmpty()) {
-                for (a in t.allocations) {
-                    if (a.uid == uid) continue
-                    val name = a.name.trim().ifEmpty { "Outro" }
-                    val current = participantMap[name]?.amount ?: 0.0
-                    val updatedAmt = FinanceEngine.round2(current + a.amount)
-                    participantMap[name] = InvoiceParticipantShare(
-                        name = name,
-                        amount = updatedAmt,
-                        pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
-                        isMe = false
-                    )
-                }
-            } else if (!t.assignedFriendName.isNullOrBlank()) {
-                val name = t.assignedFriendName.trim()
-                val friendShare = FinanceEngine.round2(max(0.0, t.effectiveAmount - (t.userImpact[uid] ?: 0.0)))
-                if (friendShare > 0) {
-                    val current = participantMap[name]?.amount ?: 0.0
-                    val updatedAmt = FinanceEngine.round2(current + friendShare)
-                    participantMap[name] = InvoiceParticipantShare(
-                        name = name,
-                        amount = updatedAmt,
-                        pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
-                        isMe = false
-                    )
-                }
-            } else if (!t.externalName.isNullOrBlank()) {
-                val name = t.externalName.trim()
-                val share = FinanceEngine.round2(max(0.0, t.effectiveAmount - (t.userImpact[uid] ?: 0.0)))
-                if (share > 0) {
-                    val current = participantMap[name]?.amount ?: 0.0
-                    val updatedAmt = FinanceEngine.round2(current + share)
-                    participantMap[name] = InvoiceParticipantShare(
-                        name = name,
-                        amount = updatedAmt,
-                        pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
-                        isMe = false
-                    )
-                }
+            val shares = getTransactionParticipantShares(t, uid, all)
+            for ((key, amt) in shares) {
+                if (Math.abs(amt) <= 0.0001) continue
+                val isMe = (key == "__me__")
+                val name = if (isMe) "Você (Minha parte)" else key
+                val current = participantMap[name]?.amount ?: 0.0
+                val updatedAmt = FinanceEngine.round2(current + amt)
+                participantMap[name] = InvoiceParticipantShare(
+                    name = name,
+                    amount = updatedAmt,
+                    pct = 0,
+                    isMe = isMe
+                )
             }
         }
 
-        val recordedOthers = participantMap.values.filter { !it.isMe }.sumOf { it.amount }
-        if (othersShare > recordedOthers + 0.05) {
-            val diff = FinanceEngine.round2(othersShare - recordedOthers)
-            val current = participantMap["Parceiro(a)"]?.amount ?: 0.0
-            val updatedAmt = FinanceEngine.round2(current + diff)
-            participantMap["Parceiro(a)"] = InvoiceParticipantShare(
-                name = "Parceiro(a)",
-                amount = updatedAmt,
-                pct = if (total > 0) ((updatedAmt / total) * 100).roundToInt() else 0,
-                isMe = false
-            )
+        // Se houver créditos (estornos/pagamentos) e o titular tiver participação, abate proporcionalmente do titular
+        if (credits > 0.0 && participantMap.containsKey("Você (Minha parte)")) {
+            val cur = participantMap["Você (Minha parte)"]!!.amount
+            val adjusted = FinanceEngine.round2(max(0.0, cur - credits))
+            participantMap["Você (Minha parte)"] = participantMap["Você (Minha parte)"]!!.copy(amount = adjusted)
         }
 
         val splitBreakdown = participantMap.values
             .filter { it.amount > 0 }
+            .map { p ->
+                p.copy(pct = if (total > 0) ((p.amount / total) * 100).roundToInt() else 0)
+            }
             .sortedWith(compareByDescending<InvoiceParticipantShare> { it.isMe }.thenByDescending { it.amount })
 
         val topExpense = expenses.maxByOrNull { it.effectiveAmount }
@@ -320,5 +283,189 @@ object InvoiceEngine {
                 "Venceu há $late dia${if (late == 1) "" else "s"}"
             }
         }
+    }
+
+    /**
+     * Retorna o mapa de participantes e seus respectivos valores rateados para uma transação de despesa.
+     * O titular/usuário atual é indexado pela chave especial "__me__".
+     * Outros participantes são indexados por seus nomes.
+     * A soma de todos os valores no mapa é GARANTIDA de ser igual a FinanceEngine.round2(tx.effectiveAmount).
+     */
+    fun getTransactionParticipantShares(
+        tx: Transaction,
+        uid: String,
+        all: List<Transaction> = emptyList()
+    ): Map<String, Double> {
+        if (tx.type != TransactionType.EXPENSE) return emptyMap()
+        val total = FinanceEngine.round2(tx.effectiveAmount)
+        if (Math.abs(total) <= 0.0001) return emptyMap()
+
+        val shares = mutableMapOf<String, Double>()
+
+        // 1. Alocações explícitas (quando há alocações cadastradas na transação)
+        val validAllocs = tx.allocations.filter { Math.abs(it.amount) > 0.0001 }
+        val othersAllocs = validAllocs.filter { a ->
+            val isMyUid = !a.uid.isNullOrBlank() && a.uid == uid
+            val norm = a.name.trim().lowercase()
+            val isMyName = (a.uid.isNullOrBlank() || a.uid == uid) && (
+                norm == "você" || norm == "voce" || norm == "meu" ||
+                norm == "minha parte" || norm == "você (minha parte)" || norm == "voce (minha parte)"
+            )
+            !isMyUid && !isMyName
+        }
+
+        if (othersAllocs.isNotEmpty()) {
+            var sumOthers = 0.0
+            for (a in othersAllocs) {
+                val name = a.name.trim().ifEmpty { "Outro" }
+                val amt = FinanceEngine.round2(a.amount)
+                shares[name] = FinanceEngine.round2((shares[name] ?: 0.0) + amt)
+                sumOthers += amt
+            }
+            val myAllocs = validAllocs.filter { !othersAllocs.contains(it) }
+            val myAllocSum = myAllocs.sumOf { it.amount }
+            val myAmount = if (Math.abs(myAllocSum) > 0.0001) {
+                FinanceEngine.round2(myAllocSum)
+            } else {
+                FinanceEngine.round2(total - sumOthers)
+            }
+            if (Math.abs(myAmount) > 0.0001) {
+                shares["__me__"] = myAmount
+            }
+        } else if (tx.splitType == com.saldolivre.app.data.model.SplitType.SPLIT_50) {
+            // 2. Divisão 50/50 implícita
+            val half = FinanceEngine.round2(total / 2.0)
+            val otherHalf = FinanceEngine.round2(total - half)
+            shares["__me__"] = half
+            val partnerName = if (!tx.externalName.isNullOrBlank()) tx.externalName.trim() else "Parceiro(a)"
+            shares[partnerName] = otherHalf
+        } else if (tx.splitType == com.saldolivre.app.data.model.SplitType.PARTNER) {
+            // 3. 100% Parceiro(a)
+            val partnerName = if (!tx.externalName.isNullOrBlank()) tx.externalName.trim() else "Parceiro(a)"
+            shares[partnerName] = total
+        } else if (!tx.assignedFriendName.isNullOrBlank() ||
+            !tx.assignedFriendUid.isNullOrBlank() ||
+            tx.splitType == com.saldolivre.app.data.model.SplitType.FRIEND
+        ) {
+            // 4. Amigo atribuído
+            val friendName = tx.assignedFriendName?.trim()?.ifEmpty { "Amigo" } ?: "Amigo"
+            val friendAmount: Double = when {
+                tx.friendSharePct != null && tx.friendSharePct > 0.0 -> {
+                    FinanceEngine.round2((total * tx.friendSharePct) / 100.0)
+                }
+                tx.userImpact.containsKey(uid) && Math.abs(tx.userImpact[uid] ?: 0.0) > 0.0 -> {
+                    FinanceEngine.round2(total - (tx.userImpact[uid] ?: 0.0))
+                }
+                !tx.assignedFriendUid.isNullOrBlank() && tx.userImpact.containsKey(tx.assignedFriendUid) -> {
+                    FinanceEngine.round2(tx.userImpact[tx.assignedFriendUid] ?: total)
+                }
+                else -> {
+                    FinanceEngine.round2(total / 2.0)
+                }
+            }
+
+            val myAmount = FinanceEngine.round2(total - friendAmount)
+            if (Math.abs(myAmount) > 0.0001) {
+                shares["__me__"] = myAmount
+            }
+            shares[friendName] = friendAmount
+        } else if (!tx.externalName.isNullOrBlank() ||
+            tx.splitType == com.saldolivre.app.data.model.SplitType.EXTERNAL
+        ) {
+            // 5. Terceiro / Externo
+            val extName = tx.externalName?.trim()?.ifEmpty { "Terceiro" } ?: "Terceiro"
+            val extAmount: Double = if (tx.splitType == com.saldolivre.app.data.model.SplitType.EXTERNAL) {
+                total
+            } else if (tx.userImpact.containsKey(uid) && Math.abs(tx.userImpact[uid] ?: 0.0) > 0.0) {
+                FinanceEngine.round2(total - (tx.userImpact[uid] ?: 0.0))
+            } else {
+                total
+            }
+            val myAmount = FinanceEngine.round2(total - extAmount)
+            if (Math.abs(myAmount) > 0.0001) {
+                shares["__me__"] = myAmount
+            }
+            shares[extName] = extAmount
+        } else {
+            // 6. 100% Meu (SplitType.MINE ou padrão)
+            shares["__me__"] = total
+        }
+
+        // 7. Reconciliação estrita de centavos:
+        // Garante com precisão matemática absoluta que a soma de todas as cotas seja EXATAMENTE igual a 'total'.
+        val sumShares = FinanceEngine.round2(shares.values.sum())
+        val diff = FinanceEngine.round2(total - sumShares)
+        if (kotlin.math.abs(diff) > 0.0001) {
+            if (shares.containsKey("__me__")) {
+                val curMe = shares["__me__"] ?: 0.0
+                val adjustedMe = FinanceEngine.round2(curMe + diff)
+                if (Math.abs(adjustedMe) > 0.0001) {
+                    shares["__me__"] = adjustedMe
+                } else {
+                    shares.remove("__me__")
+                }
+            } else {
+                val largestKey = shares.maxByOrNull { Math.abs(it.value) }?.key
+                if (largestKey != null) {
+                    val cur = shares[largestKey] ?: 0.0
+                    shares[largestKey] = FinanceEngine.round2(cur + diff)
+                } else {
+                    shares["__me__"] = diff
+                }
+            }
+        }
+
+        return shares
+    }
+
+    /**
+     * Calcula o valor atribuível a um participante específico em uma transação da fatura.
+     */
+    fun participantAmountIn(
+        tx: Transaction,
+        participant: InvoiceParticipantShare,
+        uid: String
+    ): Double {
+        if (tx.type != TransactionType.EXPENSE) return 0.0
+        val shares = getTransactionParticipantShares(tx, uid)
+
+        if (participant.isMe) {
+            return shares["__me__"] ?: 0.0
+        }
+
+        val partName = participant.name.trim().lowercase()
+        return shares.entries.find { (k, _) ->
+            val kNorm = k.trim().lowercase()
+            kNorm == partName ||
+                (partName == "parceiro(a)" && (kNorm == "parceiro" || kNorm == "parceira" || kNorm == "parceiro(a)"))
+        }?.value ?: 0.0
+    }
+
+    /**
+     * Recalcula a distribuição de categorias exclusivamente para os gastos do participante.
+     */
+    fun calculateCategoryBreakdownForParticipant(
+        expenses: List<Transaction>,
+        participant: InvoiceParticipantShare,
+        uid: String
+    ): List<InvoiceCategorySlice> {
+        val participantExpenses = expenses.mapNotNull { tx ->
+            val share = participantAmountIn(tx, participant, uid)
+            if (share > 0.0) tx to share else null
+        }
+
+        val totalParticipantExpense = participantExpenses.sumOf { it.second }
+
+        return participantExpenses
+            .groupBy { it.first.category }
+            .map { (cat, list) ->
+                val amount = list.sumOf { it.second }
+                InvoiceCategorySlice(
+                    category = cat,
+                    amount = FinanceEngine.round2(amount),
+                    pct = if (totalParticipantExpense > 0) ((amount / totalParticipantExpense) * 100).roundToInt() else 0
+                )
+            }
+            .sortedByDescending { it.amount }
     }
 }

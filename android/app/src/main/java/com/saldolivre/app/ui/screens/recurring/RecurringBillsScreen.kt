@@ -85,7 +85,7 @@ fun RecurringBillsScreen(
                 title = {
                     Column {
                         Text(
-                            text = "Moldes Recorrentes",
+                            text = "Assinaturas & Contas Fixas",
                             style = Typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
@@ -93,7 +93,7 @@ fun RecurringBillsScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "Previsões automáticas e salários",
+                            text = "Lançamento automatizado e renda mensal",
                             fontSize = 11.sp,
                             color = TextMuted,
                             maxLines = 1,
@@ -191,6 +191,7 @@ fun RecurringBillsScreen(
         RecurringBillFormDialog(
             initialBill = uiState.editingBill!!,
             partner = uiState.partner,
+            cards = uiState.cards,
             onDismiss = { viewModel.closeForm() },
             onSave = { viewModel.saveBill(it) }
         )
@@ -617,6 +618,27 @@ private fun RecurringBillItemCard(
                     )
                 }
 
+                // Trigger badge
+                val triggerText = when (bill.launchTrigger) {
+                    LaunchTrigger.DAY_BEFORE -> "⚡ Lança D-1"
+                    LaunchTrigger.ON_DUE_DATE -> "📅 Lança no dia"
+                    LaunchTrigger.DAY_AFTER -> "⏰ Lança D+1"
+                    LaunchTrigger.FIRST_DAY_OF_MONTH -> "🗓️ Lança dia 1º"
+                }
+                TagBadge(
+                    text = triggerText,
+                    backgroundColor = Amber500.copy(alpha = 0.15f),
+                    textColor = Amber400
+                )
+
+                if (!bill.cardId.isNullOrBlank()) {
+                    TagBadge(
+                        text = "💳 Cartão Vinculado",
+                        backgroundColor = Purple500.copy(alpha = 0.15f),
+                        textColor = Purple400
+                    )
+                }
+
                 // Duration badge
                 if (!bill.endMonth.isNullOrBlank()) {
                     val countLabel = bill.installmentsCount?.let { " (${it}x)" } ?: ""
@@ -754,13 +776,14 @@ private fun EmptyRecurringState() {
 }
 
 // -------------------------------------------------------------
-// Componente 4: Form Dialog (Criar / Editar Molde)
+// Componente 4: Form Dialog (Criar / Editar Conta Fixa)
 // -------------------------------------------------------------
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecurringBillFormDialog(
     initialBill: RecurringBill,
     partner: UserProfile?,
+    cards: List<Card> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (RecurringBill) -> Unit
 ) {
@@ -773,6 +796,8 @@ private fun RecurringBillFormDialog(
     var estimationRule by remember { mutableStateOf(initialBill.estimationRule) }
     var splitType by remember { mutableStateOf(initialBill.splitType ?: SplitType.MINE) }
     var paymentMethod by remember { mutableStateOf(initialBill.paymentMethod ?: PaymentMethod.BILL) }
+    var cardId by remember { mutableStateOf(initialBill.cardId) }
+    var launchTrigger by remember { mutableStateOf(initialBill.launchTrigger) }
     var active by remember { mutableStateOf(initialBill.active) }
 
     // Duração
@@ -803,6 +828,8 @@ private fun RecurringBillFormDialog(
     var expandedRuleDropdown by remember { mutableStateOf(false) }
     var expandedSplitDropdown by remember { mutableStateOf(false) }
     var expandedPaymentDropdown by remember { mutableStateOf(false) }
+    var expandedCardDropdown by remember { mutableStateOf(false) }
+    var expandedTriggerDropdown by remember { mutableStateOf(false) }
     var expandedInstallmentsDropdown by remember { mutableStateOf(false) }
 
     Dialog(
@@ -833,7 +860,7 @@ private fun RecurringBillFormDialog(
                             .padding(end = 8.dp)
                     ) {
                         Text(
-                            text = if (initialBill.id.startsWith("new_")) "Novo Molde Recorrente" else "Editar Molde",
+                            text = if (initialBill.id.startsWith("new_")) "Nova Conta Fixa / Assinatura" else "Editar Conta Fixa",
                             style = Typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
@@ -841,7 +868,7 @@ private fun RecurringBillFormDialog(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "Configuração de automação mensal",
+                            text = "Lançamento automatizado mensal por vencimento",
                             fontSize = 11.sp,
                             color = TextMuted,
                             maxLines = 1,
@@ -1257,7 +1284,108 @@ private fun RecurringBillFormDialog(
                             )
                             DropdownMenuItem(
                                 text = { Text("💳 Cartão de Crédito", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                onClick = { paymentMethod = PaymentMethod.CREDIT_CARD; expandedPaymentDropdown = false }
+                                onClick = {
+                                    paymentMethod = PaymentMethod.CREDIT_CARD
+                                    if (cards.isNotEmpty() && cardId.isNullOrBlank()) {
+                                        cardId = cards.first().id
+                                    }
+                                    expandedPaymentDropdown = false
+                                }
+                            )
+                        }
+                    }
+
+                    // Seletor de Cartão de Crédito Vinculado
+                    if (paymentMethod == PaymentMethod.CREDIT_CARD) {
+                        ExposedDropdownMenuBox(
+                            expanded = expandedCardDropdown,
+                            onExpandedChange = { expandedCardDropdown = it }
+                        ) {
+                            val selectedCard = cards.find { it.id == cardId }
+                            val cardLabel = selectedCard?.let { "💳 ${it.cardName}" } ?: "Selecione o cartão..."
+                            OutlinedTextField(
+                                value = cardLabel,
+                                onValueChange = {},
+                                readOnly = true,
+                                singleLine = true,
+                                label = { Text("Vincular ao Cartão", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCardDropdown) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Amber400,
+                                    unfocusedBorderColor = DarkBorder,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = expandedCardDropdown,
+                                onDismissRequest = { expandedCardDropdown = false },
+                                modifier = Modifier.background(DarkSurface)
+                            ) {
+                                cards.forEach { card ->
+                                    DropdownMenuItem(
+                                        text = { Text("💳 ${card.cardName}", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        onClick = {
+                                            cardId = card.id
+                                            expandedCardDropdown = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Gatilho de Lançamento Automático
+                    ExposedDropdownMenuBox(
+                        expanded = expandedTriggerDropdown,
+                        onExpandedChange = { expandedTriggerDropdown = it }
+                    ) {
+                        val triggerLabel = when (launchTrigger) {
+                            LaunchTrigger.DAY_BEFORE -> "⚡ 1 dia antes (D-1) [Recomendado]"
+                            LaunchTrigger.ON_DUE_DATE -> "📅 No dia do vencimento (D-0)"
+                            LaunchTrigger.DAY_AFTER -> "⏰ 1 dia após o vencimento (D+1)"
+                            LaunchTrigger.FIRST_DAY_OF_MONTH -> "🗓️ No 1º dia do mês"
+                        }
+                        OutlinedTextField(
+                            value = triggerLabel,
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            label = { Text("Lançamento Automático", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTriggerDropdown) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Amber400,
+                                unfocusedBorderColor = DarkBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expandedTriggerDropdown,
+                            onDismissRequest = { expandedTriggerDropdown = false },
+                            modifier = Modifier.background(DarkSurface)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("⚡ 1 dia antes (D-1) [Recomendado]", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                onClick = { launchTrigger = LaunchTrigger.DAY_BEFORE; expandedTriggerDropdown = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("📅 No dia do vencimento (D-0)", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                onClick = { launchTrigger = LaunchTrigger.ON_DUE_DATE; expandedTriggerDropdown = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("⏰ 1 dia após o vencimento (D+1)", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                onClick = { launchTrigger = LaunchTrigger.DAY_AFTER; expandedTriggerDropdown = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("🗓️ No 1º dia do mês", color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                onClick = { launchTrigger = LaunchTrigger.FIRST_DAY_OF_MONTH; expandedTriggerDropdown = false }
                             )
                         }
                     }
@@ -1491,6 +1619,8 @@ private fun RecurringBillFormDialog(
                                 estimationRule = estimationRule,
                                 splitType = splitType,
                                 paymentMethod = paymentMethod,
+                                cardId = if (paymentMethod == PaymentMethod.CREDIT_CARD) cardId else null,
+                                launchTrigger = launchTrigger,
                                 type = billType,
                                 active = active,
                                 startMonth = if (durationMode == "installments") startMonth else null,
@@ -1506,7 +1636,7 @@ private fun RecurringBillFormDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1.5f)
                     ) {
-                        Text("Salvar Molde", fontWeight = FontWeight.Bold)
+                        Text("Salvar Conta Fixa", fontWeight = FontWeight.Bold)
                     }
                 }
             }

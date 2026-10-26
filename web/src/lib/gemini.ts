@@ -453,6 +453,11 @@ export const functionDeclarations: FunctionDeclaration[] = [
           description:
             'CRÍTICO: Defina como true quando o usuário pedir para ver despesas relacionadas 100% a ele ("meus gastos pessoais", "100% minhas", "apenas o que é meu", "só minhas"). Exclui rigorosamente qualquer gasto compartilhado com amigos, parceiro ou terceiros.',
         },
+        todosMeusGastos: {
+          type: Type.BOOLEAN,
+          description:
+            'Defina como true quando o usuário pedir para ver "todos os meus gastos" ou "meus gastos" (incluindo tanto gastos 100% pessoais quanto gastos rateados/compartilhados onde o usuário tem sua cota). NÃO exclui lançamentos rateados.',
+        },
         pessoa: {
           type: Type.STRING,
           description:

@@ -679,6 +679,23 @@ class MockFinanceRepository(
         return Pair(res.created.size, res.skipped)
     }
 
+    override suspend fun autoLaunchDueBillsForMonth(monthKey: String, todayStr: String): FinanceEngine.AutoLaunchBillsResult {
+        val user = _currentUser.value
+        val partner = allUsers.find { it.uid != user.uid }
+        val res = FinanceEngine.autoLaunchDueBills(
+            bills = _recurringBills.value,
+            all = _transactions.value,
+            monthKey = monthKey,
+            todayStr = todayStr,
+            me = user,
+            partner = partner
+        )
+        if (res.created.isNotEmpty()) {
+            addTransactions(res.created)
+        }
+        return res
+    }
+
     private fun buildDemoCards(): List<Card> {
         return listOf(
             Card(

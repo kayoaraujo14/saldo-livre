@@ -58,7 +58,8 @@ fun DashboardScreen(
     onNavigateToTransactions: () -> Unit,
     onNavigateToReceivables: () -> Unit,
     onNavigateToInvestments: () -> Unit = {},
-    onNavigateToEditTransaction: (String) -> Unit = {}
+    onNavigateToEditTransaction: (String) -> Unit = {},
+    onNavigateToRefundTransaction: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
@@ -405,7 +406,102 @@ fun DashboardScreen(
                 }
             }
 
-            // 4. Cabeçalho da Seção: Últimos Lançamentos
+            // 4. Banner de Lançamento Automático Recente
+            uiState.autoLaunchNotice?.let { notice ->
+                item(key = "auto_launch_banner", contentType = "auto_launch_banner") {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Amber500.copy(alpha = 0.15f))
+                                    .border(1.dp, Amber500.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = null,
+                                    tint = Amber400,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "⚡ Lançamento Automático",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Amber400
+                                    )
+                                    IconButton(
+                                        onClick = { viewModel.dismissAutoLaunchNotice() },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Fechar",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                val firstBill = notice.bills.firstOrNull()
+                                val msg = if (notice.count == 1 && firstBill != null) {
+                                    "A conta ${firstBill.description} (${FinanceEngine.formatCurrency(firstBill.totalAmount)}) foi lançada automaticamente no seu extrato deste mês."
+                                } else {
+                                    "${notice.count} contas fixas programadas foram lançadas automaticamente no seu extrato."
+                                }
+
+                                Text(
+                                    text = msg,
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    lineHeight = 16.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "Ver no Extrato →",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Amber400,
+                                        modifier = Modifier
+                                            .clickable {
+                                                viewModel.dismissAutoLaunchNotice()
+                                                onNavigateToTransactions()
+                                            }
+                                            .padding(vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. Cabeçalho da Seção: Últimos Lançamentos
             item(key = "recent_header", contentType = "recent_header") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -482,6 +578,10 @@ fun DashboardScreen(
             onNavigateToEditTransaction = { editTxId ->
                 selectedTxForDetails = null
                 onNavigateToEditTransaction(editTxId)
+            },
+            onNavigateToRefundTransaction = { refundTxId ->
+                selectedTxForDetails = null
+                onNavigateToRefundTransaction(refundTxId)
             },
             onDeleteRequest = {
                 txToDelete = tx

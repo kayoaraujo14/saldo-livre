@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -16,7 +15,6 @@ import {
   ChevronRight,
   ChevronDown,
   Plus,
-  Zap,
   CreditCard,
   RefreshCw,
   KeyRound,
@@ -60,16 +58,12 @@ export function Header({
     profile,
     month,
     setMonth,
-    generateBills,
     signOut,
     exitDemo,
     switchProfile,
     pendingFriendRequests,
     pendingChargeGroups,
   } = useFinance()
-
-  const [generating, setGenerating] = useState(false)
-  const [generateToast, setGenerateToast] = useState<{ created: number; skipped: number } | null>(null)
 
   const isCurrentMonth = month === currentMonthKey()
   const hasGeminiKey = Boolean(getGeminiApiKey())
@@ -91,17 +85,6 @@ export function Header({
   const handlePrevMonth = () => setMonth(shiftMonth(month, -1))
   const handleNextMonth = () => setMonth(shiftMonth(month, 1))
   const handleToday = () => setMonth(currentMonthKey())
-
-  const handleGenerate = async () => {
-    setGenerating(true)
-    try {
-      const res = await generateBills()
-      setGenerateToast(res)
-      setTimeout(() => setGenerateToast(null), 3500)
-    } finally {
-      setGenerating(false)
-    }
-  }
 
   return (
     <header className="border-b border-white/5 bg-slate-950/90 backdrop-blur-md sticky top-0 z-40 transition-all pt-[max(0.4rem,env(safe-area-inset-top,0px))]">
@@ -246,18 +229,6 @@ export function Header({
                 </DropdownMenuLabel>
                 
                 <DropdownMenuItem
-                  onClick={handleGenerate}
-                  disabled={generating}
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
-                >
-                  <Zap className={`size-3.5 text-amber-400 ${generating ? 'animate-spin' : ''}`} />
-                  <div className="flex flex-col">
-                    <span className="font-medium">Gerar Contas do Mês</span>
-                    <span className="text-[10px] text-slate-500">Gera contas fixas deste mês</span>
-                  </div>
-                </DropdownMenuItem>
-
-                <DropdownMenuItem
                   onClick={onOpenProjection}
                   className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
                 >
@@ -315,8 +286,8 @@ export function Header({
                 >
                   <RefreshCw className="size-3.5 text-amber-400" />
                   <div className="flex flex-col">
-                    <span className="font-medium">Moldes & Salário Base</span>
-                    <span className="text-[10px] text-slate-500">Receitas e despesas fixas</span>
+                    <span className="font-medium">Contas Fixas & Renda</span>
+                    <span className="text-[10px] text-slate-500">Assinaturas e renda fixa</span>
                   </div>
                 </DropdownMenuItem>
 
@@ -433,15 +404,6 @@ export function Header({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-
-            {/* Toast for generate bills */}
-            {generateToast && (
-              <div className="fixed top-16 right-4 z-50 bg-slate-900 border border-emerald-500/40 text-emerald-300 px-3 py-2 rounded-xl text-xs shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-                <span>
-                  ✓ {generateToast.created} conta(s) gerada(s) · {generateToast.skipped} já existiam
-                </span>
-              </div>
-            )}
           </div>
         </div>
       </div>

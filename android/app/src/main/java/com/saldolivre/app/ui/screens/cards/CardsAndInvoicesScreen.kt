@@ -31,10 +31,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.CardInvoice
+import com.saldolivre.app.data.engine.InvoiceCategorySlice
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.engine.InvoiceStatus
 import com.saldolivre.app.data.model.Card
+import com.saldolivre.app.data.model.CategoryRegistry
+import com.saldolivre.app.ui.components.InvoiceDateGroup
+import com.saldolivre.app.ui.components.InvoiceDateGroupHeader
 import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
@@ -103,8 +107,23 @@ fun CardsAndInvoicesScreen(
         }
     }
 
-    val visibleInvoiceItems = remember(selectedInvoice, uiState.itemFilter, uiState.searchQuery) {
-        val items = selectedInvoice?.items.orEmpty()
+    val visibleInvoiceItems = remember(
+        selectedInvoice,
+        uiState.itemFilter,
+        uiState.searchQuery,
+        uiState.selectedParticipantName,
+        uiState.currentUser.uid
+    ) {
+        var items = selectedInvoice?.items.orEmpty()
+        val participantName = uiState.selectedParticipantName
+        if (participantName != null) {
+            val part = selectedInvoice?.splitBreakdown?.find { it.name == participantName }
+            if (part != null) {
+                items = items.filter { tx ->
+                    InvoiceEngine.participantAmountIn(tx, part, uiState.currentUser.uid) > 0.0
+                }
+            }
+        }
         val filtered = when (uiState.itemFilter) {
             InvoiceItemFilter.ALL -> items
             InvoiceItemFilter.THIRD_PARTY -> items.filter { tx ->
@@ -123,6 +142,21 @@ fun CardsAndInvoicesScreen(
             it.description.contains(uiState.searchQuery, ignoreCase = true) ||
                 it.category.contains(uiState.searchQuery, ignoreCase = true) ||
                 it.subcategory?.contains(uiState.searchQuery, ignoreCase = true) == true
+        }
+    }
+
+    val activeCategorySlices = remember(
+        selectedInvoice,
+        uiState.selectedParticipantName,
+        uiState.currentUser.uid
+    ) {
+        val participantName = uiState.selectedParticipantName
+        val part = if (participantName != null) selectedInvoice?.splitBreakdown?.find { it.name == participantName } else null
+        if (part != null && selectedInvoice != null) {
+            val expenses = selectedInvoice.items.filter { it.type == TransactionType.EXPENSE }
+            InvoiceEngine.calculateCategoryBreakdownForParticipant(expenses, part, uiState.currentUser.uid)
+        } else {
+            selectedInvoice?.byCategory.orEmpty()
         }
     }
 
@@ -271,6 +305,7 @@ fun CardsAndInvoicesScreen(
                         uiState = uiState,
                         selectedInvoice = selectedInvoice,
                         visibleItems = visibleInvoiceItems,
+                        categorySlices = activeCategorySlices,
                         viewModel = viewModel,
                         onEditTransaction = onEditTransaction
                     )
@@ -338,9 +373,31 @@ private fun InvoicesTabContent(
     uiState: CardsAndInvoicesUiState,
     selectedInvoice: CardInvoice?,
     visibleItems: List<Transaction>,
+    categorySlices: List<InvoiceCategorySlice>,
     viewModel: CardsAndInvoicesViewModel,
     onEditTransaction: (String) -> Unit
 ) {
+    val participant = if (uiState.selectedParticipantName != null) {
+        selectedInvoice?.splitBreakdown?.find { it.name == uiState.selectedParticipantName }
+    } else null
+
+    val groupedByDate = remember(visibleItems, uiState.selectedParticipantName, uiState.currentUser.uid) {
+        val map = LinkedHashMap<String, MutableList<Transaction>>()
+        for (tx in visibleItems) {
+            val key = tx.dueDate.ifBlank { "Sem data" }
+            map.getOrPut(key) { mutableListOf() }.add(tx)
+        }
+        map.map { (dateKey, items) ->
+            val dayTotal = items.sumOf { tx ->
+                val amt = if (participant != null) {
+                    InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid)
+                } else tx.effectiveAmount
+                if (tx.type == TransactionType.INCOME) -amt else amt
+            }
+            InvoiceDateGroup(dateKey, items, dayTotal)
+        }
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
@@ -445,7 +502,11 @@ private fun InvoicesTabContent(
             // 4.3 Divisão da Fatura (Rateio com parceiro e terceiros)
             if (selectedInvoice.splitBreakdown.isNotEmpty()) {
                 item(key = "inv_split_${selectedInvoice.card.id}") {
-                    SplitBreakdownCard(invoice = selectedInvoice)
+                    SplitBreakdownCard(
+                        invoice = selectedInvoice,
+                        selectedParticipantName = uiState.selectedParticipantName,
+                        onToggleParticipant = viewModel::toggleParticipantFilter
+                    )
                 }
             }
 
@@ -460,16 +521,20 @@ private fun InvoicesTabContent(
             }
 
             // 4.5 Distribuição por Categorias
-            if (selectedInvoice.byCategory.isNotEmpty()) {
+            if (categorySlices.isNotEmpty()) {
                 item(key = "inv_categories_${selectedInvoice.card.id}") {
-                    CategoryBreakdown(selectedInvoice)
+                    CategoryBreakdown(
+                        categories = categorySlices,
+                        selectedParticipantName = uiState.selectedParticipantName,
+                        onClearParticipant = viewModel::clearParticipantFilter
+                    )
                 }
             }
 
             // 4.6 Cabeçalho de Lançamentos + Busca + Filtros
             item(key = "inv_items_header") {
                 ItemsHeader(
-                    count = selectedInvoice.itemsCount,
+                    count = visibleItems.size,
                     filter = uiState.itemFilter,
                     searchQuery = uiState.searchQuery,
                     onFilter = viewModel::setFilter,
@@ -500,8 +565,23 @@ private fun InvoicesTabContent(
                     }
                 }
             } else {
-                items(visibleItems, key = { "inv_tx_${it.id}" }) { tx ->
-                    InvoiceItemRow(tx = tx, onClick = { onEditTransaction(tx.id) })
+                groupedByDate.forEach { group ->
+                    item(key = "inv_date_header_${group.dateKey}") {
+                        InvoiceDateGroupHeader(
+                            dateKey = group.dateKey,
+                            totalAmount = group.totalAmount
+                        )
+                    }
+                    items(group.items, key = { "inv_tx_${it.id}" }) { tx ->
+                        val share = if (participant != null) {
+                            InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid)
+                        } else null
+                        InvoiceItemRow(
+                            tx = tx,
+                            participantShare = share,
+                            onClick = { onEditTransaction(tx.id) }
+                        )
+                    }
                 }
             }
         }
@@ -1018,26 +1098,55 @@ private fun SmartInsightsCard(invoice: CardInvoice) {
 }
 
 @Composable
-private fun SplitBreakdownCard(invoice: CardInvoice) {
+private fun SplitBreakdownCard(
+    invoice: CardInvoice,
+    selectedParticipantName: String? = null,
+    onToggleParticipant: ((String) -> Unit)? = null
+) {
     SectionCard("Divisão da Fatura (Quem Divide Comigo)", Icons.Default.People, Emerald400) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             invoice.splitBreakdown.forEach { part ->
+                val isSelected = selectedParticipantName == part.name
                 val itemColor = if (part.isMe) Emerald400 else Cyan400
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(DarkBackground.copy(alpha = 0.6f))
+                        .background(if (isSelected) itemColor.copy(alpha = 0.12f) else DarkBackground.copy(alpha = 0.6f))
+                        .border(
+                            width = if (isSelected) 1.5.dp else 1.dp,
+                            color = if (isSelected) itemColor else Color.White.copy(alpha = 0.05f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable(enabled = onToggleParticipant != null) {
+                            onToggleParticipant?.invoke(part.name)
+                        }
                         .padding(10.dp)
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(
-                                part.name,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (part.isMe) Emerald400 else TextPrimary
-                            )
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    part.name,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (part.isMe) Emerald400 else TextPrimary
+                                )
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(itemColor.copy(alpha = 0.2f))
+                                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                                    ) {
+                                        Text("Filtrando", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = itemColor)
+                                    }
+                                }
+                            }
                             Text(
                                 "${FinanceEngine.formatCurrency(part.amount)} (${part.pct}%)",
                                 fontSize = 12.sp,
@@ -1057,6 +1166,13 @@ private fun SplitBreakdownCard(invoice: CardInvoice) {
                         )
                     }
                 }
+            }
+            if (onToggleParticipant != null) {
+                Text(
+                    text = if (selectedParticipantName != null) "Toque no participante novamente para remover o filtro." else "Toque em um participante para filtrar o extrato e categorias por ele.",
+                    fontSize = 10.sp,
+                    color = TextMuted
+                )
             }
         }
     }
@@ -1124,26 +1240,109 @@ private fun HistoryChart(
 }
 
 @Composable
-private fun CategoryBreakdown(invoice: CardInvoice) {
-    val palette = listOf(Emerald500, Cyan500, Purple500, Amber500, Rose500, CardInterOrange)
-    SectionCard("Para onde foi o dinheiro", Icons.Default.PieChart, Purple400) {
-        invoice.byCategory.take(6).forEachIndexed { index, slice ->
-            val color = palette[index % palette.size]
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(slice.category, fontSize = 11.sp, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text("${FinanceEngine.formatCurrency(slice.amount)} · ${slice.pct}%", fontSize = 11.sp, color = TextMuted)
+private fun CategoryBreakdown(
+    categories: List<InvoiceCategorySlice>,
+    selectedParticipantName: String? = null,
+    onClearParticipant: (() -> Unit)? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val displayCategories = if (expanded) categories else categories.take(6)
+    val title = if (selectedParticipantName != null) {
+        "Para onde foi o dinheiro ($selectedParticipantName)"
+    } else {
+        "Para onde foi o dinheiro"
+    }
+
+    SectionCard(title, Icons.Default.PieChart, Purple400) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (selectedParticipantName != null && onClearParticipant != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Exibindo apenas gastos de $selectedParticipantName",
+                        fontSize = 11.sp,
+                        color = Cyan400
+                    )
+                    TextButton(
+                        onClick = onClearParticipant,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text("Ver geral", fontSize = 11.sp, color = Emerald400)
+                    }
                 }
-                LinearProgressIndicator(
-                    progress = { slice.pct / 100f },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(CircleShape),
-                    color = color,
-                    trackColor = color.copy(alpha = 0.14f),
-                    strokeCap = StrokeCap.Round
-                )
+            }
+
+            displayCategories.forEach { slice ->
+                val catDetail = CategoryRegistry.get(slice.category)
+                val color = catDetail.color
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(color.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    catDetail.icon,
+                                    contentDescription = null,
+                                    tint = color,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                            Text(
+                                slice.category,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            "${FinanceEngine.formatCurrency(slice.amount)} · ${slice.pct}%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextSecondary
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { slice.pct / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape),
+                        color = color,
+                        trackColor = color.copy(alpha = 0.14f),
+                        strokeCap = StrokeCap.Round
+                    )
+                }
+            }
+
+            if (categories.size > 6) {
+                TextButton(
+                    onClick = { expanded = !expanded },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text(
+                        if (expanded) "Mostrar menos" else "Ver mais (${categories.size - 6} categorias)",
+                        fontSize = 11.sp,
+                        color = Cyan400
+                    )
+                }
             }
         }
     }
@@ -1233,9 +1432,21 @@ private fun ItemsHeader(
 }
 
 @Composable
-private fun InvoiceItemRow(tx: Transaction, onClick: () -> Unit) {
+private fun InvoiceItemRow(
+    tx: Transaction,
+    participantShare: Double? = null,
+    onClick: () -> Unit
+) {
     val isCredit = tx.type == TransactionType.INCOME
     val stColor = itemStatusColor(tx.status)
+    val catDetail = remember(tx.category) { CategoryRegistry.get(tx.category) }
+    val thirdParty = remember(tx) {
+        tx.allocations.firstOrNull { it.type == "EXTERNAL" }?.name
+            ?: tx.assignedFriendName
+    }
+    val displayAmount = participantShare ?: tx.effectiveAmount
+    val isSharedAndDifferent = participantShare != null && Math.abs(participantShare - tx.effectiveAmount) > 0.009
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1246,6 +1457,24 @@ private fun InvoiceItemRow(tx: Transaction, onClick: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(catDetail.color.copy(alpha = 0.14f))
+                .border(1.dp, catDetail.color.copy(alpha = 0.28f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = catDetail.icon,
+                contentDescription = tx.category,
+                tint = catDetail.color,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+
+        Spacer(Modifier.width(10.dp))
+
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -1259,7 +1488,34 @@ private fun InvoiceItemRow(tx: Transaction, onClick: () -> Unit) {
                 )
                 tx.installmentTag?.let {
                     Spacer(Modifier.width(6.dp))
-                    Text(it, fontSize = 10.sp, color = Cyan400, fontWeight = FontWeight.SemiBold)
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Cyan400.copy(alpha = 0.14f))
+                            .border(1.dp, Cyan400.copy(alpha = 0.3f), CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                    ) {
+                        Text(it, fontSize = 9.sp, color = Cyan400, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                if (!thirdParty.isNullOrBlank()) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Amber500.copy(alpha = 0.14f))
+                            .border(1.dp, Amber500.copy(alpha = 0.3f), CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = "🏷️ $thirdParty",
+                            fontSize = 9.sp,
+                            color = Amber400,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
             Text(
@@ -1273,11 +1529,18 @@ private fun InvoiceItemRow(tx: Transaction, onClick: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                (if (isCredit) "− " else "") + FinanceEngine.formatCurrency(tx.effectiveAmount),
+                (if (isCredit) "− " else "") + FinanceEngine.formatCurrency(displayAmount),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isCredit) Cyan400 else TextPrimary
             )
+            if (isSharedAndDifferent) {
+                Text(
+                    "de " + FinanceEngine.formatCurrency(tx.effectiveAmount),
+                    fontSize = 10.sp,
+                    color = TextMuted
+                )
+            }
             Box(
                 modifier = Modifier
                     .padding(top = 2.dp)
@@ -1835,8 +2098,28 @@ private fun CardItemView(
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         } else {
-                            item.transactions.forEach { tx ->
-                                CardTransactionRow(tx = tx)
+                            val groupedCardTxs = remember(item.transactions) {
+                                val map = LinkedHashMap<String, MutableList<Transaction>>()
+                                for (tx in item.transactions) {
+                                    val key = tx.dueDate.ifBlank { "Sem data" }
+                                    map.getOrPut(key) { mutableListOf() }.add(tx)
+                                }
+                                map.map { (dateKey, txs) ->
+                                    val total = txs.sumOf { tx ->
+                                        if (tx.type == TransactionType.INCOME) -tx.effectiveAmount else tx.effectiveAmount
+                                    }
+                                    InvoiceDateGroup(dateKey, txs, total)
+                                }
+                            }
+                            groupedCardTxs.forEach { grp ->
+                                InvoiceDateGroupHeader(
+                                    dateKey = grp.dateKey,
+                                    totalAmount = grp.totalAmount,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                                grp.items.forEach { tx ->
+                                    CardTransactionRow(tx = tx)
+                                }
                             }
                         }
                     }
@@ -1848,8 +2131,13 @@ private fun CardItemView(
 
 @Composable
 private fun CardTransactionRow(tx: Transaction) {
-    val isExpense = tx.type == TransactionType.EXPENSE
+    val isCredit = tx.type == TransactionType.INCOME
     val formattedAmount = remember(tx.effectiveAmount) { FinanceEngine.formatCurrency(tx.effectiveAmount) }
+    val catDetail = remember(tx.category) { CategoryRegistry.get(tx.category) }
+    val thirdParty = remember(tx) {
+        tx.allocations.firstOrNull { it.type == "EXTERNAL" }?.name
+            ?: tx.assignedFriendName
+    }
 
     Surface(
         color = DarkBackground.copy(alpha = 0.5f),
@@ -1863,6 +2151,24 @@ private fun CardTransactionRow(tx: Transaction) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(catDetail.color.copy(alpha = 0.14f))
+                    .border(1.dp, catDetail.color.copy(alpha = 0.28f), CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = catDetail.icon,
+                    contentDescription = tx.category,
+                    tint = catDetail.color,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            Spacer(Modifier.width(10.dp))
+
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -1877,45 +2183,44 @@ private fun CardTransactionRow(tx: Transaction) {
                     overflow = TextOverflow.Ellipsis
                 )
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = FinanceEngine.formatFullDate(tx.dueDate),
+                        text = listOfNotNull(tx.category, tx.subcategory).joinToString(" › "),
                         fontSize = 10.sp,
                         color = TextSecondary,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
 
                     tx.installmentTag?.let { tag ->
                         Surface(
-                            color = DarkSurfaceVariant,
+                            color = Cyan400.copy(alpha = 0.15f),
                             shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
                                 text = tag,
                                 fontSize = 9.sp,
-                                color = TextSecondary,
+                                color = Cyan400,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                             )
                         }
                     }
 
-                    val thirdParty = tx.allocations.firstOrNull { it.type == "EXTERNAL" }?.name
-                        ?: tx.assignedFriendName
                     if (!thirdParty.isNullOrBlank()) {
                         Surface(
                             color = Amber500.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(4.dp),
-                            modifier = Modifier.weight(1f, fill = false)
+                            shape = RoundedCornerShape(4.dp)
                         ) {
                             Text(
-                                text = thirdParty,
+                                text = "🏷️ $thirdParty",
                                 fontSize = 9.sp,
                                 color = Amber400,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                             )
                         }
@@ -1924,12 +2229,10 @@ private fun CardTransactionRow(tx: Transaction) {
             }
 
             Text(
-                text = "${if (isExpense) "-" else "+"}$formattedAmount",
+                text = (if (isCredit) "− " else "") + formattedAmount,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isExpense) Rose400 else Emerald400,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                fontWeight = FontWeight.SemiBold,
+                color = if (isCredit) Cyan400 else TextPrimary
             )
         }
     }

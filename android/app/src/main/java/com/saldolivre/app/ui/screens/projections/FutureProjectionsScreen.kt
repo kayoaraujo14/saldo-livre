@@ -136,9 +136,6 @@ fun FutureProjectionsScreen(
                     onSelectMonth = {
                         viewModel.selectMonth(projection.monthKey)
                         onNavigateBack()
-                    },
-                    onGenerateBills = {
-                        viewModel.generateBillsForMonth(projection.monthKey)
                     }
                 )
             }
@@ -296,8 +293,7 @@ private fun MonthProjectionCard(
     projection: FutureMonthProjection,
     isSelected: Boolean,
     isCurrent: Boolean,
-    onSelectMonth: () -> Unit,
-    onGenerateBills: () -> Unit
+    onSelectMonth: () -> Unit
 ) {
     val isPositive = projection.projectedFreeBalance >= 0
     val formattedIncome = remember(projection.projectedIncome) { FinanceEngine.formatCurrency(projection.projectedIncome) }
@@ -581,31 +577,18 @@ private fun MonthProjectionCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!projection.isGenerated) {
-                    TextButton(
-                        onClick = onGenerateBills,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1f, fill = false)
-                    ) {
-                        Icon(imageVector = Icons.Default.Bolt, contentDescription = null, tint = Amber400, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Gerar Lançamentos",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Amber400,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Cyan400, modifier = Modifier.size(14.dp))
                     Text(
-                        text = "Sincronizado",
+                        text = if (projection.isGenerated) "Lançamentos integrados" else "Lançamento automático",
                         fontSize = 11.sp,
-                        color = TextMuted,
+                        color = TextSecondary,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 

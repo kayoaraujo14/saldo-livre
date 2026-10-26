@@ -19,6 +19,25 @@ enum class EstimationRule(val value: String) {
     }
 }
 
+enum class LaunchTrigger(val value: String) {
+    @SerializedName("day_before")
+    DAY_BEFORE("day_before"),
+
+    @SerializedName("on_due_date")
+    ON_DUE_DATE("on_due_date"),
+
+    @SerializedName("day_after")
+    DAY_AFTER("day_after"),
+
+    @SerializedName("first_day_of_month")
+    FIRST_DAY_OF_MONTH("first_day_of_month");
+
+    companion object {
+        fun from(value: String?): LaunchTrigger =
+            entries.find { it.value.equals(value, ignoreCase = true) } ?: DAY_BEFORE
+    }
+}
+
 @Immutable
 data class RecurringBill(
     val id: String = "",
@@ -32,8 +51,10 @@ data class RecurringBill(
     val active: Boolean = true,
     val splitType: SplitType? = null,
     val paymentMethod: PaymentMethod? = null,
+    val cardId: String? = null,
     val type: TransactionType = TransactionType.EXPENSE,
     val startMonth: String? = null,
     val endMonth: String? = null,
-    val installmentsCount: Int? = null
+    val installmentsCount: Int? = null,
+    val launchTrigger: LaunchTrigger = LaunchTrigger.DAY_BEFORE
 )

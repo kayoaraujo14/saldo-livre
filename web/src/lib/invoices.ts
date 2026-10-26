@@ -151,50 +151,29 @@ export function buildCardInvoice(
 
   const limit = card.limit && card.limit > 0 ? card.limit : null
 
-  // Rateio detalhado por participante
+  // Rateio detalhado por participante baseado nas cotas reais de cada lançamento
   const participantMap = new Map<string, { name: string; amount: number; isMe: boolean }>()
-  if (myShare > 0) {
-    participantMap.set('__me__', { name: 'Você (Minha parte)', amount: myShare, isMe: true })
-  }
 
   for (const t of expenses) {
-    if (t.allocations && Array.isArray(t.allocations) && t.allocations.length > 0) {
-      for (const a of t.allocations) {
-        if (a.uid && a.uid === uid) continue
-        const name = a.name?.trim() || 'Outro'
-        const existing = participantMap.get(name) ?? { name, amount: 0, isMe: false }
-        existing.amount = round2(existing.amount + (a.amount || 0))
-        participantMap.set(name, existing)
-      }
-    } else if (t.assignedFriendName) {
-      const name = t.assignedFriendName.trim()
-      const friendShare = round2(Math.max(0, effectiveAmount(t) - (t.userImpact?.[uid] ?? 0)))
-      if (friendShare > 0) {
-        const existing = participantMap.get(name) ?? { name, amount: 0, isMe: false }
-        existing.amount = round2(existing.amount + friendShare)
-        participantMap.set(name, existing)
-      }
-    } else if (t.externalName) {
-      const name = t.externalName.trim()
-      const share = round2(Math.max(0, effectiveAmount(t) - (t.userImpact?.[uid] ?? 0)))
-      if (share > 0) {
-        const existing = participantMap.get(name) ?? { name, amount: 0, isMe: false }
-        existing.amount = round2(existing.amount + share)
-        participantMap.set(name, existing)
-      }
+    const shares = getTransactionParticipantShares(t, uid, all)
+    for (const [key, amt] of shares.entries()) {
+      if (Math.abs(amt) <= 0.0001) continue
+      const isMe = key === '__me__'
+      const name = isMe ? 'Você (Minha parte)' : key
+      const existing = participantMap.get(name) ?? { name, amount: 0, isMe }
+      existing.amount = round2(existing.amount + amt)
+      participantMap.set(name, existing)
     }
   }
 
-  const recordedOthers = [...participantMap.values()].filter((p) => !p.isMe).reduce((s, p) => s + p.amount, 0)
-  if (othersShare > recordedOthers + 0.05) {
-    const diff = round2(othersShare - recordedOthers)
-    const existing = participantMap.get('Parceiro(a)') ?? { name: 'Parceiro(a)', amount: 0, isMe: false }
-    existing.amount = round2(existing.amount + diff)
-    participantMap.set('Parceiro(a)', existing)
+  // Se houver créditos e o titular tiver participação, abate proporcionalmente do titular
+  if (credits > 0 && participantMap.has('Você (Minha parte)')) {
+    const cur = participantMap.get('Você (Minha parte)')!
+    cur.amount = round2(Math.max(0, cur.amount - credits))
   }
 
   const splitBreakdown: InvoiceParticipantShare[] = [...participantMap.values()]
-    .filter((p) => p.amount > 0)
+    .filter((p) => p.amount > 0.001)
     .map((p) => ({
       ...p,
       pct: total > 0 ? Math.round((p.amount / total) * 100) : 0,
@@ -210,12 +189,13 @@ export function buildCardInvoice(
     (t) =>
       t.cardId === card.id &&
       t.competenceMonth > monthKey &&
-      t.type === 'expense' &&
       !t.reserveCardId &&
       (t.visibleToUids || []).includes(uid),
   )
-  const futureInstallmentsTotal = round2(futureItems.reduce((s, t) => s + effectiveAmount(t), 0))
-  const futureInstallmentsCount = futureItems.length
+  const futureExpenses = futureItems.filter((t) => t.type === 'expense' && t.status !== 'paid')
+  const futureCredits = futureItems.filter((t) => t.type === 'income').reduce((s, t) => s + effectiveAmount(t), 0)
+  const futureInstallmentsTotal = round2(Math.max(0, futureExpenses.reduce((s, t) => s + effectiveAmount(t), 0) - futureCredits))
+  const futureInstallmentsCount = futureExpenses.length
 
   // Melhor dia de compra
   const bestPurchaseDay = card.closingDay
@@ -302,4 +282,187 @@ export function dueCountdownLabel(inv: CardInvoice) {
   if (inv.daysToDue > 0) return `Vence em ${inv.daysToDue} dia${inv.daysToDue === 1 ? '' : 's'}`
   const late = Math.abs(inv.daysToDue)
   return `Venceu há ${late} dia${late === 1 ? '' : 's'}`
+}
+
+/**
+ * Retorna o mapa de participantes e seus respectivos valores rateados para uma transação de despesa.
+ * O titular/usuário atual é indexado pela chave especial "__me__".
+ * Outros participantes são indexados por seus nomes.
+ * A soma de todos os valores no mapa é GARANTIDA de ser igual a round2(effectiveAmount(tx)).
+ */
+export function getTransactionParticipantShares(
+  tx: Transaction,
+  uid: string,
+  _all: Transaction[] = []
+): Map<string, number> {
+  if (tx.type !== 'expense') return new Map()
+  const total = round2(effectiveAmount(tx))
+  if (Math.abs(total) <= 0.0001) return new Map()
+
+  const shares = new Map<string, number>()
+
+  // 1. Alocações explícitas
+  const validAllocs = (tx.allocations || []).filter((a) => Math.abs(a.amount || 0) > 0.0001)
+  const othersAllocs = validAllocs.filter((a) => {
+    const isMyUid = Boolean(a.uid && a.uid === uid)
+    const norm = (a.name || '').trim().toLowerCase()
+    const isMyName = (!a.uid || a.uid === uid) && (
+      norm === 'você' || norm === 'voce' || norm === 'meu' || norm === 'minha parte' || norm === 'você (minha parte)' || norm === 'voce (minha parte)'
+    )
+    return !isMyUid && !isMyName
+  })
+
+  if (othersAllocs.length > 0) {
+    let sumOthers = 0
+    for (const a of othersAllocs) {
+      const name = a.name?.trim() || 'Outro'
+      const amt = round2(a.amount || 0)
+      shares.set(name, round2((shares.get(name) ?? 0) + amt))
+      sumOthers += amt
+    }
+    const myAllocs = validAllocs.filter((a) => !othersAllocs.includes(a))
+    const myAllocSum = myAllocs.reduce((s, a) => s + (a.amount || 0), 0)
+    const myAmount = Math.abs(myAllocSum) > 0.0001 ? round2(total - sumOthers) : round2(Math.max(0, total - sumOthers))
+    if (Math.abs(myAmount) > 0.0001) {
+      shares.set('__me__', myAmount)
+    }
+  } else if (tx.splitType === 'split_50') {
+    // 2. Divisão 50/50 implícita
+    const half = round2(total / 2)
+    const otherHalf = round2(total - half)
+    shares.set('__me__', half)
+    const partnerName = tx.externalName?.trim() || 'Parceiro(a)'
+    shares.set(partnerName, otherHalf)
+  } else if (tx.splitType === 'partner') {
+    // 3. 100% Parceiro(a)
+    const partnerName = tx.externalName?.trim() || 'Parceiro(a)'
+    shares.set(partnerName, total)
+  } else if (Boolean(tx.assignedFriendName || tx.assignedFriendUid || tx.splitType === 'friend')) {
+    // 4. Amigo atribuído
+    const friendName = tx.assignedFriendName?.trim() || 'Amigo'
+    let friendAmount = 0
+    if (tx.friendSharePct && tx.friendSharePct > 0) {
+      friendAmount = round2((total * tx.friendSharePct) / 100)
+    } else if (tx.userImpact && uid in tx.userImpact && (tx.userImpact[uid] ?? 0) >= 0 && (tx.userImpact[uid] ?? 0) <= total) {
+      friendAmount = round2(total - (tx.userImpact[uid] || 0))
+    } else if (tx.assignedFriendUid && tx.userImpact && tx.assignedFriendUid in tx.userImpact) {
+      friendAmount = round2(tx.userImpact[tx.assignedFriendUid] || total)
+    } else {
+      friendAmount = round2(total / 2)
+    }
+    friendAmount = Math.max(0, Math.min(total, friendAmount))
+    const myAmount = round2(Math.max(0, total - friendAmount))
+    if (Math.abs(myAmount) > 0.0001) shares.set('__me__', myAmount)
+    shares.set(friendName, friendAmount)
+  } else if (Boolean(tx.externalName || tx.splitType === 'external')) {
+    // 5. Terceiro / Externo
+    const extName = tx.externalName?.trim() || 'Terceiro'
+    const extAmount = tx.splitType === 'external'
+      ? total
+      : (tx.userImpact && uid in tx.userImpact && (tx.userImpact[uid] ?? 0) >= 0 && (tx.userImpact[uid] ?? 0) <= total)
+        ? round2(total - (tx.userImpact[uid] || 0))
+        : total
+    const myAmount = round2(Math.max(0, total - extAmount))
+    if (Math.abs(myAmount) > 0.0001) shares.set('__me__', myAmount)
+    shares.set(extName, extAmount)
+  } else {
+    // 6. 100% Meu
+    shares.set('__me__', total)
+  }
+
+  // 7. Reconciliação estrita de centavos:
+  // Garante com precisão absoluta que a soma de todas as cotas seja EXATAMENTE igual a 'total'.
+  let sumShares = 0
+  for (const v of shares.values()) {
+    sumShares = round2(sumShares + v)
+  }
+  const diff = round2(total - sumShares)
+  if (Math.abs(diff) > 0.0001) {
+    if (shares.has('__me__')) {
+      const curMe = shares.get('__me__') || 0
+      const adjustedMe = round2(curMe + diff)
+      if (adjustedMe > 0) {
+        shares.set('__me__', adjustedMe)
+      } else {
+        shares.delete('__me__')
+      }
+    } else if (diff > 0) {
+      shares.set('__me__', diff)
+    } else {
+      let largestKey: string | null = null
+      let largestVal = -1
+      for (const [k, v] of shares.entries()) {
+        if (v > largestVal) {
+          largestVal = v
+          largestKey = k
+        }
+      }
+      if (largestKey) {
+        shares.set(largestKey, round2(Math.max(0, largestVal + diff)))
+      }
+    }
+  }
+
+  return shares
+}
+
+/**
+ * Calcula o valor atribuível a um participante específico em uma transação da fatura.
+ */
+export function participantAmountIn(
+  tx: Transaction,
+  participant: InvoiceParticipantShare,
+  uid: string
+): number {
+  if (tx.type !== 'expense') return 0
+  const shares = getTransactionParticipantShares(tx, uid)
+
+  if (participant.isMe) {
+    return shares.get('__me__') ?? 0
+  }
+
+  const partName = participant.name.trim().toLowerCase()
+  for (const [k, v] of shares.entries()) {
+    const kNorm = k.trim().toLowerCase()
+    if (
+      kNorm === partName ||
+      (partName === 'parceiro(a)' && (kNorm === 'parceiro' || kNorm === 'parceira' || kNorm === 'parceiro(a)'))
+    ) {
+      return v
+    }
+  }
+  return 0
+}
+
+/**
+ * Recalcula a distribuição de categorias exclusivamente para os gastos do participante.
+ */
+export function calculateCategoryBreakdownForParticipant(
+  expenses: Transaction[],
+  participant: InvoiceParticipantShare,
+  uid: string
+): InvoiceCategorySlice[] {
+  const participantExpenses: Array<{ tx: Transaction; share: number }> = []
+
+  for (const tx of expenses) {
+    const share = participantAmountIn(tx, participant, uid)
+    if (share > 0) {
+      participantExpenses.push({ tx, share })
+    }
+  }
+
+  const totalParticipantExpense = participantExpenses.reduce((s, p) => s + p.share, 0)
+
+  const catMap = new Map<string, number>()
+  for (const { tx, share } of participantExpenses) {
+    catMap.set(tx.category, (catMap.get(tx.category) ?? 0) + share)
+  }
+
+  return [...catMap.entries()]
+    .map(([category, amount]) => ({
+      category,
+      amount: round2(amount),
+      pct: totalParticipantExpense > 0 ? Math.round((amount / totalParticipantExpense) * 100) : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount)
 }

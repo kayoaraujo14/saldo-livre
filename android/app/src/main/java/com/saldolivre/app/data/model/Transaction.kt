@@ -199,4 +199,11 @@ data class Transaction(
 
     val isRejected: Boolean
         get() = acceptanceStatus == AcceptanceStatus.REJECTED.value
+
+    val isRefund: Boolean
+        get() = category.equals("Estorno", ignoreCase = true) ||
+                subcategory?.contains("Estorno", ignoreCase = true) == true ||
+                subcategory?.contains("Crédito na Fatura", ignoreCase = true) == true ||
+                effectiveAmount < 0.0 ||
+                totalAmount < 0.0
 }

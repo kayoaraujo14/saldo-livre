@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,10 +16,26 @@ import {
   type RecurringBill,
   type SplitType,
   type TransactionType,
+  type LaunchTrigger,
 } from '@/types'
-import { ESTIMATION_LABELS } from '@/lib/finance'
+import { ESTIMATION_LABELS, estimateRecurring } from '@/lib/finance'
 import { formatBRL, currentMonthKey, shiftMonth, monthLabel } from '@/lib/utils'
-import { RefreshCw, Plus, Trash2, Calendar, Split, Sparkles, Wallet, Check, Edit2, Clock, ArrowDownLeft, ArrowUpRight } from 'lucide-react'
+import {
+  RefreshCw,
+  Plus,
+  Trash2,
+  Calendar,
+  Split,
+  Sparkles,
+  Wallet,
+  Check,
+  Edit2,
+  Clock,
+  ArrowDownLeft,
+  ArrowUpRight,
+  CreditCard,
+  Zap,
+} from 'lucide-react'
 
 interface RecurringBillsModalProps {
   open: boolean
@@ -27,7 +43,7 @@ interface RecurringBillsModalProps {
 }
 
 export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalProps) {
-  const { recurring, saveRecurring, deleteRecurring, me, partner, profile, updateProfile } = useFinance()
+  const { recurring, saveRecurring, deleteRecurring, me, partner, profile, updateProfile, cards, transactions, month } = useFinance()
   const [editingBill, setEditingBill] = useState<RecurringBill | null>(null)
   const [activeTab, setActiveTab] = useState<'all' | 'income' | 'expense'>('all')
 
@@ -44,9 +60,11 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
   const [estimationRule, setEstimationRule] = useState<EstimationRule>('fixed')
   const [splitType, setSplitType] = useState<SplitType>('mine')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('bill')
+  const [cardId, setCardId] = useState<string | null>(null)
+  const [launchTrigger, setLaunchTrigger] = useState<LaunchTrigger>('day_before')
   const [active, setActive] = useState(true)
 
-  // Feature 1: Duração e Parcelas
+  // Duração e Parcelas
   const [durationMode, setDurationMode] = useState<'indefinite' | 'installments'>('indefinite')
   const [startMonth, setStartMonth] = useState(currentMonthKey())
   const [installmentsCount, setInstallmentsCount] = useState(3)
@@ -76,6 +94,8 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       splitType: 'mine',
       paymentMethod: 'bill',
       type: 'expense',
+      launchTrigger: 'day_before',
+      cardId: null,
     })
     setBillType('expense')
     setDescription('')
@@ -86,6 +106,8 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
     setEstimationRule('fixed')
     setSplitType('mine')
     setPaymentMethod('bill')
+    setCardId(null)
+    setLaunchTrigger('day_before')
     setActive(true)
     setDurationMode('indefinite')
     setStartMonth(currentMonthKey())
@@ -103,7 +125,9 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
     setDefaultAmount(bill.defaultAmount)
     setEstimationRule(bill.estimationRule)
     setSplitType(bill.splitType ?? 'mine')
-    setPaymentMethod(bill.paymentMethod ?? (bill.type === 'income' ? 'pix' : 'bill'))
+    setPaymentMethod(bill.paymentMethod ?? (bill.type === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill'))
+    setCardId(bill.cardId || null)
+    setLaunchTrigger(bill.launchTrigger || 'day_before')
     setActive(bill.active)
     if (bill.endMonth) {
       setDurationMode('installments')
@@ -138,6 +162,8 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       estimationRule,
       splitType,
       paymentMethod,
+      cardId: paymentMethod === 'credit_card' ? cardId : null,
+      launchTrigger,
       active,
       type: billType,
       startMonth: durationMode === 'installments' ? startMonth : undefined,
@@ -150,11 +176,22 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
   }
 
   const handleDelete = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este molde recorrente?')) {
+    if (confirm('Tem certeza que deseja excluir esta assinatura/conta fixa?')) {
       await deleteRecurring(id)
       if (editingBill?.id === id) setEditingBill(null)
     }
   }
+
+  // Média dinâmica calculada se estimationRule for avg_3_months
+  const liveEstimate = useMemo(() => {
+    if (!editingBill || estimationRule === 'fixed') return null
+    const dummyBill: RecurringBill = {
+      ...editingBill,
+      defaultAmount: Number(defaultAmount) || 0,
+      estimationRule,
+    }
+    return estimateRecurring(dummyBill, transactions, month)
+  }, [editingBill, defaultAmount, estimationRule, transactions, month])
 
   const myBills = recurring
     .filter((b) => b.ownerUid === me?.uid)
@@ -163,6 +200,47 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       if (activeTab === 'expense') return b.type !== 'income'
       return true
     })
+
+  const get503020Badge = (cat: Category) => {
+    const detail = CATEGORY_GROUPS[cat]
+    if (!detail) return null
+    if (detail.defaultNature === 'need') {
+      return (
+        <Badge variant="outline" className="text-[10px] bg-blue-950/40 text-blue-300 border-blue-800/60">
+          Necessidade (50%)
+        </Badge>
+      )
+    }
+    if (detail.defaultNature === 'want') {
+      return (
+        <Badge variant="outline" className="text-[10px] bg-pink-950/40 text-pink-300 border-pink-800/60">
+          Desejo (30%)
+        </Badge>
+      )
+    }
+    if (detail.defaultNature === 'investment') {
+      return (
+        <Badge variant="outline" className="text-[10px] bg-purple-950/40 text-purple-300 border-purple-800/60">
+          Investimento (20%)
+        </Badge>
+      )
+    }
+    return null
+  }
+
+  const getTriggerLabel = (trigger?: LaunchTrigger) => {
+    switch (trigger) {
+      case 'on_due_date':
+        return 'No dia do vencimento'
+      case 'day_after':
+        return '1 dia após o vencimento'
+      case 'first_day_of_month':
+        return 'No 1º dia do mês'
+      case 'day_before':
+      default:
+        return '1 dia antes do vencimento'
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -175,10 +253,10 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
               </div>
               <div className="min-w-0 flex-1">
                 <DialogTitle className="text-base sm:text-lg font-bold text-white truncate">
-                  Moldes & Contas Recorrentes
+                  Assinaturas & Contas Fixas
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-400 truncate">
-                  Previsões automáticas de salários, rendas e contas mensais
+                  Lançamento automatizado de assinaturas, contas fixas e renda mensal
                 </DialogDescription>
               </div>
             </div>
@@ -190,7 +268,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                 className="bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm shrink-0"
               >
                 <Plus className="size-3.5" />
-                <span>Novo Molde</span>
+                <span>Nova Conta Fixa</span>
               </Button>
             )}
           </div>
@@ -219,7 +297,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   <Button
                     size="sm"
                     onClick={handleSaveSalary}
-                    className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white gap-1 rounded-lg font-semibold"
+                    className="h-8 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white gap-1 rounded-lg font-semibold cursor-pointer"
                   >
                     <Check className="size-3.5" /> Salvar
                   </Button>
@@ -227,7 +305,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                     variant="ghost"
                     size="sm"
                     onClick={() => setEditingIncome(false)}
-                    className="h-8 px-2 text-xs text-slate-400 hover:text-white"
+                    className="h-8 px-2 text-xs text-slate-400 hover:text-white cursor-pointer"
                   >
                     ✕
                   </Button>
@@ -237,7 +315,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   <span className="text-lg sm:text-xl font-black text-emerald-400 tracking-tight font-mono">
                     {formatBRL(profile?.monthlyIncome || 0)}
                   </span>
-                  <span className="text-xs text-slate-400">/ mês</span>
+                  <span className="text-xs text-slate-400">/ mês · Lançado no 1º dia</span>
                 </div>
               )}
             </div>
@@ -265,7 +343,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
                 <Sparkles className="size-4 text-amber-400" />
-                <span>{editingBill.id.startsWith('new_') ? 'Cadastrar Novo Molde' : `Editar ${editingBill.description}`}</span>
+                <span>{editingBill.id.startsWith('new_') ? 'Cadastrar Nova Conta Fixa / Assinatura' : `Editar ${editingBill.description}`}</span>
               </h4>
 
               {/* Toggle Income vs Expense */}
@@ -286,7 +364,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   }`}
                 >
                   <ArrowUpRight className="size-3.5 text-amber-400" />
-                  <span>Despesa</span>
+                  <span>Despesa / Assinatura</span>
                 </button>
                 <button
                   type="button"
@@ -302,7 +380,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   }`}
                 >
                   <ArrowDownLeft className="size-3.5 text-emerald-400" />
-                  <span>Entrada</span>
+                  <span>Renda Recorrente</span>
                 </button>
               </div>
             </div>
@@ -310,20 +388,21 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5 sm:col-span-2">
                 <label className="text-xs font-semibold text-slate-300">
-                  {billType === 'income' ? 'Descrição da Entrada (Ex: Freelance Fixo, Rendimento)' : 'Descrição da Conta (Ex: Conta de Luz, Aluguel)'}
+                  {billType === 'income' ? 'Descrição da Renda (Ex: Freelance Fixo, Aluguel Recebido)' : 'Descrição da Conta / Assinatura (Ex: Netflix, Conta de Luz, Aluguel)'}
                 </label>
                 <Input
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder={billType === 'income' ? 'Ex: Consultoria Mensal' : 'Ex: Internet Fibra'}
+                  placeholder={billType === 'income' ? 'Ex: Consultoria Mensal' : 'Ex: Spotify ou Aluguel'}
                   className="h-10 text-xs sm:text-sm bg-slate-900 border-slate-700/80 rounded-xl"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">
-                  {billType === 'income' ? 'Categoria de Entrada' : 'Categoria de Despesa'}
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300">Categoria</label>
+                  {get503020Badge(category)}
+                </div>
                 <Select
                   value={category}
                   onValueChange={(v) => {
@@ -353,9 +432,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                 const availableSubs = getCategoryDetail(category)?.subcategories || []
                 return (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-slate-300">
-                      Subcategoria {billType === 'income' ? 'da Entrada' : 'da Despesa'}
-                    </label>
+                    <label className="text-xs font-semibold text-slate-300">Subcategoria</label>
                     <Select
                       value={subcategory || ''}
                       onValueChange={(v) => setSubcategory(v || null)}
@@ -390,7 +467,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Valor Base (R$)</label>
+                <label className="text-xs font-semibold text-slate-300">Valor Base Estimado (R$)</label>
                 <Input
                   type="number"
                   step="0.01"
@@ -413,6 +490,11 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                     <SelectItem value="avg_3_months">📊 Média dos Últimos 3 Meses</SelectItem>
                   </SelectContent>
                 </Select>
+                {liveEstimate && estimationRule !== 'fixed' && (
+                  <p className="text-[11px] text-cyan-300 mt-1">
+                    💡 Valor calculado atual: <strong className="font-mono">{formatBRL(liveEstimate.amount)}</strong>
+                  </p>
+                )}
               </div>
 
               {billType === 'expense' && (
@@ -431,8 +513,17 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
               )}
 
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Meio de Pagamento / Cobrança</label>
-                <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
+                <label className="text-xs font-semibold text-slate-300">Forma de Pagamento</label>
+                <Select
+                  value={paymentMethod}
+                  onValueChange={(v) => {
+                    const pm = v as PaymentMethod
+                    setPaymentMethod(pm)
+                    if (pm === 'credit_card' && cards.length > 0 && !cardId) {
+                      setCardId(cards[0].id)
+                    }
+                  }}
+                >
                   <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs">
                     <SelectValue />
                   </SelectTrigger>
@@ -443,6 +534,108 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                     <SelectItem value="credit_card">💳 Cartão de Crédito</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Seletor de Cartão se Cartão de Crédito estiver selecionado */}
+              {paymentMethod === 'credit_card' && (
+                <div className="space-y-1.5 animate-in fade-in duration-200">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <CreditCard className="size-3.5 text-violet-400" />
+                    <span>Vincular ao Cartão de Crédito</span>
+                  </label>
+                  {cards.length === 0 ? (
+                    <p className="text-xs text-amber-400/90 py-2">
+                      Nenhum cartão cadastrado. Cadastre um cartão no menu principal.
+                    </p>
+                  ) : (
+                    <Select value={cardId || ''} onValueChange={(v) => setCardId(v || null)}>
+                      <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs">
+                        <SelectValue placeholder="Selecione o cartão..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cards.map((c) => (
+                          <SelectItem key={c.id} value={c.id} className="text-xs">
+                            💳 {c.cardName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
+
+              {/* Configuração de Gatilho de Automação */}
+              <div className="sm:col-span-2 p-4 rounded-xl bg-gradient-to-r from-amber-950/20 via-slate-900/80 to-amber-950/10 border border-amber-500/25 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                    <Zap className="size-4 text-amber-400" />
+                    <span>Gatilho de Lançamento Automático</span>
+                  </label>
+                  <Badge variant="outline" className="text-[10px] bg-amber-500/15 text-amber-300 border-amber-500/30">
+                    Automação Inteligente
+                  </Badge>
+                </div>
+
+                <p className="text-[11px] text-slate-400">
+                  Quando a data de disparo for atingida, o Saldo Livre lançará esta conta no seu extrato e exibirá uma notificação na tela de início.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setLaunchTrigger('day_before')}
+                    className={`p-2.5 rounded-xl text-xs font-medium text-left cursor-pointer transition-all border ${
+                      launchTrigger === 'day_before'
+                        ? 'bg-amber-500/20 text-amber-200 border-amber-500/40 shadow-sm'
+                        : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="font-bold flex items-center gap-1 text-white">
+                      <span>⚡ 1 dia antes</span>
+                      <span className="text-[10px] text-amber-400 font-normal">(Recomendado)</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Lança no dia {Math.max(1, dueDay - 1)} para antecipar o pagamento</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLaunchTrigger('on_due_date')}
+                    className={`p-2.5 rounded-xl text-xs font-medium text-left cursor-pointer transition-all border ${
+                      launchTrigger === 'on_due_date'
+                        ? 'bg-amber-500/20 text-amber-200 border-amber-500/40 shadow-sm'
+                        : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="font-bold text-white">📅 No dia do vencimento</div>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Lança pontualmente no dia {dueDay}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLaunchTrigger('day_after')}
+                    className={`p-2.5 rounded-xl text-xs font-medium text-left cursor-pointer transition-all border ${
+                      launchTrigger === 'day_after'
+                        ? 'bg-amber-500/20 text-amber-200 border-amber-500/40 shadow-sm'
+                        : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="font-bold text-white">⏰ 1 dia após o vencimento</div>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Lança no dia {dueDay + 1} para checar cobrança</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLaunchTrigger('first_day_of_month')}
+                    className={`p-2.5 rounded-xl text-xs font-medium text-left cursor-pointer transition-all border ${
+                      launchTrigger === 'first_day_of_month'
+                        ? 'bg-amber-500/20 text-amber-200 border-amber-500/40 shadow-sm'
+                        : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <div className="font-bold text-white">🗓️ No 1º dia do mês</div>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Lança assim que o mês se inicia</span>
+                  </button>
+                </div>
               </div>
 
               {/* Duração & Fim da Recorrência */}
@@ -521,7 +714,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
 
               <div className="sm:col-span-2 flex items-center justify-between p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
                 <span className="text-xs font-semibold text-slate-200">
-                  Molde Ativo (gerar automaticamente nos meses futuros)
+                  Conta Fixa Ativa (lançar automaticamente conforme o vencimento)
                 </span>
                 <input
                   type="checkbox"
@@ -533,11 +726,11 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-              <Button variant="outline" size="sm" onClick={() => setEditingBill(null)} className="h-9 text-xs rounded-xl">
+              <Button variant="outline" size="sm" onClick={() => setEditingBill(null)} className="h-9 text-xs rounded-xl cursor-pointer">
                 Cancelar
               </Button>
-              <Button size="sm" onClick={handleSave} className="h-9 text-xs bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl shadow-sm">
-                Salvar Molde
+              <Button size="sm" onClick={handleSave} className="h-9 text-xs bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl shadow-sm cursor-pointer">
+                Salvar Conta Fixa
               </Button>
             </div>
           </div>
@@ -555,7 +748,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Todos ({recurring.filter(b => b.ownerUid === me?.uid).length})
+                Todas ({recurring.filter(b => b.ownerUid === me?.uid).length})
               </button>
               <button
                 type="button"
@@ -567,7 +760,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                 }`}
               >
                 <ArrowDownLeft className="size-3.5 text-emerald-400" />
-                <span>Entradas ({recurring.filter(b => b.ownerUid === me?.uid && b.type === 'income').length})</span>
+                <span>Rendas ({recurring.filter(b => b.ownerUid === me?.uid && b.type === 'income').length})</span>
               </button>
               <button
                 type="button"
@@ -579,7 +772,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                 }`}
               >
                 <ArrowUpRight className="size-3.5 text-amber-400" />
-                <span>Despesas ({recurring.filter(b => b.ownerUid === me?.uid && b.type !== 'income').length})</span>
+                <span>Despesas & Assinaturas ({recurring.filter(b => b.ownerUid === me?.uid && b.type !== 'income').length})</span>
               </button>
             </div>
 
@@ -588,44 +781,54 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
               {myBills.length === 0 ? (
                 <div className="text-center py-10 text-slate-400 text-xs rounded-2xl bg-slate-950/60 border border-white/[0.06] space-y-2">
                   <RefreshCw className="size-8 mx-auto opacity-30 text-slate-500" />
-                  <p className="font-semibold text-slate-300">Nenhum molde nesta categoria.</p>
-                  <p className="text-slate-500">Clique em "Novo Molde" acima para automatizar seus lançamentos.</p>
+                  <p className="font-semibold text-slate-300">Nenhuma conta fixa cadastrada nesta aba.</p>
+                  <p className="text-slate-500">Clique em "Nova Conta Fixa" acima para programar seus lançamentos automáticos.</p>
                 </div>
               ) : (
                 myBills.map((bill) => {
                   const isIncome = bill.type === 'income'
+                  const linkedCard = bill.cardId ? cards.find((c) => c.id === bill.cardId) : null
+
                   return (
                     <div
                       key={bill.id}
                       className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
-                        isIncome
-                          ? 'border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50'
-                          : 'border-white/[0.06] bg-slate-950/70 hover:border-slate-700'
+                        !bill.active
+                          ? 'opacity-60 border-slate-800 bg-slate-950/40'
+                          : isIncome
+                            ? 'border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50'
+                            : 'border-white/[0.06] bg-slate-950/70 hover:border-slate-700'
                       }`}
                     >
-                      <div className="space-y-1.5">
+                      <div className="space-y-1.5 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-slate-100 text-sm">{bill.description}</span>
+                          <span className="font-bold text-slate-100 text-sm truncate">{bill.description}</span>
                           {isIncome ? (
                             <Badge variant="outline" className="text-[10px] bg-emerald-950/40 text-emerald-300 border-emerald-800">
-                              💰 Entrada
+                              💰 Renda Fixa
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="text-[10px] bg-slate-800 text-slate-300 border-slate-700">
                               {bill.category}
                             </Badge>
                           )}
+                          {!isIncome && get503020Badge(bill.category)}
                           {bill.subcategory && (
-                            <Badge variant="outline" className="text-[10px] bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
+                            <Badge variant="outline" className="text-[10px] bg-slate-800/80 text-slate-300 border-slate-700 font-medium">
                               › {bill.subcategory}
+                            </Badge>
+                          )}
+                          {linkedCard && (
+                            <Badge variant="outline" className="text-[10px] bg-violet-950/50 text-violet-300 border-violet-800 gap-1">
+                              <CreditCard className="size-2.5" /> {linkedCard.cardName}
                             </Badge>
                           )}
                           <Badge
                             variant="outline"
-                            className="text-[10px] bg-amber-950/40 text-amber-300 border-amber-800/60 gap-1"
+                            className="text-[10px] bg-amber-500/10 text-amber-300 border-amber-500/30 gap-1"
                           >
-                            <Sparkles className="size-2.5" />
-                            {ESTIMATION_LABELS[bill.estimationRule]}
+                            <Zap className="size-2.5" />
+                            {getTriggerLabel(bill.launchTrigger)}
                           </Badge>
                           {bill.splitType === 'split_50' && (
                             <Badge variant="outline" className="text-[10px] bg-violet-950/50 text-violet-300 border-violet-800 gap-1">
@@ -644,7 +847,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                           )}
                         </div>
 
-                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                        <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
                           <span className="flex items-center gap-1.5">
                             <Calendar className="size-3.5 text-slate-500" />
                             {isIncome ? `Recebe dia ${bill.dueDay}` : `Vence dia ${bill.dueDay}`}
@@ -652,6 +855,10 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                           <span>·</span>
                           <span className={`font-mono font-bold ${isIncome ? 'text-emerald-400' : 'text-slate-200'}`}>
                             {isIncome ? `+${formatBRL(bill.defaultAmount)}` : formatBRL(bill.defaultAmount)}
+                          </span>
+                          <span>·</span>
+                          <span className="text-[11px] text-slate-500">
+                            {ESTIMATION_LABELS[bill.estimationRule]}
                           </span>
                         </div>
                       </div>
@@ -661,7 +868,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                           variant="outline"
                           size="sm"
                           onClick={() => handleEdit(bill)}
-                          className="text-xs h-8 rounded-lg border-slate-800 hover:text-white"
+                          className="text-xs h-8 rounded-lg border-slate-800 hover:text-white cursor-pointer"
                         >
                           <Edit2 className="size-3 mr-1" />
                           <span>Editar</span>
@@ -671,7 +878,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                           size="icon-sm"
                           onClick={() => handleDelete(bill.id)}
                           className="text-slate-400 hover:text-rose-400 h-8 w-8 rounded-lg cursor-pointer"
-                          title="Excluir Molde"
+                          title="Excluir Conta Fixa"
                         >
                           <Trash2 className="size-3.5" />
                         </Button>
@@ -685,7 +892,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
         )}
 
         <DialogFooter className="pt-2 border-t border-white/[0.06]">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl text-xs h-9">
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} className="rounded-xl text-xs h-9 cursor-pointer">
             Fechar
           </Button>
         </DialogFooter>

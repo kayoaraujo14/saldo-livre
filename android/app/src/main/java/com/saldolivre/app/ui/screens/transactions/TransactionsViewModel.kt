@@ -36,6 +36,7 @@ data class TransactionsUiState(
     val availableCategories: List<String> = emptyList(),
     val categoryCounts: Map<String, Int> = emptyMap(),
     val availablePersons: List<String> = emptyList(),
+    val personCounts: Map<String, Int> = emptyMap(),
 
     // Dynamic Filtered Sums (reflecting current selection)
     val filteredIncome: Double = 0.0,
@@ -85,13 +86,50 @@ class TransactionsViewModel(
                 val paidCount = monthTxs.count { it.status == TransactionStatus.PAID }
                 val pendingCount = monthTxs.count { it.status != TransactionStatus.PAID }
 
-                val availableCats = monthTxs.map { it.category }.filter { it.isNotBlank() }.distinct().sorted()
-                val catCounts = monthTxs.groupingBy { it.category }.eachCount()
-                val availablePers = monthTxs.flatMap { getPersonsForTransaction(it, user.uid) }
-                    .distinct()
-                    .sortedWith { a, b ->
-                        if (a == "100% Meu") -1 else if (b == "100% Meu") 1 else a.compareTo(b)
+                val expenseCats = CategoryRegistry.EXPENSE_CATEGORIES.map { it.name }
+                val incomeCats = CategoryRegistry.INCOME_CATEGORIES.map { it.name }
+                val availableCats = monthTxs.map { it.category }
+                    .filter { cat ->
+                        cat.isNotBlank() && (expenseCats.any { it.equals(cat, ignoreCase = true) } || incomeCats.any { it.equals(cat, ignoreCase = true) })
                     }
+                    .distinct()
+                    .sorted()
+                val catCounts = monthTxs.groupingBy { it.category }.eachCount()
+
+                val myAllCount = monthTxs.count { FinanceEngine.isMyExpense(it, user.uid, allTxs) }
+                val pureMineCount = monthTxs.count { FinanceEngine.isPureMine(it, user.uid, allTxs) }
+                val sharedWithMeCount = monthTxs.count { FinanceEngine.isSharedWithMe(it, user.uid, allTxs) }
+
+                val availablePers = mutableListOf<String>()
+                val pCounts = mutableMapOf<String, Int>()
+
+                if (myAllCount > 0) {
+                    availablePers.add("Todos os Meus")
+                    pCounts["Todos os Meus"] = myAllCount
+                }
+                if (pureMineCount > 0) {
+                    availablePers.add("100% Meu (Exclusivo)")
+                    pCounts["100% Meu (Exclusivo)"] = pureMineCount
+                }
+                if (sharedWithMeCount > 0) {
+                    availablePers.add("Meus Rateados")
+                    pCounts["Meus Rateados"] = sharedWithMeCount
+                }
+
+                val otherPersons = monthTxs.flatMap { getPersonsForTransaction(it, user.uid) }
+                    .filter { it != "100% Meu" && it != "Todos os Meus" && it != "100% Meu (Exclusivo)" && it != "Meus Rateados" }
+                    .distinct()
+                    .sorted()
+
+                otherPersons.forEach { p ->
+                    val count = monthTxs.count { tx ->
+                        if (p == "50/50 (Casal)") tx.splitType == SplitType.SPLIT_50
+                        else if (p == "Parceiro(a)") tx.splitType == SplitType.PARTNER
+                        else getPersonsForTransaction(tx, user.uid).contains(p)
+                    }
+                    availablePers.add(p)
+                    pCounts[p] = count
+                }
 
                 _uiState.update { current ->
                     current.copy(
@@ -102,6 +140,7 @@ class TransactionsViewModel(
                         availableCategories = availableCats,
                         categoryCounts = catCounts,
                         availablePersons = availablePers,
+                        personCounts = pCounts,
                         totalIncome = FinanceEngine.round2(income),
                         totalExpense = FinanceEngine.round2(expense),
                         totalPaidExpense = summary.paid,
@@ -305,8 +344,29 @@ class TransactionsViewModel(
             }
 
             val matchesPerson = if (state.selectedPersons.isNotEmpty()) {
-                val txPersons = getPersonsForTransaction(tx, uid)
-                txPersons.any { it in state.selectedPersons }
+                state.selectedPersons.any { filterPerson ->
+                    when (filterPerson) {
+                        "Todos os Meus", "Todos os Meus Gastos", "Meus Gastos (Todos)" -> {
+                            FinanceEngine.isMyExpense(tx, uid, state.allTransactions)
+                        }
+                        "100% Meu", "100% Meu (Exclusivo)" -> {
+                            FinanceEngine.isPureMine(tx, uid, state.allTransactions)
+                        }
+                        "Meus Rateados", "Rateados (Minha Cota)" -> {
+                            FinanceEngine.isSharedWithMe(tx, uid, state.allTransactions)
+                        }
+                        "50/50 (Casal)" -> {
+                            tx.splitType == SplitType.SPLIT_50
+                        }
+                        "Parceiro(a)", "100% Parceiro(a)" -> {
+                            tx.splitType == SplitType.PARTNER
+                        }
+                        else -> {
+                            val txPersons = getPersonsForTransaction(tx, uid)
+                            txPersons.any { it.equals(filterPerson, ignoreCase = true) }
+                        }
+                    }
+                }
             } else {
                 true
             }
@@ -358,16 +418,26 @@ class TransactionsViewModel(
         fun getPersonsForTransaction(tx: Transaction, currentUid: String): List<String> {
             val persons = mutableListOf<String>()
 
+            // Identificação de participação do usuário
+            if (FinanceEngine.isMyExpense(tx, currentUid)) {
+                persons.add("Todos os Meus")
+                if (FinanceEngine.isPureMine(tx, currentUid)) {
+                    persons.add("100% Meu (Exclusivo)")
+                    persons.add("100% Meu")
+                } else {
+                    persons.add("Meus Rateados")
+                }
+            }
+
             if (tx.allocations.isNotEmpty()) {
                 for (alloc in tx.allocations) {
                     val name = alloc.name.trim()
-                    if (alloc.uid == currentUid ||
-                        name.equals("você", ignoreCase = true) ||
-                        name.equals("meu", ignoreCase = true) ||
-                        name.equals("100% meu", ignoreCase = true)
+                    if (alloc.uid != currentUid &&
+                        !name.equals("você", ignoreCase = true) &&
+                        !name.equals("meu", ignoreCase = true) &&
+                        !name.equals("100% meu", ignoreCase = true) &&
+                        name.isNotBlank()
                     ) {
-                        if ("100% Meu" !in persons) persons.add("100% Meu")
-                    } else if (name.isNotBlank()) {
                         if (name !in persons) persons.add(name)
                     }
                 }
@@ -378,26 +448,18 @@ class TransactionsViewModel(
                 if (!externalName.isNullOrBlank() || tx.splitType == SplitType.EXTERNAL) {
                     val name = if (!externalName.isNullOrBlank()) externalName else "Terceiro Externo"
                     if (name !in persons) persons.add(name)
-                    if (currentUid.isNotBlank() && (tx.paidByUid == currentUid || tx.createdByUid == currentUid)) {
-                        if ("100% Meu" !in persons) persons.add("100% Meu")
-                    }
                 } else if (!friendName.isNullOrBlank() || !tx.assignedFriendUid.isNullOrBlank() || tx.splitType == SplitType.FRIEND) {
                     val name = if (!friendName.isNullOrBlank()) friendName else "Amigo"
                     if (name !in persons) persons.add(name)
-                    if (currentUid.isNotBlank() && (tx.paidByUid == currentUid || tx.createdByUid == currentUid)) {
-                        if ("100% Meu" !in persons) persons.add("100% Meu")
-                    }
                 } else if (tx.splitType == SplitType.SPLIT_50) {
                     if ("50/50 (Casal)" !in persons) persons.add("50/50 (Casal)")
-                    if ("100% Meu" !in persons) persons.add("100% Meu")
                 } else if (tx.splitType == SplitType.PARTNER) {
                     if ("Parceiro(a)" !in persons) persons.add("Parceiro(a)")
-                } else {
-                    if ("100% Meu" !in persons) persons.add("100% Meu")
                 }
             }
 
             if (persons.isEmpty()) {
+                persons.add("Todos os Meus")
                 persons.add("100% Meu")
             }
             return persons

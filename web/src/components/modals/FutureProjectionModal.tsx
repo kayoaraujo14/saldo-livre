@@ -7,7 +7,6 @@ import { formatBRL, currentMonthKey } from '@/lib/utils'
 import {
   CalendarRange,
   ArrowRight,
-  Zap,
   Sparkles,
   CheckCircle2,
   TrendingUp,
@@ -21,7 +20,7 @@ interface FutureProjectionModalProps {
 }
 
 export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: FutureProjectionModalProps) {
-  const { transactions, recurring, profile, me, month, setMonth, generateBills } = useFinance()
+  const { transactions, recurring, profile, me, month } = useFinance()
 
   if (!me) return null
 
@@ -38,11 +37,6 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
   const handleGoToMonth = (monthKey: string) => {
     onSelectMonth(monthKey)
     onOpenChange(false)
-  }
-
-  const handleGenerateForMonth = async (monthKey: string) => {
-    setMonth(monthKey)
-    await generateBills()
   }
 
   return (
@@ -173,18 +167,10 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
 
                   {/* Month Actions */}
                   <div className="flex items-center justify-between pt-2.5 border-t border-white/[0.06] text-xs gap-2">
-                    {!p.isGenerated ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleGenerateForMonth(p.monthKey)}
-                        className="text-[11px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 h-8 px-2.5 gap-1 rounded-lg shrink-0"
-                      >
-                        <Zap className="size-3" /> Gerar Lançamentos
-                      </Button>
-                    ) : (
-                      <span className="text-[11px] text-slate-500 font-medium truncate">Lançamentos sincronizados</span>
-                    )}
+                    <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
+                      <Sparkles className="size-3 text-cyan-400" />
+                      <span>{p.isGenerated ? 'Lançamentos integrados' : 'Lançamento automático ativo'}</span>
+                    </span>
 
                     <Button
                       size="sm"

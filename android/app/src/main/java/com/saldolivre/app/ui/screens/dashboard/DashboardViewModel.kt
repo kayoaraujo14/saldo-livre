@@ -11,6 +11,11 @@ import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+data class AutoLaunchNotice(
+    val count: Int,
+    val bills: List<Transaction>
+)
+
 data class DashboardUiState(
     val currentUser: UserProfile = UserProfile(),
     val allUsers: List<UserProfile> = emptyList(),
@@ -20,7 +25,8 @@ data class DashboardUiState(
     val allTransactions: List<Transaction> = emptyList(),
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
-    val closureDialogDismissed: Boolean = false
+    val closureDialogDismissed: Boolean = false,
+    val autoLaunchNotice: AutoLaunchNotice? = null
 )
 
 class DashboardViewModel(
@@ -29,6 +35,7 @@ class DashboardViewModel(
 
     private val _uiState = MutableStateFlow(DashboardUiState(isLoading = true))
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
+    private var lastCheckedRunKey = ""
 
     init {
         viewModelScope.launch {
@@ -56,12 +63,43 @@ class DashboardViewModel(
                     allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
-                    closureDialogDismissed = _uiState.value.closureDialogDismissed
+                    closureDialogDismissed = _uiState.value.closureDialogDismissed,
+                    autoLaunchNotice = _uiState.value.autoLaunchNotice
                 )
             }.collect { newState ->
                 _uiState.value = newState
+                checkAndAutoLaunchBills(newState.selectedMonth)
             }
         }
+    }
+
+    private fun checkAndAutoLaunchBills(month: String) {
+        val todayStr = java.time.LocalDate.now().toString()
+        val runKey = "${month}_$todayStr"
+        if (lastCheckedRunKey == runKey) return
+        lastCheckedRunKey = runKey
+
+        viewModelScope.launch {
+            try {
+                val res = repository.autoLaunchDueBillsForMonth(month, todayStr)
+                if (res.created.isNotEmpty()) {
+                    _uiState.update {
+                        it.copy(
+                            autoLaunchNotice = AutoLaunchNotice(
+                                count = res.created.size,
+                                bills = res.created
+                            )
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao executar lançamento automático", e)
+            }
+        }
+    }
+
+    fun dismissAutoLaunchNotice() {
+        _uiState.update { it.copy(autoLaunchNotice = null) }
     }
 
     fun openClosureDialog() {

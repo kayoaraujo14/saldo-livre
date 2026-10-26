@@ -524,8 +524,8 @@ fun MenuScreen(
                         MenuNavigationRow(
                             icon = Icons.Default.Repeat,
                             iconColor = Amber400,
-                            title = "Moldes & Salário Base",
-                            subtitle = "Contas fixas, assinaturas e receitas mensais",
+                            title = "Contas Fixas & Renda",
+                            subtitle = "Assinaturas, contas fixas e salário base",
                             badgeText = if (uiState.activeRecurringCount > 0) "${uiState.activeRecurringCount} ativos" else null,
                             badgeColor = Amber500,
                             onClick = onNavigateToRecurringBills
@@ -578,36 +578,6 @@ fun MenuScreen(
                     border = CardDefaults.outlinedCardBorder().copy(brush = SolidColor(DarkBorder))
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // Gerar Contas Fixas do Mês
-                        MenuNavigationRow(
-                            icon = Icons.Default.Bolt,
-                            iconColor = Emerald400,
-                            title = if (uiState.isGeneratingBills) "Gerando Contas..." else "Gerar Contas do Mês",
-                            subtitle = "Importa os moldes recorrentes para ${FinanceEngine.monthLabel(uiState.selectedMonth)}",
-                            onClick = { viewModel.generateBillsForCurrentMonth() }
-                        )
-
-                        uiState.generateFeedback?.let { feedback ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Emerald500.copy(alpha = 0.12f))
-                                    .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = feedback,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Emerald400
-                                )
-                            }
-                        }
-
-                        MenuDivider()
-
                         // Configuração exclusiva de Chave API do Gemini
                         MenuNavigationRow(
                             icon = Icons.Default.Key,

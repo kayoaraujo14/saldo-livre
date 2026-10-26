@@ -15,6 +15,7 @@ import {
   type Transaction,
 } from '@/types'
 import {
+  canUserEditTransaction,
   effectiveAmount,
   impactFor,
   detectSplit,
@@ -24,6 +25,9 @@ import {
   getThirdPartyInfo,
   isSharedCard,
   getTxPersons,
+  isMyExpenseTx,
+  isPureMineTx,
+  isSharedWithMeTx,
 } from '@/lib/finance'
 import { formatBRL, formatShortDate, round2 } from '@/lib/utils'
 import {
@@ -46,11 +50,12 @@ import {
   Minimize2,
   User,
   X,
+  Lock,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 import { MobileTransactionCard } from './mobile/MobileTransactionCard'
 
-type TabFilter = 'all' | 'income' | 'expense' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
+type TabFilter = 'all' | 'income' | 'expense' | 'my_expenses' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
 
 interface ColumnFilters {
   status: ('paid' | 'pending' | 'estimated')[]
@@ -84,11 +89,12 @@ const INITIAL_COLUMN_FILTERS: ColumnFilters = {
 
 interface TransactionTableProps {
   onEditTx: (tx: Transaction) => void
+  onRefundTx?: (tx: Transaction) => void
   onToggleExpand?: () => void
   isExpanded?: boolean
 }
 
-export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: TransactionTableProps) {
+export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpanded }: TransactionTableProps) {
   const {
     summary,
     monthTransactions,
@@ -122,7 +128,13 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
   const availableCategories = useMemo(() => {
     const map = new Map<string, number>()
     monthTransactions.forEach((tx) => {
-      map.set(tx.category, (map.get(tx.category) || 0) + 1)
+      const isLegacy =
+        (LEGACY_CATEGORIES as readonly string[]).includes(tx.category) &&
+        !(EXPENSE_CATEGORIES as readonly string[]).includes(tx.category) &&
+        !(INCOME_CATEGORIES as readonly string[]).includes(tx.category)
+      if (!isLegacy && tx.category) {
+        map.set(tx.category, (map.get(tx.category) || 0) + 1)
+      }
     })
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
   }, [monthTransactions])
@@ -137,27 +149,79 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
   }, [monthTransactions, currentUid])
 
   const availablePersons = useMemo(() => {
-    const map = new Map<string, { count: number; totalAmount: number; role: string }>()
+    let myAllCount = 0
+    let myAllTotal = 0
+    let myPureCount = 0
+    let myPureTotal = 0
+    let mySharedCount = 0
+    let mySharedTotal = 0
+
+    const othersMap = new Map<string, { count: number; totalAmount: number; role: string }>()
+
     monthTransactions.forEach((tx) => {
+      const myImp = Math.abs(impactFor(tx, currentUid, monthTransactions))
+
+      if (isMyExpenseTx(tx, currentUid, monthTransactions)) {
+        myAllCount++
+        myAllTotal += myImp
+        if (isPureMineTx(tx, currentUid, monthTransactions)) {
+          myPureCount++
+          myPureTotal += myImp
+        } else {
+          mySharedCount++
+          mySharedTotal += myImp
+        }
+      }
+
       const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
       pList.forEach((p) => {
-        const prev = map.get(p.name) || { count: 0, totalAmount: 0, role: p.role }
-        map.set(p.name, {
-          count: prev.count + 1,
-          totalAmount: round2(prev.totalAmount + p.amount),
-          role: p.role,
-        })
+        if (p.role !== 'me' && p.name !== '100% Meu') {
+          const prev = othersMap.get(p.name) || { count: 0, totalAmount: 0, role: p.role }
+          othersMap.set(p.name, {
+            count: prev.count + 1,
+            totalAmount: round2(prev.totalAmount + p.amount),
+            role: p.role,
+          })
+        }
       })
     })
-    return Array.from(map.entries())
+
+    const result: { name: string; count: number; totalAmount: number; role: string }[] = []
+
+    if (myAllCount > 0) {
+      result.push({
+        name: 'Meus Gastos (Todos)',
+        count: myAllCount,
+        totalAmount: round2(myAllTotal),
+        role: 'me_all',
+      })
+    }
+    if (myPureCount > 0) {
+      result.push({
+        name: '100% Meu (Exclusivo)',
+        count: myPureCount,
+        totalAmount: round2(myPureTotal),
+        role: 'me_pure',
+      })
+    }
+    if (mySharedCount > 0) {
+      result.push({
+        name: 'Meus Rateados',
+        count: mySharedCount,
+        totalAmount: round2(mySharedTotal),
+        role: 'me_shared',
+      })
+    }
+
+    const sortedOthers = Array.from(othersMap.entries())
       .map(([name, data]) => ({ name, ...data }))
       .sort((a, b) => {
-        if (a.name === '100% Meu') return -1
-        if (b.name === '100% Meu') return 1
         if (a.role === 'partner' && b.role !== 'partner') return -1
         if (b.role === 'partner' && a.role !== 'partner') return 1
         return a.name.localeCompare(b.name)
       })
+
+    return [...result, ...sortedOthers]
   }, [monthTransactions, currentUid, partner?.name])
 
   const availableDays = useMemo(() => {
@@ -191,6 +255,9 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         if (tx.type !== 'income') return false
       } else if (activeTab === 'expense') {
         if (tx.type === 'income') return false
+      } else if (activeTab === 'my_expenses') {
+        if (tx.type === 'income') return false
+        if (!isMyExpenseTx(tx, currentUid, monthTransactions)) return false
       } else if (activeTab === 'refund') {
         const isRef = tx.category === 'Estorno' || tx.totalAmount < 0 || effectiveAmount(tx) < 0
         if (!isRef) return false
@@ -249,8 +316,19 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
         if (!columnFilters.splits.includes(sp)) return false
       }
       if (columnFilters.persons.length > 0) {
-        const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
-        const hasMatchingPerson = pList.some((p) => columnFilters.persons.includes(p.name))
+        const hasMatchingPerson = columnFilters.persons.some((pName) => {
+          if (pName === 'Meus Gastos (Todos)' || pName === 'Todos os Meus') {
+            return isMyExpenseTx(tx, currentUid, monthTransactions)
+          }
+          if (pName === '100% Meu (Exclusivo)' || pName === '100% Meu') {
+            return isPureMineTx(tx, currentUid, monthTransactions)
+          }
+          if (pName === 'Meus Rateados' || pName === 'Rateados (Minha Cota)') {
+            return isSharedWithMeTx(tx, currentUid, monthTransactions)
+          }
+          const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+          return pList.some((p) => p.name === pName)
+        })
         if (!hasMatchingPerson) return false
       }
 
@@ -303,7 +381,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
       }
       return (b.createdAt || 0) - (a.createdAt || 0)
     })
-  }, [monthTransactions, activeTab, search, cards, sortOrder, columnFilters, currentUid])
+  }, [monthTransactions, activeTab, search, cards, sortOrder, columnFilters, currentUid, partner?.name])
 
   // Real-time Analytical Summary of filtered items
   const filteredSummary = useMemo(() => {
@@ -336,6 +414,25 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
     if (columnFilters.persons.length === 0) return 0
     let total = 0
     filteredTxs.forEach((tx) => {
+      const myImp = Math.abs(impactFor(tx, currentUid, monthTransactions))
+      if (columnFilters.persons.includes('Meus Gastos (Todos)') || columnFilters.persons.includes('Todos os Meus')) {
+        if (isMyExpenseTx(tx, currentUid, monthTransactions)) {
+          total += myImp
+          return
+        }
+      }
+      if (columnFilters.persons.includes('100% Meu (Exclusivo)') || columnFilters.persons.includes('100% Meu')) {
+        if (isPureMineTx(tx, currentUid, monthTransactions)) {
+          total += myImp
+          return
+        }
+      }
+      if (columnFilters.persons.includes('Meus Rateados') || columnFilters.persons.includes('Rateados (Minha Cota)')) {
+        if (isSharedWithMeTx(tx, currentUid, monthTransactions)) {
+          total += myImp
+          return
+        }
+      }
       const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
       pList.forEach((p) => {
         if (columnFilters.persons.includes(p.name)) {
@@ -416,6 +513,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
       all: txs.length,
       income: txs.filter((t: Transaction) => t && t.type === 'income').length,
       expense: txs.filter((t: Transaction) => t && t.type !== 'income').length,
+      myExpenses: txs.filter((t: Transaction) => t && isMyExpenseTx(t, currentUid, txs)).length,
       refund: txs.filter((t: Transaction) => t && (t.category === 'Estorno' || t.totalAmount < 0 || effectiveAmount(t) < 0)).length,
       pending: txs.filter((t: Transaction) => t && t.status !== 'paid').length,
       paid: txs.filter((t: Transaction) => t && t.status === 'paid').length,
@@ -427,9 +525,10 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
       third: txs.filter((t: Transaction) => (Array.isArray(t?.allocations) ? t.allocations : []).some((a) => a && a.type === 'EXTERNAL')).length,
       friends_installments: txs.filter((t: Transaction) => t && Boolean(t.assignedFriendUid || t.installmentGroupId)).length,
     }
-  }, [monthTransactions, cards])
+  }, [monthTransactions, cards, currentUid])
 
   const startEdit = (tx: Transaction) => {
+    if (!canUserEditTransaction(tx, currentUid)) return
     setEditingId(tx.id)
     setEditDesc(tx.description)
     setEditDate(tx.dueDate)
@@ -437,16 +536,27 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
   }
 
   const saveInlineEdit = async (tx: Transaction) => {
+    if (!canUserEditTransaction(tx, currentUid)) {
+      setEditingId(null)
+      return
+    }
     const num = parseFloat(editAmount.replace(',', '.'))
     if (!editDesc.trim() || isNaN(num) || num <= 0) {
       setEditingId(null)
       return
     }
 
-    await updateTransaction(tx.id, {
+    const hasFriend = Boolean(tx.assignedFriendUid)
+    const patch: Partial<Transaction> = {
       description: editDesc.trim(),
       dueDate: editDate,
-    })
+    }
+    if (hasFriend) {
+      patch.acceptanceStatus = 'pending_approval'
+      patch.respondedAt = null
+    }
+
+    await updateTransaction(tx.id, patch)
 
     if (num !== effectiveAmount(tx)) {
       await changeAmount(tx, {
@@ -551,6 +661,19 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
             }`}
           >
             <span>💸 Despesas ({counts.expense})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('my_expenses')}
+            className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'my_expenses'
+                ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-500/40 font-semibold shadow-xs'
+                : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-800/50'
+            }`}
+            title="Todos os meus gastos (100% pessoais e rateados com minha participação)"
+          >
+            <span>👤 Meus Gastos ({counts.myExpenses})</span>
           </button>
 
           {counts.refund > 0 && (
@@ -882,6 +1005,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
               allTransactions={monthTransactions}
               cards={cards}
               onEdit={onEditTx}
+              onRefund={onRefundTx}
               onDelete={(targetTx) => {
                 if (targetTx.installmentGroupId) {
                   setDeleteGroupTx(targetTx)
@@ -1201,9 +1325,6 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                           .map(([cat, count]) => {
                             const isChecked = columnFilters.categories.includes(cat)
                             const detail = getCategoryDetail(cat)
-                            const isLegacy = (LEGACY_CATEGORIES as readonly string[]).includes(cat) &&
-                              !(EXPENSE_CATEGORIES as readonly string[]).includes(cat) &&
-                              !(INCOME_CATEGORIES as readonly string[]).includes(cat)
                             return (
                               <label
                                 key={cat}
@@ -1222,11 +1343,6 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                                     style={{ backgroundColor: detail?.color || '#94a3b8' }}
                                   />
                                   <span className="truncate">{cat}</span>
-                                  {isLegacy && (
-                                    <span className="text-[9px] text-amber-400/80 bg-amber-500/10 px-1 py-0.2 rounded font-sans shrink-0">
-                                      Legada
-                                    </span>
-                                  )}
                                 </div>
                                 <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono text-slate-400 shrink-0">
                                   {count}
@@ -1303,13 +1419,15 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                           .map((p) => {
                             const isChecked = columnFilters.persons.includes(p.name)
                             const emoji =
-                              p.name === '100% Meu'
+                              p.role === 'me_all' || p.role === 'me_pure' || p.name === '100% Meu'
                                 ? '👤'
-                                : p.role === 'partner'
+                                : p.role === 'me_shared'
                                   ? '🤝'
-                                  : p.role === 'friend'
-                                    ? '🧑‍🤝‍🧑'
-                                    : '🏷️'
+                                  : p.role === 'partner'
+                                    ? '🔄'
+                                    : p.role === 'friend'
+                                      ? '🧑‍🤝‍🧑'
+                                      : '🏷️'
                             return (
                               <label
                                 key={p.name}
@@ -1553,6 +1671,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
             ) : (
               filteredTxs.map((tx: Transaction) => {
                 const isEditing = editingId === tx.id
+                const canEdit = canUserEditTransaction(tx, currentUid)
                 const effAmount = effectiveAmount(tx)
                 const myImpact = impactFor(tx, currentUid, monthTransactions)
                 const split = detectSplit(tx, currentUid)
@@ -1576,9 +1695,9 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                     <td className="py-2 px-3 align-middle">
                       <button
                         type="button"
-                        onClick={() => cycleStatus(tx)}
-                        title="Clique para alternar: Estimado → Pendente → Pago"
-                        className="cursor-pointer transition-transform hover:scale-105 active:scale-95"
+                        onClick={() => { if (canEdit) cycleStatus(tx) }}
+                        title={canEdit ? "Clique para alternar: Estimado → Pendente → Pago" : "Lançamento recebido por rateio (somente leitura)"}
+                        className={canEdit ? "cursor-pointer transition-transform hover:scale-105 active:scale-95" : "cursor-default opacity-85"}
                       >
                         {tx.status === 'estimated' ? (
                           <Badge variant="outline" className="text-[10px] bg-cyan-500/10 text-cyan-300 border-cyan-500/30 gap-1 font-medium">
@@ -1629,9 +1748,9 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span
-                              onDoubleClick={() => startEdit(tx)}
-                              className="font-medium text-slate-200 hover:text-white cursor-pointer"
-                              title="Duplo clique para editar"
+                              onDoubleClick={() => { if (canEdit) startEdit(tx) }}
+                              className={`font-medium text-slate-200 ${canEdit ? 'hover:text-white cursor-pointer' : 'cursor-default'}`}
+                              title={canEdit ? "Duplo clique para editar" : undefined}
                             >
                               {tx.description}
                             </span>
@@ -1693,10 +1812,10 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  onEditTx(tx)
+                                  if (canEdit) onEditTx(tx)
                                 }}
-                                className="cursor-pointer"
-                                title={`Parcelamento conectado (${tx.installmentNumber}/${tx.installmentsTotal}). Clique para editar a série ou a parcela.`}
+                                className={canEdit ? "cursor-pointer" : "cursor-default"}
+                                title={canEdit ? `Parcelamento conectado (${tx.installmentNumber}/${tx.installmentsTotal}). Clique para editar a série ou a parcela.` : `Parcelamento conectado (${tx.installmentNumber}/${tx.installmentsTotal})`}
                               >
                                 <Badge
                                   variant="outline"
@@ -1794,6 +1913,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                     <td className="py-2 px-3 align-middle">
                       <div className="flex flex-col gap-0.5">
                         <Select
+                          disabled={!canEdit}
                           value={tx.category}
                           onValueChange={(cat) => {
                             const newCat = cat as Category
@@ -1804,10 +1924,15 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                                 subcategory: newSub,
                               })
                             } else {
-                              updateTransaction(tx.id, {
+                              const patch: Partial<Transaction> = {
                                 category: newCat,
                                 subcategory: newSub,
-                              })
+                              }
+                              if (tx.assignedFriendUid) {
+                                patch.acceptanceStatus = 'pending_approval'
+                                patch.respondedAt = null
+                              }
+                              updateTransaction(tx.id, patch)
                             }
                           }}
                         >
@@ -1830,6 +1955,7 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                         </Select>
                         {(getCategoryDetail(tx.category)?.subcategories?.length ?? 0) > 0 ? (
                           <Select
+                            disabled={!canEdit}
                             value={tx.subcategory || ''}
                             onValueChange={(sub) => {
                               const newSub = sub || null
@@ -1838,9 +1964,14 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                                   subcategory: newSub,
                                 })
                               } else {
-                                updateTransaction(tx.id, {
+                                const patch: Partial<Transaction> = {
                                   subcategory: newSub,
-                                })
+                                }
+                                if (tx.assignedFriendUid) {
+                                  patch.acceptanceStatus = 'pending_approval'
+                                  patch.respondedAt = null
+                                }
+                                updateTransaction(tx.id, patch)
                               }
                             }}
                           >
@@ -1891,10 +2022,11 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                       ) : (
                         <div className="flex flex-col gap-1 min-w-[130px]">
                           <Select
+                            disabled={!canEdit}
                             value={split}
                             onValueChange={(val) => {
                               if (val === 'custom') {
-                                onEditTx(tx)
+                                if (canEdit) onEditTx(tx)
                               } else {
                                 changeSplit(tx, val as SplitType)
                               }
@@ -2066,10 +2198,10 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             ) : (
                               <span
                                 className={`text-xs font-bold ${
-                                  tx.type === 'income' ? 'text-emerald-400' : 'text-slate-100'
+                                  tx.type === 'income' ? 'text-emerald-400' : isRefund ? 'text-cyan-400' : 'text-slate-100'
                                 }`}
                               >
-                                {tx.type === 'income' ? `+${formatBRL(myImpact)}` : `−${formatBRL(myImpact)}`}
+                                {tx.type === 'income' ? `+${formatBRL(myImpact)}` : isRefund ? `+${formatBRL(Math.abs(myImpact))}` : `−${formatBRL(myImpact)}`}
                               </span>
                             )}
                           </div>
@@ -2180,8 +2312,22 @@ export function TransactionTable({ onEditTx, onToggleExpand, isExpanded }: Trans
                             ✕
                           </Button>
                         </div>
+                      ) : !canEdit ? (
+                        <div className="flex items-center justify-center p-1" title="Lançamento recebido por rateio. Apenas quem lançou pode editar ou excluir.">
+                          <Lock className="size-3.5 text-slate-500" />
+                        </div>
                       ) : (
                         <div className="flex items-center justify-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
+                          {onRefundTx && tx.type === 'expense' && !isRefund && (
+                            <button
+                              type="button"
+                              onClick={() => onRefundTx(tx)}
+                              className="p-1 rounded text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/40 transition-colors cursor-pointer"
+                              title="Cadastrar estorno rateado deste lançamento"
+                            >
+                              <RotateCcw className="size-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => onEditTx(tx)}

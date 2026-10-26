@@ -709,6 +709,8 @@ export interface Card {
   limit?: number | null
 }
 
+export type LaunchTrigger = 'day_before' | 'on_due_date' | 'day_after' | 'first_day_of_month'
+
 /** Coleção `recurring_bills` */
 export interface RecurringBill {
   id: string
@@ -723,12 +725,15 @@ export interface RecurringBill {
   /** Extensão opcional: divisão padrão ao gerar (ex: aluguel 50/50) */
   splitType?: SplitType
   paymentMethod?: PaymentMethod
+  cardId?: string | null
   /** 'expense' (padrão) ou 'income' para receitas recorrentes (salário, aluguel recebido, freela) */
   type?: TransactionType
   /** Nova Feature 1: Limite e parcelamento em modelos recorrentes */
   startMonth?: string // YYYY-MM
   endMonth?: string // YYYY-MM (null/undefined se for contínua por prazo indeterminado)
   installmentsCount?: number // Quantidade total de parcelas / meses
+  /** Regra de disparo automático: 1 dia antes (padrão), no dia, 1 dia depois ou 1º dia do mês */
+  launchTrigger?: LaunchTrigger
 }
 
 export interface Allocation {

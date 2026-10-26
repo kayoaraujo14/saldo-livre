@@ -8,8 +8,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CallSplit
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonOutline
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -141,11 +147,11 @@ fun AdvancedFiltersBottomSheet(
                     }
                 }
 
-                // Section 3: Pessoa / Terceiro (Cartão Compartilhado)
+                // Section 3: Participação & Responsável
                 if (uiState.availablePersons.isNotEmpty()) {
                     FilterSection(
-                        title = "Pessoa / Terceiro (Cartão Compartilhado)",
-                        subtitle = "Isole facilmente gastos de dependentes ou participantes"
+                        title = "Participação & Responsável",
+                        subtitle = "Filtre seus gastos pessoais (todos ou 100%), rateios ou de terceiros"
                     ) {
                         FlowRow(
                             modifier = Modifier.fillMaxWidth(),
@@ -153,8 +159,20 @@ fun AdvancedFiltersBottomSheet(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             uiState.availablePersons.forEach { person ->
+                                val (icon, iconTint) = when (person) {
+                                    "Todos os Meus", "Todos os Meus Gastos" -> Icons.Default.Person to Emerald400
+                                    "100% Meu (Exclusivo)", "100% Meu" -> Icons.Default.PersonOutline to Emerald400
+                                    "Meus Rateados" -> Icons.AutoMirrored.Filled.CallSplit to Amber400
+                                    "50/50 (Casal)" -> Icons.Default.People to Purple400
+                                    "Parceiro(a)" -> Icons.Default.Sync to Purple400
+                                    else -> Icons.AutoMirrored.Filled.Label to Cyan400
+                                }
+                                val count = uiState.personCounts[person] ?: 0
                                 FilterPillChip(
                                     label = person,
+                                    icon = icon,
+                                    iconTint = iconTint,
+                                    count = count,
                                     isSelected = uiState.selectedPersons.contains(person),
                                     onClick = { onTogglePerson(person) }
                                 )
@@ -170,10 +188,6 @@ fun AdvancedFiltersBottomSheet(
 
                 val expenseCategories = CategoryRegistry.EXPENSE_CATEGORIES
                 val incomeCategories = CategoryRegistry.INCOME_CATEGORIES
-                val legacyCategories = uiState.availableCategories.filter { cat ->
-                    expenseCategories.none { it.name.equals(cat, ignoreCase = true) } &&
-                    incomeCategories.none { it.name.equals(cat, ignoreCase = true) }
-                }
 
                 if (showExpenseCats) {
                     FilterSection(
@@ -219,32 +233,6 @@ fun AdvancedFiltersBottomSheet(
                                     count = count,
                                     isSelected = uiState.selectedCategories.contains(cat.name),
                                     onClick = { onToggleCategory(cat.name) }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (legacyCategories.isNotEmpty()) {
-                    FilterSection(
-                        title = "Categorias Anteriores",
-                        subtitle = "Lançamentos com categorização legada identificados no período"
-                    ) {
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            legacyCategories.forEach { catName ->
-                                val detail = CategoryRegistry.get(catName)
-                                val count = uiState.categoryCounts[catName] ?: 0
-                                FilterPillChip(
-                                    label = "$catName (Legada)",
-                                    icon = detail.icon,
-                                    iconTint = detail.color,
-                                    count = count,
-                                    isSelected = uiState.selectedCategories.contains(catName),
-                                    onClick = { onToggleCategory(catName) }
                                 )
                             }
                         }

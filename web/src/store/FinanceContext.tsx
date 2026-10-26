@@ -25,10 +25,12 @@ import {
   amountPatch,
   buildSplit,
   calculateCardInvoiceDates,
+  canUserEditTransaction,
   clampPct,
   computeSummary,
   friendPctOf,
   friendShareOf,
+  autoLaunchDueBills,
   generateMonthBills,
   nextStatus,
   resolvePartner,
@@ -174,7 +176,15 @@ export interface FriendItem {
   friendshipId: string
 }
 
+export interface AutoLaunchedNotice {
+  date: string
+  createdCount: number
+  bills: Array<{ id: string; description: string; amount: number; type: string; dueDay: number }>
+}
+
 interface FinanceContextValue {
+  autoLaunchedNotice: AutoLaunchedNotice | null
+  dismissAutoLaunchNotice: () => void
   mode: Mode
   firebaseAvailable: boolean
   authLoading: boolean
@@ -262,6 +272,23 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [forceDemo, setForceDemo] = useState(() => localStorage.getItem(FORCE_DEMO_KEY) === '1')
   const mode: Mode = fb.isFirebaseConfigured && !forceDemo ? 'firebase' : 'demo'
   const [month, setMonth] = useState(currentMonthKey())
+  const [autoLaunchedNotice, setAutoLaunchedNotice] = useState<AutoLaunchedNotice | null>(() => {
+    try {
+      const stored = sessionStorage.getItem('auto_launch_notice')
+      return stored ? JSON.parse(stored) : null
+    } catch {
+      return null
+    }
+  })
+
+  const dismissAutoLaunchNotice = useCallback(() => {
+    setAutoLaunchedNotice(null)
+    try {
+      sessionStorage.removeItem('auto_launch_notice')
+    } catch {
+      // ignore
+    }
+  }, [])
   const [pendingBatchTransactions, setPendingBatchTransactions] = useState<PendingBatchTransaction[]>([])
   const pendingBatchRef = useRef(pendingBatchTransactions)
   pendingBatchRef.current = pendingBatchTransactions
@@ -863,6 +890,29 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   const updateTransaction = useCallback(
     async (id: string, patch: Partial<Transaction>) => {
+      const source = mode === 'demo' ? demoRef.current.transactions : fbTxRef.current
+      const currentTx = source.find((t) => t.id === id)
+
+      // Regra 1: Quem recebeu o rateio e confirmou (ou está em rateio alheio) NÃO pode editar
+      if (currentTx && currentUid && !canUserEditTransaction(currentTx, currentUid)) {
+        const keys = Object.keys(patch)
+        const isOnlyResponse = keys.length > 0 && keys.every((k) => k === 'acceptanceStatus' || k === 'respondedAt')
+        if (!isOnlyResponse) {
+          throw new Error('Você não pode editar um lançamento feito por outra pessoa.')
+        }
+      }
+
+      // Regra 2: A pessoa que lançou ao editar submete de novo ao aceite de quem recebe o rateio
+      const targetFriendUid = patch.assignedFriendUid !== undefined ? patch.assignedFriendUid : currentTx?.assignedFriendUid
+      if (targetFriendUid && (!currentTx || currentTx.createdByUid === currentUid || currentTx.paidByUid === currentUid)) {
+        const keys = Object.keys(patch)
+        const isOnlyResponse = keys.length > 0 && keys.every((k) => k === 'acceptanceStatus' || k === 'respondedAt')
+        if (!isOnlyResponse && patch.acceptanceStatus === undefined) {
+          patch.acceptanceStatus = 'pending_approval'
+          patch.respondedAt = null
+        }
+      }
+
       if (mode === 'demo') {
         commitDemo((s) => ({
           ...s,
@@ -872,27 +922,38 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
       await fb.fsUpdateTransaction(id, patch)
     },
-    [mode, commitDemo],
+    [mode, commitDemo, currentUid],
   )
 
   const deleteTransaction = useCallback(
     async (id: string) => {
+      const source = mode === 'demo' ? demoRef.current.transactions : fbTxRef.current
+      const currentTx = source.find((t) => t.id === id)
+      if (currentTx && currentUid && !canUserEditTransaction(currentTx, currentUid)) {
+        throw new Error('Você não pode excluir um lançamento feito por outra pessoa.')
+      }
+
       if (mode === 'demo') {
         commitDemo((s) => ({ ...s, transactions: s.transactions.filter((t) => t.id !== id) }))
         return
       }
       await fb.fsDeleteTransaction(id)
     },
-    [mode, commitDemo],
+    [mode, commitDemo, currentUid],
   )
 
   const deleteInstallmentGroup = useCallback(
     async (groupId: string): Promise<number> => {
       if (!groupId) return 0
       const source = mode === 'demo' ? demoRef.current.transactions : fbTxRef.current
-      const targetIds = source.filter((t) => t.installmentGroupId === groupId).map((t) => t.id)
-      if (!targetIds.length) return 0
+      const targetTxs = source.filter((t) => t.installmentGroupId === groupId)
+      if (!targetTxs.length) return 0
 
+      if (targetTxs.some((t) => currentUid && !canUserEditTransaction(t, currentUid))) {
+        throw new Error('Você não pode excluir um parcelamento feito por outra pessoa.')
+      }
+
+      const targetIds = targetTxs.map((t) => t.id)
       if (mode === 'demo') {
         const set = new Set(targetIds)
         commitDemo((s) => ({
@@ -905,7 +966,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       await fb.fsDeleteTransactionsBatch(targetIds)
       return targetIds.length
     },
-    [mode, commitDemo],
+    [mode, commitDemo, currentUid],
   )
 
   const updateInstallmentGroup = useCallback(
@@ -918,9 +979,31 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
       if (!groupTxs.length) return 0
 
-      const isFriend = input.splitType === 'friend'
-      const assignedFriend: Party | null =
-        isFriend && input.friend ? { uid: input.friend.uid, name: input.friend.name } : null
+      if (groupTxs.some((t) => currentUid && !canUserEditTransaction(t, currentUid))) {
+        throw new Error('Você não pode editar um parcelamento feito por outra pessoa.')
+      }
+
+      // Detecta se há amigo no parcelamento (via input.friend, customAllocations ou registro original)
+      let assignedFriend: Party | null = null
+      if (input.friend) {
+        assignedFriend = { uid: input.friend.uid, name: input.friend.name }
+      } else if (input.customAllocations) {
+        const fa = input.customAllocations.find(
+          (a) => a.type === 'PLATFORM_USER' && a.uid && a.uid !== me.uid && (!partnerParty || a.uid !== partnerParty.uid),
+        )
+        if (fa && fa.uid) assignedFriend = { uid: fa.uid, name: fa.name }
+      } else if (
+        groupTxs[0]?.assignedFriendUid &&
+        groupTxs[0]?.assignedFriendName &&
+        input.splitType !== 'mine' &&
+        input.splitType !== 'split_50' &&
+        input.splitType !== 'partner' &&
+        input.splitType !== 'external'
+      ) {
+        assignedFriend = { uid: groupTxs[0].assignedFriendUid, name: groupTxs[0].assignedFriendName }
+      }
+
+      const isFriend = Boolean(assignedFriend)
 
       const card = cards.find((c) => c.id === input.cardId)
       const payerUid = input.paymentMethod === 'credit_card' && card ? card.ownerUid : me.uid
@@ -994,6 +1077,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           assignedFriendName: assignedFriend?.name ?? null,
           friendSharePct,
           acceptanceStatus: isFriend ? 'pending_approval' : null,
+          respondedAt: null,
         }
 
         updates.push({ id: t.id, patch })
@@ -1014,7 +1098,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       await fb.fsUpdateTransactionsBatch(updates)
       return updates.length
     },
-    [mode, commitDemo, me, partnerParty, cards],
+    [mode, commitDemo, me, partnerParty, cards, currentUid],
   )
 
   // Auto-repara qualquer grupo de parcelas cujas datas foram acidentalmente colapsadas no mesmo mês
@@ -1057,17 +1141,64 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     }
   }, [transactions, updateTransaction])
 
+  // Auto-lançamento inteligente de assinaturas e contas fixas por proximidade de vencimento
+  const autoLaunchRanRef = useRef<string>('')
+  useEffect(() => {
+    if (!me) return
+    const now = new Date()
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const runKey = `${me.uid}_${month}_${todayStr}_${recurring.length}_${transactions.length}`
+    if (autoLaunchRanRef.current === runKey) return
+    autoLaunchRanRef.current = runKey
+
+    const { created } = autoLaunchDueBills({
+      bills: recurring,
+      all: transactions,
+      monthKey: month,
+      todayStr,
+      me,
+      partner: partnerParty,
+      profile,
+    })
+
+    if (created.length > 0) {
+      addMany(created).then(() => {
+        const notice: AutoLaunchedNotice = {
+          date: todayStr,
+          createdCount: created.length,
+          bills: created.map((c) => ({
+            id: c.recurringBillId || '',
+            description: c.description,
+            amount: c.totalAmount,
+            type: c.type,
+            dueDay: parseInt(c.dueDate.slice(-2), 10) || 10,
+          })),
+        }
+        setAutoLaunchedNotice(notice)
+        try {
+          sessionStorage.setItem('auto_launch_notice', JSON.stringify(notice))
+        } catch {
+          // ignore
+        }
+      })
+    }
+  }, [me, month, recurring, transactions, partnerParty, profile, addMany])
+
   const cycleStatus = useCallback(
     async (tx: Transaction) => {
+      if (currentUid && !canUserEditTransaction(tx, currentUid)) return
       const next = nextStatus(tx.status)
       await updateTransaction(tx.id, statusPatch(tx, next))
     },
-    [updateTransaction],
+    [updateTransaction, currentUid],
   )
 
   const setStatus = useCallback(
-    (tx: Transaction, status: TransactionStatus) => updateTransaction(tx.id, statusPatch(tx, status)),
-    [updateTransaction],
+    (tx: Transaction, status: TransactionStatus) => {
+      if (currentUid && !canUserEditTransaction(tx, currentUid)) return Promise.resolve()
+      return updateTransaction(tx.id, statusPatch(tx, status))
+    },
+    [updateTransaction, currentUid],
   )
 
   const changeSplit = useCallback(
@@ -1079,6 +1210,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       customAllocations?: Allocation[],
     ) => {
       if (!me) return
+      if (!canUserEditTransaction(tx, me.uid)) {
+        throw new Error('Você não pode alterar a divisão de um lançamento feito por outra pessoa.')
+      }
       const isFriend = splitType === 'friend'
       // Detecta amigo em divisões friend ou custom
       let assignedFriend: Party | null = null
@@ -1112,15 +1246,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         assignedFriend,
         friendSharePct: pct,
         customAllocations,
-        acceptanceStatus: tx.acceptanceStatus,
+        acceptanceStatus: assignedFriend ? 'pending_approval' : null,
         previous: tx.allocations,
       })
 
-      // Se o amigo ou o percentual mudou, o amigo precisa aprovar os novos termos
-      const termsChanged =
-        assignedFriend &&
-        (tx.assignedFriendUid !== assignedFriend.uid || clampPct(tx.friendSharePct ?? 100) !== pct)
-
+      // Qualquer alteração na divisão com amigo submete novamente ao aceite
       await updateTransaction(tx.id, {
         allocations: split.allocations,
         userImpact: split.userImpact,
@@ -1128,20 +1258,26 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         assignedFriendUid: assignedFriend?.uid ?? null,
         assignedFriendName: assignedFriend?.name ?? null,
         friendSharePct: pct,
-        acceptanceStatus: assignedFriend
-          ? termsChanged || !tx.acceptanceStatus
-            ? 'pending_approval'
-            : tx.acceptanceStatus
-          : null,
+        acceptanceStatus: assignedFriend ? 'pending_approval' : null,
+        respondedAt: null,
       })
     },
     [me, partnerParty, updateTransaction],
   )
 
   const changeAmount = useCallback(
-    (tx: Transaction, values: { estimatedAmount?: number | null; actualAmount?: number | null }) =>
-      updateTransaction(tx.id, amountPatch(tx, values)),
-    [updateTransaction],
+    (tx: Transaction, values: { estimatedAmount?: number | null; actualAmount?: number | null }) => {
+      if (me && !canUserEditTransaction(tx, me.uid)) {
+        throw new Error('Você não pode alterar o valor de um lançamento feito por outra pessoa.')
+      }
+      const patch = amountPatch(tx, values)
+      if (tx.assignedFriendUid) {
+        patch.acceptanceStatus = 'pending_approval'
+        patch.respondedAt = null
+      }
+      return updateTransaction(tx.id, patch)
+    },
+    [me, updateTransaction],
   )
 
   const markReimbursed = useCallback(
@@ -1535,6 +1671,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     changeAmount,
     markReimbursed,
     generateBills,
+    autoLaunchedNotice,
+    dismissAutoLaunchNotice,
     saveCard,
     deleteCard,
     saveRecurring,

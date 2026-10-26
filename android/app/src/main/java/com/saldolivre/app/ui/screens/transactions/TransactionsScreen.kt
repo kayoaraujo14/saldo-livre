@@ -40,7 +40,8 @@ fun TransactionsScreen(
     viewModel: TransactionsViewModel,
     onNavigateBack: () -> Unit = {},
     onNavigateToAddTransaction: () -> Unit,
-    onNavigateToEditTransaction: (String) -> Unit = {}
+    onNavigateToEditTransaction: (String) -> Unit = {},
+    onNavigateToRefundTransaction: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
@@ -490,6 +491,10 @@ fun TransactionsScreen(
             onNavigateToEditTransaction = { editTxId ->
                 selectedTxForDetails = null
                 onNavigateToEditTransaction(editTxId)
+            },
+            onNavigateToRefundTransaction = { refundTxId ->
+                selectedTxForDetails = null
+                onNavigateToRefundTransaction(refundTxId)
             },
             onDeleteRequest = {
                 txToDelete = tx

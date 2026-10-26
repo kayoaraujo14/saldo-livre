@@ -1288,7 +1288,7 @@ DADOS FINANCEIROS REAIS DO USUÁRIO EM ${FinanceEngine.monthLabel(selectedMonth)
 - Gastos por Categoria neste mês:
   $byCategoryDesc
 - Total Investido no Mês: R$ ${FinanceEngine.round2(summary.totalInvested)}$byInvestmentDesc
-- Moldes de Contas Recorrentes Cadastradas [ATENÇÃO: MOLDES / PREVISÕES TEÓRICAS - NÃO SÃO TRANSAÇÕES EFETIVADAS]:
+- Assinaturas e Contas Fixas Cadastradas [ATENÇÃO: PREVISÕES TEÓRICAS - NÃO SÃO TRANSAÇÕES EFETIVADAS ATÉ SEREM LANÇADAS]:
   $recurringDesc
 """.trim()
 
@@ -1543,7 +1543,8 @@ Atenção para datas:
 }
 ```
 *(OBRIGATÓRIO: Use SEMPRE que o usuário perguntar sobre despesas reais, valores pagos, análises por categoria, período, cartão cadastrado ou divisões com terceiros. Parâmetros inteligentes:
-- "somenteMinhas": defina como true quando o usuário pedir para ver gastos 100% dele ("100% a mim", "só minhas", "gastos pessoais meus"). Exclui divisões e terceiros!
+- "todosMeusGastos": defina como true quando o usuário pedir para ver "todos os meus gastos" ou "meus gastos" (inclui gastos 100% pessoais E rateados onde o usuário participa). NÃO exclui lançamentos rateados!
+- "somenteMinhas": defina como true APENAS quando o usuário pedir para ver despesas 100% exclusivas dele ("100% a mim", "só minhas exclusivas", "sem divisão"). Exclui divisões e terceiros!
 - "pessoa": nome de amigo ou terceiro (ex: "Kayo", "Mariana", "Mãe") para filtrar apenas compras dele(a).
 - "apenasTerceiros": defina como true para compras divididas ou de terceiros em geral.
 - "cartao": nome do cartão cadastrado (ex: "Nubank", "Inter") para filtrar gastos nele e referenciá-lo.

@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/badge'
 import { type Transaction, type Card as CardType } from '@/types'
-import { effectiveAmount, impactFor, detectSplit, getThirdPartyInfo } from '@/lib/finance'
+import { canUserEditTransaction, effectiveAmount, impactFor, detectSplit, getThirdPartyInfo } from '@/lib/finance'
 import { formatBRL, formatShortDate } from '@/lib/utils'
 import {
   CreditCard,
@@ -11,6 +11,7 @@ import {
   Clock,
   Sparkles,
   Layers,
+  Lock,
   ArrowDownLeft,
 } from 'lucide-react'
 
@@ -20,6 +21,7 @@ interface MobileTransactionCardProps {
   allTransactions: Transaction[]
   cards: CardType[]
   onEdit: (tx: Transaction) => void
+  onRefund?: (tx: Transaction) => void
   onDelete: (tx: Transaction) => void
   onCycleStatus: (tx: Transaction) => void
 }
@@ -30,10 +32,12 @@ export function MobileTransactionCard({
   allTransactions,
   cards,
   onEdit,
+  onRefund,
   onDelete,
   onCycleStatus,
 }: MobileTransactionCardProps) {
   const effAmount = effectiveAmount(tx)
+  const canEdit = canUserEditTransaction(tx, currentUid)
   const myImpact = impactFor(tx, currentUid, allTransactions)
   const split = detectSplit(tx, currentUid)
   const isRefund = tx.category === 'Estorno' || effAmount < 0 || tx.totalAmount < 0
@@ -110,9 +114,9 @@ export function MobileTransactionCard({
         {/* Status Pill (Tap to toggle) */}
         <button
           type="button"
-          onClick={() => onCycleStatus(tx)}
-          className="cursor-pointer active:scale-95 transition-transform shrink-0 ml-auto"
-          title="Toque para alternar status da despesa"
+          onClick={() => { if (canEdit) onCycleStatus(tx) }}
+          className={canEdit ? "cursor-pointer active:scale-95 transition-transform shrink-0 ml-auto" : "cursor-default shrink-0 ml-auto opacity-85"}
+          title={canEdit ? "Toque para alternar status da despesa" : "Lançamento compartilhado (somente leitura)"}
         >
           {getStatusBadge()}
         </button>
@@ -176,34 +180,50 @@ export function MobileTransactionCard({
           <strong
             className={`font-semibold ${
               isRefund
-                ? 'text-emerald-400'
+                ? 'text-cyan-400'
                 : isIncome
                   ? 'text-emerald-400'
                   : 'text-amber-300'
             }`}
           >
-            {formatBRL(myImpact)}
+            {isRefund ? `+${formatBRL(Math.abs(myImpact))}` : formatBRL(myImpact)}
           </strong>
         </div>
 
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onEdit(tx)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-            title="Editar lançamento"
-          >
-            <Edit2 className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => onDelete(tx)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-            title="Excluir lançamento"
-          >
-            <Trash2 className="size-3.5" />
-          </button>
-        </div>
+        {canEdit ? (
+          <div className="flex items-center gap-1">
+            {onRefund && tx.type === 'expense' && !isRefund && (
+              <button
+                type="button"
+                onClick={() => onRefund(tx)}
+                className="p-1.5 rounded-lg text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/40 transition-colors cursor-pointer"
+                title="Cadastrar estorno rateado deste lançamento"
+              >
+                <RotateCcw className="size-3.5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onEdit(tx)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Editar lançamento"
+            >
+              <Edit2 className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete(tx)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+              title="Excluir lançamento"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
+        ) : (
+          <span className="text-[10px] text-slate-500 flex items-center gap-1 font-medium py-1 px-1.5" title="Lançamento recebido por rateio. Apenas quem lançou pode editar ou excluir.">
+            <Lock className="size-3 text-slate-500" /> Somente leitura
+          </span>
+        )}
       </div>
     </div>
   )

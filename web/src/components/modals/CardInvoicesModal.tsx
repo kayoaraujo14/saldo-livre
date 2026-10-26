@@ -9,9 +9,11 @@ import {
   buildInvoiceHistory,
   dueCountdownLabel,
   INVOICE_STATUS_META,
+  participantAmountIn,
+  calculateCategoryBreakdownForParticipant,
   type CardInvoice,
 } from '@/lib/invoices'
-import { formatBRL, formatShortDate, monthLabel, shiftMonth, shortMonthLabel } from '@/lib/utils'
+import { formatBRL, formatNubankDateHeader, formatShortDate, monthLabel, shiftMonth, shortMonthLabel } from '@/lib/utils'
 import { CATEGORY_GROUPS, type Category, type Transaction } from '@/types'
 import {
   Calendar,
@@ -31,12 +33,14 @@ import {
   Users,
   Wallet,
   Zap,
+  RotateCcw,
 } from 'lucide-react'
 
 interface CardInvoicesModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onEditTx?: (tx: Transaction) => void
+  onRefundTx?: (tx: Transaction) => void
 }
 
 /** Paleta estática alinhada com as cores dos cartões. */
@@ -102,15 +106,16 @@ function StatusPill({ inv }: { inv: CardInvoice }) {
   )
 }
 
-export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoicesModalProps) {
+export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: CardInvoicesModalProps) {
   const { cards, transactions, me, month, setStatus } = useFinance()
   const uid = me?.uid ?? ''
 
   const [viewMonth, setViewMonth] = useState(month)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
+  const [selectedParticipantName, setSelectedParticipantName] = useState<string | null>(null)
   const [confirmPay, setConfirmPay] = useState(false)
   const [paying, setPaying] = useState(false)
-  const [itemFilter, setItemFilter] = useState<'all' | 'open' | 'paid' | 'installments'>('all')
+  const [itemFilter, setItemFilter] = useState<'all' | 'third_party' | 'open' | 'paid' | 'installments'>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
   // Sincroniza com o mês global sempre que o modal é aberto
@@ -119,6 +124,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
       setViewMonth(month)
       setConfirmPay(false)
       setSearchQuery('')
+      setSelectedParticipantName(null)
     }
   }, [open, month])
 
@@ -154,12 +160,44 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
     return { total, open, mine, nextDue }
   }, [invoices])
 
+  const hideKpis = Boolean(
+    selected &&
+      (invoices.length <= 1 ||
+        (Math.abs(totals.open - selected.openAmount) < 0.01 && Math.abs(totals.total - selected.total) < 0.01)),
+  )
+
+  const activeCategorySlices = useMemo(() => {
+    if (!selected) return []
+    if (selectedParticipantName) {
+      const part = selected.splitBreakdown.find((p) => p.name === selectedParticipantName)
+      if (part) {
+        const expenses = selected.items.filter((t) => t.type === 'expense')
+        return calculateCategoryBreakdownForParticipant(expenses, part, uid)
+      }
+    }
+    return selected.byCategory
+  }, [selected, selectedParticipantName, uid])
+
   const visibleItems = useMemo(() => {
     if (!selected) return []
     let list = selected.items
-    if (itemFilter === 'open') list = list.filter((t) => t.status !== 'paid')
-    else if (itemFilter === 'paid') list = list.filter((t) => t.status === 'paid')
-    else if (itemFilter === 'installments') list = list.filter((t) => (t.installmentsTotal ?? 1) > 1)
+
+    if (selectedParticipantName) {
+      const part = selected.splitBreakdown.find((p) => p.name === selectedParticipantName)
+      if (part) {
+        list = list.filter((t) => participantAmountIn(t, part, uid) > 0)
+      }
+    }
+
+    if (itemFilter === 'third_party') {
+      list = list.filter((t) => Boolean(t.assignedFriendName || t.externalName || (t.allocations && t.allocations.length > 0)))
+    } else if (itemFilter === 'open') {
+      list = list.filter((t) => t.status !== 'paid')
+    } else if (itemFilter === 'paid') {
+      list = list.filter((t) => t.status === 'paid')
+    } else if (itemFilter === 'installments') {
+      list = list.filter((t) => (t.installmentsTotal ?? 1) > 1)
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
@@ -171,7 +209,30 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
       )
     }
     return list
-  }, [selected, itemFilter, searchQuery])
+  }, [selected, selectedParticipantName, itemFilter, searchQuery, uid])
+
+  const groupedInvoiceItems = useMemo(() => {
+    const groups: { dateKey: string; items: Transaction[]; total: number }[] = []
+    const map = new Map<string, Transaction[]>()
+    for (const tx of visibleItems) {
+      const key = tx.dueDate ? tx.dueDate.trim() : 'Sem data'
+      if (!map.has(key)) {
+        map.set(key, [])
+      }
+      map.get(key)!.push(tx)
+    }
+    for (const [dateKey, items] of map.entries()) {
+      const total = items.reduce((sum, tx) => {
+        const activePart = selectedParticipantName ? selected?.splitBreakdown.find((p) => p.name === selectedParticipantName) : null
+        const partShare = activePart ? participantAmountIn(tx, activePart, uid) : null
+        const hasPartFilter = Boolean(selectedParticipantName && partShare != null && partShare > 0)
+        const amount = hasPartFilter ? partShare! : effectiveAmount(tx)
+        return sum + (tx.type === 'income' ? -amount : amount)
+      }, 0)
+      groups.push({ dateKey, items, total })
+    }
+    return groups
+  }, [visibleItems, selectedParticipantName, selected?.splitBreakdown, uid])
 
   const handlePayInvoice = async () => {
     if (!selected) return
@@ -204,7 +265,10 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
         <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/[0.08] bg-slate-900/50 p-1.5">
           <button
             type="button"
-            onClick={() => setViewMonth((m) => shiftMonth(m, -1))}
+            onClick={() => {
+              setViewMonth((m) => shiftMonth(m, -1))
+              setSelectedParticipantName(null)
+            }}
             className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Fatura anterior"
           >
@@ -216,7 +280,10 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
           </div>
           <button
             type="button"
-            onClick={() => setViewMonth((m) => shiftMonth(m, 1))}
+            onClick={() => {
+              setViewMonth((m) => shiftMonth(m, 1))
+              setSelectedParticipantName(null)
+            }}
             className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Próxima fatura"
           >
@@ -236,51 +303,63 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
           </div>
         ) : (
           <div className="space-y-4">
-            {/* KPIs consolidados */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-              <Kpi icon={<Wallet className="size-4 text-cyan-400" />} label="Total das faturas" value={formatBRL(totals.total)} />
-              <Kpi icon={<Lock className="size-4 text-amber-400" />} label="Em aberto" value={formatBRL(totals.open)} tone="text-amber-300" />
-              <Kpi icon={<Users className="size-4 text-emerald-400" />} label="Minha parte" value={formatBRL(totals.mine)} tone="text-emerald-300" />
-              <Kpi
-                icon={<CalendarClock className="size-4 text-rose-400" />}
-                label="Próximo vencimento"
-                value={totals.nextDue ? formatShortDate(totals.nextDue.dueDate) : '—'}
-                hint={totals.nextDue ? totals.nextDue.card.cardName : 'Tudo em dia'}
-              />
-            </div>
+            {/* KPIs consolidados (ocultados quando redundantes com o cartão único exibido) */}
+            {!hideKpis && (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <Kpi icon={<Wallet className="size-4 text-cyan-400" />} label="Total das faturas" value={formatBRL(totals.total)} />
+                <Kpi icon={<Lock className="size-4 text-amber-400" />} label="Em aberto" value={formatBRL(totals.open)} tone="text-amber-300" />
+                <Kpi icon={<Users className="size-4 text-emerald-400" />} label="Minha parte" value={formatBRL(totals.mine)} tone="text-emerald-300" />
+                <Kpi
+                  icon={<CalendarClock className="size-4 text-rose-400" />}
+                  label="Próximo vencimento"
+                  value={totals.nextDue ? formatShortDate(totals.nextDue.dueDate) : '—'}
+                  hint={totals.nextDue ? totals.nextDue.card.cardName : 'Tudo em dia'}
+                />
+              </div>
+            )}
 
             {/* Seletor de cartões em carrossel horizontal */}
-            <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
-              {invoices.map((inv) => {
-                const t = themeOf(inv.card.color)
-                const active = inv.card.id === effectiveCardId
-                return (
-                  <button
-                    key={inv.card.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedCardId(inv.card.id)
-                      setConfirmPay(false)
-                    }}
-                    className={`snap-start shrink-0 w-[220px] text-left rounded-2xl p-3.5 border transition-all cursor-pointer ${
-                      active
-                        ? `ring-2 ${t.ring} border-white/20 bg-gradient-to-br ${t.gradient} to-slate-950 scale-[1.01] shadow-lg`
-                        : 'border-white/[0.08] bg-slate-900/40 opacity-75 hover:opacity-100 hover:border-white/20'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-bold text-white truncate">{inv.card.cardName}</span>
-                      <StatusPill inv={inv} />
-                    </div>
-                    <p className="mt-3 text-lg font-extrabold text-white tabular-nums">{formatBRL(inv.total)}</p>
-                    <div className="mt-1 flex items-center justify-between text-[11px] text-slate-300">
-                      <span>Vence {formatShortDate(inv.dueDate)}</span>
-                      <span className="text-slate-400">{inv.itemsCount} itens</span>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
+            {invoices.length > 1 && (
+              <div className="flex gap-2.5 overflow-x-auto pb-1 -mx-1 px-1 snap-x">
+                {invoices.map((inv) => {
+                  const t = themeOf(inv.card.color)
+                  const active = inv.card.id === effectiveCardId
+                  const formattedName = inv.card.cardName.trim()
+                    ? inv.card.cardName.trim().replace(/^./, (c) => c.toUpperCase())
+                    : 'Cartão'
+                  const chipSubtitle =
+                    inv.itemsCount === 0
+                      ? 'Sem compras no ciclo'
+                      : `Vence ${formatShortDate(inv.dueDate)} · ${inv.itemsCount} ${inv.itemsCount === 1 ? 'item' : 'itens'}`
+
+                  return (
+                    <button
+                      key={inv.card.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCardId(inv.card.id)
+                        setSelectedParticipantName(null)
+                        setConfirmPay(false)
+                      }}
+                      className={`snap-start shrink-0 w-[220px] text-left rounded-2xl p-3.5 border transition-all cursor-pointer ${
+                        active
+                          ? `ring-2 ${t.ring} border-white/20 bg-gradient-to-br ${t.gradient} to-slate-950 scale-[1.01] shadow-lg`
+                          : 'border-white/[0.08] bg-slate-900/40 opacity-75 hover:opacity-100 hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-white truncate">{formattedName}</span>
+                        <StatusPill inv={inv} />
+                      </div>
+                      <p className="mt-3 text-lg font-extrabold text-white tabular-nums">{formatBRL(inv.total)}</p>
+                      <div className="mt-1 flex items-center justify-between text-[11px] text-slate-300">
+                        <span>{chipSubtitle}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             {selected && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -353,7 +432,9 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                       <div className="space-y-1 mt-3 relative z-10">
                         <div className="flex justify-between text-[11px] text-white/80">
                           <span>Uso do limite ({selected.limitUsagePct}%)</span>
-                          <span>Disponível: {formatBRL(selected.availableLimit ?? Math.max(0, selected.limit - selected.total))}</span>
+                          <span className={selected.availableLimit != null && selected.availableLimit <= 0 ? 'text-rose-300 font-bold' : ''}>
+                            Disponível: {formatBRL(selected.availableLimit ?? Math.max(0, selected.limit - selected.total))}
+                          </span>
                         </div>
                         <div className="h-1.5 rounded-full bg-black/40 overflow-hidden">
                           <div
@@ -363,6 +444,11 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                             style={{ width: `${selected.limitUsagePct ?? 0}%` }}
                           />
                         </div>
+                        {selected.futureInstallmentsTotal > 0 && (
+                          <p className="text-[10px] text-white/70">
+                            Inclui {formatBRL(selected.futureInstallmentsTotal)} em faturas futuras
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -448,27 +534,48 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                         <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
                           <Users className="size-3.5 text-emerald-400" /> Divisão da Fatura
                         </h4>
-                        <span className="text-[10px] text-slate-400">Rateio calculado</span>
+                        <span className="text-[10px] text-slate-400">
+                          {selectedParticipantName ? 'Clique para desmarcar' : 'Clique para filtrar'}
+                        </span>
                       </div>
                       <div className="space-y-2">
-                        {selected.splitBreakdown.map((part) => (
-                          <div key={part.name} className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05] space-y-1">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className={`font-semibold ${part.isMe ? 'text-emerald-300' : 'text-slate-200'}`}>
-                                {part.name}
-                              </span>
-                              <span className="font-bold tabular-nums text-white">
-                                {formatBRL(part.amount)} ({part.pct}%)
-                              </span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${part.isMe ? 'bg-emerald-500' : 'bg-sky-500'}`}
-                                style={{ width: `${part.pct}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
+                        {selected.splitBreakdown.map((part) => {
+                          const isSelected = selectedParticipantName === part.name
+                          return (
+                            <button
+                              key={part.name}
+                              type="button"
+                              onClick={() => setSelectedParticipantName(isSelected ? null : part.name)}
+                              className={`w-full text-left p-2.5 rounded-xl transition-all cursor-pointer space-y-1.5 border ${
+                                isSelected
+                                  ? 'bg-emerald-950/50 border-emerald-500/60 ring-2 ring-emerald-500/30 shadow-md'
+                                  : 'bg-slate-950/60 border-white/[0.05] hover:border-white/20 hover:bg-slate-900/60'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`font-semibold truncate ${part.isMe ? 'text-emerald-300' : 'text-slate-200'}`}>
+                                    {part.name}
+                                  </span>
+                                  {isSelected && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 shrink-0">
+                                      Filtrando ✕
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="font-bold tabular-nums text-white shrink-0 ml-2">
+                                  {formatBRL(part.amount)} ({part.pct}%)
+                                </span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${part.isMe ? 'bg-emerald-500' : 'bg-sky-500'}`}
+                                  style={{ width: `${part.pct}%` }}
+                                />
+                              </div>
+                            </button>
+                          )
+                        })}
                       </div>
                     </section>
                   )}
@@ -513,7 +620,10 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                           <button
                             key={h.monthKey}
                             type="button"
-                            onClick={() => setViewMonth(h.monthKey)}
+                            onClick={() => {
+                              setViewMonth(h.monthKey)
+                              setSelectedParticipantName(null)
+                            }}
                             className="flex-1 h-full flex flex-col justify-end items-center gap-1 group cursor-pointer"
                             title={`${monthLabel(h.monthKey)}: ${formatBRL(h.total)}`}
                           >
@@ -536,13 +646,27 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                     <p className="text-[10px] text-slate-500">Barras tracejadas = faturas futuras já comprometidas por compras parceladas.</p>
                   </section>
 
-                  {/* Categorias */}
-                  {selected.byCategory.length > 0 && (
+                  {/* Categorias (dinâmicas por participante) */}
+                  {activeCategorySlices.length > 0 && (
                     <section className="rounded-2xl p-4 border border-white/[0.08] bg-slate-900/40 space-y-2.5">
-                      <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <PieChart className="size-3.5 text-violet-400" /> Para onde foi o dinheiro
-                      </h4>
-                      {selected.byCategory.slice(0, 6).map((c) => {
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <PieChart className="size-3.5 text-violet-400" />
+                          <span>
+                            {selectedParticipantName ? `Gastos de ${selectedParticipantName}` : 'Para onde foi o dinheiro'}
+                          </span>
+                        </h4>
+                        {selectedParticipantName && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedParticipantName(null)}
+                            className="text-[10px] text-cyan-400 hover:underline cursor-pointer"
+                          >
+                            Ver geral
+                          </button>
+                        )}
+                      </div>
+                      {activeCategorySlices.slice(0, 6).map((c) => {
                         const color = CATEGORY_GROUPS[c.category as Category]?.color ?? '#64748b'
                         return (
                           <div key={c.category} className="space-y-1">
@@ -575,6 +699,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                       {(
                         [
                           ['all', 'Todos'],
+                          ['third_party', 'Terceiros'],
                           ['open', 'Em aberto'],
                           ['paid', 'Pagos'],
                           ['installments', 'Parcelados'],
@@ -594,6 +719,23 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                     </div>
                   </div>
 
+                  {/* Banner de filtro ativo por participante */}
+                  {selectedParticipantName && (
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 animate-in fade-in">
+                      <span className="flex items-center gap-1.5 truncate">
+                        <span>Exibindo lançamentos de:</span>
+                        <strong className="text-white font-semibold truncate">{selectedParticipantName}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedParticipantName(null)}
+                        className="text-[11px] text-emerald-400 hover:text-white underline cursor-pointer ml-2 shrink-0 font-medium"
+                      >
+                        Limpar filtro ✕
+                      </button>
+                    </div>
+                  )}
+
                   {/* Campo de Busca Rápida */}
                   <div className="relative">
                     <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -608,62 +750,129 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx }: CardInvoices
                   {visibleItems.length === 0 ? (
                     <div className="py-16 text-center space-y-2">
                       <p className="text-xs text-slate-400 font-medium">Nenhum lançamento encontrado para este filtro.</p>
-                      {searchQuery && (
+                      {(searchQuery || selectedParticipantName || itemFilter !== 'all') && (
                         <button
                           type="button"
-                          onClick={() => setSearchQuery('')}
+                          onClick={() => {
+                            setSearchQuery('')
+                            setSelectedParticipantName(null)
+                            setItemFilter('all')
+                          }}
                           className="text-[11px] text-cyan-400 hover:underline cursor-pointer"
                         >
-                          Limpar busca
+                          Limpar todos os filtros
                         </button>
                       )}
                     </div>
                   ) : (
-                    <ul className="divide-y divide-white/[0.05] max-h-[65dvh] overflow-y-auto pr-1">
-                      {visibleItems.map((tx) => {
-                        const isCredit = tx.type === 'income'
-                        const st = ITEM_STATUS_LABEL[tx.status]
-                        const mine = tx.userImpact?.[uid]
+                    <div className="space-y-4 max-h-[65dvh] overflow-y-auto pr-1">
+                      {groupedInvoiceItems.map((group) => {
+                        const header = formatNubankDateHeader(group.dateKey)
                         return (
-                          <li key={tx.id}>
-                            <button
-                              type="button"
-                              onClick={() => onEditTx?.(tx)}
-                              className="w-full py-2.5 flex items-center gap-3 text-left hover:bg-slate-800/40 rounded-xl px-2 cursor-pointer transition-colors"
-                            >
-                              <span
-                                className="size-2 rounded-full shrink-0"
-                                style={{ backgroundColor: CATEGORY_GROUPS[tx.category]?.color ?? '#64748b' }}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-xs font-semibold text-slate-100 truncate flex items-center gap-1.5">
-                                  <span>{tx.description}</span>
-                                  {tx.installmentsTotal && tx.installmentsTotal > 1 && (
-                                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-300 font-bold border border-cyan-500/30">
-                                      {tx.installmentNumber}/{tx.installmentsTotal}
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-[10px] text-slate-400 truncate">
-                                  {tx.category}
-                                  {tx.subcategory ? ` › ${tx.subcategory}` : ''}
-                                  {mine != null && !isCredit && Math.abs(mine - effectiveAmount(tx)) > 0.01 && (
-                                    <> · minha parte <strong className="text-emerald-400">{formatBRL(mine)}</strong></>
-                                  )}
-                                </p>
+                          <div key={group.dateKey} className="space-y-1.5">
+                            <div className="flex items-center justify-between px-2 pt-1.5 pb-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs font-bold tracking-wide ${header.isToday ? 'text-cyan-400' : header.isYesterday ? 'text-amber-400' : 'text-slate-200'}`}>
+                                  {header.title}
+                                </span>
+                                {header.subtitle && (
+                                  <span className="text-[11px] text-slate-400">
+                                    · {header.subtitle}
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-right shrink-0 space-y-0.5">
-                                <p className={`text-xs font-bold tabular-nums ${isCredit ? 'text-teal-300' : 'text-white'}`}>
-                                  {isCredit ? '− ' : ''}
-                                  {formatBRL(effectiveAmount(tx))}
-                                </p>
-                                <span className={`inline-block rounded-full border px-1.5 text-[9px] font-semibold ${st.tone}`}>{st.label}</span>
-                              </div>
-                            </button>
-                          </li>
+                              <span className="text-[11px] font-semibold text-slate-300 tabular-nums">
+                                {formatBRL(group.total)}
+                              </span>
+                            </div>
+
+                            <ul className="divide-y divide-white/[0.05] rounded-xl bg-slate-900/40 border border-white/[0.05] px-1">
+                              {group.items.map((tx) => {
+                                const isCredit = tx.type === 'income'
+                                const st = ITEM_STATUS_LABEL[tx.status]
+                                const mine = tx.userImpact?.[uid]
+                                const activePart = selectedParticipantName ? selected.splitBreakdown.find((p) => p.name === selectedParticipantName) : null
+                                const participantShare = activePart ? participantAmountIn(tx, activePart, uid) : null
+                                const hasParticipantFilter = Boolean(selectedParticipantName && participantShare != null && participantShare > 0)
+                                const displayAmount = hasParticipantFilter ? participantShare! : effectiveAmount(tx)
+                                const isPartial = hasParticipantFilter && Math.abs(displayAmount - effectiveAmount(tx)) > 0.01
+
+                                const thirdParty =
+                                  tx.assignedFriendName ||
+                                  tx.externalName ||
+                                  (tx.allocations && tx.allocations.find((a) => a.uid !== uid)?.name)
+
+                                return (
+                                  <li key={tx.id} className="flex items-center gap-1 group">
+                                    <button
+                                      type="button"
+                                      onClick={() => onEditTx?.(tx)}
+                                      className="flex-1 py-2.5 flex items-center gap-3 text-left hover:bg-slate-800/40 rounded-xl px-2 cursor-pointer transition-colors min-w-0"
+                                    >
+                                      <span
+                                        className="size-2 rounded-full shrink-0"
+                                        style={{ backgroundColor: CATEGORY_GROUPS[tx.category]?.color ?? '#64748b' }}
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="text-xs font-semibold text-slate-100 truncate">{tx.description}</span>
+                                          {tx.installmentsTotal && tx.installmentsTotal > 1 && (
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-bold border border-cyan-500/30">
+                                              {tx.installmentNumber}/{tx.installmentsTotal}
+                                            </span>
+                                          )}
+                                          {thirdParty && (
+                                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 font-medium border border-amber-500/30 truncate max-w-[130px]">
+                                              🏷️ {thirdParty}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                                          {tx.category}
+                                          {tx.subcategory ? ` › ${tx.subcategory}` : ''}
+                                          {isPartial ? (
+                                            <span className="text-emerald-400 font-medium"> · parte de {selectedParticipantName}</span>
+                                          ) : (
+                                            mine != null && !isCredit && Math.abs(mine - effectiveAmount(tx)) > 0.01 && (
+                                              <> · minha parte <strong className="text-emerald-400">{formatBRL(mine)}</strong></>
+                                            )
+                                          )}
+                                        </p>
+                                      </div>
+                                      <div className="text-right shrink-0 space-y-0.5">
+                                        <p className={`text-xs font-bold tabular-nums ${isCredit ? 'text-teal-300' : hasParticipantFilter ? 'text-emerald-400' : 'text-white'}`}>
+                                          {isCredit ? '− ' : ''}
+                                          {formatBRL(displayAmount)}
+                                        </p>
+                                        {isPartial && (
+                                          <p className="text-[10px] text-slate-500 tabular-nums">
+                                            total {formatBRL(effectiveAmount(tx))}
+                                          </p>
+                                        )}
+                                        <span className={`inline-block rounded-full border px-1.5 text-[9px] font-semibold ${st.tone}`}>{st.label}</span>
+                                      </div>
+                                    </button>
+                                    {onRefundTx && tx.type === 'expense' && !isCredit && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          onOpenChange(false)
+                                          onRefundTx(tx)
+                                        }}
+                                        className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/40 transition-all cursor-pointer shrink-0"
+                                        title="Cadastrar estorno rateado deste lançamento"
+                                      >
+                                        <RotateCcw className="size-3.5" />
+                                      </button>
+                                    )}
+                                  </li>
+                                )
+                              })}
+                            </ul>
+                          </div>
                         )
                       })}
-                    </ul>
+                    </div>
                   )}
                 </section>
               </div>

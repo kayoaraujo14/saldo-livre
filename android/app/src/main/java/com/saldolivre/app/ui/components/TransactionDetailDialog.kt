@@ -13,12 +13,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -38,6 +40,7 @@ fun TransactionDetailDialog(
     onToggleStatus: () -> Unit,
     onSetStatus: (TransactionStatus, Double?) -> Unit,
     onNavigateToEditTransaction: (String) -> Unit,
+    onNavigateToRefundTransaction: (String) -> Unit = {},
     onDeleteRequest: () -> Unit
 ) {
     val myImpact = remember(transaction, currentUserId, allTransactions) {
@@ -46,6 +49,9 @@ fun TransactionDetailDialog(
         } else {
             transaction.effectiveAmount
         }
+    }
+    val canEdit = remember(transaction, currentUserId) {
+        FinanceEngine.canUserEditTransaction(transaction, currentUserId)
     }
     val isSplit = remember(transaction, myImpact) {
         kotlin.math.abs(myImpact - transaction.effectiveAmount) > 0.01 ||
@@ -204,94 +210,144 @@ fun TransactionDetailDialog(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Botão de Destaque: Editar Lançamento (Paridade Web)
-                OutlinedButton(
-                    onClick = {
-                        val targetId = transaction.id
-                        onDismissRequest()
-                        onNavigateToEditTransaction(targetId)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = CircleShape,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Cyan500.copy(alpha = 0.12f),
-                        contentColor = Cyan400
-                    ),
-                    border = BorderStroke(1.dp, Cyan500.copy(alpha = 0.35f))
-                ) {
-                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Editar Lançamento",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        maxLines = 1
-                    )
+                if (canEdit) {
+                    // Botão de Destaque: Editar Lançamento (Paridade Web)
+                    OutlinedButton(
+                        onClick = {
+                            val targetId = transaction.id
+                            onDismissRequest()
+                            onNavigateToEditTransaction(targetId)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Cyan500.copy(alpha = 0.12f),
+                            contentColor = Cyan400
+                        ),
+                        border = BorderStroke(1.dp, Cyan500.copy(alpha = 0.35f))
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Editar Lançamento",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            maxLines = 1
+                        )
+                    }
+
+                    if (transaction.type == TransactionType.EXPENSE && !transaction.isRefund) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                val targetId = transaction.id
+                                onDismissRequest()
+                                onNavigateToRefundTransaction(targetId)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = CircleShape,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = Color(0xFF14B8A6).copy(alpha = 0.12f),
+                                contentColor = Color(0xFF2DD4BF)
+                            ),
+                            border = BorderStroke(1.dp, Color(0xFF14B8A6).copy(alpha = 0.35f))
+                        ) {
+                            Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Cadastrar Estorno Rateado",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(CircleShape)
+                            .background(Amber500.copy(alpha = 0.12f))
+                            .border(1.dp, Amber500.copy(alpha = 0.25f), CircleShape)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "🔒 Lançamento recebido por rateio (somente leitura)",
+                            fontSize = 12.sp,
+                            color = Amber400,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         },
         confirmButton = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (transaction.status != TransactionStatus.PAID) {
-                    Button(
-                        onClick = {
-                            val parsedAmount = customActualInput.replace(",", ".").toDoubleOrNull()
-                            onSetStatus(TransactionStatus.PAID, parsedAmount)
-                            onDismissRequest()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = DarkBackground
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isIncome) "Confirmar" else "Confirmar Pago",
-                            color = DarkBackground,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                } else {
-                    FilledTonalButton(
-                        onClick = {
-                            onSetStatus(TransactionStatus.PENDING, null)
-                            onDismissRequest()
-                        },
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = Amber500.copy(alpha = 0.2f),
-                            contentColor = Amber400
-                        )
-                    ) {
-                        Icon(imageVector = Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Voltar p/ Pendente",
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+            if (canEdit) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (transaction.status != TransactionStatus.PAID) {
+                        Button(
+                            onClick = {
+                                val parsedAmount = customActualInput.replace(",", ".").toDoubleOrNull()
+                                onSetStatus(TransactionStatus.PAID, parsedAmount)
+                                onDismissRequest()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = DarkBackground
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isIncome) "Confirmar" else "Confirmar Pago",
+                                color = DarkBackground,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
+                        FilledTonalButton(
+                            onClick = {
+                                onSetStatus(TransactionStatus.PENDING, null)
+                                onDismissRequest()
+                            },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Amber500.copy(alpha = 0.2f),
+                                contentColor = Amber400
+                            )
+                        ) {
+                            Icon(imageVector = Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Voltar p/ Pendente",
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
         },
-        dismissButton = {
-            TextButton(
-                onClick = onDeleteRequest,
-                colors = ButtonDefaults.textButtonColors(contentColor = Rose400)
-            ) {
-                Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(text = "Excluir", maxLines = 1)
+        dismissButton = if (canEdit) {
+            {
+                TextButton(
+                    onClick = onDeleteRequest,
+                    colors = ButtonDefaults.textButtonColors(contentColor = Rose400)
+                ) {
+                    Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Excluir", maxLines = 1)
+                }
             }
-        }
+        } else null
     )
 }
 

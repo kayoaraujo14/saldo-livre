@@ -143,7 +143,7 @@ fun AppNavHost(
                 val toRoute = targetState.destination.route
                 if (fromRoute in bottomNavRoutes && toRoute in bottomNavRoutes) {
                     fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing))
-                } else if (toRoute == "chat" || toRoute == "add_transaction" || toRoute?.startsWith("edit_transaction") == true) {
+                } else if (toRoute == "chat" || toRoute == "add_transaction" || toRoute?.startsWith("edit_transaction") == true || toRoute?.startsWith("refund_transaction") == true) {
                     // Recuo sutil em profundidade quando abre o Chat ou formulário modal
                     scaleOut(targetScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)) +
                         fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing))
@@ -162,7 +162,7 @@ fun AppNavHost(
                 if (fromRoute in bottomNavRoutes && toRoute in bottomNavRoutes) {
                     fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
                         scaleIn(initialScale = 0.98f, animationSpec = tween(220, easing = FastOutSlowInEasing))
-                } else if (fromRoute == "chat" || fromRoute == "add_transaction" || fromRoute?.startsWith("edit_transaction") == true) {
+                } else if (fromRoute == "chat" || fromRoute == "add_transaction" || fromRoute?.startsWith("edit_transaction") == true || fromRoute?.startsWith("refund_transaction") == true) {
                     // Retorno de modal / Chat para tela anterior
                     scaleIn(initialScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)) +
                         fadeIn(animationSpec = tween(200, easing = FastOutSlowInEasing))
@@ -205,7 +205,8 @@ fun AppNavHost(
                     },
                     onNavigateToReceivables = { navController.navigate("receivables") },
                     onNavigateToInvestments = { navController.navigate("investments") },
-                    onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") }
+                    onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") },
+                    onNavigateToRefundTransaction = { txId -> navController.navigate("refund_transaction/$txId") }
                 )
             }
 
@@ -216,7 +217,8 @@ fun AppNavHost(
                     viewModel = transactionsViewModel,
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToAddTransaction = { navController.navigate("add_transaction") },
-                    onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") }
+                    onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") },
+                    onNavigateToRefundTransaction = { txId -> navController.navigate("refund_transaction/$txId") }
                 )
             }
 
@@ -321,6 +323,32 @@ fun AppNavHost(
                 val txId = backStackEntry.arguments?.getString("txId")
                 val formViewModel = viewModel(key = "edit_tx_$txId") {
                     TransactionFormViewModel(repository, editingTxId = txId)
+                }
+                TransactionFormScreen(
+                    viewModel = formViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+
+            // Form: Cadastrar Estorno Rateado de Transação Existente (Modal Slide Up)
+            composable(
+                route = "refund_transaction/{txId}",
+                enterTransition = {
+                    slideIntoContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Up,
+                        animationSpec = tween(280, easing = FastOutSlowInEasing)
+                    ) + fadeIn(animationSpec = tween(200))
+                },
+                popExitTransition = {
+                    slideOutOfContainer(
+                        towards = AnimatedContentTransitionScope.SlideDirection.Down,
+                        animationSpec = tween(240, easing = FastOutSlowInEasing)
+                    ) + fadeOut(animationSpec = tween(180))
+                }
+            ) { backStackEntry ->
+                val txId = backStackEntry.arguments?.getString("txId")
+                val formViewModel = viewModel(key = "refund_tx_$txId") {
+                    TransactionFormViewModel(repository, refundFromTxId = txId)
                 }
                 TransactionFormScreen(
                     viewModel = formViewModel,

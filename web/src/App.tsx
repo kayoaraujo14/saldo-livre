@@ -19,6 +19,7 @@ import { ScrollToTop } from '@/components/ui/ScrollToTop'
 import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
 import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
+import { AutoLaunchNoticeBanner } from '@/components/AutoLaunchNoticeBanner'
 import { Button } from '@/components/ui/button'
 import { Clock, ArrowRight, ReceiptText } from 'lucide-react'
 import type { Transaction } from '@/types'
@@ -35,7 +36,6 @@ function MainDashboard() {
     me,
     cycleStatus,
     deleteTransaction,
-    generateBills,
   } = useFinance()
 
   const [cardsModalOpen, setCardsModalOpen] = useState(false)
@@ -49,7 +49,7 @@ function MainDashboard() {
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
   const [invoicesModalOpen, setInvoicesModalOpen] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
-  const [generatingBills, setGeneratingBills] = useState(false)
+  const [refundFromTx, setRefundFromTx] = useState<Transaction | null>(null)
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
   const [mobileTab, setMobileTab] = useState<MobileTab>('home')
@@ -78,21 +78,20 @@ function MainDashboard() {
 
   const handleOpenNewTx = () => {
     setEditingTx(null)
+    setRefundFromTx(null)
     setTxModalOpen(true)
   }
 
   const handleEditTx = (tx: Transaction) => {
     setEditingTx(tx)
+    setRefundFromTx(null)
     setTxModalOpen(true)
   }
 
-  const handleGenerate = async () => {
-    setGeneratingBills(true)
-    try {
-      await generateBills()
-    } finally {
-      setGeneratingBills(false)
-    }
+  const handleRefundTx = (tx: Transaction) => {
+    setEditingTx(null)
+    setRefundFromTx(tx)
+    setTxModalOpen(true)
   }
 
   const totalPendingNotifications = pendingChargeGroups.length + pendingFriendRequests.length
@@ -146,6 +145,11 @@ function MainDashboard() {
           </div>
         )}
 
+        {/* Banner de Lançamento Automático / Próximos Vencimentos (Desktop) */}
+        <div className="hidden lg:block">
+          <AutoLaunchNoticeBanner onGoToTransactions={() => setDesktopView('table_full')} />
+        </div>
+
         {/* ============================================================== */}
         {/* DESKTOP LAYOUT (Screen >= 1024px / lg)                          */}
         {/* ============================================================== */}
@@ -171,6 +175,7 @@ function MainDashboard() {
             >
               <TransactionTable
                 onEditTx={handleEditTx}
+                onRefundTx={handleRefundTx}
                 onToggleExpand={() =>
                   setDesktopView((prev) => (prev === 'table_full' ? 'chat_focus' : 'table_full'))
                 }
@@ -213,6 +218,9 @@ function MainDashboard() {
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
               />
 
+              {/* Banner de Lançamento Automático / Próximos Vencimentos (Mobile) */}
+              <AutoLaunchNoticeBanner onGoToTransactions={() => handleSelectMobileTab('transactions')} />
+
               {/* Recent Transactions Preview Section (Directly below KPIs, with no duplicate button clutter!) */}
               <div className="glass-card rounded-2xl p-4 border border-white/[0.08] space-y-3">
                 <div className="flex items-center justify-between">
@@ -243,6 +251,7 @@ function MainDashboard() {
                         allTransactions={monthTransactions}
                         cards={cards}
                         onEdit={handleEditTx}
+                        onRefund={handleRefundTx}
                         onDelete={(targetTx) => deleteTransaction(targetTx.id)}
                         onCycleStatus={cycleStatus}
                       />
@@ -258,6 +267,7 @@ function MainDashboard() {
             <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <TransactionTable
                 onEditTx={handleEditTx}
+                onRefundTx={handleRefundTx}
               />
             </div>
           )}
@@ -282,8 +292,6 @@ function MainDashboard() {
               onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
               onOpenInvestments={() => setInvestmentsModalOpen(true)}
               onOpenInvoices={() => setInvoicesModalOpen(true)}
-              onGenerateBills={handleGenerate}
-              generating={generatingBills}
             />
           )}
         </div>
@@ -307,8 +315,15 @@ function MainDashboard() {
       <ApiKeyModal open={apiKeyModalOpen} onOpenChange={setApiKeyModalOpen} />
       <TransactionModal
         open={txModalOpen}
-        onOpenChange={setTxModalOpen}
+        onOpenChange={(open) => {
+          setTxModalOpen(open)
+          if (!open) {
+            setEditingTx(null)
+            setRefundFromTx(null)
+          }
+        }}
         editingTx={editingTx}
+        refundFromTx={refundFromTx}
       />
       <FutureProjectionModal
         open={projectionModalOpen}
@@ -333,6 +348,7 @@ function MainDashboard() {
         open={invoicesModalOpen}
         onOpenChange={setInvoicesModalOpen}
         onEditTx={handleEditTx}
+        onRefundTx={handleRefundTx}
       />
     </div>
   )

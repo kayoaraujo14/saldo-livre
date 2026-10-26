@@ -69,14 +69,19 @@ fun TransactionItem(
 
     val displayAmount = if (!currentUserId.isNullOrBlank() && isSplit) myImpact else transaction.effectiveAmount
 
-    val formattedAmount = remember(displayAmount, isIncome) {
-        val prefix = if (isIncome) "+ " else "- "
-        prefix + FinanceEngine.formatCurrency(displayAmount)
+    val isRefund = transaction.isRefund || displayAmount < 0.0
+    val formattedAmount = remember(displayAmount, isIncome, isRefund) {
+        if (isRefund) {
+            "+ " + FinanceEngine.formatCurrency(kotlin.math.abs(displayAmount))
+        } else {
+            val prefix = if (isIncome) "+ " else "- "
+            prefix + FinanceEngine.formatCurrency(kotlin.math.abs(displayAmount))
+        }
     }
-    val amountColor = if (isIncome) Emerald400 else TextPrimary
+    val amountColor = if (isRefund) Cyan400 else if (isIncome) Emerald400 else TextPrimary
     val itemBorderColor = if (isPaid) Emerald500.copy(alpha = 0.25f) else DarkBorder
 
-    val isPayerAndHasReceivable = !currentUserId.isNullOrBlank() &&
+    val isPayerAndHasReceivable = !isRefund && !currentUserId.isNullOrBlank() &&
             transaction.paidByUid == currentUserId &&
             transaction.effectiveAmount > myImpact
     val toReceive = if (isPayerAndHasReceivable) transaction.effectiveAmount - myImpact else 0.0

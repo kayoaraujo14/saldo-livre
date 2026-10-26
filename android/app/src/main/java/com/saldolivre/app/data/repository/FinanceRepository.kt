@@ -33,6 +33,7 @@ interface FinanceRepository {
     suspend fun markAllocationReimbursed(transactionId: String, nameOrUid: String)
     suspend fun updateEstimatedWithActual(id: String, actualAmount: Double)
     suspend fun generateBillsForMonth(monthKey: String): Pair<Int, Int>
+    suspend fun autoLaunchDueBillsForMonth(monthKey: String, todayStr: String): com.saldolivre.app.data.engine.FinanceEngine.AutoLaunchBillsResult
     suspend fun saveRecurringBill(bill: RecurringBill)
     suspend fun deleteRecurringBill(id: String)
     suspend fun updateMonthlyIncome(income: Double)

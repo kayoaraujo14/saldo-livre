@@ -18,6 +18,7 @@ data class RecurringBillsUiState(
     val currentUser: UserProfile = UserProfile(),
     val partner: UserProfile? = null,
     val bills: List<RecurringBill> = emptyList(),
+    val cards: List<Card> = emptyList(),
     val isLoading: Boolean = false,
     val activeTab: RecurringTab = RecurringTab.ALL,
     val editingIncome: Boolean = false,
@@ -39,17 +40,19 @@ class RecurringBillsViewModel(
         viewModelScope.launch {
             combine(
                 repository.currentUser,
-                repository.getRecurringBills()
-            ) { user, bills ->
+                repository.getRecurringBills(),
+                repository.getCards()
+            ) { user, bills, cards ->
                 val partner = repository.allUsers.find { it.uid != user.uid }
-                user to (bills to partner)
-            }.collect { (user, billsAndPartner) ->
-                val (bills, partner) = billsAndPartner
+                Triple(user, partner, bills to cards)
+            }.collect { (user, partner, billsAndCards) ->
+                val (bills, cards) = billsAndCards
                 _uiState.update { current ->
                     current.copy(
                         currentUser = user,
                         partner = partner,
                         bills = bills,
+                        cards = cards,
                         incomeInput = if (!current.editingIncome) user.monthlyIncome.toString() else current.incomeInput
                     )
                 }
@@ -129,7 +132,7 @@ class RecurringBillsViewModel(
                 it.copy(
                     editingBill = null,
                     isFormOpen = false,
-                    userMessage = "Molde recorrente salvo com sucesso!"
+                    userMessage = "Conta fixa salva com sucesso!"
                 )
             }
         }
@@ -159,7 +162,7 @@ class RecurringBillsViewModel(
                     billToDelete = null,
                     editingBill = if (it.editingBill?.id == toDelete.id) null else it.editingBill,
                     isFormOpen = if (it.editingBill?.id == toDelete.id) false else it.isFormOpen,
-                    userMessage = "Molde excluído com sucesso."
+                    userMessage = "Conta fixa excluída com sucesso."
                 )
             }
         }

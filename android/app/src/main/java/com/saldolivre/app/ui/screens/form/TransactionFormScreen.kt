@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Warning
@@ -82,7 +83,8 @@ fun TransactionFormScreen(
                 title = {
                     Text(
                         text = when {
-                            state.isEditing -> "Editar Lançamento"
+                            state.isEditing -> if (state.isEstorno) "Editar Estorno Rateado" else "Editar Lançamento"
+                            state.isEstorno -> "Novo Estorno Rateado"
                             state.type == TransactionType.EXPENSE -> "Nova Despesa"
                             else -> "Nova Receita"
                         },
@@ -262,7 +264,7 @@ fun TransactionFormScreen(
                 }
             }
 
-            // Type Toggle: Despesa vs Receita
+            // Type Toggle: Despesa vs Estorno vs Receita
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -274,15 +276,33 @@ fun TransactionFormScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (state.type == TransactionType.EXPENSE) Rose500 else Color.Transparent)
-                        .clickable { viewModel.onTypeChange(TransactionType.EXPENSE) }
-                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                        .background(if (state.type == TransactionType.EXPENSE && !state.isEstorno) Rose500 else Color.Transparent)
+                        .clickable { viewModel.onTypeChange(TransactionType.EXPENSE, isEstorno = false) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "💸 Despesa",
                         fontWeight = FontWeight.Bold,
-                        color = if (state.type == TransactionType.EXPENSE) DarkBackground else TextSecondary,
+                        color = if (state.type == TransactionType.EXPENSE && !state.isEstorno) DarkBackground else TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (state.isEstorno) Cyan500 else Color.Transparent)
+                        .clickable { viewModel.onTypeChange(TransactionType.EXPENSE, isEstorno = true) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "🔄 Estorno",
+                        fontWeight = FontWeight.Bold,
+                        color = if (state.isEstorno) DarkBackground else TextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -293,8 +313,8 @@ fun TransactionFormScreen(
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (state.type == TransactionType.INCOME) Emerald500 else Color.Transparent)
-                        .clickable { viewModel.onTypeChange(TransactionType.INCOME) }
-                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                        .clickable { viewModel.onTypeChange(TransactionType.INCOME, isEstorno = false) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -307,40 +327,82 @@ fun TransactionFormScreen(
                 }
             }
 
+            if (state.isEstorno) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Cyan500.copy(alpha = 0.12f))
+                        .border(1.dp, Cyan500.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = Cyan400,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .padding(top = 2.dp)
+                        )
+                        Text(
+                            text = "Cadastrando um estorno rateado: O valor inserido entrará como crédito na fatura/despesa e o abatimento será rateado proporcionalmente entre os participantes.",
+                            fontSize = 11.sp,
+                            color = Cyan400,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            }
+
             // Amount Input Card
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(DarkSurface)
-                    .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
+                    .border(
+                        1.dp,
+                        if (state.isEstorno) Cyan500.copy(alpha = 0.45f) else DarkBorder,
+                        RoundedCornerShape(16.dp)
+                    )
                     .padding(16.dp)
             ) {
                 Column {
-                    val amountLabel = if (state.isInstallment && state.installmentsCount > 1) {
-                        if (state.installmentMode == "total") "VALOR TOTAL DA COMPRA (R$)" else "VALOR POR PARCELA (R$)"
-                    } else {
-                        "VALOR (R$)"
+                    val amountLabel = when {
+                        state.isEstorno -> "VALOR DO ESTORNO / CRÉDITO A ABATER (R$)"
+                        state.isInstallment && state.installmentsCount > 1 -> {
+                            if (state.installmentMode == "total") "VALOR TOTAL DA COMPRA (R$)" else "VALOR POR PARCELA (R$)"
+                        }
+                        else -> "VALOR (R$)"
                     }
-                    Text(text = amountLabel, style = Typography.labelSmall, color = TextMuted)
+                    Text(text = amountLabel, style = Typography.labelSmall, color = if (state.isEstorno) Cyan400 else TextMuted)
                     Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = state.amountText,
-                        onValueChange = { viewModel.onAmountChange(it) },
-                        placeholder = { Text(text = "0,00", fontSize = 28.sp, color = TextMuted) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        textStyle = Typography.headlineLarge.copy(
-                            color = if (state.type == TransactionType.INCOME) Emerald400 else TextPrimary
-                        ),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color.Transparent,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (state.isEstorno) {
+                            Text(text = "- R$ ", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Cyan400)
+                        }
+                        OutlinedTextField(
+                            value = state.amountText,
+                            onValueChange = { viewModel.onAmountChange(it) },
+                            placeholder = { Text(text = "0,00", fontSize = 28.sp, color = TextMuted) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            textStyle = Typography.headlineLarge.copy(
+                                color = if (state.isEstorno) Cyan400 else if (state.type == TransactionType.INCOME) Emerald400 else TextPrimary
+                            ),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
 
@@ -406,6 +468,23 @@ fun TransactionFormScreen(
                     base
                 }
             }
+            var expandedCategoryDropdown by remember { mutableStateOf(false) }
+            var expandedSubcategoryDropdown by remember { mutableStateOf(false) }
+
+            val categoriesToShow = remember(state.type, state.category, state.isEstorno) {
+                val list = if (state.type == TransactionType.INCOME) {
+                    CategoryRegistry.INCOME_CATEGORIES
+                } else {
+                    val base = CategoryRegistry.EXPENSE_CATEGORIES
+                    val estornoCat = CategoryRegistry.get("Estorno")
+                    if (base.none { it.name == "Estorno" }) listOf(estornoCat) + base else base
+                }
+                if (list.none { it.name == state.category }) {
+                    list + CategoryRegistry.get(state.category)
+                } else {
+                    list
+                }
+            }
 
             Column(
                 modifier = Modifier
@@ -422,7 +501,7 @@ fun TransactionFormScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Categoria Principal",
+                        text = "Categoria & Subcategoria",
                         style = Typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
@@ -445,87 +524,174 @@ fun TransactionFormScreen(
                     }
                 }
 
-                val categoriesToShow = remember(state.type, state.category) {
-                    val list = if (state.type == TransactionType.INCOME) {
-                        CategoryRegistry.INCOME_CATEGORIES
-                    } else {
-                        CategoryRegistry.EXPENSE_CATEGORIES
-                    }
-                    if (list.none { it.name == state.category }) {
-                        list + CategoryRegistry.get(state.category)
-                    } else {
-                        list
-                    }
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // Menu Suspenso: Categoria Principal
+                ExposedDropdownMenuBox(
+                    expanded = expandedCategoryDropdown,
+                    onExpandedChange = { expandedCategoryDropdown = it },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    categoriesToShow.forEach { cat ->
-                        val isSelected = state.category == cat.name
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) cat.color.copy(alpha = 0.2f) else DarkBackground)
-                                .border(1.dp, if (isSelected) cat.color else DarkBorder, RoundedCornerShape(10.dp))
-                                .clickable { viewModel.onCategoryChange(cat.name) }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = cat.icon,
-                                    contentDescription = null,
-                                    tint = if (isSelected) cat.color else TextSecondary,
-                                    modifier = Modifier.size(14.dp)
+                    OutlinedTextField(
+                        value = state.category,
+                        onValueChange = {},
+                        readOnly = true,
+                        singleLine = true,
+                        label = {
+                            Text(
+                                if (state.type == TransactionType.INCOME) "Categoria de Receita" else "Categoria de Despesa",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = currentCategoryDetail.icon,
+                                contentDescription = null,
+                                tint = currentCategoryDetail.color,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategoryDropdown)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = currentCategoryDetail.color,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedContainerColor = DarkBackground,
+                            unfocusedContainerColor = DarkBackground,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedLabelColor = currentCategoryDetail.color,
+                            unfocusedLabelColor = TextSecondary,
+                            focusedTrailingIconColor = currentCategoryDetail.color,
+                            unfocusedTrailingIconColor = TextSecondary
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = expandedCategoryDropdown,
+                        onDismissRequest = { expandedCategoryDropdown = false },
+                        modifier = Modifier.background(DarkSurface)
+                    ) {
+                        categoriesToShow.forEach { cat ->
+                            val isSelected = state.category == cat.name
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = cat.name,
+                                        color = if (isSelected) cat.color else TextPrimary,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = cat.icon,
+                                        contentDescription = null,
+                                        tint = cat.color,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                trailingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = cat.color,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    viewModel.onCategoryChange(cat.name)
+                                    expandedCategoryDropdown = false
+                                },
+                                modifier = Modifier.background(
+                                    if (isSelected) cat.color.copy(alpha = 0.12f) else Color.Transparent
                                 )
-                                Text(
-                                    text = cat.name,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) cat.color else TextSecondary
-                                )
-                            }
+                            )
                         }
                     }
                 }
 
+                // Menu Suspenso: Subcategoria
                 if (subcategoriesList.isNotEmpty()) {
-                    HorizontalDivider(color = DarkBorder.copy(alpha = 0.6f))
-
-                    Text(
-                        text = "Subcategoria (${state.category})",
-                        style = Typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextSecondary
-                    )
-
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ExposedDropdownMenuBox(
+                        expanded = expandedSubcategoryDropdown,
+                        onExpandedChange = { expandedSubcategoryDropdown = it },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        subcategoriesList.forEach { sub ->
-                            val isSelected = state.subcategory == sub
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSelected) Cyan500.copy(alpha = 0.2f) else DarkBackground)
-                                    .border(1.dp, if (isSelected) Cyan400 else DarkBorder, RoundedCornerShape(10.dp))
-                                    .clickable { viewModel.onSubcategoryChange(sub) }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
+                        OutlinedTextField(
+                            value = state.subcategory ?: "Selecione uma subcategoria",
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            label = {
                                 Text(
-                                    text = sub,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) Cyan400 else TextSecondary
+                                    "Subcategoria (${state.category})",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedSubcategoryDropdown)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Cyan400,
+                                unfocusedBorderColor = DarkBorder,
+                                focusedContainerColor = DarkBackground,
+                                unfocusedContainerColor = DarkBackground,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedLabelColor = Cyan400,
+                                unfocusedLabelColor = TextSecondary,
+                                focusedTrailingIconColor = Cyan400,
+                                unfocusedTrailingIconColor = TextSecondary
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = expandedSubcategoryDropdown,
+                            onDismissRequest = { expandedSubcategoryDropdown = false },
+                            modifier = Modifier.background(DarkSurface)
+                        ) {
+                            subcategoriesList.forEach { sub ->
+                                val isSelected = state.subcategory == sub
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = sub,
+                                            color = if (isSelected) Cyan400 else TextPrimary,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    trailingIcon = if (isSelected) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Cyan400,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    } else null,
+                                    onClick = {
+                                        viewModel.onSubcategoryChange(sub)
+                                        expandedSubcategoryDropdown = false
+                                    },
+                                    modifier = Modifier.background(
+                                        if (isSelected) Cyan400.copy(alpha = 0.12f) else Color.Transparent
+                                    )
                                 )
                             }
                         }
@@ -628,7 +794,7 @@ fun TransactionFormScreen(
             }
 
             // Seção de Compra Parcelada (idêntica à Web)
-            if (state.type == TransactionType.EXPENSE && !state.isEditing) {
+            if (state.type == TransactionType.EXPENSE && !state.isEditing && !state.isEstorno) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1011,6 +1177,44 @@ fun TransactionFormScreen(
                 }
             }
 
+            if (state.isEstorno) {
+                val estornoAmt = state.amountText.toDoubleOrNull() ?: 0.0
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Cyan500.copy(alpha = 0.10f))
+                        .border(1.dp, Cyan500.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                        .padding(14.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                tint = Cyan400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Resumo do Alívio Financeiro (Estorno Rateado)",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Cyan400
+                            )
+                        }
+                        Text(
+                            text = "Este estorno abaterá ${FinanceEngine.formatCurrency(estornoAmt)} diretamente da fatura ou despesas deste ciclo, aliviando o Saldo Livre e reduzindo os recebíveis/pagáveis de cada participante do rateio.",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             // Submit Button
@@ -1019,10 +1223,14 @@ fun TransactionFormScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 52.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.isEstorno) Cyan500 else Emerald500
+                ),
                 shape = RoundedCornerShape(14.dp)
             ) {
                 val buttonText = when {
+                    state.isEstorno ->
+                        "Salvar Estorno Rateado"
                     state.isEditing && editingTx?.installmentGroupId != null && state.editScope == "all" ->
                         "Salvar em Todas as ${editingTx.installmentsTotal ?: state.installmentsCount} Parcelas"
                     state.isEditing ->

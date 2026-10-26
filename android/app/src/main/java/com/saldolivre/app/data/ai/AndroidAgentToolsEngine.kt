@@ -149,9 +149,19 @@ class AndroidAgentToolsEngine(
         customDueDate: String? = null,
         confirmed: Boolean = false
     ): ToolExecutionResult {
-        if (amount <= 0.0) {
+        val isEstorno = category?.equals("Estorno", ignoreCase = true) == true ||
+                description.contains("estorno", ignoreCase = true) ||
+                description.contains("reembolso", ignoreCase = true) ||
+                description.contains("devolucao", ignoreCase = true) ||
+                description.contains("devolução", ignoreCase = true) ||
+                description.contains("crédito na fatura", ignoreCase = true) ||
+                description.contains("credito na fatura", ignoreCase = true)
+
+        val absAmount = Math.abs(amount)
+        if (absAmount <= 0.0) {
             return ToolExecutionResult(text = "⚠️ O valor da transação deve ser maior que zero.")
         }
+        val totalSigned = if (isEstorno) -absAmount else absAmount
 
         val user = repository.currentUser.value
         val cards = repository.getCards().first()
@@ -182,8 +192,11 @@ class AndroidAgentToolsEngine(
         var finalCat = category?.takeIf { it.isNotBlank() && it != "Outros" }
         var finalSubcat = subcategory?.takeIf { it.isNotBlank() }
 
-        if (finalCat == null) {
-            val guess = neuralClassifier.guessCategoryAndSubcategory(description, amount)
+        if (isEstorno && (finalCat == null || finalCat == "Outros")) {
+            finalCat = "Estorno"
+            finalSubcat = "Crédito na Fatura"
+        } else if (finalCat == null) {
+            val guess = neuralClassifier.guessCategoryAndSubcategory(description, absAmount)
             finalCat = if (type == TransactionType.INCOME) {
                 if (CategoryRegistry.INCOME_CATEGORIES.any { it.name.equals(guess.category, ignoreCase = true) }) guess.category
                 else "Outras Receitas"
@@ -221,7 +234,7 @@ class AndroidAgentToolsEngine(
 
         val splitResult = FinanceEngine.buildSplit(
             splitType = effectiveSplitType,
-            total = amount,
+            total = totalSigned,
             myUid = user.uid,
             myName = user.displayName,
             partnerUid = partner?.uid,
@@ -236,16 +249,24 @@ class AndroidAgentToolsEngine(
         val cleanDesc = FinanceEngine.stripInstallmentSuffix(description)
         val isInstallment = totalInstallments > 1
         val cardText = if (matchedCard != null) " • Cartão ${matchedCard.cardName}" else ""
-        val myImpact = splitResult.userImpact[user.uid] ?: amount
+        val myImpact = splitResult.userImpact[user.uid] ?: totalSigned
 
         // SE AINDA NÃO CONFIRMADO PELO USUÁRIO: Gera rascunho com pedido de confirmação interativo
         if (!confirmed) {
             val before = repository.getMonthSummary().first()
-            val netDiff = if (type == TransactionType.INCOME) amount else -myImpact
+            val netDiff = if (type == TransactionType.INCOME) absAmount else -myImpact
             val estimatedAfter = FinanceEngine.round2(before.freeBalance + netDiff)
-            val actionTitle = "${if (type == TransactionType.INCOME) "Receita" else "Despesa"}: $cleanDesc"
+            val actionTitle = if (isEstorno) "Estorno / Reembolso: $cleanDesc" else "${if (type == TransactionType.INCOME) "Receita" else "Despesa"}: $cleanDesc"
 
-            val confirmMessage = if (isInstallment) {
+            val confirmMessage = if (isEstorno) {
+                val dateDetail = if (isCreditCard) " para a fatura de **${FinanceEngine.monthLabel(finalCompetenceMonth)}**" else " para **${FinanceEngine.monthLabel(finalCompetenceMonth)}**"
+                "Entendi que você deseja cadastrar um **estorno rateado**: **\"$cleanDesc\"** no valor de **${FinanceEngine.formatCurrency(absAmount)}**${if (matchedCard != null) " no cartão **${matchedCard.cardName}**" else ""}$dateDetail.\n\n" +
+                        "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
+                        "• **Método**: ${effectiveMethod.label}\n" +
+                        "• **Divisão**: ${splitType.label} (Seu alívio: +${FinanceEngine.formatCurrency(Math.abs(myImpact))})\n" +
+                        "• **Alívio no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
+                        "Por favor, confirme se os dados estão corretos para abater este estorno no Saldo Livre."
+            } else if (isInstallment) {
                 "Entendi que você deseja cadastrar uma despesa parcelada: **\"$cleanDesc\"** em **${totalInstallments}x de ${FinanceEngine.formatCurrency(amount)}** (total de ${FinanceEngine.formatCurrency(amount * totalInstallments)})${if (matchedCard != null) " no cartão **${matchedCard.cardName}**" else ""} a partir de **${FinanceEngine.monthLabel(finalCompetenceMonth)}**.\n\n" +
                         "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
                         "• **Divisão**: ${splitType.label} (Seu impacto: ${FinanceEngine.formatCurrency(myImpact)}/mês)\n" +
@@ -396,8 +417,8 @@ class AndroidAgentToolsEngine(
                 type = type,
                 paymentMethod = effectiveMethod,
                 status = if (type == TransactionType.INCOME || !isCreditCard) TransactionStatus.PAID else TransactionStatus.PENDING,
-                actualAmount = amount,
-                totalAmount = amount,
+                actualAmount = totalSigned,
+                totalAmount = totalSigned,
                 dueDate = finalDueDate,
                 competenceMonth = finalCompetenceMonth,
                 visibleToUids = splitResult.visibleToUids,
@@ -413,13 +434,16 @@ class AndroidAgentToolsEngine(
 
             repository.addTransaction(tx)
 
+            val actTitle = if (isEstorno) "Estorno Rateado Registrado" else if (type == TransactionType.INCOME) "Receita Registrada" else "Despesa Registrada"
+            val actDesc = if (isEstorno) "$cleanDesc — Estorno de ${FinanceEngine.formatCurrency(absAmount)}" else "$cleanDesc — ${FinanceEngine.formatCurrency(amount)}"
+
             repository.logActivity(
                 ActivityLog(
                     id = "act_" + UUID.randomUUID().toString().take(8),
                     actionType = ActivityActionType.TRANSACTION_CREATED,
-                    title = if (type == TransactionType.INCOME) "Receita Registrada" else "Despesa Registrada",
-                    description = "$cleanDesc — ${FinanceEngine.formatCurrency(amount)}",
-                    amount = amount,
+                    title = actTitle,
+                    description = actDesc,
+                    amount = totalSigned,
                     competenceMonth = finalCompetenceMonth,
                     userUid = user.uid,
                     userName = user.displayName
@@ -428,21 +452,21 @@ class AndroidAgentToolsEngine(
 
             val summaryNow = repository.getMonthSummary().first()
 
-            val typeLabel = if (type == TransactionType.INCOME) "Receita" else "Despesa"
+            val typeLabel = if (isEstorno) "Estorno rateado" else if (type == TransactionType.INCOME) "Receita" else "Despesa"
 
             val dateLabel = if (isCreditCard) "Data da Compra" else "Vencimento"
 
             return ToolExecutionResult(
-                text = "✅ **$typeLabel registrada com sucesso!**\n\n" +
+                text = "✅ **$typeLabel ${if (isEstorno) "registrado" else "registrada"} com sucesso!**\n\n" +
                         "• **Descrição**: $cleanDesc\n" +
-                        "• **Valor**: ${FinanceEngine.formatCurrency(amount)}\n" +
+                        "• **Valor**: ${FinanceEngine.formatCurrency(absAmount)}\n" +
                         "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
                         "• **Competência**: ${FinanceEngine.monthLabel(finalCompetenceMonth)} ($dateLabel: ${FinanceEngine.formatShortDate(finalDueDate)})$cardText\n" +
-                        "• **Divisão**: ${splitType.label} (Seu impacto: ${FinanceEngine.formatCurrency(myImpact)})\n\n" +
+                        "• **Divisão**: ${splitType.label} (Seu alívio: +${FinanceEngine.formatCurrency(Math.abs(myImpact))})\n\n" +
                         "Seu **Saldo Livre** foi atualizado em tempo real!",
                 actionCard = ActionCardData(
-                    title = if (type == TransactionType.INCOME) "Receita Registrada" else "Despesa Registrada",
-                    description = "$cleanDesc — ${FinanceEngine.formatCurrency(amount)}",
+                    title = actTitle,
+                    description = "$cleanDesc — ${FinanceEngine.formatCurrency(absAmount)}",
                     detail = "$finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}$cardText • ${splitType.label}",
                     newFreeBalance = "Saldo Livre em ${FinanceEngine.monthLabel(finalCompetenceMonth)}: ${FinanceEngine.formatCurrency(summaryNow.freeBalance)}"
                 )
@@ -1349,6 +1373,7 @@ class AndroidAgentToolsEngine(
         month: String? = null,
         status: TransactionStatus? = null,
         onlyMine: Boolean = false,
+        allMyExpenses: Boolean = false,
         person: String? = null,
         onlyThirdParties: Boolean = false,
         cardFilter: String? = null,
@@ -1406,6 +1431,11 @@ class AndroidAgentToolsEngine(
             if (!subcategory.isNullOrBlank() && !(t.subcategory?.contains(subcategory, ignoreCase = true) == true)) return@filter false
             if (status != null && t.status != status) return@filter false
             if (!searchTerm.isNullOrBlank() && !matchesSearch(t.description, searchTerm) && !matchesSearch(t.category, searchTerm)) return@filter false
+
+            // FILTRO: TODOS OS MEUS GASTOS (100% MEUS + RATEADOS COM MINHA PARTICIPAÇÃO)
+            if (allMyExpenses) {
+                if (!FinanceEngine.isMyExpense(t, user.uid, all)) return@filter false
+            }
 
             // FILTRO CRÍTICO: SOMENTE 100% MEU (SEM DIVISÕES NEM TERCEIROS)
             if (onlyMine) {
@@ -1684,6 +1714,7 @@ class AndroidAgentToolsEngine(
         month: String? = null,
         status: TransactionStatus? = null,
         onlyMine: Boolean = false,
+        allMyExpenses: Boolean = false,
         person: String? = null,
         onlyThirdParties: Boolean = false,
         cardFilter: String? = null,
@@ -1697,6 +1728,7 @@ class AndroidAgentToolsEngine(
         month = month,
         status = status,
         onlyMine = onlyMine,
+        allMyExpenses = allMyExpenses,
         person = person,
         onlyThirdParties = onlyThirdParties,
         cardFilter = cardFilter,
@@ -1725,6 +1757,10 @@ class AndroidAgentToolsEngine(
         val onlyMine = jsonObj.getBooleanOrNull("onlyMine")
             ?: jsonObj.getBooleanOrNull("somenteMinhas")
             ?: jsonObj.getBooleanOrNull("apenasMinhas")
+            ?: false
+
+        val allMyExpenses = jsonObj.getBooleanOrNull("todosMeusGastos")
+            ?: jsonObj.getBooleanOrNull("meusGastos")
             ?: false
 
         val person = jsonObj.getStringOrNull("person")
@@ -1761,6 +1797,7 @@ class AndroidAgentToolsEngine(
             month = month,
             status = status,
             onlyMine = onlyMine,
+            allMyExpenses = allMyExpenses,
             person = person,
             onlyThirdParties = onlyThirdParties,
             cardFilter = cardFilter,

@@ -520,6 +520,24 @@ class FirestoreFinanceRepository(
         return Pair(res.created.size, res.skipped)
     }
 
+    override suspend fun autoLaunchDueBillsForMonth(monthKey: String, todayStr: String): FinanceEngine.AutoLaunchBillsResult {
+        val user = _currentUser.value
+        val allTxs = getTransactions().first()
+        val bills = getRecurringBills().first()
+        val res = FinanceEngine.autoLaunchDueBills(
+            bills = bills,
+            all = allTxs,
+            monthKey = monthKey,
+            todayStr = todayStr,
+            me = user,
+            partner = null
+        )
+        if (res.created.isNotEmpty()) {
+            addTransactions(res.created)
+        }
+        return res
+    }
+
     override suspend fun saveRecurringBill(bill: RecurringBill) {
         val uid = auth.currentUser?.uid ?: _currentUser.value.uid
         val billId = if (bill.id.isBlank() || bill.id.startsWith("new_")) {

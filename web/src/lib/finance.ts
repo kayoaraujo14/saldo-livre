@@ -17,6 +17,7 @@ import type {
   TransactionStatus,
   UserProfile,
   FutureMonthProjection,
+  LaunchTrigger,
 } from '@/types'
 import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
 
@@ -213,7 +214,7 @@ export function buildSplit(input: SplitInput) {
         const friendAmount = round2((total * pct) / 100)
         const myAmount = round2(total - friendAmount)
         allocations =
-          myAmount > 0
+          Math.abs(myAmount) > 0.001
             ? [userAlloc(me, myAmount), userAlloc(assignedFriend, friendAmount)]
             : [userAlloc(assignedFriend, total)]
       } else {
@@ -231,10 +232,11 @@ export function buildSplit(input: SplitInput) {
     case 'custom': {
       if (input.customAllocations && input.customAllocations.length > 0) {
         allocations = input.customAllocations.map((a) => {
+          const signedAmount = total < 0 ? -Math.abs(a.amount) : Math.abs(a.amount)
           const item: Allocation = {
             type: a.type,
             name: a.name.trim() || 'Participante',
-            amount: round2(a.amount),
+            amount: round2(signedAmount),
             reimbursed: a.uid === payerUid ? true : wasReimbursed(a.uid ?? a.name),
           }
           if (a.uid) item.uid = a.uid
@@ -263,7 +265,7 @@ export function rescaleSplit(tx: Transaction, newTotal: number) {
   let allocations: Allocation[]
   if (allocs.length === 0) {
     allocations = []
-  } else if (oldTotal <= 0) {
+  } else if (Math.abs(oldTotal) <= 0.001) {
     const each = round2(newTotal / allocs.length)
     allocations = allocs.map((a) => ({ ...a, amount: each }))
   } else {
@@ -312,6 +314,30 @@ export function detectSplit(tx: Transaction, viewerUid: string): SplitType {
   if (tx.splitType === 'partner') return 'partner'
   if (mine) return 'mine'
   return 'partner'
+}
+
+/**
+ * Determina se o usuário logado tem permissão para editar ou excluir a transação.
+ * Um lançamento feito por outra pessoa NÃO pode ser editado nem excluído por quem
+ * recebeu o rateio (amigo atribuído ou participante em rateio).
+ */
+export function canUserEditTransaction(tx: Transaction, currentUid?: string | null): boolean {
+  if (!currentUid) return false
+
+  // Se o usuário logado é o criador ou o pagador, tem permissão total
+  const isCreator = tx.createdByUid === currentUid || (!tx.createdByUid && tx.paidByUid === currentUid)
+  if (isCreator) return true
+
+  // Quem recebeu o rateio como amigo atribuído NÃO pode editar
+  if (tx.assignedFriendUid === currentUid) return false
+
+  // Se o usuário faz parte das alocações mas não criou o lançamento
+  if (tx.allocations?.some((a) => a.uid === currentUid)) return false
+
+  // Se outra pessoa criou explicitamente, o usuário atual não pode editar
+  if (tx.createdByUid && tx.createdByUid !== currentUid) return false
+
+  return true
 }
 
 export const SPLIT_LABELS: Record<SplitType, { label: string; emoji: string; short: string }> = {
@@ -559,6 +585,95 @@ export function impactFor(tx: Transaction, uid: string, all: Transaction[]) {
   }
 
   return tx.userImpact?.[uid] ?? 0
+}
+
+/**
+ * Verifica se a transação representa um gasto do usuário (impacta o Saldo Livre ou tem sua participação).
+ * Inclui gastos 100% pessoais e lançamentos rateados (50/50, amigos, divisões personalizadas).
+ */
+export function isMyExpenseTx(tx: Transaction, uid: string, all: Transaction[] = []): boolean {
+  if (tx.type === 'income') return false
+
+  const myImp = Math.abs(impactFor(tx, uid, all))
+  if (myImp > 0.001) return true
+
+  // Alocação explícita onde o usuário tem valor > 0
+  if (
+    tx.allocations &&
+    tx.allocations.some(
+      (a) => (a.uid === uid || a.name?.toLowerCase() === 'você' || a.name?.toLowerCase() === 'meu' || a.name?.toLowerCase() === '100% meu') && Number(a.amount) > 0,
+    )
+  ) {
+    return true
+  }
+
+  // Divisão 50/50 que envolve o usuário
+  if (tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') {
+    if (!tx.visibleToUids || tx.visibleToUids.includes(uid) || tx.createdByUid === uid || tx.paidByUid === uid) {
+      return true
+    }
+  }
+
+  // 100% Meu
+  if (tx.splitType === 'mine') {
+    if (!tx.visibleToUids || tx.visibleToUids.includes(uid) || tx.createdByUid === uid || tx.paidByUid === uid) {
+      return true
+    }
+  }
+
+  // Amigo onde o usuário tem cota
+  if (tx.splitType === 'friend' || tx.assignedFriendUid) {
+    if (uid === tx.assignedFriendUid && tx.acceptanceStatus === 'accepted') return true
+    if ((tx.createdByUid === uid || tx.paidByUid === uid) && friendShareOf(tx) < Math.abs(effectiveAmount(tx))) {
+      return true
+    }
+  }
+
+  // Criado ou pago pelo usuário (desde que não seja 100% do parceiro ou terceiro puro)
+  if (tx.createdByUid === uid || tx.paidByUid === uid) {
+    if (tx.splitType === 'partner') return false
+    if (tx.splitType === 'external' || (tx.splitType as string) === 'THIRD_PARTY') return false
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Verifica se a transação é 100% exclusiva do usuário (sem divisão com parceiro, amigos ou terceiros).
+ */
+export function isPureMineTx(tx: Transaction, uid: string, all: Transaction[] = []): boolean {
+  if (!isMyExpenseTx(tx, uid, all)) return false
+
+  if (tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') return false
+  if (tx.splitType === 'partner') return false
+  if (tx.assignedFriendUid || tx.assignedFriendName || tx.targetFriendName || tx.splitType === 'friend') return false
+  if (tx.thirdPartyName || tx.externalName || tx.splitType === 'external' || (tx.splitType as string) === 'THIRD_PARTY') return false
+
+  if (tx.allocations && tx.allocations.length > 1) {
+    const hasOthers = tx.allocations.some(
+      (a) =>
+        a.uid !== uid &&
+        a.name?.toLowerCase() !== 'você' &&
+        a.name?.toLowerCase() !== 'meu' &&
+        a.name?.toLowerCase() !== '100% meu' &&
+        Number(a.amount) > 0,
+    )
+    if (hasOthers) return false
+  }
+
+  const myImp = Math.abs(impactFor(tx, uid, all))
+  const eff = Math.abs(effectiveAmount(tx))
+  if (eff > 0 && Math.abs(myImp - eff) > 0.05) return false
+
+  return true
+}
+
+/**
+ * Verifica se a transação é um gasto do usuário que foi rateado/compartilhado com parceiro, amigos ou terceiros.
+ */
+export function isSharedWithMeTx(tx: Transaction, uid: string, all: Transaction[] = []): boolean {
+  return isMyExpenseTx(tx, uid, all) && !isPureMineTx(tx, uid, all)
 }
 
 // ------------------------------------------------------------------
@@ -901,6 +1016,148 @@ export const ESTIMATION_LABELS = {
   avg_3_months: 'Média 3 meses',
 } as const
 
+export function computeLaunchDate(dueDay: number, monthKey: string, trigger: LaunchTrigger = 'day_before'): string {
+  const [yearStr, monthStr] = monthKey.split('-')
+  const year = parseInt(yearStr, 10)
+  const month = parseInt(monthStr, 10)
+  const dim = daysInMonth(monthKey)
+  const clampedDueDay = Math.min(Math.max(1, dueDay), dim)
+
+  if (trigger === 'first_day_of_month') {
+    return `${monthKey}-01`
+  }
+
+  const dateObj = new Date(year, month - 1, clampedDueDay)
+
+  if (trigger === 'day_before') {
+    dateObj.setDate(dateObj.getDate() - 1)
+  } else if (trigger === 'day_after') {
+    dateObj.setDate(dateObj.getDate() + 1)
+  }
+
+  const y = dateObj.getFullYear()
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0')
+  const d = String(dateObj.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+export interface AutoLaunchResult {
+  created: NewTransaction[]
+  skipped: number
+  launchedBillIds: string[]
+}
+
+export function autoLaunchDueBills(args: {
+  bills: RecurringBill[]
+  all: Transaction[]
+  monthKey: string
+  todayStr: string
+  me: Party
+  partner: Party | null
+  profile: UserProfile | null
+}): AutoLaunchResult {
+  const { bills, all, monthKey, todayStr, me, partner, profile } = args
+  const created: NewTransaction[] = []
+  const launchedBillIds: string[] = []
+  let skipped = 0
+
+  // 1. Receita mensal (salário base) a partir do perfil
+  if (profile && profile.monthlyIncome > 0) {
+    const salaryId = `salary_${me.uid}`
+    const exists = all.some((t) => t.recurringBillId === salaryId && t.competenceMonth === monthKey)
+    if (!exists) {
+      // Salário disponibilizado no 1º dia do mês corrente
+      const salaryLaunchDate = `${monthKey}-01`
+      if (todayStr >= salaryLaunchDate) {
+        const split = buildSplit({ splitType: 'mine', total: profile.monthlyIncome, me, partner: null, payerUid: me.uid })
+        created.push({
+          createdByUid: me.uid,
+          paidByUid: me.uid,
+          description: 'Salário Base',
+          category: 'Receita',
+          type: 'income',
+          paymentMethod: 'pix',
+          status: 'estimated',
+          estimatedAmount: profile.monthlyIncome,
+          actualAmount: null,
+          totalAmount: profile.monthlyIncome,
+          dueDate: dateInMonth(monthKey, 5),
+          competenceMonth: monthKey,
+          recurringBillId: salaryId,
+          allocations: split.allocations,
+          userImpact: split.userImpact,
+          visibleToUids: split.visibleToUids,
+          createdAt: Date.now(),
+        })
+        launchedBillIds.push(salaryId)
+      } else {
+        skipped++
+      }
+    } else {
+      skipped++
+    }
+  }
+
+  // 2. Contas Fixas e Assinaturas ativas do usuário
+  for (const bill of bills.filter((b) => b.active && b.ownerUid === me.uid)) {
+    if (bill.startMonth && monthKey < bill.startMonth) {
+      skipped++
+      continue
+    }
+    if (bill.endMonth && monthKey > bill.endMonth) {
+      skipped++
+      continue
+    }
+
+    const exists = all.some((t) => t.recurringBillId === bill.id && t.competenceMonth === monthKey)
+    if (exists) {
+      skipped++
+      continue
+    }
+
+    const trigger = bill.launchTrigger || 'day_before'
+    const launchDate = computeLaunchDate(bill.dueDay, monthKey, trigger)
+
+    if (todayStr >= launchDate) {
+      const { amount } = estimateRecurring(bill, all, monthKey)
+      const split = buildSplit({
+        splitType: bill.splitType ?? 'mine',
+        total: amount,
+        me,
+        partner,
+        payerUid: me.uid,
+      })
+      const isIncome = bill.type === 'income'
+      created.push({
+        createdByUid: me.uid,
+        paidByUid: me.uid,
+        cardId: bill.cardId || null,
+        description: bill.description,
+        category: isIncome ? 'Receita' : bill.category,
+        subcategory: bill.subcategory || null,
+        type: bill.type ?? 'expense',
+        paymentMethod: bill.paymentMethod ?? (isIncome ? 'pix' : bill.cardId ? 'credit_card' : 'bill'),
+        status: 'estimated',
+        estimatedAmount: amount,
+        actualAmount: null,
+        totalAmount: amount,
+        dueDate: dateInMonth(monthKey, bill.dueDay),
+        competenceMonth: monthKey,
+        recurringBillId: bill.id,
+        allocations: split.allocations,
+        userImpact: split.userImpact,
+        visibleToUids: split.visibleToUids,
+        createdAt: Date.now(),
+      })
+      launchedBillIds.push(bill.id)
+    } else {
+      skipped++
+    }
+  }
+
+  return { created, skipped, launchedBillIds }
+}
+
 export function generateMonthBills(args: {
   bills: RecurringBill[]
   all: Transaction[]
@@ -922,7 +1179,7 @@ export function generateMonthBills(args: {
       created.push({
         createdByUid: me.uid,
         paidByUid: me.uid,
-        description: 'Salário',
+        description: 'Salário Base',
         category: 'Receita',
         type: 'income',
         paymentMethod: 'pix',
@@ -942,7 +1199,7 @@ export function generateMonthBills(args: {
   }
 
   for (const bill of bills.filter((b) => b.active && b.ownerUid === me.uid)) {
-    // Feature 1: Limite de meses da recorrência/parcelas
+    // Limite de meses da recorrência/parcelas
     if (bill.startMonth && monthKey < bill.startMonth) {
       skipped++
       continue
@@ -969,11 +1226,12 @@ export function generateMonthBills(args: {
     created.push({
       createdByUid: me.uid,
       paidByUid: me.uid,
+      cardId: bill.cardId || null,
       description: bill.description,
       category: isIncome ? 'Receita' : bill.category,
       subcategory: bill.subcategory || null,
       type: bill.type ?? 'expense',
-      paymentMethod: bill.paymentMethod ?? (isIncome ? 'pix' : 'bill'),
+      paymentMethod: bill.paymentMethod ?? (isIncome ? 'pix' : bill.cardId ? 'credit_card' : 'bill'),
       status: 'estimated',
       estimatedAmount: amount,
       actualAmount: null,
@@ -1008,14 +1266,13 @@ export function projectFutureMonths(args: {
 
     // Check existing transactions for that month visible to uid
     const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
-    const isGenerated = monthTxs.some((t) => Boolean(t.recurringBillId))
 
     let projectedIncome = 0
     let projectedExpense = 0
     let incomeCount = 0
     let expenseCount = 0
 
-    // 1. Sempre inclui transações reais agendadas para aquele mês (ex: parcelas de compras com cartão)
+    // 1. Sempre inclui transações reais agendadas para aquele mês (ex: parcelas de compras com cartão ou contas já lançadas)
     for (const t of monthTxs) {
       const impact = impactFor(t, uid, all)
       if (t.type === 'income') {
@@ -1027,32 +1284,36 @@ export function projectFutureMonths(args: {
       }
     }
 
-    // 2. Se as contas do mês ainda não foram geradas, projeta o salário e os moldes ativos válidos
-    if (!isGenerated) {
-      const hasSalary = monthTxs.some((t) => t.recurringBillId === `salary_${uid}`)
-      if (!hasSalary && profile && profile.monthlyIncome > 0) {
-        projectedIncome += profile.monthlyIncome
+    // 2. Projeta o salário e as contas fixas ativas que ainda NÃO foram lançadas como transação neste mês
+    const hasSalary = monthTxs.some((t) => t.recurringBillId === `salary_${uid}`)
+    if (!hasSalary && profile && profile.monthlyIncome > 0) {
+      projectedIncome += profile.monthlyIncome
+      incomeCount++
+    }
+
+    let ungeneratedCount = 0
+    const activeBills = bills.filter((b) => b.active && b.ownerUid === uid)
+
+    for (const bill of activeBills) {
+      if (monthTxs.some((t) => t.recurringBillId === bill.id)) continue
+
+      // Limite temporal de vigência / parcelas
+      if (bill.startMonth && monthKey < bill.startMonth) continue
+      if (bill.endMonth && monthKey > bill.endMonth) continue
+
+      ungeneratedCount++
+      const { amount } = estimateRecurring(bill, all, monthKey)
+      const myFraction = bill.splitType === 'split_50' ? round2(amount / 2) : amount
+      if (bill.type === 'income') {
+        projectedIncome += myFraction
         incomeCount++
-      }
-
-      for (const bill of bills.filter((b) => b.active && b.ownerUid === uid)) {
-        if (monthTxs.some((t) => t.recurringBillId === bill.id)) continue
-
-        // Feature 1: Limite temporal de recorrência / parcelamento
-        if (bill.startMonth && monthKey < bill.startMonth) continue
-        if (bill.endMonth && monthKey > bill.endMonth) continue
-
-        const { amount } = estimateRecurring(bill, all, monthKey)
-        const myFraction = bill.splitType === 'split_50' ? round2(amount / 2) : amount
-        if (bill.type === 'income') {
-          projectedIncome += myFraction
-          incomeCount++
-        } else {
-          projectedExpense += myFraction
-          expenseCount++
-        }
+      } else {
+        projectedExpense += myFraction
+        expenseCount++
       }
     }
+
+    const isGenerated = ungeneratedCount === 0 && (!profile || profile.monthlyIncome <= 0 || hasSalary)
 
     projectedIncome = round2(projectedIncome)
     projectedExpense = round2(projectedExpense)
@@ -1062,10 +1323,10 @@ export function projectFutureMonths(args: {
     projections.push({
       monthKey,
       label,
+      daysInMonth: dim,
       projectedIncome,
       projectedExpense,
       projectedFreeBalance,
-      daysInMonth: dim,
       projectedDailyLimit,
       isGenerated,
       incomeCount,

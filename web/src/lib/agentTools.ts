@@ -8,6 +8,7 @@ import {
   amountPatch,
   buildSplit,
   calculateCardInvoiceDates,
+  canUserEditTransaction,
   clampPct,
   computeSummary,
   detectSplit,
@@ -15,6 +16,7 @@ import {
   getReserveInfo,
   guessCategoryAndSubcategory,
   impactFor,
+  isMyExpenseTx,
   listReceivables,
   pickCard,
   projectFutureMonths,
@@ -145,7 +147,7 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
 async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
   const rawTotal = Number(args.valorTotal)
   if (isNaN(rawTotal) || rawTotal === 0) return { response: { ok: false, erro: 'valorTotal inválido' } }
-  const total = round2(rawTotal)
+  let total = round2(rawTotal)
 
   const description = String(args.descricao ?? 'Lançamento').trim()
 
@@ -191,7 +193,11 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
   let category: Category = (CATEGORIES as readonly string[]).includes(String(args.categoria))
     ? (args.categoria as Category)
     : guessed.category
-  if (total < 0 && category === 'Outros') category = 'Estorno'
+  const isRefund = total < 0 || category === 'Estorno' || /estorno|reembolso|devolucao|devolução|crédito na fatura|credito fatura/i.test(description)
+  if (isRefund && type === 'expense' && total > 0) {
+    total = -Math.abs(total)
+  }
+  if (isRefund && (category === 'Outros' || category === 'Alimentação')) category = 'Estorno'
   if (splitType === 'external' && category === 'Outros') category = 'Cartão Terceiros'
   if (type === 'income' && (category === 'Outros' || category === 'Receita')) {
     category = (INCOME_CATEGORIES as readonly string[]).includes(guessed.category)
@@ -425,10 +431,11 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
   if (isPendingConfirmation) {
     const netDiff = type === 'income' ? total : -myImpact
     const estimatedAfter = round2(before.freeBalance + netDiff)
-    const actionTitle = `${type === 'income' ? 'Receita' : 'Despesa'}: ${finalDescription}`
+    const actionKind = type === 'income' ? 'Receita' : isRefund ? 'Estorno / Reembolso' : 'Despesa'
+    const actionTitle = `${actionKind}: ${finalDescription}`
 
     const confirmationLines = [
-      { label: 'Valor da parcela', value: money(total) },
+      { label: isRefund ? 'Valor do estorno' : 'Valor da parcela', value: money(Math.abs(total)) },
       ...(isInstallment
         ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
         : []),
@@ -461,7 +468,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       response: {
         ok: true,
         aguardandoConfirmacao: true,
-        mensagem: `Entendi que você deseja cadastrar uma ${type === 'income' ? 'receita' : 'despesa'}: "${finalDescription}" no valor de ${money(total)}${card ? ` no cartão ${card.cardName}` : ''} realizada em ${formatShortDate(date)} para a fatura de ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
+        mensagem: `Entendi que você deseja cadastrar ${isRefund ? 'um estorno/crédito' : type === 'income' ? 'uma receita' : 'uma despesa'}: "${finalDescription}" no valor de ${money(Math.abs(total))}${card ? ` no cartão ${card.cardName}` : ''} realizada em ${formatShortDate(date)} para a fatura de ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
         descricao: finalDescription,
         valorParcela: total,
         tipo: type,
@@ -1220,6 +1227,16 @@ async function excluir(env: AgentEnv, args: Record<string, unknown>): Promise<To
     }
   }
 
+  const uneditable = targets.filter((t) => !canUserEditTransaction(t, env.me.uid))
+  if (uneditable.length > 0) {
+    return {
+      response: {
+        ok: false,
+        erro: `Você não tem permissão para excluir ${uneditable.length === 1 ? 'o lançamento' : 'os lançamentos'} "${uneditable.map((u) => u.description).join(', ')}", pois foram registrados por outra pessoa e recebidos por você via rateio.`,
+      },
+    }
+  }
+
   const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
   const totalDeletedValue = targets.reduce((sum, t) => sum + effectiveAmount(t), 0)
   const deletedDescriptions = targets.map((t) => t.description)
@@ -1312,6 +1329,24 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
   if (targets.length === 0) {
     return {
       response: { ok: false, erro: 'Nenhuma transação encontrada para edição com os critérios informados.' },
+    }
+  }
+
+  const uneditable = targets.filter((t) => !canUserEditTransaction(t, env.me.uid))
+  if (uneditable.length > 0) {
+    return {
+      response: {
+        ok: false,
+        error: `Não foi possível editar: o lançamento "${uneditable[0].description}" foi realizado por outra pessoa e você recebeu o rateio. Apenas quem lançou pode fazer alterações nele.`,
+      },
+      action: {
+        kind: 'error',
+        title: 'Edição não permitida',
+        lines: [
+          { label: 'Motivo', value: 'Lançamento de terceiro recebido via rateio', tone: 'negative' },
+          { label: 'Item', value: uneditable[0].description },
+        ],
+      },
     }
   }
 
@@ -1587,6 +1622,14 @@ async function atualizar(env: AgentEnv, args: Record<string, unknown>): Promise<
   }
 
   const tx = candidates[0]
+  if (!canUserEditTransaction(tx, env.me.uid)) {
+    return {
+      response: {
+        ok: false,
+        erro: `Não foi possível atualizar: a conta "${tx.description}" foi criada por outra pessoa. Apenas quem lançou pode alterá-la.`,
+      },
+    }
+  }
   const patch = {
     ...amountPatch(tx, { actualAmount: value, estimatedAmount: newStatus === 'estimated' ? value : null }),
     status: newStatus,
@@ -1724,6 +1767,7 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   const dataInicio = typeof args.dataInicio === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.dataInicio) ? args.dataInicio.trim() : ''
   const dataFim = typeof args.dataFim === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.dataFim) ? args.dataFim.trim() : ''
   const somenteMinhas = args.somenteMinhas === true || args.apenasMinhas === true
+  const todosMeusGastos = args.todosMeusGastos === true || args.meusGastos === true
   const pessoa = typeof args.pessoa === 'string' ? args.pessoa.trim() : typeof args.terceiro === 'string' ? args.terceiro.trim() : ''
   const apenasTerceiros = args.apenasTerceiros === true || args.terceiros === true || /^(terceiro|terceiros|amigos|amigo)$/i.test(pessoa)
   const cartaoFiltro = typeof args.cartao === 'string' ? args.cartao.trim() : ''
@@ -1808,6 +1852,11 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
 
     // 7. Termo de busca livre
     if (termo && !matchesSearch(t.description, termo) && !(t.subcategory && matchesSearch(t.subcategory, termo))) return false
+
+    // 7.5. FILTRO: TODOS OS MEUS GASTOS (100% MEUS + RATEADOS COM MINHA PARTICIPAÇÃO)
+    if (todosMeusGastos) {
+      if (!isMyExpenseTx(t, env.me.uid, all)) return false
+    }
 
     // 8. FILTRO CRÍTICO: SOMENTE 100% MEU (SEM DIVISÕES NEM TERCEIROS)
     if (somenteMinhas) {

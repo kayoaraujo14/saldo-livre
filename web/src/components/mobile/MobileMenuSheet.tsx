@@ -5,7 +5,6 @@ import {
   CreditCard,
   RefreshCw,
   CalendarRange,
-  Zap,
   KeyRound,
   LogOut,
   ChevronRight,
@@ -22,7 +21,7 @@ interface MobileMenuSheetProps {
   onOpenApiKey: () => void
   onOpenProjection: () => void
   onOpenFriends: () => void
-  onGenerateBills: () => void
+  onGenerateBills?: () => void
   onOpenRecentActivity?: () => void
   onOpenInvestments?: () => void
   onOpenInvoices?: () => void
@@ -35,11 +34,9 @@ export function MobileMenuSheet({
   onOpenApiKey,
   onOpenProjection,
   onOpenFriends,
-  onGenerateBills,
   onOpenRecentActivity,
   onOpenInvestments,
   onOpenInvoices,
-  generating,
 }: MobileMenuSheetProps) {
   const {
     mode,
@@ -228,7 +225,7 @@ export function MobileMenuSheet({
           <ChevronRight className="size-4 text-slate-500" />
         </button>
 
-        {/* Moldes Recorrentes & Salário */}
+        {/* Contas Fixas & Renda */}
         <button
           type="button"
           onClick={onOpenRecurring}
@@ -239,8 +236,8 @@ export function MobileMenuSheet({
               <RefreshCw className="size-4" />
             </div>
             <div>
-              <span className="text-sm font-semibold text-white block">Moldes & Salário Base</span>
-              <span className="text-xs text-slate-400">Contas fixas, assinaturas e receitas</span>
+              <span className="text-sm font-semibold text-white block">Contas Fixas & Renda</span>
+              <span className="text-xs text-slate-400">Assinaturas, despesas fixas e salário</span>
             </div>
           </div>
           <ChevronRight className="size-4 text-slate-500" />
@@ -259,27 +256,6 @@ export function MobileMenuSheet({
             <div>
               <span className="text-sm font-semibold text-white block">Projeção 6 Meses</span>
               <span className="text-xs text-slate-400">Fluxo futuro de parcelas e saldo livre</span>
-            </div>
-          </div>
-          <ChevronRight className="size-4 text-slate-500" />
-        </button>
-
-        {/* Gerar Contas Fixas */}
-        <button
-          type="button"
-          onClick={onGenerateBills}
-          disabled={generating}
-          className="w-full p-4 flex items-center justify-between hover:bg-slate-800/40 transition-colors text-left cursor-pointer active:bg-slate-800/60"
-        >
-          <div className="flex items-center gap-3">
-            <div className="size-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center">
-              <Zap className={`size-4 ${generating ? 'animate-spin' : ''}`} />
-            </div>
-            <div>
-              <span className="text-sm font-semibold text-white block">
-                {generating ? 'Gerando Contas...' : '⚡ Gerar Contas do Mês'}
-              </span>
-              <span className="text-xs text-slate-400">Importa moldes para o mês atual</span>
             </div>
           </div>
           <ChevronRight className="size-4 text-slate-500" />
