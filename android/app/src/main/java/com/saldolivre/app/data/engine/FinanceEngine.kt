@@ -8,7 +8,6 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.round
 
 object FinanceEngine {
@@ -1080,7 +1079,7 @@ object FinanceEngine {
                 val paidPart = if (invoice.status == InvoiceStatus.PAID) {
                     myShare
                 } else {
-                    round2(min(myShare, invoice.paidRatio * myShare))
+                    round2(kotlin.math.min(myShare, invoice.paidRatio * myShare))
                 }
                 val openPart = round2(max(0.0, myShare - paidPart))
 

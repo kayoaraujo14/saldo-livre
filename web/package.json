@@ -8,8 +8,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "vitest run",
     "preview": "vite preview",
-    "deploy": "npm run build && npx firebase-tools deploy --project saldo-livre-c3ca3"
+    "deploy": "npm run build && npx firebase-tools deploy --project saldo-livre-c3ca3",
+    "test": "vitest run"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",
