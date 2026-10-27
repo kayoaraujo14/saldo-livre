@@ -1,35 +1,48 @@
 import { describe, it, expect } from 'vitest'
-import { clampPct } from '../finance'
+import { friendPctOf } from '../finance'
 
-describe('clampPct', () => {
-  it('should clamp percentage to 100 if null', () => {
-    expect(clampPct(null)).toBe(100)
+describe('friendPctOf', () => {
+  it('returns 100 if tx is falsy', () => {
+    expect(friendPctOf(null as any)).toBe(100)
+    expect(friendPctOf(undefined as any)).toBe(100)
   })
 
-  it('should clamp percentage to 100 if undefined', () => {
-    expect(clampPct(undefined)).toBe(100)
+  it('returns clamped friendSharePct if it exists', () => {
+    expect(friendPctOf({ friendSharePct: 30 } as any)).toBe(30)
+    expect(friendPctOf({ friendSharePct: -10 } as any)).toBe(100) // clampPct logic
+    expect(friendPctOf({ friendSharePct: 150 } as any)).toBe(100) // clampPct logic
   })
 
-  it('should clamp percentage to 100 if negative or zero', () => {
-    expect(clampPct(0)).toBe(100)
-    expect(clampPct(-10)).toBe(100)
+  it('returns 100 if totalAmount is falsy or 0', () => {
+    expect(friendPctOf({ totalAmount: 0 } as any)).toBe(100)
+    expect(friendPctOf({ totalAmount: null } as any)).toBe(100)
+    expect(friendPctOf({ totalAmount: undefined } as any)).toBe(100)
   })
 
-  it('should clamp percentage to 100 if greater than 100', () => {
-    expect(clampPct(150)).toBe(100)
-    expect(clampPct(100.01)).toBe(100)
+  it('calculates the percentage correctly based on friendShareOf', () => {
+    // friendShareOf returns 0 if assignedFriendUid is not provided.
+    expect(friendPctOf({ totalAmount: 100 } as any)).toBe(100) // (0 / 100) * 100 = 0 -> clamped to 100
+
+    // fallback when assignedFriendUid exists but no allocations -> friendShareOf uses 50%
+    expect(friendPctOf({ totalAmount: 200, assignedFriendUid: 'friend-1' } as any)).toBe(50) // (100 / 200) * 100 = 50
+
+    // when allocation exists
+    expect(
+      friendPctOf({
+        totalAmount: 200,
+        assignedFriendUid: 'friend-1',
+        allocations: [{ uid: 'friend-1', amount: 80 }]
+      } as any)
+    ).toBe(40) // (80 / 200) * 100 = 40
   })
 
-  it('should return the percentage if between 0 and 100', () => {
-    expect(clampPct(50)).toBe(50)
-    expect(clampPct(33.333)).toBe(33.33) // round2 in action
-    expect(clampPct(99.99)).toBe(99.99)
-    expect(clampPct(100)).toBe(100)
-  })
-
-  it('should handle non-finite numbers', () => {
-    expect(clampPct(NaN)).toBe(100)
-    expect(clampPct(Infinity)).toBe(100)
-    expect(clampPct(-Infinity)).toBe(100)
+  it('handles negative totalAmount correctly by taking absolute value', () => {
+    expect(
+      friendPctOf({
+        totalAmount: -200,
+        assignedFriendUid: 'friend-1',
+        allocations: [{ uid: 'friend-1', amount: 80 }]
+      } as any)
+    ).toBe(40)
   })
 })
