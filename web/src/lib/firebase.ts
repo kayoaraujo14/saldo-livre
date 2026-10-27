@@ -59,7 +59,7 @@ export function clearFirebaseConfig() {
 }
 
 export const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: '',
+  apiKey: 'AIzaSyD6R12Yi9dVUQWiVkYCUplPh0-6Dsr-mhg',
   authDomain: 'saldo-livre-c3ca3.firebaseapp.com',
   projectId: 'saldo-livre-c3ca3',
   storageBucket: 'saldo-livre-c3ca3.firebasestorage.app',
