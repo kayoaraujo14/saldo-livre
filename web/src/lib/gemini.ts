@@ -1394,13 +1394,19 @@ export async function runGeminiAgent(opts: {
     contents.push(modelContent ?? { role: 'model', parts: calls.map((fc: any) => ({ functionCall: fc })) })
 
     const responseParts: Part[] = []
-    for (const fc of calls) {
-      let result: ToolResult
-      try {
-        result = await opts.execute(fc.name as ToolName, (fc.args ?? {}) as Record<string, unknown>)
-      } catch (e) {
-        result = { response: { ok: false, erro: (e as Error).message } }
-      }
+    const results = await Promise.all(
+      calls.map(async (fc: any) => {
+        let result: ToolResult
+        try {
+          result = await opts.execute(fc.name as ToolName, (fc.args ?? {}) as Record<string, unknown>)
+        } catch (e) {
+          result = { response: { ok: false, erro: (e as Error).message } }
+        }
+        return { fc, result }
+      })
+    )
+
+    for (const { fc, result } of results) {
       if (result.action) actions.push(result.action)
       responseParts.push({
         functionResponse: {
