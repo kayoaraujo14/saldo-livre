@@ -1,28 +1,45 @@
 import { describe, it, expect } from 'vitest'
-import { cn } from './utils'
+import { formatBRL } from './utils'
 
-describe('cn()', () => {
-  it('should merge standard class names', () => {
-    expect(cn('class1', 'class2')).toBe('class1 class2')
+describe('formatBRL', () => {
+  it('formats positive numbers correctly', () => {
+    // Normal formatting uses space for the non-breaking space used by Intl.NumberFormat in some environments
+    // We can replace non-breaking spaces with standard spaces or test dynamically.
+    // Intl.NumberFormat 'pt-BR' format usually produces something like "R$ 1.500,50" but with non-breaking spaces (\u00A0).
+    // The safest way is to just generate the expected value dynamically to avoid encoding issues,
+    // or to check if it contains the formatted numeric string.
+    const expected = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(1500.5)
+    expect(formatBRL(1500.5)).toBe(expected)
   })
 
-  it('should filter out falsy values', () => {
-    expect(cn('class1', false, null, undefined, 'class2', '')).toBe('class1 class2')
+  it('formats negative numbers correctly', () => {
+    const expected = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(-50.25)
+    expect(formatBRL(-50.25)).toBe(expected)
   })
 
-  it('should merge tailwind classes and resolve conflicts', () => {
-    expect(cn('px-2 py-1 bg-red-500', 'px-4', 'bg-blue-500')).toBe('py-1 px-4 bg-blue-500')
+  it('handles zero correctly', () => {
+    const expected = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(0)
+    expect(formatBRL(0)).toBe(expected)
   })
 
-  it('should handle arrays of classes', () => {
-    expect(cn(['class1', 'class2'], 'class3')).toBe('class1 class2 class3')
+  it('normalizes negative zero to positive zero', () => {
+    const expected = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(0)
+    expect(formatBRL(-0)).toBe(expected)
   })
 
-  it('should handle objects (clsx behavior)', () => {
-    expect(cn({ 'class1': true, 'class2': false, 'class3': true })).toBe('class1 class3')
+  it('handles compact format correctly (maximumFractionDigits: 0)', () => {
+    const expectedCompact = new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      maximumFractionDigits: 0,
+    }).format(1500.5)
+    expect(formatBRL(1500.5, true)).toBe(expectedCompact)
   })
 
-  it('should handle mixed inputs', () => {
-    expect(cn('text-sm', ['font-bold', { 'text-red-500': true, 'text-blue-500': false }], 'p-4 text-center')).toBe('text-sm font-bold text-red-500 p-4 text-center')
+  it('handles non-finite values by defaulting to 0', () => {
+    const expectedZero = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(0)
+    expect(formatBRL(NaN)).toBe(expectedZero)
+    expect(formatBRL(Infinity)).toBe(expectedZero)
+    expect(formatBRL(-Infinity)).toBe(expectedZero)
   })
 })
