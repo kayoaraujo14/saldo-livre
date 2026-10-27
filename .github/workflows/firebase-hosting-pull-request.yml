@@ -25,7 +25,7 @@ jobs:
       - name: Construir aplicação (Build)
         run: npm --prefix web run build
         env:
-          VITE_FIREBASE_API_KEY: AIzaSyD6R12Yi9dVUQWiVkYCUplPh0-6Dsr-mhg
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
           VITE_FIREBASE_AUTH_DOMAIN: saldo-livre-c3ca3.firebaseapp.com
           VITE_FIREBASE_PROJECT_ID: saldo-livre-c3ca3
           VITE_FIREBASE_STORAGE_BUCKET: saldo-livre-c3ca3.firebasestorage.app
