@@ -8,7 +8,7 @@ describe('amountPatch', () => {
     createdByUid: 'uid1',
     paidByUid: 'uid1',
     description: 'Test Tx',
-    category: 'Test',
+    category: 'Outros',
     type: 'expense',
     paymentMethod: 'pix',
     status: 'estimated',
