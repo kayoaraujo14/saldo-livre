@@ -571,6 +571,7 @@ export function TransactionTable({
   const counts = useMemo(() => {
     const txs = Array.isArray(effectiveTransactions) ? effectiveTransactions : []
     const cardsList = Array.isArray(cards) ? cards : []
+    const cardsMap = new Map(cardsList.filter(Boolean).map((c) => [c.id, c]))
     return {
       all: txs.length,
       income: txs.filter((t: Transaction) => t && t.type === 'income').length,
@@ -581,7 +582,7 @@ export function TransactionTable({
       paid: txs.filter((t: Transaction) => t && t.status === 'paid').length,
       shared: txs.filter((t: Transaction) => {
         if (!t) return false
-        const card = cardsList.find((c) => c && c.id === t.cardId)
+        const card = cardsMap.get(t.cardId || '')
         return isSharedCard(card) || t.reserveCardId
       }).length,
       third: txs.filter((t: Transaction) => (Array.isArray(t?.allocations) ? t.allocations : []).some((a) => a && a.type === 'EXTERNAL')).length,

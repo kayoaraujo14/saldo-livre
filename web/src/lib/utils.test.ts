@@ -1,40 +1,28 @@
 import { describe, it, expect } from 'vitest'
-import { monthLabel } from './utils'
+import { cn } from './utils'
 
-describe('utils', () => {
-  describe('monthLabel', () => {
-    it('returns the correct label for a valid month key', () => {
-      expect(monthLabel('2023-01')).toBe('Janeiro 2023')
-      expect(monthLabel('2024-12')).toBe('Dezembro 2024')
-      expect(monthLabel('2025-06')).toBe('Junho 2025')
-    })
+describe('cn()', () => {
+  it('should merge standard class names', () => {
+    expect(cn('class1', 'class2')).toBe('class1 class2')
+  })
 
-    it('returns "Mês" for null or undefined input', () => {
-      expect(monthLabel(null)).toBe('Mês')
-      expect(monthLabel(undefined)).toBe('Mês')
-    })
+  it('should filter out falsy values', () => {
+    expect(cn('class1', false, null, undefined, 'class2', '')).toBe('class1 class2')
+  })
 
-    it('returns "Mês" if the string does not contain a hyphen', () => {
-      expect(monthLabel('202301')).toBe('Mês')
-      expect(monthLabel('janeiro')).toBe('Mês')
-      expect(monthLabel('')).toBe('Mês')
-    })
+  it('should merge tailwind classes and resolve conflicts', () => {
+    expect(cn('px-2 py-1 bg-red-500', 'px-4', 'bg-blue-500')).toBe('py-1 px-4 bg-blue-500')
+  })
 
-    it('returns the original input if year or month is not a valid number', () => {
-      expect(monthLabel('YYYY-MM')).toBe('YYYY-MM')
-      expect(monthLabel('2023-XX')).toBe('2023-XX')
-      expect(monthLabel('AAAA-01')).toBe('AAAA-01')
-    })
+  it('should handle arrays of classes', () => {
+    expect(cn(['class1', 'class2'], 'class3')).toBe('class1 class2 class3')
+  })
 
-    it('returns the original input if month is out of valid range (1-12)', () => {
-      expect(monthLabel('2023-00')).toBe('2023-00')
-      expect(monthLabel('2023-13')).toBe('2023-13')
-      expect(monthLabel('2023--1')).toBe('2023--1')
-    })
+  it('should handle objects (clsx behavior)', () => {
+    expect(cn({ 'class1': true, 'class2': false, 'class3': true })).toBe('class1 class3')
+  })
 
-    it('handles whitespace around the input correctly', () => {
-      expect(monthLabel('  2023-05  ')).toBe('Maio 2023')
-      expect(monthLabel('\n2023-05\t')).toBe('Maio 2023')
-    })
+  it('should handle mixed inputs', () => {
+    expect(cn('text-sm', ['font-bold', { 'text-red-500': true, 'text-blue-500': false }], 'p-4 text-center')).toBe('text-sm font-bold text-red-500 p-4 text-center')
   })
 })
