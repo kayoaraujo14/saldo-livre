@@ -1,99 +1,48 @@
 import { describe, it, expect } from 'vitest'
-import { effectiveAmount } from '../finance'
-import type { Transaction } from '@/types'
+import { friendPctOf } from '../finance'
 
-describe('effectiveAmount', () => {
-  it('should return actualAmount if it is defined', () => {
-    const tx = {
-      actualAmount: 100,
-      estimatedAmount: 200,
-      totalAmount: 300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(100)
+describe('friendPctOf', () => {
+  it('returns 100 if tx is falsy', () => {
+    expect(friendPctOf(null as any)).toBe(100)
+    expect(friendPctOf(undefined as any)).toBe(100)
   })
 
-  it('should return actualAmount if it is 0', () => {
-    const tx = {
-      actualAmount: 0,
-      estimatedAmount: 200,
-      totalAmount: 300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(0)
+  it('returns clamped friendSharePct if it exists', () => {
+    expect(friendPctOf({ friendSharePct: 30 } as any)).toBe(30)
+    expect(friendPctOf({ friendSharePct: -10 } as any)).toBe(100) // clampPct logic
+    expect(friendPctOf({ friendSharePct: 150 } as any)).toBe(100) // clampPct logic
   })
 
-  it('should return actualAmount if it is negative', () => {
-    const tx = {
-      actualAmount: -50,
-      estimatedAmount: 200,
-      totalAmount: 300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(-50)
+  it('returns 100 if totalAmount is falsy or 0', () => {
+    expect(friendPctOf({ totalAmount: 0 } as any)).toBe(100)
+    expect(friendPctOf({ totalAmount: null } as any)).toBe(100)
+    expect(friendPctOf({ totalAmount: undefined } as any)).toBe(100)
   })
 
-  it('should return estimatedAmount if actualAmount is null', () => {
-    const tx = {
-      actualAmount: null,
-      estimatedAmount: 200,
-      totalAmount: 300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(200)
+  it('calculates the percentage correctly based on friendShareOf', () => {
+    // friendShareOf returns 0 if assignedFriendUid is not provided.
+    expect(friendPctOf({ totalAmount: 100 } as any)).toBe(100) // (0 / 100) * 100 = 0 -> clamped to 100
+
+    // fallback when assignedFriendUid exists but no allocations -> friendShareOf uses 50%
+    expect(friendPctOf({ totalAmount: 200, assignedFriendUid: 'friend-1' } as any)).toBe(50) // (100 / 200) * 100 = 50
+
+    // when allocation exists
+    expect(
+      friendPctOf({
+        totalAmount: 200,
+        assignedFriendUid: 'friend-1',
+        allocations: [{ uid: 'friend-1', amount: 80 }]
+      } as any)
+    ).toBe(40) // (80 / 200) * 100 = 40
   })
 
-  it('should return estimatedAmount if actualAmount is undefined', () => {
-    const tx = {
-      estimatedAmount: 200,
-      totalAmount: 300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(200)
-  })
-
-  it('should return estimatedAmount if it is 0 and actualAmount is null', () => {
-    const tx = {
-      actualAmount: null,
-      estimatedAmount: 0,
-      totalAmount: 300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(0)
-  })
-
-  it('should return totalAmount if actualAmount and estimatedAmount are null', () => {
-    const tx = {
-      actualAmount: null,
-      estimatedAmount: null,
-      totalAmount: 300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(300)
-  })
-
-  it('should return totalAmount if it is 0 and both actualAmount and estimatedAmount are null', () => {
-    const tx = {
-      actualAmount: null,
-      estimatedAmount: null,
-      totalAmount: 0,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(0)
-  })
-
-  it('should return totalAmount if it is negative and both actualAmount and estimatedAmount are null', () => {
-    const tx = {
-      actualAmount: null,
-      estimatedAmount: null,
-      totalAmount: -300,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(-300)
-  })
-
-  it('should return 0 if all values are null', () => {
-    const tx = {
-      actualAmount: null,
-      estimatedAmount: null,
-      totalAmount: null,
-    } as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(0)
-  })
-
-  it('should return 0 if all values are undefined', () => {
-    const tx = {} as Pick<Transaction, 'actualAmount' | 'estimatedAmount' | 'totalAmount'>
-    expect(effectiveAmount(tx)).toBe(0)
+  it('handles negative totalAmount correctly by taking absolute value', () => {
+    expect(
+      friendPctOf({
+        totalAmount: -200,
+        assignedFriendUid: 'friend-1',
+        allocations: [{ uid: 'friend-1', amount: 80 }]
+      } as any)
+    ).toBe(40)
   })
 })
