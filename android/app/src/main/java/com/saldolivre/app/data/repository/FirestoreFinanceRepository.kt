@@ -84,24 +84,85 @@ class FirestoreFinanceRepository(
             return@callbackFlow
         }
 
-        val registration: ListenerRegistration = firestore.collection("transactions")
+        val myTxsMap = mutableMapOf<String, Transaction>()
+        val sharedCardTxsMap = mutableMapOf<String, Map<String, Transaction>>()
+        val sharedCardListeners = mutableMapOf<String, ListenerRegistration>()
+
+        fun emitMerged() {
+            val allMerged = LinkedHashMap<String, Transaction>()
+            allMerged.putAll(myTxsMap)
+            for (cardTxs in sharedCardTxsMap.values) {
+                for ((id, tx) in cardTxs) {
+                    allMerged[id] = tx
+                }
+            }
+            trySend(allMerged.values.toList())
+        }
+
+        // 1. Transações com visibleToUids do usuário
+        val myRegistration: ListenerRegistration = firestore.collection("transactions")
             .whereArrayContains("visibleToUids", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    trySend(emptyList())
                     return@addSnapshotListener
                 }
-                val txs = snapshot?.documents?.mapNotNull { doc ->
+                myTxsMap.clear()
+                snapshot?.documents?.forEach { doc ->
                     try {
-                        parseTransaction(doc)
-                    } catch (_: Exception) {
-                        null
-                    }
-                } ?: emptyList()
-                trySend(txs)
+                        val tx = parseTransaction(doc)
+                        myTxsMap[tx.id] = tx
+                    } catch (_: Exception) {}
+                }
+                emitMerged()
             }
 
-        awaitClose { registration.remove() }
+        // 2. Escuta cartões compartilhados onde o usuário é convidado e sincroniza todas as transações daquele cartão
+        val sharedCardsRegistration = firestore.collection("cards")
+            .whereArrayContains("sharedWithUids", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                val currentSharedCardIds = snapshot?.documents?.mapNotNull { it.id }?.toSet() ?: emptySet()
+
+                // Remove listeners de cartões que deixaram de ser compartilhados
+                val removed = sharedCardListeners.keys - currentSharedCardIds
+                for (id in removed) {
+                    sharedCardListeners.remove(id)?.remove()
+                    sharedCardTxsMap.remove(id)
+                }
+
+                // Adiciona listeners para novos cartões compartilhados
+                val added = currentSharedCardIds - sharedCardListeners.keys
+                for (cardId in added) {
+                    val reg = firestore.collection("transactions")
+                        .whereEqualTo("cardId", cardId)
+                        .addSnapshotListener { txSnap, txErr ->
+                            if (txErr != null) return@addSnapshotListener
+                            val txMap = mutableMapOf<String, Transaction>()
+                            txSnap?.documents?.forEach { doc ->
+                                try {
+                                    val tx = parseTransaction(doc)
+                                    txMap[tx.id] = tx
+                                } catch (_: Exception) {}
+                            }
+                            sharedCardTxsMap[cardId] = txMap
+                            emitMerged()
+                        }
+                    sharedCardListeners[cardId] = reg
+                }
+
+                if (removed.isNotEmpty()) {
+                    emitMerged()
+                }
+            }
+
+        awaitClose {
+            myRegistration.remove()
+            sharedCardsRegistration.remove()
+            for (reg in sharedCardListeners.values) {
+                reg.remove()
+            }
+            sharedCardListeners.clear()
+        }
     }
 
     override fun getCards(): Flow<List<Card>> = callbackFlow {
@@ -328,7 +389,9 @@ class FirestoreFinanceRepository(
 
     override suspend fun updateTransaction(tx: Transaction) {
         if (tx.id.isNotBlank()) {
-            firestore.collection("transactions").document(tx.id).set(transactionToMap(tx)).await()
+            val userUid = auth.currentUser?.uid ?: _currentUser.value.uid
+            val safeTx = if (tx.createdByUid.isBlank()) tx.copy(createdByUid = userUid) else tx
+            firestore.collection("transactions").document(tx.id).set(transactionToMap(safeTx)).await()
         }
     }
 
@@ -390,6 +453,11 @@ class FirestoreFinanceRepository(
                 FinanceEngine.dateInMonth(targetMonth, origDay)
             }
 
+            val targetFriendUid = input.friend?.uid ?: tx.assignedFriendUid
+            val targetFriendName = input.friend?.name ?: tx.assignedFriendName
+            val targetFriendPct = input.friend?.pct ?: tx.friendSharePct
+            val hasFriend = !targetFriendUid.isNullOrBlank()
+
             val split = FinanceEngine.buildSplit(
                 splitType = input.splitType ?: tx.splitType ?: SplitType.MINE,
                 total = curAmount,
@@ -399,10 +467,14 @@ class FirestoreFinanceRepository(
                 partnerName = partner?.displayName,
                 payerUid = payerUid,
                 externalName = input.externalName,
-                assignedFriendUid = input.friend?.uid,
-                assignedFriendName = input.friend?.name,
-                friendSharePct = input.friend?.pct
+                assignedFriendUid = targetFriendUid,
+                assignedFriendName = targetFriendName,
+                friendSharePct = targetFriendPct,
+                customAllocations = input.customAllocations
             )
+
+            val customUids = input.customAllocations?.mapNotNull { it.uid } ?: emptyList()
+            val effectiveVisible = (split.visibleToUids + listOfNotNull(targetFriendUid) + card?.sharedWithUids.orEmpty() + customUids).distinct()
 
             tx.copy(
                 description = newDesc,
@@ -418,11 +490,12 @@ class FirestoreFinanceRepository(
                 totalAmount = curAmount,
                 allocations = split.allocations,
                 userImpact = split.userImpact,
-                visibleToUids = split.visibleToUids,
-                assignedFriendUid = input.friend?.uid ?: tx.assignedFriendUid,
-                assignedFriendName = input.friend?.name ?: tx.assignedFriendName,
-                friendSharePct = input.friend?.pct ?: tx.friendSharePct,
-                acceptanceStatus = if (input.splitType == SplitType.FRIEND) AcceptanceStatus.PENDING_APPROVAL.value else tx.acceptanceStatus,
+                visibleToUids = effectiveVisible,
+                assignedFriendUid = targetFriendUid,
+                assignedFriendName = targetFriendName,
+                friendSharePct = targetFriendPct,
+                acceptanceStatus = if (hasFriend) AcceptanceStatus.PENDING_APPROVAL.value else null,
+                respondedAt = if (hasFriend) null else tx.respondedAt,
                 splitType = input.splitType ?: tx.splitType
             )
         }
@@ -524,7 +597,7 @@ class FirestoreFinanceRepository(
         val user = _currentUser.value
         val allTxs = getTransactions().first()
         val bills = getRecurringBills().first()
-        val res = FinanceEngine.autoLaunchDueBills(
+        return FinanceEngine.autoLaunchDueBills(
             bills = bills,
             all = allTxs,
             monthKey = monthKey,
@@ -532,10 +605,24 @@ class FirestoreFinanceRepository(
             me = user,
             partner = null
         )
-        if (res.created.isNotEmpty()) {
-            addTransactions(res.created)
+    }
+
+    override suspend fun markRecurringResolved(monthKey: String, billId: String) {
+        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
+        val currentMap = _currentUser.value.resolvedRecurring.toMutableMap()
+        val currentList = (currentMap[monthKey] ?: emptyList()).toMutableList()
+        if (!currentList.contains(billId)) {
+            currentList.add(billId)
+            currentMap[monthKey] = currentList
+            _currentUser.value = _currentUser.value.copy(resolvedRecurring = currentMap)
+            if (uid.isNotBlank() && uid != "default_uid") {
+                firestore.collection("users").document(uid).update("resolvedRecurring", currentMap).await()
+            }
         }
-        return res
+    }
+
+    override suspend fun getResolvedRecurring(): Map<String, List<String>> {
+        return _currentUser.value.resolvedRecurring
     }
 
     override suspend fun saveRecurringBill(bill: RecurringBill) {
@@ -577,6 +664,38 @@ class FirestoreFinanceRepository(
             ownerName = if (card.ownerName.isBlank()) _currentUser.value.displayName else card.ownerName
         )
         firestore.collection("cards").document(cardId).set(cardToMap(toSave)).await()
+        syncCardTransactionsVisibility(toSave)
+    }
+
+    override suspend fun syncCardTransactionsVisibility(card: Card) {
+        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
+        if (card.ownerUid.isNotBlank() && card.ownerUid != uid) return
+        if (card.sharedWithUids.isEmpty()) return
+
+        try {
+            val snap = firestore.collection("transactions")
+                .whereEqualTo("cardId", card.id)
+                .get()
+                .await()
+
+            val batch = firestore.batch()
+            var count = 0
+            for (doc in snap.documents) {
+                val cur = (doc.get("visibleToUids") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                val merged = (cur + card.sharedWithUids).distinct()
+                if (merged.size != cur.size) {
+                    batch.update(doc.reference, "visibleToUids", merged)
+                    count++
+                    if (count >= 400) {
+                        batch.commit().await()
+                        count = 0
+                    }
+                }
+            }
+            if (count > 0) {
+                batch.commit().await()
+            }
+        } catch (_: Exception) {}
     }
 
     override suspend fun deleteCard(id: String) {
@@ -591,23 +710,48 @@ class FirestoreFinanceRepository(
             return@callbackFlow
         }
 
-        val listener = firestore.collection("friendships")
-            .where(
-                Filter.or(
-                    Filter.equalTo("requesterUid", uid),
-                    Filter.equalTo("recipientUid", uid)
-                )
-            )
+        val map1 = mutableMapOf<String, Friendship>()
+        val map2 = mutableMapOf<String, Friendship>()
+
+        fun emitCombined() {
+            val combined = (map1 + map2).values.toList()
+            trySend(combined)
+        }
+
+        val l1 = firestore.collection("friendships")
+            .whereEqualTo("requesterUid", uid)
             .addSnapshotListener { snap, err ->
                 if (err != null || snap == null) {
-                    trySend(emptyList())
+                    map1.clear()
+                    emitCombined()
                     return@addSnapshotListener
                 }
-                val list = snap.documents.mapNotNull { parseFriendship(it) }
-                trySend(list)
+                map1.clear()
+                for (doc in snap.documents) {
+                    parseFriendship(doc)?.let { map1[it.id] = it }
+                }
+                emitCombined()
             }
 
-        awaitClose { listener.remove() }
+        val l2 = firestore.collection("friendships")
+            .whereEqualTo("recipientUid", uid)
+            .addSnapshotListener { snap, err ->
+                if (err != null || snap == null) {
+                    map2.clear()
+                    emitCombined()
+                    return@addSnapshotListener
+                }
+                map2.clear()
+                for (doc in snap.documents) {
+                    parseFriendship(doc)?.let { map2[it.id] = it }
+                }
+                emitCombined()
+            }
+
+        awaitClose {
+            l1.remove()
+            l2.remove()
+        }
     }
 
     override suspend fun sendFriendRequest(email: String): Pair<Boolean, String> {
@@ -791,12 +935,21 @@ class FirestoreFinanceRepository(
     // Parsers seguros
     private fun parseUserProfile(doc: DocumentSnapshot): UserProfile? {
         if (!doc.exists()) return null
+        val rawResolved = doc.get("resolvedRecurring") as? Map<*, *>
+        val resolvedMap = mutableMapOf<String, List<String>>()
+        rawResolved?.forEach { (k, v) ->
+            if (k != null) {
+                val list = (v as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                resolvedMap[k.toString()] = list
+            }
+        }
         return UserProfile(
             uid = doc.id,
             email = doc.getString("email") ?: "",
             displayName = doc.getString("displayName") ?: "Meu Perfil",
             photoURL = doc.getString("photoURL"),
-            monthlyIncome = doc.getDouble("monthlyIncome") ?: 5000.0
+            monthlyIncome = doc.getDouble("monthlyIncome") ?: 5000.0,
+            resolvedRecurring = resolvedMap
         )
     }
 

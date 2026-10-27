@@ -1,6 +1,17 @@
 {
   "rules": [
     {
+      "name": "global-execution",
+      "path": "rules/global.md",
+      "description": "Regras globais de execução, isolamento de contexto e estabilidade do Monorepo",
+      "trigger": {
+        "type": "glob",
+        "patterns": [
+          "**/*"
+        ]
+      }
+    },
+    {
       "name": "react-web",
       "path": "rules/react.md",
       "description": "Regras de desenvolvimento para frontend Web em React e Tailwind CSS",

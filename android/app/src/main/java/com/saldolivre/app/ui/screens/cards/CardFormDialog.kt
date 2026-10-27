@@ -1,15 +1,20 @@
 package com.saldolivre.app.ui.screens.cards
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material3.*
@@ -25,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.saldolivre.app.data.model.Card
+import com.saldolivre.app.ui.screens.friends.FriendItem
 import com.saldolivre.app.data.model.SharedUser
 import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.ui.theme.*
@@ -33,6 +39,7 @@ import com.saldolivre.app.ui.theme.*
 fun CardFormDialog(
     card: Card,
     partner: UserProfile?,
+    friends: List<FriendItem> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (Card) -> Unit
 ) {
@@ -41,7 +48,14 @@ fun CardFormDialog(
     var closingDay by remember { mutableStateOf(card.closingDay.toString()) }
     var dueDay by remember { mutableStateOf(card.dueDay.toString()) }
     var thirdPartiesInput by remember { mutableStateOf(card.frequentThirdParties.joinToString(", ")) }
-    var shareWithPartner by remember { mutableStateOf(card.sharedWithUsers.isNotEmpty() || card.sharedWithUids.isNotEmpty()) }
+    var sharedUsers by remember(card) {
+        val initial = card.sharedWithUsers.toMutableList()
+        if (initial.isEmpty() && card.sharedWithUids.isNotEmpty() && partner != null && card.sharedWithUids.contains(partner.uid)) {
+            initial.add(SharedUser(uid = partner.uid, email = partner.email, name = partner.displayName))
+        }
+        mutableStateOf(initial)
+    }
+    var emailInput by remember { mutableStateOf("") }
     var selectedColor by remember { mutableStateOf(card.color.ifBlank { "violet" }) }
 
     val isNew = card.id.startsWith("new_")
@@ -221,58 +235,208 @@ fun CardFormDialog(
                     )
                 )
 
-                // Partner Sharing Switch
-                if (partner != null) {
-                    Surface(
-                        color = DarkSurfaceVariant,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                // Compartilhamento com Amigos da Plataforma (Somente Leitura)
+                Surface(
+                    color = DarkSurfaceVariant,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.Group,
+                                contentDescription = null,
+                                tint = Cyan400,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Compartilhar Cartão (Modo Visualização)",
+                                style = Typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
+
+                        Text(
+                            text = "Amigos convidados terão visualização do cartão no app deles (somente leitura): podem ver os lançamentos de suas cotas e recebem a fatura fechada no extrato deles. Não podem editar o cartão nem lançar novas compras.",
+                            style = Typography.bodySmall,
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+
+                        // Sugestão de Parceiro (Casal) se existir
+                        if (partner != null) {
+                            val isPartnerShared = sharedUsers.any { it.uid == partner.uid || (it.email.isNotBlank() && it.email.equals(partner.email, ignoreCase = true)) }
                             Row(
-                                modifier = Modifier.weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface.copy(alpha = 0.5f))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Group,
-                                    contentDescription = null,
-                                    tint = Cyan400,
-                                    modifier = Modifier.size(20.dp)
+                                Text(
+                                    text = "Parceiro(a): ${partner.displayName}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextPrimary
                                 )
-                                Column(modifier = Modifier.padding(end = 8.dp)) {
-                                    Text(
-                                        text = "Compartilhar com ${partner.displayName}",
-                                        style = Typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        color = TextPrimary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                Switch(
+                                    checked = isPartnerShared,
+                                    onCheckedChange = { checked ->
+                                        if (checked) {
+                                            if (!isPartnerShared) {
+                                                sharedUsers = (sharedUsers + SharedUser(uid = partner.uid, email = partner.email, name = partner.displayName)).toMutableList()
+                                            }
+                                        } else {
+                                            sharedUsers = sharedUsers.filter { it.uid != partner.uid && !it.email.equals(partner.email, ignoreCase = true) }.toMutableList()
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Emerald400,
+                                        checkedTrackColor = Emerald600.copy(alpha = 0.5f),
+                                        uncheckedThumbColor = TextSecondary,
+                                        uncheckedTrackColor = DarkBackground
                                     )
-                                    Text(
-                                        text = "Permite que seu parceiro selecione este cartão ao lançar despesas",
-                                        style = Typography.bodySmall,
-                                        color = TextSecondary,
-                                        fontSize = 11.sp
-                                    )
+                                )
+                            }
+                        }
+
+                        // Amigos da rede disponíveis para convite rápido
+                        val availableFriends = friends.filter { f ->
+                            sharedUsers.none { it.uid == f.friendUid || (it.email.isNotBlank() && it.email.equals(f.friendEmail, ignoreCase = true)) }
+                        }
+                        if (availableFriends.isNotEmpty()) {
+                            Text(
+                                text = "Convidar amigos da rede:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextMuted
+                            )
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(availableFriends) { fr ->
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = Cyan400.copy(alpha = 0.12f),
+                                        border = BorderStroke(1.dp, Cyan400.copy(alpha = 0.35f)),
+                                        modifier = Modifier.clickable {
+                                            sharedUsers = (sharedUsers + SharedUser(uid = fr.friendUid, email = fr.friendEmail, name = fr.friendName.ifBlank { fr.friendEmail })).toMutableList()
+                                        }
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, tint = Cyan400, modifier = Modifier.size(12.dp))
+                                            Text(fr.friendName.ifBlank { fr.friendEmail }, fontSize = 11.sp, color = Cyan400, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
                                 }
                             }
-                            Switch(
-                                checked = shareWithPartner,
-                                onCheckedChange = { shareWithPartner = it },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Emerald400,
-                                    checkedTrackColor = Emerald600.copy(alpha = 0.5f),
-                                    uncheckedThumbColor = TextSecondary,
-                                    uncheckedTrackColor = DarkBackground
+                        }
+
+                        // Campo para convidar por e-mail
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = emailInput,
+                                onValueChange = { emailInput = it },
+                                placeholder = { Text("Convidar por e-mail...", fontSize = 12.sp, color = TextMuted) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Emerald400,
+                                    unfocusedBorderColor = DarkBorder,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary
                                 )
                             )
+                            IconButton(
+                                onClick = {
+                                    val trimmed = emailInput.trim().lowercase()
+                                    if (trimmed.isNotBlank() && trimmed.contains("@") && sharedUsers.none { it.email.equals(trimmed, ignoreCase = true) }) {
+                                        sharedUsers = (sharedUsers + SharedUser(uid = "", email = trimmed, name = trimmed.substringBefore("@"))).toMutableList()
+                                        emailInput = ""
+                                    }
+                                },
+                                enabled = emailInput.trim().contains("@")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Adicionar", tint = if (emailInput.trim().contains("@")) Emerald400 else TextMuted)
+                            }
+                        }
+
+                        // Lista de convidados atuais
+                        if (sharedUsers.isNotEmpty()) {
+                            Text(
+                                text = "Membros com acesso (${sharedUsers.size}):",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                sharedUsers.forEach { user ->
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = DarkSurface,
+                                        border = BorderStroke(1.dp, DarkBorder),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = user.name.ifBlank { user.email },
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TextPrimary,
+                                                    maxLines = 1
+                                                )
+                                                if (user.email.isNotBlank() && user.name.isNotBlank() && user.name != user.email) {
+                                                    Text(user.email, fontSize = 10.sp, color = TextMuted, maxLines = 1)
+                                                }
+                                            }
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = Cyan400.copy(alpha = 0.15f),
+                                                    border = BorderStroke(1.dp, Cyan400.copy(alpha = 0.3f))
+                                                ) {
+                                                    Text(
+                                                        text = "👁️ Somente Leitura",
+                                                        fontSize = 9.sp,
+                                                        color = Cyan400,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
+                                                IconButton(
+                                                    onClick = { sharedUsers = sharedUsers.filter { it != user }.toMutableList() },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Close, contentDescription = "Remover", tint = Rose400, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -330,10 +494,6 @@ fun CardFormDialog(
                                 .map { it.trim() }
                                 .filter { it.isNotEmpty() }
 
-                            val sharedUsers = if (shareWithPartner && partner != null) {
-                                listOf(SharedUser(uid = partner.uid, email = partner.email, name = partner.displayName))
-                            } else emptyList()
-
                             val updated = card.copy(
                                 cardName = cardName.trim(),
                                 closingDay = parsedClosing,
@@ -341,7 +501,7 @@ fun CardFormDialog(
                                 limit = parsedLimit,
                                 frequentThirdParties = parties,
                                 sharedWithUsers = sharedUsers,
-                                sharedWithUids = sharedUsers.map { it.uid },
+                                sharedWithUids = sharedUsers.map { it.uid }.filter { it.isNotBlank() },
                                 color = selectedColor
                             )
                             onSave(updated)

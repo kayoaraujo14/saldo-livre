@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,6 +47,16 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
   const [activeTab, setActiveTab] = useState<'approvals' | 'friends' | 'statement'>(
     pendingChargeGroups.length > 0 ? 'approvals' : 'friends',
   )
+
+  useEffect(() => {
+    if (open) {
+      if (pendingChargeGroups.length > 0) {
+        setActiveTab('approvals')
+      } else if (pendingFriendRequests.length > 0) {
+        setActiveTab('friends')
+      }
+    }
+  }, [open, pendingChargeGroups.length, pendingFriendRequests.length])
   const [inviteEmail, setInviteEmail] = useState('')
   const [sendingInvite, setSendingInvite] = useState(false)
   const [inviteFeedback, setInviteFeedback] = useState<{ text: string; success: boolean } | null>(null)

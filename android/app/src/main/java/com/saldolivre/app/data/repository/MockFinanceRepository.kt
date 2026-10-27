@@ -389,6 +389,11 @@ class MockFinanceRepository(
                 FinanceEngine.dateInMonth(targetMonth, origDay)
             }
 
+            val targetFriendUid = input.friend?.uid ?: tx.assignedFriendUid
+            val targetFriendName = input.friend?.name ?: tx.assignedFriendName
+            val targetFriendPct = input.friend?.pct ?: tx.friendSharePct
+            val hasFriend = !targetFriendUid.isNullOrBlank()
+
             val split = FinanceEngine.buildSplit(
                 splitType = input.splitType ?: tx.splitType ?: SplitType.MINE,
                 total = curAmount,
@@ -398,10 +403,14 @@ class MockFinanceRepository(
                 partnerName = partner?.displayName,
                 payerUid = payerUid,
                 externalName = input.externalName,
-                assignedFriendUid = input.friend?.uid,
-                assignedFriendName = input.friend?.name,
-                friendSharePct = input.friend?.pct
+                assignedFriendUid = targetFriendUid,
+                assignedFriendName = targetFriendName,
+                friendSharePct = targetFriendPct,
+                customAllocations = input.customAllocations
             )
+
+            val customUids = input.customAllocations?.mapNotNull { it.uid } ?: emptyList()
+            val effectiveVisible = (split.visibleToUids + listOfNotNull(targetFriendUid) + card?.sharedWithUids.orEmpty() + customUids).distinct()
 
             val updatedTx = tx.copy(
                 description = newDesc,
@@ -417,11 +426,12 @@ class MockFinanceRepository(
                 totalAmount = curAmount,
                 allocations = split.allocations,
                 userImpact = split.userImpact,
-                visibleToUids = split.visibleToUids,
-                assignedFriendUid = input.friend?.uid ?: tx.assignedFriendUid,
-                assignedFriendName = input.friend?.name ?: tx.assignedFriendName,
-                friendSharePct = input.friend?.pct ?: tx.friendSharePct,
-                acceptanceStatus = if (input.splitType == SplitType.FRIEND) AcceptanceStatus.PENDING_APPROVAL.value else tx.acceptanceStatus,
+                visibleToUids = effectiveVisible,
+                assignedFriendUid = targetFriendUid,
+                assignedFriendName = targetFriendName,
+                friendSharePct = targetFriendPct,
+                acceptanceStatus = if (hasFriend) AcceptanceStatus.PENDING_APPROVAL.value else null,
+                respondedAt = if (hasFriend) null else tx.respondedAt,
                 splitType = input.splitType ?: tx.splitType
             )
             tx.id to updatedTx
@@ -572,6 +582,17 @@ class MockFinanceRepository(
             persistCards(updated)
             updated
         }
+        syncCardTransactionsVisibility(newCard)
+    }
+
+    override suspend fun syncCardTransactionsVisibility(card: Card) {
+        if (card.sharedWithUids.isEmpty()) return
+        val updated = _transactions.value.map { tx ->
+            if (tx.cardId == card.id) {
+                tx.copy(visibleToUids = (tx.visibleToUids + card.sharedWithUids).distinct())
+            } else tx
+        }
+        _transactions.value = updated
     }
 
     override suspend fun deleteCard(id: String) {
@@ -682,7 +703,7 @@ class MockFinanceRepository(
     override suspend fun autoLaunchDueBillsForMonth(monthKey: String, todayStr: String): FinanceEngine.AutoLaunchBillsResult {
         val user = _currentUser.value
         val partner = allUsers.find { it.uid != user.uid }
-        val res = FinanceEngine.autoLaunchDueBills(
+        return FinanceEngine.autoLaunchDueBills(
             bills = _recurringBills.value,
             all = _transactions.value,
             monthKey = monthKey,
@@ -690,10 +711,21 @@ class MockFinanceRepository(
             me = user,
             partner = partner
         )
-        if (res.created.isNotEmpty()) {
-            addTransactions(res.created)
+    }
+
+    override suspend fun markRecurringResolved(monthKey: String, billId: String) {
+        val current = _currentUser.value
+        val currentMap = current.resolvedRecurring.toMutableMap()
+        val currentList = (currentMap[monthKey] ?: emptyList()).toMutableList()
+        if (!currentList.contains(billId)) {
+            currentList.add(billId)
+            currentMap[monthKey] = currentList
+            _currentUser.value = current.copy(resolvedRecurring = currentMap)
         }
-        return res
+    }
+
+    override suspend fun getResolvedRecurring(): Map<String, List<String>> {
+        return _currentUser.value.resolvedRecurring
     }
 
     private fun buildDemoCards(): List<Card> {

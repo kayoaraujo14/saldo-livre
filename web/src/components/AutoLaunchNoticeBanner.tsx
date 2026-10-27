@@ -1,7 +1,19 @@
-import { useMemo } from 'react'
+import { useState } from 'react'
 import { useFinance } from '@/store/FinanceContext'
 import { formatBRL } from '@/lib/utils'
-import { Zap, Check, X, ArrowRight, CalendarClock } from 'lucide-react'
+import {
+  Zap,
+  Check,
+  CheckCheck,
+  X,
+  CalendarClock,
+  Link2,
+  CreditCard,
+  Receipt,
+  ArrowDownLeft,
+  Sparkles,
+  ArrowRight,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 interface AutoLaunchNoticeBannerProps {
@@ -9,123 +21,279 @@ interface AutoLaunchNoticeBannerProps {
 }
 
 export function AutoLaunchNoticeBanner({ onGoToTransactions }: AutoLaunchNoticeBannerProps) {
-  const { autoLaunchedNotice, dismissAutoLaunchNotice, recurring, monthTransactions, month, me } = useFinance()
+  const {
+    recurring,
+    monthTransactions,
+    month,
+    me,
+    pendingRecurringLaunches,
+    confirmLaunchRecurring,
+    confirmLaunchAllRecurring,
+    linkManualTransactionToRecurring,
+    skipRecurringForMonth,
+  } = useFinance()
 
-  // 2. Card informativo opcional: Próximos vencimentos nos próximos 3 dias que ainda não foram lançados
-  const upcomingBills = useMemo(() => {
-    const currentDay = new Date().getDate()
-    return (recurring || [])
-      .filter((b) => b.active && b.ownerUid === me?.uid)
-      .filter((b) => {
-        const diff = b.dueDay - currentDay
-        const alreadyLaunched = (monthTransactions || []).some(
-          (t) => t.recurringBillId === b.id && t.competenceMonth === month
-        )
-        return !alreadyLaunched && diff > 0 && diff <= 3
-      })
-  }, [recurring, me?.uid, monthTransactions, month])
+  const [loadingActionId, setLoadingActionId] = useState<string | null>(null)
 
-  // 1. Banner para lançamentos efetuados automaticamente
-  if (autoLaunchedNotice && autoLaunchedNotice.bills.length > 0) {
-    const isSingle = autoLaunchedNotice.bills.length === 1
-    const firstBill = autoLaunchedNotice.bills[0]
+  // AÇÕES PARA PENDÊNCIAS DE RECORRENTES
+  const handleConfirmSingle = async (candidate: (typeof pendingRecurringLaunches)[0]) => {
+    setLoadingActionId(candidate.id)
+    try {
+      await confirmLaunchRecurring(candidate)
+    } finally {
+      setLoadingActionId(null)
+    }
+  }
 
-    return (
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-950/40 via-slate-900/90 to-amber-950/30 border border-amber-500/30 p-3.5 sm:p-4 shadow-xl backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-300">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="size-9 sm:size-10 rounded-xl bg-gradient-to-tr from-amber-500/25 to-orange-500/25 border border-amber-500/40 text-amber-400 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-              <Zap className="size-4 sm:size-5" />
+  const handleLinkManual = async (candidateId: string, manualTxId: string) => {
+    setLoadingActionId(candidateId)
+    try {
+      await linkManualTransactionToRecurring(candidateId, manualTxId)
+    } finally {
+      setLoadingActionId(null)
+    }
+  }
+
+  const handleSkip = (candidateId: string) => {
+    skipRecurringForMonth(candidateId)
+  }
+
+  const handleConfirmAll = async () => {
+    setLoadingActionId('all')
+    try {
+      // Confirma apenas os que não tem conflito de match manual, para segurança
+      const safeToLaunch = pendingRecurringLaunches.filter((c) => !c.matchedManualTx)
+      if (safeToLaunch.length > 0) {
+        await confirmLaunchAllRecurring(safeToLaunch)
+      }
+    } finally {
+      setLoadingActionId(null)
+    }
+  }
+
+  // Próximos vencimentos nos próximos 3 dias que ainda não viraram pendências
+  const currentDay = new Date().getDate()
+  const upcomingBills = (recurring || [])
+    .filter((b) => b.active && b.ownerUid === me?.uid)
+    .filter((b) => {
+      const diff = b.dueDay - currentDay
+      const alreadyLaunched = (monthTransactions || []).some(
+        (t) => t.recurringBillId === b.id && t.competenceMonth === month,
+      )
+      const isAlreadyPending = pendingRecurringLaunches.some((c) => c.id === b.id)
+      return !alreadyLaunched && !isAlreadyPending && diff > 0 && diff <= 3
+    })
+
+  return (
+    <div className="space-y-3">
+      {/* Central de Confirmação Inteligente de Recorrentes Prontas */}
+      {pendingRecurringLaunches.length > 0 && (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-950/35 via-slate-900/90 to-cyan-950/30 border border-amber-500/30 p-3.5 sm:p-4 shadow-xl backdrop-blur-xl animate-in fade-in slide-in-from-top-2 duration-300">
+          {/* Header do Card */}
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="size-8 rounded-lg bg-gradient-to-tr from-amber-500/20 to-orange-500/20 border border-amber-500/35 text-amber-400 flex items-center justify-center shrink-0">
+                <Zap className="size-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-semibold text-white tracking-tight">
+                    Contas Fixas & Renda Programadas
+                  </h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-300">
+                    {pendingRecurringLaunches.length} pronta(s)
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Valide seus compromissos antes de lançar no extrato.
+                </p>
+              </div>
             </div>
 
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300">
-                  ⚡ Lançamento Automático
-                </span>
-                <span className="text-xs text-slate-400">
-                  {isSingle ? 'Conta fixa lançada no extrato' : `${autoLaunchedNotice.bills.length} contas lançadas`}
-                </span>
-              </div>
-
-              <div className="mt-1">
-                {isSingle ? (
-                  <p className="text-xs sm:text-sm text-slate-200">
-                    A conta <strong className="text-white font-semibold">{firstBill.description}</strong> no valor de{' '}
-                    <strong className="text-amber-300 font-mono font-semibold">{formatBRL(firstBill.amount)}</strong> foi lançada automaticamente como estimada no seu extrato deste mês.
-                  </p>
-                ) : (
-                  <p className="text-xs sm:text-sm text-slate-200">
-                    Suas contas fixas programadas foram lançadas automaticamente no seu mês:{' '}
-                    <span className="text-amber-200 font-medium">
-                      {autoLaunchedNotice.bills.map((b) => `${b.description} (${formatBRL(b.amount)})`).join(', ')}
-                    </span>
-                    .
-                  </p>
-                )}
-              </div>
-
-              {/* Botões de Ação */}
-              <div className="flex items-center gap-2 mt-3 flex-wrap">
-                {onGoToTransactions && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={onGoToTransactions}
-                    className="h-7 text-xs px-2.5 bg-amber-500/10 border-amber-500/30 text-amber-200 hover:bg-amber-500/20 hover:text-white rounded-lg cursor-pointer gap-1"
-                  >
-                    <span>Ver no Extrato</span>
-                    <ArrowRight className="size-3" />
-                  </Button>
-                )}
-
+            {/* Ações do cabeçalho */}
+            <div className="flex items-center gap-2 shrink-0">
+              {onGoToTransactions && (
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={dismissAutoLaunchNotice}
-                  className="h-7 text-xs px-2.5 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg cursor-pointer gap-1"
+                  onClick={onGoToTransactions}
+                  className="h-7 text-xs px-2 text-slate-400 hover:text-white rounded-lg gap-1 hidden sm:flex cursor-pointer"
                 >
-                  <Check className="size-3" />
-                  <span>Entendido</span>
+                  <span>Extrato</span>
+                  <ArrowRight className="size-3" />
                 </Button>
-              </div>
+              )}
+              {pendingRecurringLaunches.filter((c) => !c.matchedManualTx).length > 1 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={loadingActionId === 'all'}
+                  onClick={handleConfirmAll}
+                  className="h-7 text-xs px-2.5 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 rounded-lg gap-1 hidden sm:flex cursor-pointer"
+                >
+                  <CheckCheck className="size-3.5" />
+                  <span>Confirmar Livres</span>
+                </Button>
+              )}
             </div>
           </div>
 
-          {/* Botão fechar */}
-          <button
-            type="button"
-            onClick={dismissAutoLaunchNotice}
-            className="text-slate-500 hover:text-slate-300 p-1 rounded-lg hover:bg-white/5 transition-colors cursor-pointer shrink-0"
-            title="Dispensar aviso"
-          >
-            <X className="size-4" />
-          </button>
+          {/* Lista de itens pendentes */}
+          <div className="space-y-2 mt-2">
+            {pendingRecurringLaunches.map((item) => {
+              const isLoading = loadingActionId === item.id
+              const hasMatch = Boolean(item.matchedManualTx)
+
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-xl border p-2.5 sm:p-3 transition-colors ${
+                    hasMatch
+                      ? 'bg-amber-950/20 border-amber-500/30'
+                      : 'bg-slate-950/40 border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    {/* Informações da conta */}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className={`size-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                          item.type === 'income'
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                            : item.cardId
+                              ? 'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                              : 'bg-slate-800 border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        {item.type === 'income' ? (
+                          <ArrowDownLeft className="size-4" />
+                        ) : item.cardId ? (
+                          <CreditCard className="size-4" />
+                        ) : (
+                          <Receipt className="size-4" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs sm:text-sm font-medium text-white truncate">
+                            {item.description}
+                          </span>
+                          <span
+                            className={`text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded ${
+                              item.type === 'income'
+                                ? 'bg-emerald-500/15 text-emerald-300'
+                                : 'bg-slate-800 text-slate-300'
+                            }`}
+                          >
+                            {formatBRL(item.amount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
+                          <span>Vencimento dia {item.dueDay}</span>
+                          <span>•</span>
+                          <span>{item.category}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Botões de Ação */}
+                    <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
+                      {hasMatch && item.matchedManualTx ? (
+                        <>
+                          <Button
+                            size="sm"
+                            disabled={isLoading}
+                            onClick={() => handleLinkManual(item.id, item.matchedManualTx!.id)}
+                            className="h-7 text-xs px-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold rounded-lg gap-1 cursor-pointer"
+                            title="Vincular a conta fixa à transação manual já lançada"
+                          >
+                            <Link2 className="size-3" />
+                            <span>Vincular ao Lançamento</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={isLoading}
+                            onClick={() => handleSkip(item.id)}
+                            className="h-7 text-xs px-2 text-slate-400 hover:text-slate-200 rounded-lg cursor-pointer"
+                            title="Dispensar sugestão"
+                          >
+                            <X className="size-3" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            size="sm"
+                            disabled={isLoading}
+                            onClick={() => handleConfirmSingle(item)}
+                            className="h-7 text-xs px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg gap-1 cursor-pointer"
+                          >
+                            <Check className="size-3" />
+                            <span>Lançar</span>
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isLoading}
+                            onClick={() => handleSkip(item.id)}
+                            className="h-7 text-xs px-2 bg-slate-800/80 border-slate-700 text-slate-300 hover:text-white rounded-lg cursor-pointer"
+                            title="Marcar como já lançada manualmente ou não lançar este mês"
+                          >
+                            <span>Já Lancei / Pular</span>
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Aviso contextual caso tenha encontrado transação manual correspondente */}
+                  {hasMatch && item.matchedManualTx && (
+                    <div className="mt-2 pt-2 border-t border-amber-500/20 flex items-center gap-1.5 text-[11px] text-amber-200/90">
+                      <Sparkles className="size-3 text-amber-400 shrink-0" />
+                      <span>
+                        Encontramos um lançamento manual similar:{' '}
+                        <strong className="text-white font-medium">
+                          &quot;{item.matchedManualTx.description}&quot;
+                        </strong>{' '}
+                        de{' '}
+                        <strong className="text-amber-300 font-mono font-medium">
+                          {formatBRL(item.matchedManualTx.totalAmount)}
+                        </strong>{' '}
+                        em {item.matchedManualTx.dueDate}.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
-      </div>
-    )
-  }
+      )}
 
-  if (upcomingBills.length > 0) {
-    const nextBill = upcomingBills[0]
-    const daysLeft = nextBill.dueDay - new Date().getDate()
-
-    return (
-      <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <CalendarClock className="size-4 text-cyan-400 shrink-0" />
-          <p className="text-slate-300 truncate">
-            Próximo compromisso programado:{' '}
-            <strong className="text-white font-medium">{nextBill.description}</strong>{' '}
-            <span className="text-slate-400">({daysLeft === 1 ? 'vence amanhã' : `vence em ${daysLeft} dias`} · {formatBRL(nextBill.defaultAmount)})</span>
-          </p>
+      {/* Aviso sutil de Próximos Vencimentos (Informativo, não invasivo) */}
+      {upcomingBills.length > 0 && pendingRecurringLaunches.length === 0 && (
+        <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 px-3.5 py-2.5 flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <CalendarClock className="size-4 text-cyan-400 shrink-0" />
+            <p className="text-slate-300 truncate">
+              Próximo compromisso programado:{' '}
+              <strong className="text-white font-medium">{upcomingBills[0].description}</strong>{' '}
+              <span className="text-slate-400">
+                (
+                {upcomingBills[0].dueDay - currentDay === 1
+                  ? 'vence amanhã'
+                  : `vence em ${upcomingBills[0].dueDay - currentDay} dias`}{' '}
+                · {formatBRL(upcomingBills[0].defaultAmount)})
+              </span>
+            </p>
+          </div>
+          <span className="text-[11px] text-cyan-400 font-semibold shrink-0 hidden sm:inline">
+            Programação ativa
+          </span>
         </div>
-        <span className="text-[11px] text-cyan-400 font-semibold shrink-0 hidden sm:inline">
-          Lançamento automático ativo
-        </span>
-      </div>
-    )
-  }
-
-  return null
+      )}
+    </div>
+  )
 }

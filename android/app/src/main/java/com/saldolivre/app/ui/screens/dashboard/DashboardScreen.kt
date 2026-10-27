@@ -59,7 +59,8 @@ fun DashboardScreen(
     onNavigateToReceivables: () -> Unit,
     onNavigateToInvestments: () -> Unit = {},
     onNavigateToEditTransaction: (String) -> Unit = {},
-    onNavigateToRefundTransaction: (String) -> Unit = {}
+    onNavigateToRefundTransaction: (String) -> Unit = {},
+    onNavigateToCards: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
@@ -406,94 +407,194 @@ fun DashboardScreen(
                 }
             }
 
-            // 4. Banner de Lançamento Automático Recente
-            uiState.autoLaunchNotice?.let { notice ->
-                item(key = "auto_launch_banner", contentType = "auto_launch_banner") {
+            // 4. Central de Lançamentos Recorrentes Programados (Confirmação inteligente)
+            if (uiState.pendingRecurringLaunches.isNotEmpty()) {
+                item(key = "pending_launches_banner", contentType = "pending_launches_banner") {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = DarkSurface),
                         shape = RoundedCornerShape(16.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.4f))
+                        border = BorderStroke(1.dp, Amber500.copy(alpha = 0.4f))
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Top
+                                .padding(14.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Amber500.copy(alpha = 0.15f))
-                                    .border(1.dp, Amber500.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Bolt,
-                                    contentDescription = null,
-                                    tint = Amber400,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text(
-                                        text = "⚡ Lançamento Automático",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Amber400
-                                    )
-                                    IconButton(
-                                        onClick = { viewModel.dismissAutoLaunchNotice() },
-                                        modifier = Modifier.size(20.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Amber500.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Fechar",
-                                            tint = TextMuted,
+                                            imageVector = Icons.Default.Bolt,
+                                            contentDescription = null,
+                                            tint = Amber400,
                                             modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Column {
+                                        Text(
+                                            text = "Contas Fixas & Renda Programadas",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "${uiState.pendingRecurringLaunches.size} pronta(s) para conferência",
+                                            fontSize = 10.sp,
+                                            color = Amber400
                                         )
                                     }
                                 }
 
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                val firstBill = notice.bills.firstOrNull()
-                                val msg = if (notice.count == 1 && firstBill != null) {
-                                    "A conta ${firstBill.description} (${FinanceEngine.formatCurrency(firstBill.totalAmount)}) foi lançada automaticamente no seu extrato deste mês."
-                                } else {
-                                    "${notice.count} contas fixas programadas foram lançadas automaticamente no seu extrato."
+                                val safeCount = uiState.pendingRecurringLaunches.count { it.matchedManualTx == null }
+                                if (safeCount > 1) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.confirmAllCandidates() },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(26.dp),
+                                        border = BorderStroke(1.dp, Amber500.copy(alpha = 0.5f))
+                                    ) {
+                                        Text(
+                                            text = "Confirmar Livres",
+                                            fontSize = 10.sp,
+                                            color = Amber400,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
+                            }
 
-                                Text(
-                                    text = msg,
-                                    fontSize = 12.sp,
-                                    color = TextSecondary,
-                                    lineHeight = 16.sp
-                                )
+                            Spacer(modifier = Modifier.height(10.dp))
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                uiState.pendingRecurringLaunches.forEach { item ->
+                                    val hasMatch = item.matchedManualTx != null
+                                    Surface(
+                                        color = if (hasMatch) Amber500.copy(alpha = 0.08f) else DarkBackground,
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (hasMatch) Amber500.copy(alpha = 0.35f) else DarkBorder
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = item.description,
+                                                            fontSize = 13.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = Color.White
+                                                        )
+                                                        Text(
+                                                            text = FinanceEngine.formatCurrency(item.amount),
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = if (item.type == com.saldolivre.app.data.model.TransactionType.INCOME) Emerald500 else TextSecondary
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = "Vence dia ${item.dueDay} • ${item.category}",
+                                                        fontSize = 10.sp,
+                                                        color = TextMuted
+                                                    )
+                                                }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text(
-                                        text = "Ver no Extrato →",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Amber400,
-                                        modifier = Modifier
-                                            .clickable {
-                                                viewModel.dismissAutoLaunchNotice()
-                                                onNavigateToTransactions()
+                                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    if (hasMatch && item.matchedManualTx != null) {
+                                                        Button(
+                                                            onClick = { viewModel.linkManualTransaction(item.id, item.matchedManualTx) },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Amber500),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                            modifier = Modifier.height(26.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "Vincular",
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color.Black
+                                                            )
+                                                        }
+                                                        OutlinedButton(
+                                                            onClick = { viewModel.skipRecurring(item.id) },
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                            modifier = Modifier.height(26.dp),
+                                                            border = BorderStroke(1.dp, DarkBorder)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Close,
+                                                                contentDescription = "Pular",
+                                                                tint = TextMuted,
+                                                                modifier = Modifier.size(12.dp)
+                                                            )
+                                                        }
+                                                    } else {
+                                                        Button(
+                                                            onClick = { viewModel.confirmLaunchCandidate(item) },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                            modifier = Modifier.height(26.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "Lançar",
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = Color.White
+                                                            )
+                                                        }
+                                                        OutlinedButton(
+                                                            onClick = { viewModel.skipRecurring(item.id) },
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                            modifier = Modifier.height(26.dp),
+                                                            border = BorderStroke(1.dp, DarkBorder)
+                                                        ) {
+                                                            Text(
+                                                                text = "Pular",
+                                                                fontSize = 10.sp,
+                                                                color = TextMuted
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
-                                            .padding(vertical = 2.dp)
-                                    )
+
+                                            if (hasMatch && item.matchedManualTx != null) {
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = "💡 Encontramos manual: \"${item.matchedManualTx.description}\" (${FinanceEngine.formatCurrency(item.matchedManualTx.totalAmount)}) em ${item.matchedManualTx.dueDate}",
+                                                    fontSize = 10.sp,
+                                                    color = Amber400
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -546,11 +647,20 @@ fun DashboardScreen(
                     key = { it.id },
                     contentType = { "recent_transaction_item" }
                 ) { tx ->
-                    val onItemClick = remember(tx) { { selectedTxForDetails = tx } }
+                    val onItemClick = remember(tx) {
+                        {
+                            if (tx.id.startsWith("invoice_")) {
+                                onNavigateToCards()
+                            } else {
+                                selectedTxForDetails = tx
+                            }
+                        }
+                    }
                     TransactionItem(
                         transaction = tx,
                         currentUserId = uiState.currentUser.uid,
                         allTransactions = uiState.recentTransactions,
+                        showDate = true,
                         onClick = onItemClick,
                         onStatusClick = { viewModel.toggleTransactionStatus(tx.id) }
                     )
@@ -569,7 +679,8 @@ fun DashboardScreen(
         TransactionDetailDialog(
             transaction = tx,
             currentUserId = uiState.currentUser.uid,
-            allTransactions = uiState.recentTransactions,
+            currentUser = uiState.currentUser,
+            allTransactions = uiState.allTransactions,
             onDismissRequest = { selectedTxForDetails = null },
             onToggleStatus = { viewModel.toggleTransactionStatus(tx.id) },
             onSetStatus = { status, actualAmount ->
@@ -582,6 +693,9 @@ fun DashboardScreen(
             onNavigateToRefundTransaction = { refundTxId ->
                 selectedTxForDetails = null
                 onNavigateToRefundTransaction(refundTxId)
+            },
+            onConfirmRefund = { origTx, refundAmount ->
+                viewModel.createRefund(origTx, refundAmount)
             },
             onDeleteRequest = {
                 txToDelete = tx

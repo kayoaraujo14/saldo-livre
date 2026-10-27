@@ -6,7 +6,7 @@
  * Não há coleção nova no Firestore — o acompanhamento é 100% calculado.
  */
 import type { Card, Transaction } from '@/types'
-import { effectiveAmount, impactFor } from './finance'
+import { clampPct, effectiveAmount } from './finance'
 import { daysInMonth, round2, shiftMonth, todayKey } from './utils'
 
 export type InvoiceStatus = 'empty' | 'open' | 'closed' | 'overdue' | 'paid'
@@ -114,8 +114,7 @@ export function buildCardInvoice(
       (t) =>
         t.cardId === card.id &&
         t.competenceMonth === monthKey &&
-        !t.reserveCardId &&
-        (t.visibleToUids || []).includes(uid),
+        !t.reserveCardId,
     )
     .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '') || (b.createdAt ?? 0) - (a.createdAt ?? 0))
 
@@ -129,8 +128,9 @@ export function buildCardInvoice(
     Math.min(total, expenses.filter((t) => t.status === 'paid').reduce((s, t) => s + effectiveAmount(t), 0)),
   )
   const openAmount = round2(Math.max(0, total - paidAmount))
-  const myShare = round2(Math.max(0, expenses.reduce((s, t) => s + impactFor(t, uid, all), 0) - credits))
-  const othersShare = round2(Math.max(0, total - myShare))
+
+  const isOwner = !card.ownerUid || card.ownerUid === uid
+  const rawOwnerName = card.ownerName || 'Titular'
 
   const cat = new Map<string, number>()
   for (const t of expenses) cat.set(t.category, (cat.get(t.category) ?? 0) + effectiveAmount(t))
@@ -155,7 +155,7 @@ export function buildCardInvoice(
   const participantMap = new Map<string, { name: string; amount: number; isMe: boolean }>()
 
   for (const t of expenses) {
-    const shares = getTransactionParticipantShares(t, uid, all)
+    const shares = getTransactionParticipantShares(t, uid, card, all)
     for (const [key, amt] of shares.entries()) {
       if (Math.abs(amt) <= 0.0001) continue
       const isMe = key === '__me__'
@@ -167,10 +167,19 @@ export function buildCardInvoice(
   }
 
   // Se houver créditos e o titular tiver participação, abate proporcionalmente do titular
-  if (credits > 0 && participantMap.has('Você (Minha parte)')) {
-    const cur = participantMap.get('Você (Minha parte)')!
-    cur.amount = round2(Math.max(0, cur.amount - credits))
+  if (credits > 0) {
+    const targetKey = isOwner ? 'Você (Minha parte)' : rawOwnerName
+    if (participantMap.has(targetKey)) {
+      const cur = participantMap.get(targetKey)!
+      cur.amount = round2(Math.max(0, cur.amount - credits))
+    } else if (participantMap.has('Você (Minha parte)')) {
+      const cur = participantMap.get('Você (Minha parte)')!
+      cur.amount = round2(Math.max(0, cur.amount - credits))
+    }
   }
+
+  const myShare = round2(participantMap.get('Você (Minha parte)')?.amount ?? 0)
+  const othersShare = round2(Math.max(0, total - myShare))
 
   const splitBreakdown: InvoiceParticipantShare[] = [...participantMap.values()]
     .filter((p) => p.amount > 0.001)
@@ -178,6 +187,7 @@ export function buildCardInvoice(
       ...p,
       pct: total > 0 ? Math.round((p.amount / total) * 100) : 0,
     }))
+    .sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.amount - a.amount)
     .sort((a, b) => (b.isMe ? 1 : 0) - (a.isMe ? 1 : 0) || b.amount - a.amount)
 
   // Maior gasto da fatura
@@ -189,8 +199,7 @@ export function buildCardInvoice(
     (t) =>
       t.cardId === card.id &&
       t.competenceMonth > monthKey &&
-      !t.reserveCardId &&
-      (t.visibleToUids || []).includes(uid),
+      !t.reserveCardId,
   )
   const futureExpenses = futureItems.filter((t) => t.type === 'expense' && t.status !== 'paid')
   const futureCredits = futureItems.filter((t) => t.type === 'income').reduce((s, t) => s + effectiveAmount(t), 0)
@@ -286,13 +295,15 @@ export function dueCountdownLabel(inv: CardInvoice) {
 
 /**
  * Retorna o mapa de participantes e seus respectivos valores rateados para uma transação de despesa.
- * O titular/usuário atual é indexado pela chave especial "__me__".
- * Outros participantes são indexados por seus nomes.
+ * O usuário atual/visualizador é indexado pela chave especial "__me__" (que se tornará "Você (Minha parte)").
+ * O titular do cartão (se o visualizador for um convidado) é indexado pelo nome do titular.
+ * Outros participantes são indexados por seus respectivos nomes.
  * A soma de todos os valores no mapa é GARANTIDA de ser igual a round2(effectiveAmount(tx)).
  */
 export function getTransactionParticipantShares(
   tx: Transaction,
   uid: string,
+  card?: Card | null,
   _all: Transaction[] = []
 ): Map<string, number> {
   if (tx.type !== 'expense') return new Map()
@@ -301,106 +312,84 @@ export function getTransactionParticipantShares(
 
   const shares = new Map<string, number>()
 
+  const ownerUid = card?.ownerUid || tx.paidByUid || tx.createdByUid
+  const rawOwnerName = card?.ownerName || 'Titular'
+  const isViewerOwner = uid === ownerUid
+  const ownerDisplayName = isViewerOwner ? '__me__' : rawOwnerName
+
   // 1. Alocações explícitas
   const validAllocs = (tx.allocations || []).filter((a) => Math.abs(a.amount || 0) > 0.0001)
-  const othersAllocs = validAllocs.filter((a) => {
-    const isMyUid = Boolean(a.uid && a.uid === uid)
-    const norm = (a.name || '').trim().toLowerCase()
-    const isMyName = (!a.uid || a.uid === uid) && (
-      norm === 'você' || norm === 'voce' || norm === 'meu' || norm === 'minha parte' || norm === 'você (minha parte)' || norm === 'voce (minha parte)'
-    )
-    return !isMyUid && !isMyName
-  })
-
-  if (othersAllocs.length > 0) {
-    let sumOthers = 0
-    for (const a of othersAllocs) {
-      const name = a.name?.trim() || 'Outro'
+  if (validAllocs.length > 0) {
+    for (const a of validAllocs) {
       const amt = round2(a.amount || 0)
-      shares.set(name, round2((shares.get(name) ?? 0) + amt))
-      sumOthers += amt
-    }
-    const myAllocs = validAllocs.filter((a) => !othersAllocs.includes(a))
-    const myAllocSum = myAllocs.reduce((s, a) => s + (a.amount || 0), 0)
-    const myAmount = Math.abs(myAllocSum) > 0.0001 ? round2(total - sumOthers) : round2(Math.max(0, total - sumOthers))
-    if (Math.abs(myAmount) > 0.0001) {
-      shares.set('__me__', myAmount)
+      const isMyUid = Boolean(a.uid && a.uid === uid)
+      const isOwnerUid = Boolean(a.uid && a.uid === ownerUid)
+      const norm = (a.name || '').trim().toLowerCase()
+      const isMeName =
+        norm === 'você' ||
+        norm === 'voce' ||
+        norm === 'meu' ||
+        norm === 'minha parte' ||
+        norm === 'você (minha parte)' ||
+        norm === 'voce (minha parte)'
+
+      let key = a.name?.trim() || 'Outro'
+      if (isMyUid) key = '__me__'
+      else if (isOwnerUid) key = ownerDisplayName
+      else if (isMeName) key = ownerDisplayName
+
+      shares.set(key, round2((shares.get(key) ?? 0) + amt))
     }
   } else if (tx.splitType === 'split_50') {
     // 2. Divisão 50/50 implícita
     const half = round2(total / 2)
     const otherHalf = round2(total - half)
-    shares.set('__me__', half)
-    const partnerName = tx.externalName?.trim() || 'Parceiro(a)'
-    shares.set(partnerName, otherHalf)
+    shares.set(ownerDisplayName, round2((shares.get(ownerDisplayName) ?? 0) + half))
+    const partnerLabel = tx.externalName?.trim() || 'Parceiro(a)'
+    const partnerKey = tx.assignedFriendUid === uid ? '__me__' : partnerLabel
+    shares.set(partnerKey, round2((shares.get(partnerKey) ?? 0) + otherHalf))
   } else if (tx.splitType === 'partner') {
     // 3. 100% Parceiro(a)
-    const partnerName = tx.externalName?.trim() || 'Parceiro(a)'
-    shares.set(partnerName, total)
-  } else if (Boolean(tx.assignedFriendName || tx.assignedFriendUid || tx.splitType === 'friend')) {
+    const partnerLabel = tx.externalName?.trim() || 'Parceiro(a)'
+    const partnerKey = tx.assignedFriendUid === uid ? '__me__' : partnerLabel
+    shares.set(partnerKey, total)
+  } else if (tx.assignedFriendName || tx.assignedFriendUid || tx.splitType === 'friend') {
     // 4. Amigo atribuído
+    const friendUid = tx.assignedFriendUid
     const friendName = tx.assignedFriendName?.trim() || 'Amigo'
-    let friendAmount = 0
-    if (tx.friendSharePct && tx.friendSharePct > 0) {
-      friendAmount = round2((total * tx.friendSharePct) / 100)
-    } else if (tx.userImpact && uid in tx.userImpact && (tx.userImpact[uid] ?? 0) >= 0 && (tx.userImpact[uid] ?? 0) <= total) {
-      friendAmount = round2(total - (tx.userImpact[uid] || 0))
-    } else if (tx.assignedFriendUid && tx.userImpact && tx.assignedFriendUid in tx.userImpact) {
-      friendAmount = round2(tx.userImpact[tx.assignedFriendUid] || total)
-    } else {
-      friendAmount = round2(total / 2)
+    const pct = tx.friendSharePct && tx.friendSharePct > 0 ? clampPct(tx.friendSharePct) : 50
+    const friendAmount = round2((total * pct) / 100)
+    const buyerAmount = round2(total - friendAmount)
+
+    const isFriendViewer = Boolean(friendUid && friendUid === uid)
+    const friendKey = isFriendViewer ? '__me__' : friendName
+    const buyerKey = ownerDisplayName
+
+    if (Math.abs(friendAmount) > 0.0001) {
+      shares.set(friendKey, round2((shares.get(friendKey) ?? 0) + friendAmount))
     }
-    friendAmount = Math.max(0, Math.min(total, friendAmount))
-    const myAmount = round2(Math.max(0, total - friendAmount))
-    if (Math.abs(myAmount) > 0.0001) shares.set('__me__', myAmount)
-    shares.set(friendName, friendAmount)
-  } else if (Boolean(tx.externalName || tx.splitType === 'external')) {
+    if (Math.abs(buyerAmount) > 0.0001) {
+      shares.set(buyerKey, round2((shares.get(buyerKey) ?? 0) + buyerAmount))
+    }
+  } else if (tx.externalName || tx.splitType === 'external') {
     // 5. Terceiro / Externo
     const extName = tx.externalName?.trim() || 'Terceiro'
-    const extAmount = tx.splitType === 'external'
-      ? total
-      : (tx.userImpact && uid in tx.userImpact && (tx.userImpact[uid] ?? 0) >= 0 && (tx.userImpact[uid] ?? 0) <= total)
-        ? round2(total - (tx.userImpact[uid] || 0))
-        : total
-    const myAmount = round2(Math.max(0, total - extAmount))
-    if (Math.abs(myAmount) > 0.0001) shares.set('__me__', myAmount)
-    shares.set(extName, extAmount)
+    shares.set(extName, total)
   } else {
-    // 6. 100% Meu
-    shares.set('__me__', total)
+    // 6. 100% Meu (despesa própria do titular do cartão)
+    shares.set(ownerDisplayName, total)
   }
 
   // 7. Reconciliação estrita de centavos:
-  // Garante com precisão absoluta que a soma de todas as cotas seja EXATAMENTE igual a 'total'.
   let sumShares = 0
   for (const v of shares.values()) {
     sumShares = round2(sumShares + v)
   }
   const diff = round2(total - sumShares)
   if (Math.abs(diff) > 0.0001) {
-    if (shares.has('__me__')) {
-      const curMe = shares.get('__me__') || 0
-      const adjustedMe = round2(curMe + diff)
-      if (adjustedMe > 0) {
-        shares.set('__me__', adjustedMe)
-      } else {
-        shares.delete('__me__')
-      }
-    } else if (diff > 0) {
-      shares.set('__me__', diff)
-    } else {
-      let largestKey: string | null = null
-      let largestVal = -1
-      for (const [k, v] of shares.entries()) {
-        if (v > largestVal) {
-          largestVal = v
-          largestKey = k
-        }
-      }
-      if (largestKey) {
-        shares.set(largestKey, round2(Math.max(0, largestVal + diff)))
-      }
-    }
+    const primaryKey = ownerDisplayName
+    const cur = shares.get(primaryKey) || 0
+    shares.set(primaryKey, round2(cur + diff))
   }
 
   return shares
@@ -412,10 +401,11 @@ export function getTransactionParticipantShares(
 export function participantAmountIn(
   tx: Transaction,
   participant: InvoiceParticipantShare,
-  uid: string
+  uid: string,
+  card?: Card | null
 ): number {
   if (tx.type !== 'expense') return 0
-  const shares = getTransactionParticipantShares(tx, uid)
+  const shares = getTransactionParticipantShares(tx, uid, card)
 
   if (participant.isMe) {
     return shares.get('__me__') ?? 0
@@ -440,12 +430,13 @@ export function participantAmountIn(
 export function calculateCategoryBreakdownForParticipant(
   expenses: Transaction[],
   participant: InvoiceParticipantShare,
-  uid: string
+  uid: string,
+  card?: Card | null
 ): InvoiceCategorySlice[] {
   const participantExpenses: Array<{ tx: Transaction; share: number }> = []
 
   for (const tx of expenses) {
-    const share = participantAmountIn(tx, participant, uid)
+    const share = participantAmountIn(tx, participant, uid, card)
     if (share > 0) {
       participantExpenses.push({ tx, share })
     }
@@ -465,4 +456,138 @@ export function calculateCategoryBreakdownForParticipant(
       pct: totalParticipantExpense > 0 ? Math.round((amount / totalParticipantExpense) * 100) : 0,
     }))
     .sort((a, b) => b.amount - a.amount)
+}
+
+export interface ConsolidatedInvoiceMeta {
+  isConsolidatedInvoice: true
+  card: Card
+  invoice: CardInvoice
+  totalInvoiceAmount: number
+  myShare: number
+  othersShare: number
+  itemsCount: number
+  closingDate: string
+  dueDate: string
+  invoiceStatus: InvoiceStatus
+  isOwner: boolean
+}
+
+export type ConsolidatedTransaction = Transaction & {
+  invoiceMeta?: ConsolidatedInvoiceMeta
+}
+
+export function createConsolidatedInvoiceTx(
+  invoice: CardInvoice,
+  uid: string,
+  monthKey: string
+): ConsolidatedTransaction {
+  const card = invoice.card
+  const isOwner = card.ownerUid === uid
+  const myShare = invoice.myShare
+  const status = invoice.status === 'paid' ? 'paid' : (invoice.status === 'open' ? 'estimated' : 'pending')
+
+  const desc = isOwner
+    ? (myShare === 0 && invoice.total > 0 ? `Fatura ${card.cardName} (100% Terceiros)` : `Fatura ${card.cardName}`)
+    : `Fatura ${card.cardName} (Minha parte)`
+
+  const meta: ConsolidatedInvoiceMeta = {
+    isConsolidatedInvoice: true,
+    card,
+    invoice,
+    totalInvoiceAmount: invoice.total,
+    myShare: invoice.myShare,
+    othersShare: invoice.othersShare,
+    itemsCount: invoice.itemsCount,
+    closingDate: invoice.closingDate,
+    dueDate: invoice.dueDate,
+    invoiceStatus: invoice.status,
+    isOwner,
+  }
+
+  return {
+    id: `invoice_${card.id}_${monthKey}`,
+    createdByUid: card.ownerUid,
+    paidByUid: card.ownerUid,
+    cardId: card.id,
+    description: desc,
+    category: 'Outros',
+    subcategory: `Vencimento dia ${card.dueDay}`,
+    type: 'expense',
+    paymentMethod: 'credit_card',
+    status,
+    estimatedAmount: status === 'paid' ? null : myShare,
+    actualAmount: status === 'paid' ? myShare : null,
+    totalAmount: myShare,
+    dueDate: invoice.dueDate,
+    competenceMonth: monthKey,
+    visibleToUids: [uid],
+    userImpact: { [uid]: myShare },
+    allocations: [
+      {
+        type: 'PLATFORM_USER',
+        uid,
+        name: isOwner ? 'Você (Minha parte)' : (invoice.splitBreakdown.find((p) => p.isMe)?.name || 'Minha parte'),
+        amount: myShare,
+        reimbursed: false,
+      },
+      ...(isOwner && invoice.othersShare > 0
+        ? [
+            {
+              type: 'EXTERNAL' as const,
+              name: 'Terceiros / Amigos',
+              amount: invoice.othersShare,
+              reimbursed: false,
+            },
+          ]
+        : []),
+    ],
+    invoiceMeta: meta,
+  }
+}
+
+export function consolidateMonthTransactions(
+  monthTransactions: Transaction[],
+  allTransactions: Transaction[],
+  cards: Card[],
+  uid: string,
+  monthKey: string,
+  enabled: boolean = true
+): ConsolidatedTransaction[] {
+  if (!enabled || !uid) return monthTransactions as ConsolidatedTransaction[]
+
+  // Transações não vinculadas a cartão
+  const nonCardTxs = (monthTransactions || []).filter(
+    (t) => t.paymentMethod !== 'credit_card' || !t.cardId || Boolean(t.reserveCardId)
+  )
+
+  // Conjunto de cartões relevantes
+  const relevantCardMap = new Map<string, Card>()
+  for (const c of cards || []) {
+    if (c.ownerUid === uid || (c.sharedWithUids || []).includes(uid)) {
+      relevantCardMap.set(c.id, c)
+    }
+  }
+
+  // Também inclui cartões referenciados em monthTransactions caso algum não esteja no array cards
+  for (const t of monthTransactions || []) {
+    if (t.paymentMethod === 'credit_card' && t.cardId && !relevantCardMap.has(t.cardId)) {
+      const found = (cards || []).find((c) => c.id === t.cardId)
+      if (found) relevantCardMap.set(found.id, found)
+    }
+  }
+
+  const invoiceTxs: ConsolidatedTransaction[] = []
+
+  for (const card of relevantCardMap.values()) {
+    const inv = buildCardInvoice(card, monthKey, allTransactions, uid)
+    // Se não há compras nesta fatura para o usuário, não gera linha de extrato
+    if (inv.itemsCount === 0) continue
+
+    // Se o usuário é apenas convidado e não tem cota nesta fatura, pula
+    if (card.ownerUid !== uid && inv.myShare <= 0) continue
+
+    invoiceTxs.push(createConsolidatedInvoiceTx(inv, uid, monthKey))
+  }
+
+  return [...nonCardTxs, ...invoiceTxs]
 }

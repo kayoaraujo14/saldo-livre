@@ -7,6 +7,8 @@ import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.engine.InvoiceStatus
 import com.saldolivre.app.data.model.Card
+import com.saldolivre.app.ui.screens.friends.FriendItem
+import com.saldolivre.app.data.model.FriendshipStatus
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
@@ -23,6 +25,7 @@ data class CardsAndInvoicesUiState(
     val viewMonth: String = FinanceEngine.currentMonthKey(),
     val currentUser: UserProfile = UserProfile(),
     val partner: UserProfile? = null,
+    val friends: List<FriendItem> = emptyList(),
     // Faturas
     val invoices: List<CardInvoice> = emptyList(),
     val selectedCardId: String? = null,
@@ -68,17 +71,36 @@ class CardsAndInvoicesViewModel(
                 repository.currentUser,
                 repository.getCards(),
                 repository.getTransactions(),
-                viewMonth,
-                selectedCardId
-            ) { user, cards, transactions, month, selId ->
+                combine(viewMonth, selectedCardId) { m, s -> Pair(m, s) },
+                repository.getFriendships()
+            ) { user, cards, transactions, monthSelPair, friendships ->
+                val month = monthSelPair.first
+                val selId = monthSelPair.second
                 val partner = repository.allUsers.find { it.uid != user.uid }
                 val currentDay = LocalDate.now().dayOfMonth
+
+                val activeFriends = friendships.filter { it.status == FriendshipStatus.ACCEPTED }.map { f ->
+                    val isRequester = f.requesterUid == user.uid
+                    FriendItem(
+                        friendshipId = f.id,
+                        friendUid = if (isRequester) f.recipientUid else f.requesterUid,
+                        friendName = if (isRequester) f.recipientName else f.requesterName,
+                        friendEmail = if (isRequester) f.recipientEmail else f.requesterEmail
+                    )
+                }
 
                 // Ordenação determinística e consistente dos cartões (próprios primeiro, depois ordem alfabética)
                 val sortedCards = cards.sortedWith(
                     compareByDescending<Card> { it.ownerUid == user.uid }
                         .thenBy { it.cardName.lowercase() }
                 )
+
+                // Sincroniza visibilidade de transações para cartões compartilhados próprios
+                for (c in cards) {
+                    if (c.ownerUid == user.uid && c.sharedWithUids.isNotEmpty()) {
+                        repository.syncCardTransactionsVisibility(c)
+                    }
+                }
 
                 // 1. Invoices computation via InvoiceEngine
                 val invoices = sortedCards.map { card ->
@@ -172,7 +194,8 @@ class CardsAndInvoicesViewModel(
                         totalCommittedAmount = totalCommittedAll,
                         nextDueInvoice = nextDue,
                         isLoading = false,
-                        cardsWithInvoices = cardsWithInvoices
+                        cardsWithInvoices = cardsWithInvoices,
+                        friends = activeFriends
                     )
                 }
             }.collect()
@@ -222,7 +245,14 @@ class CardsAndInvoicesViewModel(
         _uiState.update { it.copy(searchQuery = query) }
     }
 
-    fun requestPay() = _uiState.update { it.copy(showPayConfirm = true) }
+    fun requestPay() {
+        val invoice = _uiState.value.selectedInvoice ?: return
+        if (invoice.card.ownerUid != _uiState.value.currentUser.uid) {
+            _uiState.update { it.copy(userMessage = "Apenas o titular pode quitar a fatura bancária.") }
+            return
+        }
+        _uiState.update { it.copy(showPayConfirm = true) }
+    }
     fun dismissPay() = _uiState.update { it.copy(showPayConfirm = false) }
 
     fun confirmPay() {
@@ -270,6 +300,10 @@ class CardsAndInvoicesViewModel(
     }
 
     fun editCard(card: Card) {
+        if (card.ownerUid != _uiState.value.currentUser.uid) {
+            _uiState.update { it.copy(userMessage = "Apenas o titular pode editar este cartão.") }
+            return
+        }
         _uiState.update { it.copy(editingCard = card, isFormOpen = true) }
     }
 
@@ -292,6 +326,10 @@ class CardsAndInvoicesViewModel(
     }
 
     fun confirmDelete(card: Card) {
+        if (card.ownerUid != _uiState.value.currentUser.uid) {
+            _uiState.update { it.copy(userMessage = "Apenas o titular pode excluir este cartão.") }
+            return
+        }
         _uiState.update { it.copy(cardToDelete = card) }
     }
 
@@ -322,5 +360,17 @@ class CardsAndInvoicesViewModel(
 
     fun clearMessage() {
         _uiState.update { it.copy(userMessage = null) }
+    }
+
+    fun createRefund(origTx: Transaction, refundAmount: Double) {
+        viewModelScope.launch {
+            try {
+                val refundTx = FinanceEngine.createRefundTransaction(origTx, refundAmount, _uiState.value.currentUser)
+                repository.addTransaction(refundTx)
+                _uiState.update { it.copy(userMessage = "Estorno registrado com sucesso!") }
+            } catch (e: Exception) {
+                android.util.Log.e("CardsAndInvoicesViewModel", "Erro ao registrar estorno", e)
+            }
+        }
     }
 }

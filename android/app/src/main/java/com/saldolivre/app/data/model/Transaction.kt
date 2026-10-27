@@ -180,7 +180,9 @@ data class Transaction(
     val installmentNumber: Int? = null,
     val installmentsTotal: Int? = null,
     val splitType: SplitType? = null,
-    val externalName: String? = null
+    val externalName: String? = null,
+    val refundedTransactionId: String? = null,
+    val invoiceMeta: com.saldolivre.app.data.engine.ConsolidatedInvoiceMeta? = null
 ) {
     val effectiveAmount: Double
         get() = actualAmount ?: estimatedAmount ?: totalAmount

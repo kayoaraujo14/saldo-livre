@@ -18,27 +18,34 @@ import com.saldolivre.app.ui.theme.*
 data class InvoiceDateGroup(
     val dateKey: String,
     val items: List<Transaction>,
-    val totalAmount: Double
+    val totalAmount: Double,
+    val isIncome: Boolean = false
 )
 
 @Composable
 fun InvoiceDateGroupHeader(
     dateKey: String,
     totalAmount: Double,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isIncome: Boolean = false
 ) {
     val header = remember(dateKey) { FinanceEngine.formatNubankDateHeader(dateKey) }
-    val formattedTotal = remember(totalAmount) {
-        if (totalAmount < 0.0) {
-            "- " + FinanceEngine.formatCurrency(-totalAmount)
-        } else {
-            FinanceEngine.formatCurrency(totalAmount)
+    val formattedTotal = remember(totalAmount, isIncome) {
+        when {
+            isIncome -> "+ " + FinanceEngine.formatCurrency(kotlin.math.abs(totalAmount))
+            totalAmount < 0.0 -> "- " + FinanceEngine.formatCurrency(-totalAmount)
+            else -> FinanceEngine.formatCurrency(totalAmount)
         }
     }
     val titleColor = when {
         header.isToday -> Cyan400
         header.isYesterday -> Amber400
         else -> TextPrimary
+    }
+    val amountColor = when {
+        isIncome -> Emerald400
+        totalAmount < 0.0 -> Cyan400
+        else -> TextSecondary
     }
 
     Row(
@@ -73,7 +80,7 @@ fun InvoiceDateGroupHeader(
             text = formattedTotal,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
-            color = if (totalAmount < 0.0) Cyan400 else TextSecondary
+            color = amountColor
         )
     }
 }

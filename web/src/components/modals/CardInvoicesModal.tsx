@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
-import { effectiveAmount } from '@/lib/finance'
+import { effectiveAmount, canUserEditTransaction } from '@/lib/finance'
 import {
   buildCardInvoice,
   buildInvoiceHistory,
@@ -41,6 +41,8 @@ interface CardInvoicesModalProps {
   onOpenChange: (open: boolean) => void
   onEditTx?: (tx: Transaction) => void
   onRefundTx?: (tx: Transaction) => void
+  initialCardId?: string | null
+  initialMonth?: string | null
 }
 
 /** Paleta estática alinhada com as cores dos cartões. */
@@ -106,27 +108,35 @@ function StatusPill({ inv }: { inv: CardInvoice }) {
   )
 }
 
-export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: CardInvoicesModalProps) {
+export function CardInvoicesModal({
+  open,
+  onOpenChange,
+  onEditTx,
+  onRefundTx,
+  initialCardId,
+  initialMonth,
+}: CardInvoicesModalProps) {
   const { cards, transactions, me, month, setStatus } = useFinance()
   const uid = me?.uid ?? ''
 
-  const [viewMonth, setViewMonth] = useState(month)
-  const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
+  const [viewMonth, setViewMonth] = useState(initialMonth || month)
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(initialCardId || null)
   const [selectedParticipantName, setSelectedParticipantName] = useState<string | null>(null)
   const [confirmPay, setConfirmPay] = useState(false)
   const [paying, setPaying] = useState(false)
   const [itemFilter, setItemFilter] = useState<'all' | 'third_party' | 'open' | 'paid' | 'installments'>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Sincroniza com o mês global sempre que o modal é aberto
+  // Sincroniza com o mês global ou inicial sempre que o modal é aberto
   useEffect(() => {
     if (open) {
-      setViewMonth(month)
+      setViewMonth(initialMonth || month)
+      if (initialCardId) setSelectedCardId(initialCardId)
       setConfirmPay(false)
       setSearchQuery('')
       setSelectedParticipantName(null)
     }
-  }, [open, month])
+  }, [open, month, initialCardId, initialMonth])
 
   const invoices = useMemo(
     () => cards.map((c) => buildCardInvoice(c, viewMonth, transactions, uid)),
@@ -172,7 +182,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: 
       const part = selected.splitBreakdown.find((p) => p.name === selectedParticipantName)
       if (part) {
         const expenses = selected.items.filter((t) => t.type === 'expense')
-        return calculateCategoryBreakdownForParticipant(expenses, part, uid)
+        return calculateCategoryBreakdownForParticipant(expenses, part, uid, selected.card)
       }
     }
     return selected.byCategory
@@ -185,7 +195,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: 
     if (selectedParticipantName) {
       const part = selected.splitBreakdown.find((p) => p.name === selectedParticipantName)
       if (part) {
-        list = list.filter((t) => participantAmountIn(t, part, uid) > 0)
+        list = list.filter((t) => participantAmountIn(t, part, uid, selected.card) > 0)
       }
     }
 
@@ -224,7 +234,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: 
     for (const [dateKey, items] of map.entries()) {
       const total = items.reduce((sum, tx) => {
         const activePart = selectedParticipantName ? selected?.splitBreakdown.find((p) => p.name === selectedParticipantName) : null
-        const partShare = activePart ? participantAmountIn(tx, activePart, uid) : null
+        const partShare = activePart ? participantAmountIn(tx, activePart, uid, selected?.card) : null
         const hasPartFilter = Boolean(selectedParticipantName && partShare != null && partShare > 0)
         const amount = hasPartFilter ? partShare! : effectiveAmount(tx)
         return sum + (tx.type === 'income' ? -amount : amount)
@@ -455,7 +465,19 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: 
                     {/* Ação de pagamento */}
                     {selected.openAmount > 0 && (
                       <div className="mt-4 pt-3 border-t border-white/15 relative z-10">
-                        {confirmPay ? (
+                        {selected.card.ownerUid !== uid ? (
+                          <div className="p-3 rounded-xl bg-indigo-950/60 border border-indigo-400/30 text-indigo-200 text-xs flex items-center justify-between gap-2 backdrop-blur-md">
+                            <div>
+                              <span className="font-semibold block text-white">Cartão de {selected.card.ownerName}</span>
+                              <span className="text-[11px] text-indigo-300">
+                                Sua parte nesta fatura: <strong>{formatBRL(selected.myShare)}</strong>
+                              </span>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900/60 text-indigo-200 border border-indigo-700">
+                              Somente Leitura
+                            </span>
+                          </div>
+                        ) : confirmPay ? (
                           <div className="rounded-xl border border-emerald-400/40 bg-emerald-950/60 p-3 space-y-2 backdrop-blur-md">
                             <p className="text-xs text-emerald-200">
                               Marcar {selected.items.filter((t) => t.type === 'expense' && t.status !== 'paid').length} lançamento(s) como
@@ -792,7 +814,7 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: 
                                 const st = ITEM_STATUS_LABEL[tx.status]
                                 const mine = tx.userImpact?.[uid]
                                 const activePart = selectedParticipantName ? selected.splitBreakdown.find((p) => p.name === selectedParticipantName) : null
-                                const participantShare = activePart ? participantAmountIn(tx, activePart, uid) : null
+                                const participantShare = activePart ? participantAmountIn(tx, activePart, uid, selected.card) : null
                                 const hasParticipantFilter = Boolean(selectedParticipantName && participantShare != null && participantShare > 0)
                                 const displayAmount = hasParticipantFilter ? participantShare! : effectiveAmount(tx)
                                 const isPartial = hasParticipantFilter && Math.abs(displayAmount - effectiveAmount(tx)) > 0.01
@@ -849,18 +871,28 @@ export function CardInvoicesModal({ open, onOpenChange, onEditTx, onRefundTx }: 
                                             total {formatBRL(effectiveAmount(tx))}
                                           </p>
                                         )}
-                                        <span className={`inline-block rounded-full border px-1.5 text-[9px] font-semibold ${st.tone}`}>{st.label}</span>
+                                        <div className="flex items-center justify-end gap-1">
+                                          {transactions.some((t) => t.refundedTransactionId === tx.id) && (
+                                            <span
+                                              className="inline-flex items-center gap-1 rounded-full border border-cyan-500/40 bg-cyan-950/60 text-cyan-300 px-1.5 py-0.5 text-[9px] font-semibold"
+                                              title="Esta compra possui estorno vinculado"
+                                            >
+                                              <RotateCcw className="size-2.5" />
+                                              Estornado
+                                            </span>
+                                          )}
+                                          <span className={`inline-block rounded-full border px-1.5 text-[9px] font-semibold ${st.tone}`}>{st.label}</span>
+                                        </div>
                                       </div>
                                     </button>
-                                    {onRefundTx && tx.type === 'expense' && !isCredit && (
+                                    {onRefundTx && tx.type === 'expense' && !isCredit && canUserEditTransaction(tx, uid) && (
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          onOpenChange(false)
                                           onRefundTx(tx)
                                         }}
-                                        className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/40 transition-all cursor-pointer shrink-0"
-                                        title="Cadastrar estorno rateado deste lançamento"
+                                        className="opacity-70 group-hover:opacity-100 p-2 rounded-lg text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/60 transition-all cursor-pointer shrink-0"
+                                        title="Registrar estorno desta compra"
                                       >
                                         <RotateCcw className="size-3.5" />
                                       </button>

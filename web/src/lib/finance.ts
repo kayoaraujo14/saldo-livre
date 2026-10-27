@@ -18,8 +18,10 @@ import type {
   UserProfile,
   FutureMonthProjection,
   LaunchTrigger,
+  PendingRecurringCandidate,
 } from '@/types'
 import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
+import { buildCardInvoice } from './invoices'
 
 export interface Party {
   uid: string
@@ -157,8 +159,8 @@ export function clampPct(pct: number | null | undefined) {
   return Math.min(100, round2(n))
 }
 
-/** Valor que cabe ao amigo numa cobrança de amigo (fallback: total, para dados legados). */
-export function friendShareOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount'>) {
+/** Valor que cabe ao amigo numa cobrança de amigo (fallback: cálculo por porcentagem ou total). */
+export function friendShareOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>) {
   if (!tx || !tx.assignedFriendUid) return 0
   const rawAllocs = Array.isArray(tx.allocations)
     ? tx.allocations
@@ -166,16 +168,21 @@ export function friendShareOf(tx: Pick<Transaction, 'assignedFriendUid' | 'alloc
         ? Object.values(tx.allocations)
         : [])
   const allocs = rawAllocs.filter((a: any) => a && typeof a === 'object' && a.uid === tx.assignedFriendUid)
-  if (!allocs.length) return Number(tx.totalAmount) || 0
-  return round2(allocs.reduce((s: number, a: any) => s + (Number(a.amount) || 0), 0))
+  if (allocs.length > 0) {
+    return round2(allocs.reduce((s: number, a: any) => s + (Number(a.amount) || 0), 0))
+  }
+  // Fallback se não houver allocation explícita com o UID do amigo:
+  const total = Number(tx.totalAmount) || 0
+  const pct = tx.friendSharePct != null ? clampPct(tx.friendSharePct) : 50
+  return round2((total * pct) / 100)
 }
 
 export function friendPctOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>) {
   if (!tx) return 100
   if (tx.friendSharePct != null) return clampPct(tx.friendSharePct)
-  const total = Number(tx.totalAmount) || 0
+  const total = Math.abs(Number(tx.totalAmount) || 0)
   if (!total) return 100
-  return clampPct((friendShareOf(tx) / total) * 100)
+  return clampPct((Math.abs(friendShareOf(tx)) / total) * 100)
 }
 
 export function buildSplit(input: SplitInput) {
@@ -258,30 +265,183 @@ export function buildSplit(input: SplitInput) {
   return { allocations, userImpact: deriveImpact(allocations, visibleToUids), visibleToUids, splitType }
 }
 
-/** Reescala as divisões quando o valor efetivo muda (ex: conta de luz chegou). */
-export function rescaleSplit(tx: Transaction, newTotal: number) {
+/**
+ * Reescala as divisões quando o valor efetivo muda ou quando um estorno é criado a partir de uma compra.
+ * Garante proporcionalidade estrita: a soma das cotas de todos os participantes é EXATAMENTE 100% de newTotal.
+ */
+export function rescaleSplit(tx: Transaction, newTotal: number, viewerUid?: string) {
+  const roundedTotal = round2(newTotal)
   const allocs = tx.allocations || []
-  const oldTotal = allocs.reduce((s, a) => s + (a.amount || 0), 0)
-  let allocations: Allocation[]
-  if (allocs.length === 0) {
-    allocations = []
-  } else if (Math.abs(oldTotal) <= 0.001) {
-    const each = round2(newTotal / allocs.length)
-    allocations = allocs.map((a) => ({ ...a, amount: each }))
-  } else {
-    const ratio = newTotal / oldTotal
+  let allocations: Allocation[] = []
+
+  // Caso 1: Já existem allocations com 2 ou mais participantes com soma condizente
+  const allocSum = allocs.reduce((s, a) => s + (Number(a.amount) || 0), 0)
+  const hasMultipleValidAllocs = allocs.length > 1 && Math.abs(allocSum) > 0.001
+
+  if (hasMultipleValidAllocs) {
+    const ratio = roundedTotal / allocSum
     let acc = 0
     allocations = allocs.map((a, i) => {
-      if (i === allocs.length - 1) return { ...a, amount: round2(newTotal - acc) }
+      if (i === allocs.length - 1) return { ...a, amount: round2(roundedTotal - acc) }
       const amount = round2(a.amount * ratio)
       acc += amount
       return { ...a, amount }
     })
+  } else if (tx.assignedFriendUid || tx.splitType === 'friend') {
+    // Caso 2: Divisão com Amigo (pode estar sem allocations completas ou com alocação legada de 100%)
+    const pct = tx.friendSharePct != null ? clampPct(tx.friendSharePct) : 50
+    const friendAmount = round2((roundedTotal * pct) / 100)
+    const myAmount = round2(roundedTotal - friendAmount)
+    const fName = tx.assignedFriendName?.trim() || 'Amigo'
+    const myUid = viewerUid || tx.createdByUid || tx.paidByUid
+
+    allocations = []
+    if (Math.abs(myAmount) > 0.0001) {
+      allocations.push({
+        type: 'PLATFORM_USER',
+        uid: myUid,
+        name: 'Você',
+        amount: myAmount,
+        reimbursed: true,
+      })
+    }
+    allocations.push({
+      type: tx.assignedFriendUid ? 'PLATFORM_USER' : 'EXTERNAL',
+      uid: tx.assignedFriendUid || undefined,
+      name: fName,
+      amount: friendAmount,
+      reimbursed: false,
+    })
+  } else if (tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') {
+    // Caso 3: Divisão 50/50 (Casal / Parceiro)
+    const half = round2(roundedTotal / 2)
+    const otherHalf = round2(roundedTotal - half)
+    const myUid = viewerUid || tx.createdByUid || tx.paidByUid
+    const pName = tx.externalName?.trim() || 'Parceiro(a)'
+
+    allocations = [
+      {
+        type: 'PLATFORM_USER',
+        uid: myUid,
+        name: 'Você',
+        amount: half,
+        reimbursed: true,
+      },
+      {
+        type: 'EXTERNAL',
+        name: pName,
+        amount: otherHalf,
+        reimbursed: false,
+      },
+    ]
+  } else if (tx.splitType === 'partner') {
+    // Caso 4: 100% Parceiro(a)
+    allocations = [
+      {
+        type: 'EXTERNAL',
+        name: tx.externalName?.trim() || 'Parceiro(a)',
+        amount: roundedTotal,
+        reimbursed: false,
+      },
+    ]
+  } else if (tx.splitType === 'external' || tx.externalName) {
+    // Caso 5: Terceiro Externo
+    allocations = [
+      {
+        type: 'EXTERNAL',
+        name: tx.externalName?.trim() || 'Terceiro',
+        amount: roundedTotal,
+        reimbursed: false,
+      },
+    ]
+  } else if (allocs.length > 0) {
+    // Caso 6: Allocations existentes (ex: 1 allocation de 100% Meu)
+    const ratio = Math.abs(allocSum) > 0.001 ? roundedTotal / allocSum : 1
+    let acc = 0
+    allocations = allocs.map((a, i) => {
+      if (i === allocs.length - 1) return { ...a, amount: round2(roundedTotal - acc) }
+      const amount = round2(a.amount * ratio)
+      acc += amount
+      return { ...a, amount }
+    })
+  } else {
+    // Caso 7: Padrão 100% Meu
+    const myUid = viewerUid || tx.createdByUid || tx.paidByUid
+    allocations = [
+      {
+        type: 'PLATFORM_USER',
+        uid: myUid,
+        name: 'Você',
+        amount: roundedTotal,
+        reimbursed: true,
+      },
+    ]
   }
+
+  const visibleUids = new Set<string>(tx.visibleToUids || [])
+  for (const a of allocations) {
+    if (a.uid) visibleUids.add(a.uid)
+  }
+
   return {
-    totalAmount: round2(newTotal),
+    totalAmount: roundedTotal,
     allocations,
-    userImpact: deriveImpact(allocations, tx.visibleToUids || []),
+    userImpact: deriveImpact(allocations, [...visibleUids]),
+    visibleToUids: [...visibleUids],
+  }
+}
+
+/**
+ * Cria uma transação de estorno vinculada a uma compra existente no cartão de crédito.
+ * Replica exatamente a categoria, subcategoria, cartão, participantes e proporções de rateio,
+ * gerando valores negativos que abatem a fatura e o Saldo Livre.
+ */
+export function createRefundForTransaction(
+  origTx: Transaction,
+  refundAmount: number,
+  currentUser: { uid: string; displayName?: string },
+  todayIso: string = todayKey()
+): Transaction {
+  const absAmount = round2(Math.abs(refundAmount))
+  const signedTotal = -absAmount
+
+  const rescaled = rescaleSplit(origTx, signedTotal, currentUser.uid)
+  const cleanDesc = origTx.description.replace(/^Estorno:\s*/i, '').trim()
+
+  const friendAlloc = origTx.assignedFriendUid
+    ? rescaled.allocations.find((a) => a.uid === origTx.assignedFriendUid)
+    : null
+  const friendSharePct = friendAlloc && Math.abs(signedTotal) > 0
+    ? round2((Math.abs(friendAlloc.amount) / Math.abs(signedTotal)) * 100)
+    : (origTx.friendSharePct != null ? clampPct(origTx.friendSharePct) : null)
+
+  return {
+    id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    createdByUid: currentUser.uid,
+    paidByUid: origTx.paidByUid || currentUser.uid,
+    cardId: origTx.cardId,
+    description: `Estorno: ${cleanDesc}`,
+    category: origTx.category,
+    subcategory: origTx.subcategory || 'Crédito na Fatura',
+    type: 'expense',
+    paymentMethod: origTx.paymentMethod || 'credit_card',
+    status: 'pending',
+    estimatedAmount: null,
+    actualAmount: signedTotal,
+    totalAmount: signedTotal,
+    dueDate: todayIso || origTx.dueDate,
+    competenceMonth: origTx.competenceMonth,
+    visibleToUids: rescaled.visibleToUids || [currentUser.uid],
+    userImpact: rescaled.userImpact,
+    allocations: rescaled.allocations,
+    splitType: origTx.splitType || (origTx.assignedFriendUid ? 'friend' : 'mine'),
+    assignedFriendUid: origTx.assignedFriendUid,
+    assignedFriendName: origTx.assignedFriendName,
+    acceptanceStatus: origTx.assignedFriendUid ? 'pending_approval' : null,
+    friendSharePct,
+    externalName: origTx.externalName,
+    refundedTransactionId: origTx.id,
+    createdAt: Date.now(),
   }
 }
 
@@ -489,6 +649,7 @@ export function getTxPersons(
 
   // 1. Caso com allocations explícitas
   if (Array.isArray(tx.allocations) && tx.allocations.length > 0) {
+    const isSoleUser = tx.allocations.length === 1 && !tx.assignedFriendUid
     for (const alloc of tx.allocations) {
       if (!alloc) continue
       const allocAmount = Math.abs(Number(alloc.amount) || 0)
@@ -496,7 +657,8 @@ export function getTxPersons(
         const name = alloc.name || rawThirdPartyName || 'Terceiro'
         result.push({ name, role: 'third_party', amount: allocAmount })
       } else if (alloc.uid === currentUid || alloc.name?.toLowerCase() === 'você' || alloc.name?.toLowerCase() === 'meu') {
-        result.push({ name: '100% Meu', role: 'me', amount: allocAmount })
+        const name = isSoleUser ? '100% Meu' : 'Você (Minha parte)'
+        result.push({ name, role: 'me', amount: allocAmount })
       } else if (partnerName && (alloc.name === partnerName || alloc.uid === partnerName)) {
         result.push({ name: partnerName, role: 'partner', amount: allocAmount })
       } else {
@@ -510,20 +672,21 @@ export function getTxPersons(
       const name = rawThirdPartyName || 'Terceiro Externo'
       result.push({ name, role: 'third_party', amount: effAmount })
       if (myImpact > 0 && myImpact < effAmount) {
-        result.push({ name: '100% Meu', role: 'me', amount: myImpact })
+        result.push({ name: 'Você (Minha parte)', role: 'me', amount: myImpact })
       }
     } else if (rawFriendName || tx.splitType === 'friend' || tx.assignedFriendUid) {
       const name = rawFriendName || 'Amigo'
-      const friendAmt = friendShareOf(tx) || effAmount
+      const friendAmt = Math.abs(friendShareOf(tx)) || round2(effAmount / 2)
       result.push({ name, role: 'friend', amount: friendAmt })
-      if (myImpact > 0 && myImpact < effAmount) {
-        result.push({ name: '100% Meu', role: 'me', amount: myImpact })
+      const myPart = round2(Math.max(0, effAmount - friendAmt))
+      if (myPart > 0) {
+        result.push({ name: 'Você (Minha parte)', role: 'me', amount: myPart })
       }
     } else if (tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') {
       const pName = partnerName || 'Parceiro(a)'
       const half = round2(effAmount / 2)
       result.push({ name: pName, role: 'partner', amount: half })
-      result.push({ name: '100% Meu', role: 'me', amount: half })
+      result.push({ name: 'Você (Minha parte)', role: 'me', amount: round2(effAmount - half) })
     } else if (tx.splitType === 'partner') {
       const pName = partnerName || 'Parceiro(a)'
       result.push({ name: pName, role: 'partner', amount: effAmount })
@@ -712,7 +875,8 @@ export function computeSummary(
   all: Transaction[],
   uid: string,
   monthKey: string,
-  closures: MonthClosure[] = []
+  closures: MonthClosure[] = [],
+  cards: Card[] = []
 ): MonthSummary {
   const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
   let income = 0
@@ -728,7 +892,15 @@ export function computeSummary(
   const subcat = new Map<string, { category: string; subcategory: string; amount: number; count: number }>()
   const investSubcat = new Map<string, number>()
 
-  for (const tx of monthTxs) {
+  const cardMap = new Map<string, Card>()
+  for (const c of cards || []) {
+    if (c?.id) cardMap.set(c.id, c)
+  }
+
+  const nonCardTxs = monthTxs.filter((t) => !t.cardId || !cardMap.has(t.cardId))
+
+  // 1. Não-cartões (Pix, Boleto, Salário, etc.)
+  for (const tx of nonCardTxs) {
     const impact = impactFor(tx, uid, all)
     if (tx.type === 'income') {
       income += impact
@@ -737,8 +909,38 @@ export function computeSummary(
     if (tx.status === 'paid') paid += impact
     else if (tx.status === 'estimated') committedEstimated += impact
     else committedPending += impact
+  }
 
-    if (impact > 0) {
+  // 2. Faturas de Cartão (comprometimento consolidado exato: myShare abatido de estornos/créditos)
+  const processedCardIds = new Set<string>()
+  const monthCardIds = Array.from(
+    new Set([...monthTxs.map((t) => t.cardId).filter(Boolean), ...(cards || []).map((c) => c.id)])
+  ) as string[]
+  for (const cardId of monthCardIds) {
+    const card = cardMap.get(cardId)
+    if (!card || processedCardIds.has(cardId)) continue
+    processedCardIds.add(cardId)
+
+    const invoice = buildCardInvoice(card, monthKey, all, uid)
+    const myShare = invoice.myShare
+    if (myShare > 0) {
+      const paidRatio = invoice.total > 0 ? Math.min(1, invoice.paidAmount / invoice.total) : 0
+      const paidPart = invoice.status === 'paid' ? myShare : round2(Math.min(myShare, paidRatio * myShare))
+      const openPart = round2(Math.max(0, myShare - paidPart))
+
+      paid += paidPart
+      if (invoice.status === 'open') {
+        committedEstimated += openPart
+      } else {
+        committedPending += openPart
+      }
+    }
+  }
+
+  // 3. Categorias, Investimentos e A Receber / A Pagar (processa todas as despesas do mês)
+  for (const tx of monthTxs) {
+    const impact = impactFor(tx, uid, all)
+    if (tx.type === 'expense' && impact > 0) {
       cat.set(tx.category, (cat.get(tx.category) ?? 0) + impact)
 
       if (tx.category === 'Investimentos') {
@@ -1041,6 +1243,149 @@ export function computeLaunchDate(dueDay: number, monthKey: string, trigger: Lau
   return `${y}-${m}-${d}`
 }
 
+export function normalizeText(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+}
+
+export function findMatchingManualSalary(
+  allTxs: Transaction[],
+  monthKey: string,
+  expectedAmount?: number,
+): Transaction | null {
+  const salaryWords = ['salario', 'remuneracao', 'holerite', 'pro labore', 'pro-labore', 'renda fixa', 'salario base']
+  const monthIncomes = (allTxs || []).filter((t) => t.competenceMonth === monthKey && t.type === 'income')
+
+  // 1. Verifica se já possui recurringBillId iniciando com salary_
+  const explicit = monthIncomes.find((t) => t.recurringBillId?.startsWith('salary_'))
+  if (explicit) return explicit
+
+  // 2. Busca por descrição contendo palavras-chave de salário
+  const descMatch = monthIncomes.find((t) => {
+    const desc = normalizeText(t.description)
+    return salaryWords.some((word) => desc.includes(word))
+  })
+  if (descMatch) return descMatch
+
+  // 3. Busca por valor exato se expectedAmount estiver definido
+  if (expectedAmount && expectedAmount > 0) {
+    const amountMatch = monthIncomes.find((t) => Math.abs(t.totalAmount - expectedAmount) < 0.01)
+    if (amountMatch) return amountMatch
+  }
+
+  return null
+}
+
+export function findMatchingManualBill(
+  allTxs: Transaction[],
+  monthKey: string,
+  bill: RecurringBill,
+): Transaction | null {
+  const normBill = normalizeText(bill.description)
+  const targetType = bill.type ?? 'expense'
+  const monthTxs = (allTxs || []).filter((t) => t.competenceMonth === monthKey && t.type === targetType)
+
+  // 1. Match explícito
+  const explicit = monthTxs.find((t) => t.recurringBillId === bill.id)
+  if (explicit) return explicit
+
+  // 2. Similaridade na descrição
+  const descMatch = monthTxs.find((t) => {
+    const txDesc = normalizeText(t.description)
+    return txDesc.includes(normBill) || normBill.includes(txDesc)
+  })
+  return descMatch || null
+}
+
+export function getPendingRecurringLaunches(args: {
+  bills: RecurringBill[]
+  all: Transaction[]
+  monthKey: string
+  todayStr: string
+  me: Party
+  profile: UserProfile | null
+  resolvedIds?: string[]
+}): PendingRecurringCandidate[] {
+  const { bills, all, monthKey, todayStr, me, profile, resolvedIds = [] } = args
+  const resolvedSet = new Set(resolvedIds)
+  const candidates: PendingRecurringCandidate[] = []
+
+  // 1. Salário Base (se profile configurado)
+  if (profile && profile.monthlyIncome > 0) {
+    const salaryId = `salary_${me.uid}`
+    const alreadyResolved = resolvedSet.has(salaryId)
+    const hasExplicitTx = (all || []).some((t) => t.recurringBillId === salaryId && t.competenceMonth === monthKey)
+
+    if (!alreadyResolved && !hasExplicitTx) {
+      const salaryLaunchDate = `${monthKey}-01`
+      if (todayStr >= salaryLaunchDate) {
+        const matched = findMatchingManualSalary(all, monthKey, profile.monthlyIncome)
+        // Se ainda não foi explicitamente vinculado
+        if (!matched || matched.recurringBillId !== salaryId) {
+          candidates.push({
+            id: salaryId,
+            isSalary: true,
+            description: 'Salário Base',
+            category: 'Receita',
+            subcategory: null,
+            amount: profile.monthlyIncome,
+            type: 'income',
+            paymentMethod: 'pix',
+            cardId: null,
+            dueDay: 5,
+            dueDate: dateInMonth(monthKey, 5),
+            launchDate: salaryLaunchDate,
+            matchedManualTx: matched,
+          })
+        }
+      }
+    }
+  }
+
+  // 2. Contas Fixas e Assinaturas ativas do usuário
+  const activeBills = (bills || []).filter((b) => b.active && b.ownerUid === me.uid)
+  for (const bill of activeBills) {
+    if (bill.startMonth && monthKey < bill.startMonth) continue
+    if (bill.endMonth && monthKey > bill.endMonth) continue
+
+    if (resolvedSet.has(bill.id)) continue
+
+    const hasExplicitTx = (all || []).some((t) => t.recurringBillId === bill.id && t.competenceMonth === monthKey)
+    if (hasExplicitTx) continue
+
+    const trigger = bill.launchTrigger || 'day_before'
+    const launchDate = computeLaunchDate(bill.dueDay, monthKey, trigger)
+
+    if (todayStr >= launchDate) {
+      const { amount } = estimateRecurring(bill, all, monthKey)
+      const matched = findMatchingManualBill(all, monthKey, bill)
+      if (!matched || matched.recurringBillId !== bill.id) {
+        candidates.push({
+          id: bill.id,
+          bill,
+          isSalary: false,
+          description: bill.description,
+          category: bill.category,
+          subcategory: bill.subcategory || null,
+          amount,
+          type: bill.type ?? 'expense',
+          paymentMethod: bill.paymentMethod ?? (bill.type === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill'),
+          cardId: bill.cardId || null,
+          dueDay: bill.dueDay,
+          dueDate: dateInMonth(monthKey, bill.dueDay),
+          launchDate,
+          matchedManualTx: matched,
+        })
+      }
+    }
+  }
+
+  return candidates
+}
+
 export interface AutoLaunchResult {
   created: NewTransaction[]
   skipped: number
@@ -1055,105 +1400,62 @@ export function autoLaunchDueBills(args: {
   me: Party
   partner: Party | null
   profile: UserProfile | null
+  resolvedIds?: string[]
 }): AutoLaunchResult {
-  const { bills, all, monthKey, todayStr, me, partner, profile } = args
+  const { bills, all, monthKey, todayStr, me, partner, profile, resolvedIds = [] } = args
+  const candidates = getPendingRecurringLaunches({
+    bills,
+    all,
+    monthKey,
+    todayStr,
+    me,
+    profile,
+    resolvedIds,
+  })
+
   const created: NewTransaction[] = []
   const launchedBillIds: string[] = []
-  let skipped = 0
 
-  // 1. Receita mensal (salário base) a partir do perfil
-  if (profile && profile.monthlyIncome > 0) {
-    const salaryId = `salary_${me.uid}`
-    const exists = all.some((t) => t.recurringBillId === salaryId && t.competenceMonth === monthKey)
-    if (!exists) {
-      // Salário disponibilizado no 1º dia do mês corrente
-      const salaryLaunchDate = `${monthKey}-01`
-      if (todayStr >= salaryLaunchDate) {
-        const split = buildSplit({ splitType: 'mine', total: profile.monthlyIncome, me, partner: null, payerUid: me.uid })
-        created.push({
-          createdByUid: me.uid,
-          paidByUid: me.uid,
-          description: 'Salário Base',
-          category: 'Receita',
-          type: 'income',
-          paymentMethod: 'pix',
-          status: 'estimated',
-          estimatedAmount: profile.monthlyIncome,
-          actualAmount: null,
-          totalAmount: profile.monthlyIncome,
-          dueDate: dateInMonth(monthKey, 5),
-          competenceMonth: monthKey,
-          recurringBillId: salaryId,
-          allocations: split.allocations,
-          userImpact: split.userImpact,
-          visibleToUids: split.visibleToUids,
-          createdAt: Date.now(),
-        })
-        launchedBillIds.push(salaryId)
-      } else {
-        skipped++
-      }
-    } else {
-      skipped++
+  for (const cand of candidates) {
+    // IMPORTANTE: Se encontrou um lançamento manual similar (especialmente salário ou conta existente),
+    // NUNCA cria silenciosamente uma duplicidade!
+    if (cand.matchedManualTx) {
+      continue
     }
+
+    const split = buildSplit({
+      splitType: cand.bill?.splitType ?? 'mine',
+      total: cand.amount,
+      me,
+      partner: cand.isSalary ? null : partner,
+      payerUid: me.uid,
+    })
+
+    created.push({
+      createdByUid: me.uid,
+      paidByUid: me.uid,
+      cardId: cand.cardId || null,
+      description: cand.description,
+      category: cand.category,
+      subcategory: cand.subcategory || null,
+      type: cand.type,
+      paymentMethod: cand.paymentMethod,
+      status: 'estimated',
+      estimatedAmount: cand.amount,
+      actualAmount: null,
+      totalAmount: cand.amount,
+      dueDate: cand.dueDate,
+      competenceMonth: monthKey,
+      recurringBillId: cand.id,
+      allocations: split.allocations,
+      userImpact: split.userImpact,
+      visibleToUids: split.visibleToUids,
+      createdAt: Date.now(),
+    })
+    launchedBillIds.push(cand.id)
   }
 
-  // 2. Contas Fixas e Assinaturas ativas do usuário
-  for (const bill of bills.filter((b) => b.active && b.ownerUid === me.uid)) {
-    if (bill.startMonth && monthKey < bill.startMonth) {
-      skipped++
-      continue
-    }
-    if (bill.endMonth && monthKey > bill.endMonth) {
-      skipped++
-      continue
-    }
-
-    const exists = all.some((t) => t.recurringBillId === bill.id && t.competenceMonth === monthKey)
-    if (exists) {
-      skipped++
-      continue
-    }
-
-    const trigger = bill.launchTrigger || 'day_before'
-    const launchDate = computeLaunchDate(bill.dueDay, monthKey, trigger)
-
-    if (todayStr >= launchDate) {
-      const { amount } = estimateRecurring(bill, all, monthKey)
-      const split = buildSplit({
-        splitType: bill.splitType ?? 'mine',
-        total: amount,
-        me,
-        partner,
-        payerUid: me.uid,
-      })
-      const isIncome = bill.type === 'income'
-      created.push({
-        createdByUid: me.uid,
-        paidByUid: me.uid,
-        cardId: bill.cardId || null,
-        description: bill.description,
-        category: isIncome ? 'Receita' : bill.category,
-        subcategory: bill.subcategory || null,
-        type: bill.type ?? 'expense',
-        paymentMethod: bill.paymentMethod ?? (isIncome ? 'pix' : bill.cardId ? 'credit_card' : 'bill'),
-        status: 'estimated',
-        estimatedAmount: amount,
-        actualAmount: null,
-        totalAmount: amount,
-        dueDate: dateInMonth(monthKey, bill.dueDay),
-        competenceMonth: monthKey,
-        recurringBillId: bill.id,
-        allocations: split.allocations,
-        userImpact: split.userImpact,
-        visibleToUids: split.visibleToUids,
-        createdAt: Date.now(),
-      })
-      launchedBillIds.push(bill.id)
-    } else {
-      skipped++
-    }
-  }
+  const skipped = bills.length - launchedBillIds.length
 
   return { created, skipped, launchedBillIds }
 }
@@ -1285,7 +1587,9 @@ export function projectFutureMonths(args: {
     }
 
     // 2. Projeta o salário e as contas fixas ativas que ainda NÃO foram lançadas como transação neste mês
-    const hasSalary = monthTxs.some((t) => t.recurringBillId === `salary_${uid}`)
+    const hasSalary =
+      monthTxs.some((t) => t.recurringBillId === `salary_${uid}`) ||
+      Boolean(findMatchingManualSalary(monthTxs, monthKey, profile?.monthlyIncome))
     if (!hasSalary && profile && profile.monthlyIncome > 0) {
       projectedIncome += profile.monthlyIncome
       incomeCount++

@@ -17,17 +17,14 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.requesterUid == request.auth.uid;
     }
 
-    // Cartões (Titular ou Usuário Compartilhado)
+    // Cartões (Titular com controle total, Convidado somente leitura)
     match /cards/{cardId} {
       allow read: if request.auth != null && (
         resource.data.ownerUid == request.auth.uid ||
         request.auth.uid in resource.data.sharedWithUids
       );
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
-      allow update, delete: if request.auth != null && (
-        resource.data.ownerUid == request.auth.uid ||
-        request.auth.uid in resource.data.sharedWithUids
-      );
+      allow update, delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
     }
 
     // Moldes Recorrentes (Apenas o dono acessa)
@@ -42,7 +39,16 @@ service cloud.firestore {
         request.auth.uid in resource.data.visibleToUids ||
         resource.data.assignedFriendUid == request.auth.uid ||
         resource.data.createdByUid == request.auth.uid ||
-        resource.data.paidByUid == request.auth.uid
+        resource.data.paidByUid == request.auth.uid ||
+        (
+          'cardId' in resource.data &&
+          resource.data.cardId != null &&
+          resource.data.cardId is string &&
+          resource.data.cardId != '' &&
+          exists(/databases/$(database)/documents/cards/$(resource.data.cardId)) &&
+          ('sharedWithUids' in get(/databases/$(database)/documents/cards/$(resource.data.cardId)).data) &&
+          request.auth.uid in get(/databases/$(database)/documents/cards/$(resource.data.cardId)).data.sharedWithUids
+        )
       );
       allow create: if request.auth != null && (
         request.auth.uid in request.resource.data.visibleToUids ||

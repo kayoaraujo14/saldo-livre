@@ -29,29 +29,39 @@ import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
+import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.ui.theme.*
 
 @Composable
 fun TransactionDetailDialog(
     transaction: Transaction,
     currentUserId: String? = null,
+    currentUser: UserProfile? = null,
+    cardName: String? = null,
     allTransactions: List<Transaction> = emptyList(),
     onDismissRequest: () -> Unit,
     onToggleStatus: () -> Unit,
     onSetStatus: (TransactionStatus, Double?) -> Unit,
     onNavigateToEditTransaction: (String) -> Unit,
     onNavigateToRefundTransaction: (String) -> Unit = {},
+    onConfirmRefund: ((Transaction, Double) -> Unit)? = null,
     onDeleteRequest: () -> Unit
 ) {
-    val myImpact = remember(transaction, currentUserId, allTransactions) {
-        if (!currentUserId.isNullOrBlank()) {
-            FinanceEngine.impactFor(transaction, currentUserId, allTransactions)
+    var showQuickRefundDialog by remember { mutableStateOf(false) }
+
+    val resolvedUserId = currentUserId ?: currentUser?.uid
+    val myImpact = remember(transaction, resolvedUserId, allTransactions) {
+        if (!resolvedUserId.isNullOrBlank()) {
+            FinanceEngine.impactFor(transaction, resolvedUserId, allTransactions)
         } else {
             transaction.effectiveAmount
         }
     }
-    val canEdit = remember(transaction, currentUserId) {
-        FinanceEngine.canUserEditTransaction(transaction, currentUserId)
+    val canEdit = remember(transaction, resolvedUserId) {
+        FinanceEngine.canUserEditTransaction(transaction, resolvedUserId)
+    }
+    val linkedRefund = remember(transaction.id, allTransactions) {
+        allTransactions.find { it.refundedTransactionId == transaction.id }
     }
     val isSplit = remember(transaction, myImpact) {
         kotlin.math.abs(myImpact - transaction.effectiveAmount) > 0.01 ||
@@ -103,9 +113,13 @@ fun TransactionDetailDialog(
                     DetailRow(label = "Divisão", value = "${it.emoji} ${it.label}")
                 }
                 if (transaction.allocations.isNotEmpty()) {
+                    val tot = Math.abs(transaction.effectiveAmount)
                     DetailRow(
                         label = "Rateio / Participantes",
-                        value = transaction.allocations.joinToString(", ") { "${it.name}: ${FinanceEngine.formatCurrency(it.amount)}" }
+                        value = transaction.allocations.joinToString(", ") { a ->
+                            val pct = if (tot > 0.0) FinanceEngine.round2((Math.abs(a.amount) / tot) * 100.0).toInt() else 0
+                            "${a.name}: ${FinanceEngine.formatCurrency(a.amount)} ($pct%)"
+                        }
                     )
                 }
                 if (!transaction.assignedFriendUid.isNullOrBlank()) {
@@ -114,6 +128,13 @@ fun TransactionDetailDialog(
                     DetailRow(
                         label = "Amigo Vinculado",
                         value = "${transaction.assignedFriendName ?: "Amigo"} ($pct%) • $statusText"
+                    )
+                }
+
+                if (linkedRefund != null) {
+                    DetailRow(
+                        label = "Estorno Vinculado",
+                        value = "−${FinanceEngine.formatCurrency(Math.abs(linkedRefund.effectiveAmount))}"
                     )
                 }
 
@@ -240,22 +261,20 @@ fun TransactionDetailDialog(
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedButton(
                             onClick = {
-                                val targetId = transaction.id
-                                onDismissRequest()
-                                onNavigateToRefundTransaction(targetId)
+                                showQuickRefundDialog = true
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = CircleShape,
                             colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = Color(0xFF14B8A6).copy(alpha = 0.12f),
-                                contentColor = Color(0xFF2DD4BF)
+                                containerColor = Cyan500.copy(alpha = 0.12f),
+                                contentColor = Cyan400
                             ),
-                            border = BorderStroke(1.dp, Color(0xFF14B8A6).copy(alpha = 0.35f))
+                            border = BorderStroke(1.dp, Cyan500.copy(alpha = 0.35f))
                         ) {
                             Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Cadastrar Estorno Rateado",
+                                text = "Registrar Estorno Desta Compra",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
                                 maxLines = 1
@@ -349,6 +368,20 @@ fun TransactionDetailDialog(
             }
         } else null
     )
+
+    if (showQuickRefundDialog) {
+        QuickRefundDialog(
+            origTx = transaction,
+            currentUser = currentUser ?: UserProfile(uid = resolvedUserId ?: ""),
+            cardName = cardName,
+            onDismissRequest = { showQuickRefundDialog = false },
+            onConfirmRefund = { refundAmount ->
+                onConfirmRefund?.invoke(transaction, refundAmount)
+                showQuickRefundDialog = false
+                onDismissRequest()
+            }
+        )
+    }
 }
 
 @Composable

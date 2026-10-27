@@ -29,6 +29,8 @@ import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.ui.components.DeleteInstallmentDialog
+import com.saldolivre.app.ui.components.InvoiceDateGroup
+import com.saldolivre.app.ui.components.InvoiceDateGroupHeader
 import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.ui.components.TransactionItem
@@ -41,7 +43,8 @@ fun TransactionsScreen(
     onNavigateBack: () -> Unit = {},
     onNavigateToAddTransaction: () -> Unit,
     onNavigateToEditTransaction: (String) -> Unit = {},
-    onNavigateToRefundTransaction: (String) -> Unit = {}
+    onNavigateToRefundTransaction: (String) -> Unit = {},
+    onNavigateToCards: (String?) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
@@ -50,6 +53,34 @@ fun TransactionsScreen(
 
     val isListEmpty by remember(uiState.filteredTransactions) {
         derivedStateOf { uiState.filteredTransactions.isEmpty() }
+    }
+
+    val groupedTransactions = remember(uiState.filteredTransactions, uiState.currentUser.uid, uiState.transactions) {
+        val map = LinkedHashMap<String, MutableList<Transaction>>()
+        for (tx in uiState.filteredTransactions) {
+            val key = tx.dueDate.ifBlank { "Sem data" }
+            map.getOrPut(key) { mutableListOf() }.add(tx)
+        }
+        map.map { (dateKey, items) ->
+            var dayExpenses = 0.0
+            var dayIncomes = 0.0
+            for (tx in items) {
+                val impact = FinanceEngine.impactFor(tx, uiState.currentUser.uid, uiState.transactions)
+                if (tx.type == com.saldolivre.app.data.model.TransactionType.INCOME || tx.isRefund) {
+                    dayIncomes += kotlin.math.abs(impact)
+                } else {
+                    dayExpenses += kotlin.math.abs(impact)
+                }
+            }
+            val isNetIncome = dayIncomes > dayExpenses
+            val netAmount = if (isNetIncome) dayIncomes - dayExpenses else dayExpenses - dayIncomes
+            InvoiceDateGroup(
+                dateKey = dateKey,
+                items = items,
+                totalAmount = if (dayExpenses == 0.0 && dayIncomes > 0.0) dayIncomes else if (dayIncomes == 0.0) dayExpenses else netAmount,
+                isIncome = isNetIncome
+            )
+        }
     }
 
     Scaffold(
@@ -70,6 +101,13 @@ fun TransactionsScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.toggleConsolidateInvoices() }) {
+                        Icon(
+                            imageVector = Icons.Default.CreditCard,
+                            contentDescription = if (uiState.consolidateInvoices) "Faturas consolidadas ativadas" else "Lançamentos individuais de cartão",
+                            tint = if (uiState.consolidateInvoices) Cyan400 else TextSecondary
+                        )
+                    }
                     IconButton(onClick = onNavigateToAddTransaction) {
                         Icon(
                             imageVector = Icons.Default.Add,
@@ -442,21 +480,39 @@ fun TransactionsScreen(
                         }
                     }
 
-                    items(
-                        items = uiState.filteredTransactions,
-                        key = { it.id },
-                        contentType = { "transaction_item" }
-                    ) { tx ->
-                        val onItemClick = remember(tx) { { selectedTxForDetails = tx } }
-                        val onStatusToggle = remember(tx.id) { { viewModel.toggleStatus(tx.id) } }
+                    groupedTransactions.forEach { group ->
+                        item(key = "date_header_${group.dateKey}", contentType = "date_header") {
+                            InvoiceDateGroupHeader(
+                                dateKey = group.dateKey,
+                                totalAmount = group.totalAmount,
+                                isIncome = group.isIncome
+                            )
+                        }
+                        items(
+                            items = group.items,
+                            key = { it.id },
+                            contentType = { "transaction_item" }
+                        ) { tx ->
+                            val onItemClick = remember(tx) {
+                                {
+                                    if (tx.id.startsWith("invoice_")) {
+                                        onNavigateToCards(tx.cardId)
+                                    } else {
+                                        selectedTxForDetails = tx
+                                    }
+                                }
+                            }
+                            val onStatusToggle = remember(tx.id) { { viewModel.toggleStatus(tx.id) } }
 
-                        TransactionItem(
-                            transaction = tx,
-                            currentUserId = uiState.currentUser.uid,
-                            allTransactions = uiState.transactions,
-                            onClick = onItemClick,
-                            onStatusClick = onStatusToggle
-                        )
+                            TransactionItem(
+                                transaction = tx,
+                                currentUserId = uiState.currentUser.uid,
+                                allTransactions = uiState.transactions,
+                                showDate = false,
+                                onClick = onItemClick,
+                                onStatusClick = onStatusToggle
+                            )
+                        }
                     }
                 }
             }
@@ -482,7 +538,8 @@ fun TransactionsScreen(
         TransactionDetailDialog(
             transaction = tx,
             currentUserId = uiState.currentUser.uid,
-            allTransactions = uiState.transactions,
+            currentUser = uiState.currentUser,
+            allTransactions = uiState.allTransactions.ifEmpty { uiState.transactions },
             onDismissRequest = { selectedTxForDetails = null },
             onToggleStatus = { viewModel.toggleStatus(tx.id) },
             onSetStatus = { status, actualAmount ->
@@ -495,6 +552,9 @@ fun TransactionsScreen(
             onNavigateToRefundTransaction = { refundTxId ->
                 selectedTxForDetails = null
                 onNavigateToRefundTransaction(refundTxId)
+            },
+            onConfirmRefund = { origTx, refundAmount ->
+                viewModel.createRefund(origTx, refundAmount)
             },
             onDeleteRequest = {
                 txToDelete = tx

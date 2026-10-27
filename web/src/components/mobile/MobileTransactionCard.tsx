@@ -1,18 +1,16 @@
-import { Badge } from '@/components/ui/badge'
 import { type Transaction, type Card as CardType } from '@/types'
-import { canUserEditTransaction, effectiveAmount, impactFor, detectSplit, getThirdPartyInfo } from '@/lib/finance'
-import { formatBRL, formatShortDate } from '@/lib/utils'
+import { getCategoryDetail } from '@/types'
+import { canUserEditTransaction, effectiveAmount, impactFor, getThirdPartyInfo } from '@/lib/finance'
+import { formatBRL } from '@/lib/utils'
 import {
-  CreditCard,
   Edit2,
   Trash2,
   RotateCcw,
   CheckCircle2,
   Clock,
   Sparkles,
-  Layers,
   Lock,
-  ArrowDownLeft,
+  CreditCard,
 } from 'lucide-react'
 
 interface MobileTransactionCardProps {
@@ -39,18 +37,71 @@ export function MobileTransactionCard({
   const effAmount = effectiveAmount(tx)
   const canEdit = canUserEditTransaction(tx, currentUid)
   const myImpact = impactFor(tx, currentUid, allTransactions)
-  const split = detectSplit(tx, currentUid)
   const isRefund = tx.category === 'Estorno' || effAmount < 0 || tx.totalAmount < 0
   const isIncome = tx.type === 'income'
   const card = cards.find((c) => c.id === tx.cardId)
-  const isInstallment = Boolean(tx.installmentGroupId)
   const thirdParty = getThirdPartyInfo(tx, currentUid)
+  const catDetail = getCategoryDetail(tx.category)
 
-  // Status visual configurations
+  const isSharedAndDifferent = Math.abs(myImpact - effAmount) > 0.01
+
+  if (tx.id.startsWith('invoice_')) {
+    const isOwner = card?.ownerUid === currentUid
+    return (
+      <div
+        onClick={() => onEdit(tx)}
+        className={`group rounded-2xl p-3 border transition-all flex items-center justify-between gap-3 relative cursor-pointer ${
+          tx.status === 'paid'
+            ? 'bg-slate-900/80 border-emerald-500/30'
+            : 'bg-slate-900/70 border-sky-500/25 hover:border-sky-500/40'
+        }`}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="size-9 rounded-xl bg-gradient-to-tr from-sky-500/20 to-indigo-500/20 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
+            <CreditCard className="size-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-bold text-white truncate">
+                {tx.description}
+              </span>
+              {tx.status === 'paid' ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                  <CheckCircle2 className="size-2.5" /> Paga
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                  <Clock className="size-2.5" /> Fatura
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400 truncate mt-0.5">
+              <span>Vencimento dia {card?.dueDay || tx.dueDate.slice(8, 10)}</span>
+              {isOwner ? (
+                <span className="text-sky-300"> · Toque para ver compras</span>
+              ) : (
+                <span className="text-indigo-300"> · Cartão de {card?.ownerName}</span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="text-right shrink-0">
+          <p className="text-xs font-bold text-white font-mono">
+            {formatBRL(effAmount)}
+          </p>
+          <span className="text-[9px] text-emerald-400 font-medium">
+            sua parte
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   const getStatusBadge = () => {
     if (tx.status === 'paid') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
           <CheckCircle2 className="size-2.5" /> Pago
         </span>
       )
@@ -58,172 +109,152 @@ export function MobileTransactionCard({
 
     if (tx.status === 'pending') {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
           <Clock className="size-2.5" /> Pendente
         </span>
       )
     }
 
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
         <Sparkles className="size-2.5" /> Estimado
       </span>
     )
   }
 
+  const thirdPartyName = thirdParty?.name || tx.assignedFriendName || tx.externalName
+
   return (
     <div
-      className={`glass-card rounded-2xl p-3.5 border transition-all relative overflow-hidden ${
-        isRefund
-          ? 'border-emerald-500/30 bg-emerald-950/10'
-          : isIncome
-            ? 'border-emerald-500/20 bg-emerald-950/5'
-            : 'border-white/[0.07] hover:border-white/[0.12]'
+      className={`group rounded-2xl p-2.5 border transition-all flex items-center gap-3 relative ${
+        tx.status === 'paid'
+          ? 'bg-slate-900/70 border-emerald-500/25'
+          : 'bg-slate-900/60 border-white/[0.08] hover:border-white/[0.16]'
       }`}
     >
-      {/* Top row: Category & Date + Status */}
-      <div className="flex items-center justify-between gap-2 mb-2 min-w-0">
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-hidden">
-          {isRefund ? (
-            <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 shrink-0">
-              <RotateCcw className="size-2.5 mr-1 shrink-0" /> Estorno / Reembolso
-            </Badge>
-          ) : isIncome ? (
-            <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 truncate max-w-[150px] sm:max-w-none">
-              <ArrowDownLeft className="size-2.5 mr-1 shrink-0" /> {tx.category ? `${tx.category}${tx.subcategory ? ` › ${tx.subcategory}` : ''}` : (tx.subcategory ? `Entrada › ${tx.subcategory}` : 'Receita')}
-            </Badge>
-          ) : (
-            <span
-              className="text-[11px] font-medium text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700/60 inline-flex items-center gap-1 min-w-0 max-w-[155px] sm:max-w-none truncate"
-              title={`${tx.category}${tx.subcategory ? ` › ${tx.subcategory}` : ''}`}
-            >
-              <span className="truncate">{tx.category}</span>
-              {tx.subcategory && (
-                <span className="text-emerald-400 font-normal truncate">
-                  › {tx.subcategory}
-                </span>
-              )}
-            </span>
-          )}
-
-          <span className="text-[11px] text-slate-500 font-mono shrink-0">
-            {formatShortDate(tx.dueDate || tx.competenceMonth)}
-          </span>
-        </div>
-
-        {/* Status Pill (Tap to toggle) */}
-        <button
-          type="button"
-          onClick={() => { if (canEdit) onCycleStatus(tx) }}
-          className={canEdit ? "cursor-pointer active:scale-95 transition-transform shrink-0 ml-auto" : "cursor-default shrink-0 ml-auto opacity-85"}
-          title={canEdit ? "Toque para alternar status da despesa" : "Lançamento compartilhado (somente leitura)"}
-        >
-          {getStatusBadge()}
-        </button>
+      {/* 1. Indicador da Categoria Circular */}
+      <div
+        className="size-9 rounded-full shrink-0 flex items-center justify-center border"
+        style={{
+          backgroundColor: `${catDetail.color}20`,
+          borderColor: `${catDetail.color}45`,
+        }}
+      >
+        <span
+          className="size-2.5 rounded-full"
+          style={{ backgroundColor: catDetail.color }}
+        />
       </div>
 
-      {/* Middle row: Description & Tags */}
-      <div className="mb-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <h4 className="text-sm font-bold text-white leading-snug break-words">
+      {/* 2. Coluna Central de Conteúdo */}
+      <div
+        className="min-w-0 flex-1 cursor-pointer"
+        onClick={() => onEdit(tx)}
+      >
+        {/* Linha Superior: Descrição + Tags de Parcela / Terceiro */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs font-semibold text-slate-100 truncate">
             {tx.description}
-          </h4>
-
-          {/* Amount */}
-          <div className="text-right shrink-0">
-            <span
-              className={`text-base font-extrabold font-mono tracking-tight ${
-                isRefund
-                  ? 'text-emerald-400'
-                  : isIncome
-                    ? 'text-emerald-400'
-                    : 'text-slate-100'
-              }`}
-            >
-              {isIncome ? `+${formatBRL(effAmount)}` : isRefund ? formatBRL(effAmount) : `-${formatBRL(effAmount)}`}
-            </span>
-          </div>
-        </div>
-
-        {/* Tags / Meta Chips */}
-        <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-          {/* Installment Badge */}
-          {isInstallment && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-500/15 border border-violet-500/30 text-violet-300 text-[10px] font-mono">
-              <Layers className="size-2.5" /> Parcela
-            </span>
-          )}
-
-          {/* Card Chip */}
-          {card && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/25 text-sky-300 text-[10px]">
-              <CreditCard className="size-2.5" /> {card.cardName}
-            </span>
-          )}
-
-          {/* Split / Third Party Tag */}
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/60 font-medium">
-            {split === 'split_50' && '🤝 50/50'}
-            {split === 'partner' && '👤 Parceiro (100%)'}
-            {split === 'mine' && '👤 Meu'}
-            {split === 'external' && `🏷️ ${thirdParty?.name ? `Terceiro: ${thirdParty.name}` : 'Terceiro Externo'}`}
-            {split === 'friend' && `🧑 ${tx.assignedFriendName || 'Amigo'}`}
-            {split === 'custom' && `👥 Dividido (${tx.allocations?.length ?? 2}p)`}
           </span>
+
+          {tx.installmentsTotal && tx.installmentsTotal > 1 && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-bold border border-cyan-500/30">
+              {tx.installmentNumber}/{tx.installmentsTotal}
+            </span>
+          )}
+
+          {thirdPartyName && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 font-medium border border-amber-500/30 truncate max-w-[130px]">
+              🏷️ {thirdPartyName}
+            </span>
+          )}
         </div>
+
+        {/* Linha Inferior: Categoria › Subcategoria · Cartão / Minha Parte */}
+        <p className="text-[10px] text-slate-400 truncate mt-0.5">
+          <span>{tx.category}</span>
+          {tx.subcategory && tx.subcategory !== tx.category && (
+            <span className="text-slate-400"> › {tx.subcategory}</span>
+          )}
+          {card && (
+            <span className="text-sky-300"> · 💳 {card.cardName}</span>
+          )}
+          {isSharedAndDifferent && (
+            <span className="text-emerald-400 font-medium"> · minha parte: {formatBRL(myImpact)}</span>
+          )}
+        </p>
       </div>
 
-      {/* Bottom row: My Impact & Actions */}
-      <div className="flex items-center justify-between pt-2 border-t border-white/[0.06] text-xs">
-        <div className="text-[11px] text-slate-400">
-          <span>Meu impacto: </span>
-          <strong
-            className={`font-semibold ${
-              isRefund
-                ? 'text-cyan-400'
-                : isIncome
-                  ? 'text-emerald-400'
-                  : 'text-amber-300'
-            }`}
-          >
-            {isRefund ? `+${formatBRL(Math.abs(myImpact))}` : formatBRL(myImpact)}
-          </strong>
-        </div>
+      {/* 3. Coluna Direita: Valor e Status */}
+      <div className="text-right shrink-0 space-y-1">
+        <p
+          className={`text-xs font-bold tabular-nums ${
+            isRefund
+              ? 'text-cyan-400'
+              : isIncome
+                ? 'text-emerald-400'
+                : 'text-white'
+          }`}
+        >
+          {isIncome ? `+ ${formatBRL(effAmount)}` : isRefund ? formatBRL(effAmount) : formatBRL(effAmount)}
+        </p>
 
-        {canEdit ? (
-          <div className="flex items-center gap-1">
-            {onRefund && tx.type === 'expense' && !isRefund && (
+        <div className="flex items-center justify-end gap-1">
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => onCycleStatus(tx)}
+              className="cursor-pointer active:scale-95 transition-transform"
+              title="Toque para alternar status"
+            >
+              {getStatusBadge()}
+            </button>
+          ) : (
+            <span className="text-[9px] text-slate-500 flex items-center gap-0.5" title="Somente leitura">
+              <Lock className="size-2.5" /> Leitura
+            </span>
+          )}
+
+          {canEdit && (
+            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity ml-1">
+              {onRefund && tx.type === 'expense' && !isRefund && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRefund(tx)
+                  }}
+                  className="p-1 rounded text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/40"
+                  title="Estornar"
+                >
+                  <RotateCcw className="size-3" />
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => onRefund(tx)}
-                className="p-1.5 rounded-lg text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/40 transition-colors cursor-pointer"
-                title="Cadastrar estorno rateado deste lançamento"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onEdit(tx)
+                }}
+                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                title="Editar"
               >
-                <RotateCcw className="size-3.5" />
+                <Edit2 className="size-3" />
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onEdit(tx)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Editar lançamento"
-            >
-              <Edit2 className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(tx)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
-              title="Excluir lançamento"
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          </div>
-        ) : (
-          <span className="text-[10px] text-slate-500 flex items-center gap-1 font-medium py-1 px-1.5" title="Lançamento recebido por rateio. Apenas quem lançou pode editar ou excluir.">
-            <Lock className="size-3 text-slate-500" /> Somente leitura
-          </span>
-        )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDelete(tx)
+                }}
+                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-500/10"
+                title="Excluir"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

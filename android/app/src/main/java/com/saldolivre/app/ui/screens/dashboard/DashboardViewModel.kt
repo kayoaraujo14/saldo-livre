@@ -3,7 +3,10 @@ package com.saldolivre.app.ui.screens.dashboard
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.engine.InvoiceEngine
+import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.MonthSummary
+import com.saldolivre.app.data.model.RecurringBill
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.UserProfile
@@ -23,6 +26,8 @@ data class DashboardUiState(
     val summary: MonthSummary = MonthSummary(),
     val recentTransactions: List<Transaction> = emptyList(),
     val allTransactions: List<Transaction> = emptyList(),
+    val recurringBills: List<RecurringBill> = emptyList(),
+    val pendingRecurringLaunches: List<FinanceEngine.PendingRecurringCandidate> = emptyList(),
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
     val closureDialogDismissed: Boolean = false,
@@ -35,24 +40,47 @@ class DashboardViewModel(
 
     private val _uiState = MutableStateFlow(DashboardUiState(isLoading = true))
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
-    private var lastCheckedRunKey = ""
 
     init {
         viewModelScope.launch {
             combine(
-                repository.currentUser,
-                repository.selectedMonth,
+                combine(repository.currentUser, repository.selectedMonth) { u, m -> Pair(u, m) },
                 repository.getMonthSummary(),
-                repository.getTransactions()
-            ) { user, month, summary, allTxs ->
-                val recent = allTxs
+                repository.getTransactions(),
+                repository.getRecurringBills(),
+                repository.getCards()
+            ) { userMonth, summary, allTxs, bills, cards ->
+                val user = userMonth.first
+                val month = userMonth.second
+                val monthTxs = allTxs
                     .filter { it.competenceMonth == month && it.visibleToUids.contains(user.uid) }
                     .sortedByDescending { it.createdAt }
-                    .take(6)
+
+                val consolidated = InvoiceEngine.consolidateMonthTransactions(
+                    monthTxs,
+                    allTxs,
+                    cards,
+                    user.uid,
+                    month,
+                    true
+                )
+                val recent = consolidated.take(6)
 
                 val shouldShowPopup = summary.pendingClosureSurplus != null && 
                     summary.pendingClosureSurplus > 0.0 && 
                     !_uiState.value.closureDialogDismissed
+
+                val todayStr = java.time.LocalDate.now().toString()
+                val monthResolved = user.resolvedRecurring[month] ?: emptyList()
+
+                val pending = FinanceEngine.getPendingRecurringLaunches(
+                    bills = bills,
+                    all = allTxs,
+                    monthKey = month,
+                    todayStr = todayStr,
+                    me = user,
+                    resolvedIds = monthResolved
+                )
 
                 DashboardUiState(
                     currentUser = user,
@@ -61,6 +89,8 @@ class DashboardViewModel(
                     summary = summary,
                     recentTransactions = recent,
                     allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
+                    recurringBills = bills,
+                    pendingRecurringLaunches = pending,
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
                     closureDialogDismissed = _uiState.value.closureDialogDismissed,
@@ -68,33 +98,107 @@ class DashboardViewModel(
                 )
             }.collect { newState ->
                 _uiState.value = newState
-                checkAndAutoLaunchBills(newState.selectedMonth)
             }
         }
     }
 
-    private fun checkAndAutoLaunchBills(month: String) {
-        val todayStr = java.time.LocalDate.now().toString()
-        val runKey = "${month}_$todayStr"
-        if (lastCheckedRunKey == runKey) return
-        lastCheckedRunKey = runKey
-
+    fun confirmLaunchCandidate(candidate: FinanceEngine.PendingRecurringCandidate) {
         viewModelScope.launch {
-            try {
-                val res = repository.autoLaunchDueBillsForMonth(month, todayStr)
-                if (res.created.isNotEmpty()) {
-                    _uiState.update {
-                        it.copy(
-                            autoLaunchNotice = AutoLaunchNotice(
-                                count = res.created.size,
-                                bills = res.created
-                            )
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("DashboardViewModel", "Erro ao executar lançamento automático", e)
+            val user = _uiState.value.currentUser
+            val month = _uiState.value.selectedMonth
+            val split = FinanceEngine.buildSplit(
+                splitType = candidate.bill?.splitType ?: com.saldolivre.app.data.model.SplitType.MINE,
+                total = candidate.amount,
+                myUid = user.uid,
+                myName = user.displayName,
+                partnerUid = null,
+                partnerName = null,
+                payerUid = user.uid
+            )
+            val tx = Transaction(
+                id = "tx_gen_${java.util.UUID.randomUUID().toString().take(8)}",
+                createdByUid = user.uid,
+                paidByUid = user.uid,
+                cardId = candidate.cardId,
+                description = candidate.description,
+                category = candidate.category,
+                subcategory = candidate.subcategory,
+                type = candidate.type,
+                paymentMethod = candidate.paymentMethod,
+                status = com.saldolivre.app.data.model.TransactionStatus.ESTIMATED,
+                estimatedAmount = candidate.amount,
+                actualAmount = null,
+                totalAmount = candidate.amount,
+                dueDate = candidate.dueDate,
+                competenceMonth = month,
+                recurringBillId = candidate.id,
+                allocations = split.allocations,
+                userImpact = split.userImpact,
+                visibleToUids = split.visibleToUids,
+                createdAt = System.currentTimeMillis()
+            )
+            repository.addTransaction(tx)
+            repository.markRecurringResolved(month, candidate.id)
+        }
+    }
+
+    fun confirmAllCandidates() {
+        viewModelScope.launch {
+            val user = _uiState.value.currentUser
+            val month = _uiState.value.selectedMonth
+            val candidates = _uiState.value.pendingRecurringLaunches.filter { it.matchedManualTx == null }
+            val txs = candidates.map { candidate ->
+                val split = FinanceEngine.buildSplit(
+                    splitType = candidate.bill?.splitType ?: com.saldolivre.app.data.model.SplitType.MINE,
+                    total = candidate.amount,
+                    myUid = user.uid,
+                    myName = user.displayName,
+                    partnerUid = null,
+                    partnerName = null,
+                    payerUid = user.uid
+                )
+                Transaction(
+                    id = "tx_gen_${java.util.UUID.randomUUID().toString().take(8)}",
+                    createdByUid = user.uid,
+                    paidByUid = user.uid,
+                    cardId = candidate.cardId,
+                    description = candidate.description,
+                    category = candidate.category,
+                    subcategory = candidate.subcategory,
+                    type = candidate.type,
+                    paymentMethod = candidate.paymentMethod,
+                    status = com.saldolivre.app.data.model.TransactionStatus.ESTIMATED,
+                    estimatedAmount = candidate.amount,
+                    actualAmount = null,
+                    totalAmount = candidate.amount,
+                    dueDate = candidate.dueDate,
+                    competenceMonth = month,
+                    recurringBillId = candidate.id,
+                    allocations = split.allocations,
+                    userImpact = split.userImpact,
+                    visibleToUids = split.visibleToUids,
+                    createdAt = System.currentTimeMillis()
+                )
             }
+            if (txs.isNotEmpty()) {
+                repository.addTransactions(txs)
+                candidates.forEach { repository.markRecurringResolved(month, it.id) }
+            }
+        }
+    }
+
+    fun linkManualTransaction(candidateId: String, manualTx: Transaction) {
+        viewModelScope.launch {
+            val month = _uiState.value.selectedMonth
+            repository.updateTransaction(manualTx.copy(recurringBillId = candidateId))
+            repository.markRecurringResolved(month, candidateId)
+        }
+    }
+
+    fun skipRecurring(candidateId: String) {
+        viewModelScope.launch {
+            val month = _uiState.value.selectedMonth
+            repository.markRecurringResolved(month, candidateId)
         }
     }
 
@@ -198,6 +302,17 @@ class DashboardViewModel(
     fun generateBills() {
         viewModelScope.launch {
             repository.generateBillsForMonth(_uiState.value.selectedMonth)
+        }
+    }
+
+    fun createRefund(origTx: Transaction, refundAmount: Double) {
+        viewModelScope.launch {
+            try {
+                val refundTx = FinanceEngine.createRefundTransaction(origTx, refundAmount, _uiState.value.currentUser)
+                repository.addTransaction(refundTx)
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao registrar estorno", e)
+            }
         }
     }
 }

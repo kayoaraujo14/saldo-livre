@@ -3,6 +3,8 @@ package com.saldolivre.app.ui.screens.transactions
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.engine.InvoiceEngine
+import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.Transaction
@@ -16,6 +18,9 @@ import kotlinx.coroutines.launch
 data class TransactionsUiState(
     val currentUser: UserProfile = UserProfile(),
     val transactions: List<Transaction> = emptyList(),
+    val rawMonthTransactions: List<Transaction> = emptyList(),
+    val cards: List<Card> = emptyList(),
+    val consolidateInvoices: Boolean = true,
     val allTransactions: List<Transaction> = emptyList(),
     val filteredTransactions: List<Transaction> = emptyList(),
     val selectedMonth: String = FinanceEngine.currentMonthKey(),
@@ -71,34 +76,42 @@ class TransactionsViewModel(
                 repository.currentUser,
                 repository.selectedMonth,
                 repository.getTransactions(),
-                repository.getMonthSummary()
-            ) { user, month, allTxs, summary ->
-                val monthTxs = allTxs.filter {
+                repository.getMonthSummary(),
+                repository.getCards()
+            ) { user, month, allTxs, summary, cards ->
+                val rawMonthTxs = allTxs.filter {
                     it.competenceMonth == month && it.visibleToUids.contains(user.uid)
                 }.sortedByDescending { it.dueDate }
 
-                val income = monthTxs.filter { it.type == TransactionType.INCOME }.sumOf {
+                val shouldConsolidate = _uiState.value.consolidateInvoices
+                val effectiveTxs = if (shouldConsolidate) {
+                    InvoiceEngine.consolidateMonthTransactions(rawMonthTxs, allTxs, cards, user.uid, month, true)
+                } else {
+                    rawMonthTxs
+                }
+
+                val income = rawMonthTxs.filter { it.type == TransactionType.INCOME }.sumOf {
                     FinanceEngine.impactFor(it, user.uid, allTxs)
                 }
-                val expense = monthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf {
+                val expense = rawMonthTxs.filter { it.type == TransactionType.EXPENSE }.sumOf {
                     FinanceEngine.impactFor(it, user.uid, allTxs)
                 }
-                val paidCount = monthTxs.count { it.status == TransactionStatus.PAID }
-                val pendingCount = monthTxs.count { it.status != TransactionStatus.PAID }
+                val paidCount = rawMonthTxs.count { it.status == TransactionStatus.PAID }
+                val pendingCount = rawMonthTxs.count { it.status != TransactionStatus.PAID }
 
                 val expenseCats = CategoryRegistry.EXPENSE_CATEGORIES.map { it.name }
                 val incomeCats = CategoryRegistry.INCOME_CATEGORIES.map { it.name }
-                val availableCats = monthTxs.map { it.category }
+                val availableCats = rawMonthTxs.map { it.category }
                     .filter { cat ->
                         cat.isNotBlank() && (expenseCats.any { it.equals(cat, ignoreCase = true) } || incomeCats.any { it.equals(cat, ignoreCase = true) })
                     }
                     .distinct()
                     .sorted()
-                val catCounts = monthTxs.groupingBy { it.category }.eachCount()
+                val catCounts = rawMonthTxs.groupingBy { it.category }.eachCount()
 
-                val myAllCount = monthTxs.count { FinanceEngine.isMyExpense(it, user.uid, allTxs) }
-                val pureMineCount = monthTxs.count { FinanceEngine.isPureMine(it, user.uid, allTxs) }
-                val sharedWithMeCount = monthTxs.count { FinanceEngine.isSharedWithMe(it, user.uid, allTxs) }
+                val myAllCount = rawMonthTxs.count { FinanceEngine.isMyExpense(it, user.uid, allTxs) }
+                val pureMineCount = rawMonthTxs.count { FinanceEngine.isPureMine(it, user.uid, allTxs) }
+                val sharedWithMeCount = rawMonthTxs.count { FinanceEngine.isSharedWithMe(it, user.uid, allTxs) }
 
                 val availablePers = mutableListOf<String>()
                 val pCounts = mutableMapOf<String, Int>()
@@ -116,13 +129,13 @@ class TransactionsViewModel(
                     pCounts["Meus Rateados"] = sharedWithMeCount
                 }
 
-                val otherPersons = monthTxs.flatMap { getPersonsForTransaction(it, user.uid) }
+                val otherPersons = rawMonthTxs.flatMap { getPersonsForTransaction(it, user.uid) }
                     .filter { it != "100% Meu" && it != "Todos os Meus" && it != "100% Meu (Exclusivo)" && it != "Meus Rateados" }
                     .distinct()
                     .sorted()
 
                 otherPersons.forEach { p ->
-                    val count = monthTxs.count { tx ->
+                    val count = rawMonthTxs.count { tx ->
                         if (p == "50/50 (Casal)") tx.splitType == SplitType.SPLIT_50
                         else if (p == "Parceiro(a)") tx.splitType == SplitType.PARTNER
                         else getPersonsForTransaction(tx, user.uid).contains(p)
@@ -134,7 +147,9 @@ class TransactionsViewModel(
                 _uiState.update { current ->
                     current.copy(
                         currentUser = user,
-                        transactions = monthTxs,
+                        transactions = effectiveTxs,
+                        rawMonthTransactions = rawMonthTxs,
+                        cards = cards,
                         allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
                         selectedMonth = month,
                         availableCategories = availableCats,
@@ -301,6 +316,37 @@ class TransactionsViewModel(
         }
     }
 
+    fun createRefund(origTx: Transaction, refundAmount: Double) {
+        viewModelScope.launch {
+            try {
+                val refundTx = FinanceEngine.createRefundTransaction(origTx, refundAmount, _uiState.value.currentUser)
+                repository.addTransaction(refundTx)
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao registrar estorno", e)
+            }
+        }
+    }
+
+    fun toggleConsolidateInvoices() {
+        _uiState.update { current ->
+            val next = !current.consolidateInvoices
+            val effective = if (next) {
+                InvoiceEngine.consolidateMonthTransactions(
+                    current.rawMonthTransactions,
+                    current.allTransactions,
+                    current.cards,
+                    current.currentUser.uid,
+                    current.selectedMonth,
+                    true
+                )
+            } else {
+                current.rawMonthTransactions
+            }
+            current.copy(consolidateInvoices = next, transactions = effective)
+        }
+        applyFilters()
+    }
+
     private fun applyFilters() {
         val state = _uiState.value
         val query = state.searchQuery.trim().lowercase()
@@ -313,7 +359,12 @@ class TransactionsViewModel(
                     (tx.subcategory?.lowercase()?.contains(query) == true) ||
                     (tx.externalName?.lowercase()?.contains(query) == true) ||
                     (tx.assignedFriendName?.lowercase()?.contains(query) == true) ||
-                    tx.allocations.any { it.name.lowercase().contains(query) }
+                    tx.allocations.any { it.name.lowercase().contains(query) } ||
+                    (tx.invoiceMeta?.invoice?.items?.any { subTx ->
+                        subTx.description.lowercase().contains(query) ||
+                        subTx.category.lowercase().contains(query) ||
+                        (subTx.subcategory?.lowercase()?.contains(query) == true)
+                    } == true)
 
             val matchesType = when {
                 state.selectedTypes.isNotEmpty() -> tx.type in state.selectedTypes
@@ -330,6 +381,7 @@ class TransactionsViewModel(
             val matchesCategory = when {
                 state.selectedCategories.isNotEmpty() -> {
                     if (tx.category in state.selectedCategories) true
+                    else if (tx.invoiceMeta?.invoice?.items?.any { it.category in state.selectedCategories } == true) true
                     else if (tx.category == "Receita") {
                         // Compatibilidade com transações legadas registradas como "Receita"
                         state.selectedCategories.any { selCat ->
@@ -339,7 +391,10 @@ class TransactionsViewModel(
                         }
                     } else false
                 }
-                state.selectedCategory != null -> tx.category == state.selectedCategory
+                state.selectedCategory != null -> {
+                    tx.category == state.selectedCategory ||
+                    tx.invoiceMeta?.invoice?.items?.any { it.category == state.selectedCategory } == true
+                }
                 else -> true
             }
 

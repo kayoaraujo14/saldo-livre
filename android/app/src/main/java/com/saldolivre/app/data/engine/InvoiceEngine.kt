@@ -1,7 +1,9 @@
 package com.saldolivre.app.data.engine
 
 import androidx.compose.runtime.Immutable
+import com.saldolivre.app.data.model.Allocation
 import com.saldolivre.app.data.model.Card
+import com.saldolivre.app.data.model.PaymentMethod
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
@@ -26,6 +28,20 @@ enum class InvoiceStatus(val label: String) {
     OVERDUE("Vencida"),
     PAID("Paga")
 }
+
+@Immutable
+data class ConsolidatedInvoiceMeta(
+    val card: Card,
+    val invoice: CardInvoice,
+    val totalInvoiceAmount: Double,
+    val myShare: Double,
+    val othersShare: Double,
+    val itemsCount: Int,
+    val closingDate: String,
+    val dueDate: String,
+    val invoiceStatus: InvoiceStatus,
+    val isOwner: Boolean
+)
 
 @Immutable
 data class InvoiceCategorySlice(
@@ -114,8 +130,7 @@ object InvoiceEngine {
         val items = all.filter {
             it.cardId == card.id &&
                 it.competenceMonth == monthKey &&
-                it.reserveCardId == null &&
-                it.visibleToUids.contains(uid)
+                it.reserveCardId == null
         }.sortedWith(compareByDescending<Transaction> { it.dueDate }.thenByDescending { it.createdAt })
 
         val expenses = items.filter { it.type == TransactionType.EXPENSE }
@@ -128,10 +143,9 @@ object InvoiceEngine {
             min(total, expenses.filter { it.status == TransactionStatus.PAID }.sumOf { it.effectiveAmount })
         )
         val open = FinanceEngine.round2(max(0.0, total - paid))
-        val myShare = FinanceEngine.round2(
-            max(0.0, expenses.sumOf { FinanceEngine.impactFor(it, uid, all) } - credits)
-        )
-        val othersShare = FinanceEngine.round2(max(0.0, total - myShare))
+
+        val isOwner = card.ownerUid.isBlank() || card.ownerUid == uid
+        val rawOwnerName = card.ownerName.ifBlank { "Titular" }
 
         val byCategory = expenses.groupBy { it.category }
             .map { (cat, txs) ->
@@ -158,7 +172,7 @@ object InvoiceEngine {
         val participantMap = mutableMapOf<String, InvoiceParticipantShare>()
 
         for (t in expenses) {
-            val shares = getTransactionParticipantShares(t, uid, all)
+            val shares = getTransactionParticipantShares(t, uid, card, all)
             for ((key, amt) in shares) {
                 if (Math.abs(amt) <= 0.0001) continue
                 val isMe = (key == "__me__")
@@ -174,12 +188,22 @@ object InvoiceEngine {
             }
         }
 
-        // Se houver créditos (estornos/pagamentos) e o titular tiver participação, abate proporcionalmente do titular
-        if (credits > 0.0 && participantMap.containsKey("Você (Minha parte)")) {
-            val cur = participantMap["Você (Minha parte)"]!!.amount
-            val adjusted = FinanceEngine.round2(max(0.0, cur - credits))
-            participantMap["Você (Minha parte)"] = participantMap["Você (Minha parte)"]!!.copy(amount = adjusted)
+        // Se houver créditos (estornos/pagamentos), abate proporcionalmente do titular do cartão
+        if (credits > 0.0) {
+            val targetKey = if (isOwner) "Você (Minha parte)" else rawOwnerName
+            if (participantMap.containsKey(targetKey)) {
+                val cur = participantMap[targetKey]!!.amount
+                val adjusted = FinanceEngine.round2(max(0.0, cur - credits))
+                participantMap[targetKey] = participantMap[targetKey]!!.copy(amount = adjusted)
+            } else if (participantMap.containsKey("Você (Minha parte)")) {
+                val cur = participantMap["Você (Minha parte)"]!!.amount
+                val adjusted = FinanceEngine.round2(max(0.0, cur - credits))
+                participantMap["Você (Minha parte)"] = participantMap["Você (Minha parte)"]!!.copy(amount = adjusted)
+            }
         }
+
+        val myShare = FinanceEngine.round2(participantMap["Você (Minha parte)"]?.amount ?: 0.0)
+        val othersShare = FinanceEngine.round2(max(0.0, total - myShare))
 
         val splitBreakdown = participantMap.values
             .filter { it.amount > 0 }
@@ -193,8 +217,7 @@ object InvoiceEngine {
         val futureItems = all.filter {
             it.cardId == card.id &&
                 it.competenceMonth > monthKey &&
-                it.reserveCardId == null &&
-                it.visibleToUids.contains(uid)
+                it.reserveCardId == null
         }
         val futureExpenses = futureItems.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
         val futureCredits = futureItems.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
@@ -287,13 +310,15 @@ object InvoiceEngine {
 
     /**
      * Retorna o mapa de participantes e seus respectivos valores rateados para uma transação de despesa.
-     * O titular/usuário atual é indexado pela chave especial "__me__".
-     * Outros participantes são indexados por seus nomes.
+     * O usuário atual/visualizador é indexado pela chave especial "__me__" (que se tornará "Você (Minha parte)").
+     * O titular do cartão (se o visualizador for um convidado) é indexado pelo nome do titular.
+     * Outros participantes são indexados por seus respectivos nomes.
      * A soma de todos os valores no mapa é GARANTIDA de ser igual a FinanceEngine.round2(tx.effectiveAmount).
      */
     fun getTransactionParticipantShares(
         tx: Transaction,
         uid: String,
+        card: Card? = null,
         all: List<Transaction> = emptyList()
     ): Map<String, Double> {
         if (tx.type != TransactionType.EXPENSE) return emptyMap()
@@ -302,93 +327,76 @@ object InvoiceEngine {
 
         val shares = mutableMapOf<String, Double>()
 
+        val ownerUid = card?.ownerUid?.takeIf { it.isNotBlank() } ?: tx.paidByUid.ifBlank { tx.createdByUid }
+        val rawOwnerName = card?.ownerName?.takeIf { it.isNotBlank() } ?: "Titular"
+        val isViewerOwner = (uid == ownerUid)
+        val ownerDisplayName = if (isViewerOwner) "__me__" else rawOwnerName
+
         // 1. Alocações explícitas (quando há alocações cadastradas na transação)
         val validAllocs = tx.allocations.filter { Math.abs(it.amount) > 0.0001 }
-        val othersAllocs = validAllocs.filter { a ->
-            val isMyUid = !a.uid.isNullOrBlank() && a.uid == uid
-            val norm = a.name.trim().lowercase()
-            val isMyName = (a.uid.isNullOrBlank() || a.uid == uid) && (
-                norm == "você" || norm == "voce" || norm == "meu" ||
-                norm == "minha parte" || norm == "você (minha parte)" || norm == "voce (minha parte)"
-            )
-            !isMyUid && !isMyName
-        }
-
-        if (othersAllocs.isNotEmpty()) {
-            var sumOthers = 0.0
-            for (a in othersAllocs) {
-                val name = a.name.trim().ifEmpty { "Outro" }
+        if (validAllocs.isNotEmpty()) {
+            for (a in validAllocs) {
                 val amt = FinanceEngine.round2(a.amount)
-                shares[name] = FinanceEngine.round2((shares[name] ?: 0.0) + amt)
-                sumOthers += amt
-            }
-            val myAllocs = validAllocs.filter { !othersAllocs.contains(it) }
-            val myAllocSum = myAllocs.sumOf { it.amount }
-            val myAmount = if (Math.abs(myAllocSum) > 0.0001) {
-                FinanceEngine.round2(myAllocSum)
-            } else {
-                FinanceEngine.round2(total - sumOthers)
-            }
-            if (Math.abs(myAmount) > 0.0001) {
-                shares["__me__"] = myAmount
+                val isMyUid = !a.uid.isNullOrBlank() && a.uid == uid
+                val isOwnerUid = !a.uid.isNullOrBlank() && a.uid == ownerUid
+                val norm = a.name.trim().lowercase()
+                val isMeName = (norm == "você" || norm == "voce" || norm == "meu" || norm == "minha parte" || norm == "você (minha parte)" || norm == "voce (minha parte)")
+
+                val key = when {
+                    isMyUid -> "__me__"
+                    isOwnerUid -> ownerDisplayName
+                    isMeName -> {
+                        // "Você" na alocação original representa quem fez a compra (o titular do cartão)
+                        ownerDisplayName
+                    }
+                    else -> a.name.trim().ifEmpty { "Outro" }
+                }
+                shares[key] = FinanceEngine.round2((shares[key] ?: 0.0) + amt)
             }
         } else if (tx.splitType == com.saldolivre.app.data.model.SplitType.SPLIT_50) {
             // 2. Divisão 50/50 implícita
             val half = FinanceEngine.round2(total / 2.0)
             val otherHalf = FinanceEngine.round2(total - half)
-            shares["__me__"] = half
-            val partnerName = if (!tx.externalName.isNullOrBlank()) tx.externalName.trim() else "Parceiro(a)"
-            shares[partnerName] = otherHalf
+            val partnerLabel = if (!tx.externalName.isNullOrBlank()) tx.externalName.trim() else "Parceiro(a)"
+
+            shares[ownerDisplayName] = FinanceEngine.round2((shares[ownerDisplayName] ?: 0.0) + half)
+            val partnerKey = if (tx.assignedFriendUid == uid) "__me__" else partnerLabel
+            shares[partnerKey] = FinanceEngine.round2((shares[partnerKey] ?: 0.0) + otherHalf)
         } else if (tx.splitType == com.saldolivre.app.data.model.SplitType.PARTNER) {
             // 3. 100% Parceiro(a)
-            val partnerName = if (!tx.externalName.isNullOrBlank()) tx.externalName.trim() else "Parceiro(a)"
-            shares[partnerName] = total
+            val partnerLabel = if (!tx.externalName.isNullOrBlank()) tx.externalName.trim() else "Parceiro(a)"
+            val partnerKey = if (tx.assignedFriendUid == uid) "__me__" else partnerLabel
+            shares[partnerKey] = total
         } else if (!tx.assignedFriendName.isNullOrBlank() ||
             !tx.assignedFriendUid.isNullOrBlank() ||
             tx.splitType == com.saldolivre.app.data.model.SplitType.FRIEND
         ) {
             // 4. Amigo atribuído
+            val friendUid = tx.assignedFriendUid
             val friendName = tx.assignedFriendName?.trim()?.ifEmpty { "Amigo" } ?: "Amigo"
-            val friendAmount: Double = when {
-                tx.friendSharePct != null && tx.friendSharePct > 0.0 -> {
-                    FinanceEngine.round2((total * tx.friendSharePct) / 100.0)
-                }
-                tx.userImpact.containsKey(uid) && Math.abs(tx.userImpact[uid] ?: 0.0) > 0.0 -> {
-                    FinanceEngine.round2(total - (tx.userImpact[uid] ?: 0.0))
-                }
-                !tx.assignedFriendUid.isNullOrBlank() && tx.userImpact.containsKey(tx.assignedFriendUid) -> {
-                    FinanceEngine.round2(tx.userImpact[tx.assignedFriendUid] ?: total)
-                }
-                else -> {
-                    FinanceEngine.round2(total / 2.0)
-                }
-            }
+            val pct = (tx.friendSharePct ?: 50.0).coerceIn(1.0, 100.0)
+            val friendAmount = FinanceEngine.round2((total * pct) / 100.0)
+            val buyerAmount = FinanceEngine.round2(total - friendAmount)
 
-            val myAmount = FinanceEngine.round2(total - friendAmount)
-            if (Math.abs(myAmount) > 0.0001) {
-                shares["__me__"] = myAmount
+            val isFriendViewer = (!friendUid.isNullOrBlank() && friendUid == uid)
+            val friendKey = if (isFriendViewer) "__me__" else friendName
+            val buyerKey = ownerDisplayName
+
+            if (Math.abs(friendAmount) > 0.0001) {
+                shares[friendKey] = FinanceEngine.round2((shares[friendKey] ?: 0.0) + friendAmount)
             }
-            shares[friendName] = friendAmount
+            if (Math.abs(buyerAmount) > 0.0001) {
+                shares[buyerKey] = FinanceEngine.round2((shares[buyerKey] ?: 0.0) + buyerAmount)
+            }
         } else if (!tx.externalName.isNullOrBlank() ||
             tx.splitType == com.saldolivre.app.data.model.SplitType.EXTERNAL
         ) {
             // 5. Terceiro / Externo
             val extName = tx.externalName?.trim()?.ifEmpty { "Terceiro" } ?: "Terceiro"
-            val extAmount: Double = if (tx.splitType == com.saldolivre.app.data.model.SplitType.EXTERNAL) {
-                total
-            } else if (tx.userImpact.containsKey(uid) && Math.abs(tx.userImpact[uid] ?: 0.0) > 0.0) {
-                FinanceEngine.round2(total - (tx.userImpact[uid] ?: 0.0))
-            } else {
-                total
-            }
-            val myAmount = FinanceEngine.round2(total - extAmount)
-            if (Math.abs(myAmount) > 0.0001) {
-                shares["__me__"] = myAmount
-            }
-            shares[extName] = extAmount
+            shares[extName] = total
         } else {
-            // 6. 100% Meu (SplitType.MINE ou padrão)
-            shares["__me__"] = total
+            // 6. 100% Meu (despesa própria do titular do cartão)
+            shares[ownerDisplayName] = total
         }
 
         // 7. Reconciliação estrita de centavos:
@@ -396,23 +404,9 @@ object InvoiceEngine {
         val sumShares = FinanceEngine.round2(shares.values.sum())
         val diff = FinanceEngine.round2(total - sumShares)
         if (kotlin.math.abs(diff) > 0.0001) {
-            if (shares.containsKey("__me__")) {
-                val curMe = shares["__me__"] ?: 0.0
-                val adjustedMe = FinanceEngine.round2(curMe + diff)
-                if (Math.abs(adjustedMe) > 0.0001) {
-                    shares["__me__"] = adjustedMe
-                } else {
-                    shares.remove("__me__")
-                }
-            } else {
-                val largestKey = shares.maxByOrNull { Math.abs(it.value) }?.key
-                if (largestKey != null) {
-                    val cur = shares[largestKey] ?: 0.0
-                    shares[largestKey] = FinanceEngine.round2(cur + diff)
-                } else {
-                    shares["__me__"] = diff
-                }
-            }
+            val primaryKey = ownerDisplayName
+            val cur = shares[primaryKey] ?: 0.0
+            shares[primaryKey] = FinanceEngine.round2(cur + diff)
         }
 
         return shares
@@ -424,10 +418,11 @@ object InvoiceEngine {
     fun participantAmountIn(
         tx: Transaction,
         participant: InvoiceParticipantShare,
-        uid: String
+        uid: String,
+        card: Card? = null
     ): Double {
         if (tx.type != TransactionType.EXPENSE) return 0.0
-        val shares = getTransactionParticipantShares(tx, uid)
+        val shares = getTransactionParticipantShares(tx, uid, card)
 
         if (participant.isMe) {
             return shares["__me__"] ?: 0.0
@@ -447,10 +442,11 @@ object InvoiceEngine {
     fun calculateCategoryBreakdownForParticipant(
         expenses: List<Transaction>,
         participant: InvoiceParticipantShare,
-        uid: String
+        uid: String,
+        card: Card? = null
     ): List<InvoiceCategorySlice> {
         val participantExpenses = expenses.mapNotNull { tx ->
-            val share = participantAmountIn(tx, participant, uid)
+            val share = participantAmountIn(tx, participant, uid, card)
             if (share > 0.0) tx to share else null
         }
 
@@ -467,5 +463,130 @@ object InvoiceEngine {
                 )
             }
             .sortedByDescending { it.amount }
+    }
+
+    /**
+     * Cria um pseudo-lançamento consolidado de fatura para exibição no extrato geral no dia do vencimento.
+     * O valor corresponde estritamente à cota do usuário (myShare).
+     */
+    fun createConsolidatedInvoiceTx(
+        invoice: CardInvoice,
+        uid: String,
+        monthKey: String
+    ): Transaction {
+        val card = invoice.card
+        val isOwner = card.ownerUid == uid
+        val myShare = invoice.myShare
+        val status = if (invoice.status == InvoiceStatus.PAID) {
+            TransactionStatus.PAID
+        } else if (invoice.status == InvoiceStatus.OPEN) {
+            TransactionStatus.ESTIMATED
+        } else {
+            TransactionStatus.PENDING
+        }
+
+        val desc = if (isOwner) {
+            if (myShare == 0.0 && invoice.total > 0.0) "Fatura ${card.cardName} (100% Terceiros)" else "Fatura ${card.cardName}"
+        } else {
+            "Fatura ${card.cardName} (Minha parte)"
+        }
+
+        val meta = ConsolidatedInvoiceMeta(
+            card = card,
+            invoice = invoice,
+            totalInvoiceAmount = invoice.total,
+            myShare = invoice.myShare,
+            othersShare = invoice.othersShare,
+            itemsCount = invoice.itemsCount,
+            closingDate = invoice.closingDate,
+            dueDate = invoice.dueDate,
+            invoiceStatus = invoice.status,
+            isOwner = isOwner
+        )
+
+        val allocationsList = mutableListOf(
+            Allocation(
+                type = "PLATFORM_USER",
+                uid = uid,
+                name = if (isOwner) "Você (Minha parte)" else (invoice.splitBreakdown.find { it.isMe }?.name ?: "Minha parte"),
+                amount = myShare,
+                reimbursed = false
+            )
+        )
+        if (isOwner && invoice.othersShare > 0.0) {
+            allocationsList.add(
+                Allocation(
+                    type = "EXTERNAL",
+                    name = "Terceiros / Amigos",
+                    amount = invoice.othersShare,
+                    reimbursed = false
+                )
+            )
+        }
+
+        return Transaction(
+            id = "invoice_${card.id}_$monthKey",
+            createdByUid = card.ownerUid,
+            paidByUid = card.ownerUid,
+            cardId = card.id,
+            description = desc,
+            category = "Outros",
+            subcategory = "Vencimento dia ${card.dueDay}",
+            type = TransactionType.EXPENSE,
+            paymentMethod = PaymentMethod.CREDIT_CARD,
+            status = status,
+            estimatedAmount = if (status == TransactionStatus.PAID) null else myShare,
+            actualAmount = if (status == TransactionStatus.PAID) myShare else null,
+            totalAmount = myShare,
+            dueDate = invoice.dueDate,
+            competenceMonth = monthKey,
+            visibleToUids = listOf(uid),
+            userImpact = mapOf(uid to myShare),
+            allocations = allocationsList,
+            invoiceMeta = meta
+        )
+    }
+
+    /**
+     * Consolida transações de cartão de crédito no extrato mensal.
+     * Substitui os lançamentos individuais de cartão por um único lançamento no dia do vencimento.
+     */
+    fun consolidateMonthTransactions(
+        monthTransactions: List<Transaction>,
+        allTransactions: List<Transaction>,
+        cards: List<Card>,
+        uid: String,
+        monthKey: String,
+        enabled: Boolean = true
+    ): List<Transaction> {
+        if (!enabled || uid.isBlank()) return monthTransactions
+
+        val nonCardTxs = monthTransactions.filter {
+            it.paymentMethod != PaymentMethod.CREDIT_CARD || it.cardId.isNullOrBlank() || it.reserveCardId != null
+        }
+
+        val relevantCardMap = LinkedHashMap<String, Card>()
+        for (c in cards) {
+            if (c.ownerUid == uid || c.sharedWithUids.contains(uid)) {
+                relevantCardMap[c.id] = c
+            }
+        }
+
+        for (t in monthTransactions) {
+            if (t.paymentMethod == PaymentMethod.CREDIT_CARD && !t.cardId.isNullOrBlank() && !relevantCardMap.containsKey(t.cardId)) {
+                cards.find { it.id == t.cardId }?.let { relevantCardMap[it.id] = it }
+            }
+        }
+
+        val invoiceTxs = mutableListOf<Transaction>()
+        for (card in relevantCardMap.values) {
+            val inv = buildInvoice(card, monthKey, allTransactions, uid)
+            if (inv.itemsCount == 0) continue
+            if (card.ownerUid != uid && inv.myShare <= 0.0) continue
+
+            invoiceTxs.add(createConsolidatedInvoiceTx(inv, uid, monthKey))
+        }
+
+        return (nonCardTxs + invoiceTxs).sortedByDescending { it.dueDate }
     }
 }

@@ -573,34 +573,186 @@ object FinanceEngine {
         return if (status == TransactionStatus.PAID) TransactionStatus.PENDING else TransactionStatus.PAID
     }
 
-    fun rescaleSplit(tx: Transaction, newTotal: Double): Transaction {
-        val allocs = tx.allocations
-        val oldTotal = allocs.sumOf { it.amount }
+    fun rescaleSplit(tx: Transaction, newTotal: Double, viewerUid: String? = null): Transaction {
         val roundedTotal = round2(newTotal)
-        val newAllocs = when {
-            allocs.isEmpty() -> emptyList()
-            Math.abs(oldTotal) <= 0.001 -> {
-                val each = round2(roundedTotal / allocs.size)
-                allocs.map { it.copy(amount = each) }
-            }
-            else -> {
-                val ratio = roundedTotal / oldTotal
-                var acc = 0.0
-                allocs.mapIndexed { idx, a ->
-                    if (idx == allocs.lastIndex) {
-                        a.copy(amount = round2(roundedTotal - acc))
-                    } else {
-                        val amt = round2(a.amount * ratio)
-                        acc += amt
-                        a.copy(amount = amt)
-                    }
+        val allocs = tx.allocations
+        val allocSum = allocs.sumOf { it.amount }
+        val hasMultipleValidAllocs = allocs.size > 1 && Math.abs(allocSum) > 0.001
+
+        val newAllocs = mutableListOf<Allocation>()
+
+        if (hasMultipleValidAllocs) {
+            val ratio = roundedTotal / allocSum
+            var acc = 0.0
+            allocs.forEachIndexed { idx, a ->
+                if (idx == allocs.lastIndex) {
+                    newAllocs.add(a.copy(amount = round2(roundedTotal - acc)))
+                } else {
+                    val amt = round2(a.amount * ratio)
+                    acc += amt
+                    newAllocs.add(a.copy(amount = amt))
                 }
             }
+        } else if (!tx.assignedFriendUid.isNullOrBlank() || tx.splitType == SplitType.FRIEND) {
+            val pct = (tx.friendSharePct ?: 50.0).coerceIn(1.0, 100.0)
+            val friendAmount = round2((roundedTotal * pct) / 100.0)
+            val myAmount = round2(roundedTotal - friendAmount)
+            val fName = tx.assignedFriendName?.takeIf { it.isNotBlank() } ?: "Amigo"
+            val myUid = viewerUid ?: tx.createdByUid.ifBlank { tx.paidByUid }
+
+            if (Math.abs(myAmount) > 0.0001) {
+                newAllocs.add(
+                    Allocation(
+                        type = "PLATFORM_USER",
+                        uid = myUid,
+                        name = "Você",
+                        amount = myAmount,
+                        reimbursed = true
+                    )
+                )
+            }
+            newAllocs.add(
+                Allocation(
+                    type = if (!tx.assignedFriendUid.isNullOrBlank()) "PLATFORM_USER" else "EXTERNAL",
+                    uid = tx.assignedFriendUid,
+                    name = fName,
+                    amount = friendAmount,
+                    reimbursed = false
+                )
+            )
+        } else if (tx.splitType == SplitType.SPLIT_50) {
+            val half = round2(roundedTotal / 2.0)
+            val otherHalf = round2(roundedTotal - half)
+            val myUid = viewerUid ?: tx.createdByUid.ifBlank { tx.paidByUid }
+            val pName = tx.externalName?.takeIf { it.isNotBlank() } ?: "Parceiro(a)"
+
+            newAllocs.add(
+                Allocation(
+                    type = "PLATFORM_USER",
+                    uid = myUid,
+                    name = "Você",
+                    amount = half,
+                    reimbursed = true
+                )
+            )
+            newAllocs.add(
+                Allocation(
+                    type = "EXTERNAL",
+                    uid = null,
+                    name = pName,
+                    amount = otherHalf,
+                    reimbursed = false
+                )
+            )
+        } else if (tx.splitType == SplitType.PARTNER) {
+            newAllocs.add(
+                Allocation(
+                    type = "EXTERNAL",
+                    uid = null,
+                    name = tx.externalName?.takeIf { it.isNotBlank() } ?: "Parceiro(a)",
+                    amount = roundedTotal,
+                    reimbursed = false
+                )
+            )
+        } else if (tx.splitType == SplitType.EXTERNAL || !tx.externalName.isNullOrBlank()) {
+            newAllocs.add(
+                Allocation(
+                    type = "EXTERNAL",
+                    uid = null,
+                    name = tx.externalName?.takeIf { it.isNotBlank() } ?: "Terceiro",
+                    amount = roundedTotal,
+                    reimbursed = false
+                )
+            )
+        } else if (allocs.isNotEmpty()) {
+            val ratio = if (Math.abs(allocSum) > 0.001) roundedTotal / allocSum else 1.0
+            var acc = 0.0
+            allocs.forEachIndexed { idx, a ->
+                if (idx == allocs.lastIndex) {
+                    newAllocs.add(a.copy(amount = round2(roundedTotal - acc)))
+                } else {
+                    val amt = round2(a.amount * ratio)
+                    acc += amt
+                    newAllocs.add(a.copy(amount = amt))
+                }
+            }
+        } else {
+            val myUid = viewerUid ?: tx.createdByUid.ifBlank { tx.paidByUid }
+            newAllocs.add(
+                Allocation(
+                    type = "PLATFORM_USER",
+                    uid = myUid,
+                    name = "Você",
+                    amount = roundedTotal,
+                    reimbursed = true
+                )
+            )
         }
+
+        val visible = tx.visibleToUids.toMutableSet()
+        newAllocs.forEach { a ->
+            if (!a.uid.isNullOrBlank()) visible.add(a.uid)
+        }
+
         return tx.copy(
             totalAmount = roundedTotal,
             allocations = newAllocs,
-            userImpact = deriveImpact(newAllocs, tx.visibleToUids)
+            userImpact = deriveImpact(newAllocs, visible.toList()),
+            visibleToUids = visible.toList()
+        )
+    }
+
+    /**
+     * Cria uma transação de estorno vinculada a uma compra existente no cartão de crédito.
+     * Replica fielmente a categoria, subcategoria, cartão, participantes e proporções de rateio,
+     * gerando cotas negativas que abatem a fatura do cartão e o Saldo Livre.
+     */
+    fun createRefundTransaction(
+        origTx: Transaction,
+        refundAmount: Double,
+        currentUser: UserProfile,
+        todayIso: String = todayKey()
+    ): Transaction {
+        val absAmount = round2(Math.abs(refundAmount))
+        val signedTotal = -absAmount
+
+        val rescaled = rescaleSplit(origTx, signedTotal, currentUser.uid)
+        val cleanDesc = stripInstallmentSuffix(origTx.description.removePrefix("Estorno:").trim())
+
+        val friendAlloc = if (!origTx.assignedFriendUid.isNullOrBlank()) {
+            rescaled.allocations.find { it.uid == origTx.assignedFriendUid }
+        } else null
+        val friendSharePct = if (friendAlloc != null && Math.abs(signedTotal) > 0.0) {
+            round2((Math.abs(friendAlloc.amount) / Math.abs(signedTotal)) * 100.0)
+        } else origTx.friendSharePct
+
+        return Transaction(
+            id = "tx_" + UUID.randomUUID().toString().take(8),
+            createdByUid = currentUser.uid,
+            paidByUid = origTx.paidByUid.ifBlank { currentUser.uid },
+            cardId = origTx.cardId,
+            description = "Estorno: $cleanDesc",
+            category = origTx.category,
+            subcategory = origTx.subcategory ?: "Crédito na Fatura",
+            type = TransactionType.EXPENSE,
+            paymentMethod = origTx.paymentMethod,
+            status = TransactionStatus.PENDING,
+            estimatedAmount = null,
+            actualAmount = signedTotal,
+            totalAmount = signedTotal,
+            dueDate = todayIso.ifBlank { origTx.dueDate },
+            competenceMonth = origTx.competenceMonth,
+            visibleToUids = rescaled.visibleToUids.ifEmpty { listOf(currentUser.uid) },
+            userImpact = rescaled.userImpact,
+            allocations = rescaled.allocations,
+            splitType = origTx.splitType ?: if (!origTx.assignedFriendUid.isNullOrBlank()) SplitType.FRIEND else SplitType.MINE,
+            assignedFriendUid = origTx.assignedFriendUid,
+            assignedFriendName = origTx.assignedFriendName,
+            acceptanceStatus = if (!origTx.assignedFriendUid.isNullOrBlank()) "pending_approval" else null,
+            friendSharePct = friendSharePct,
+            externalName = origTx.externalName,
+            refundedTransactionId = origTx.id,
+            createdAt = System.currentTimeMillis()
         )
     }
 
@@ -626,25 +778,20 @@ object FinanceEngine {
     fun friendShareOf(tx: Transaction): Double {
         if (tx.assignedFriendUid.isNullOrBlank()) return 0.0
         val friendAlloc = tx.allocations.filter { it.uid == tx.assignedFriendUid }
-        val allocSum = friendAlloc.sumOf { it.amount }
-        if (allocSum > 0.0) {
-            return round2(allocSum)
+        if (friendAlloc.isNotEmpty()) {
+            return round2(friendAlloc.sumOf { it.amount })
         }
 
-        // Fallback 1: se userImpact tem o assignedFriendUid com valor > 0
+        // Fallback 1: se userImpact tem o assignedFriendUid com valor diferente de zero
         val impactVal = tx.userImpact[tx.assignedFriendUid]
-        if (impactVal != null && impactVal > 0.0) {
+        if (impactVal != null && Math.abs(impactVal) > 0.0001) {
             return round2(impactVal)
         }
 
         // Fallback 2: se tem friendSharePct
-        if (tx.friendSharePct != null && tx.friendSharePct > 0.0) {
-            val total = effectiveAmount(tx)
-            return round2((total * (tx.friendSharePct / 100.0)))
-        }
-
-        // Fallback 3: total da transação
-        return round2(effectiveAmount(tx))
+        val pct = (tx.friendSharePct ?: 50.0).coerceIn(1.0, 100.0)
+        val total = effectiveAmount(tx)
+        return round2((total * (pct / 100.0)))
     }
 
     fun detectSplit(tx: Transaction, viewerUid: String): SplitType {
@@ -697,7 +844,7 @@ object FinanceEngine {
                 if (ownImpact != null) return ownImpact
                 // Se o usuário foi quem pagou ou criou, o impacto dele é o total da compra menos o que o amigo deve
                 if (uid == tx.createdByUid || uid == tx.paidByUid) {
-                    return round2(max(0.0, effectiveAmount(tx) - friendShare))
+                    return round2(effectiveAmount(tx) - friendShare)
                 }
                 return 0.0
             }
@@ -706,7 +853,7 @@ object FinanceEngine {
             if (uid == tx.assignedFriendUid) return 0.0
             // Quem lançou tem apenas a sua própria parte (a cota do amigo é valor a receber em receivables, não despesa própria)
             val ownImpact = tx.userImpact[uid] ?: if (uid == tx.createdByUid || uid == tx.paidByUid) {
-                round2(max(0.0, effectiveAmount(tx) - friendShare))
+                round2(effectiveAmount(tx) - friendShare)
             } else 0.0
             return ownImpact
         }
@@ -901,7 +1048,10 @@ object FinanceEngine {
 
         val cardMap = cards.associateBy { it.id }
 
-        for (tx in monthTxs) {
+        val nonCardTxs = monthTxs.filter { it.cardId.isNullOrBlank() || !cardMap.containsKey(it.cardId) }
+
+        // 1. Não-cartões (Pix, Boleto, Salário, etc.)
+        for (tx in nonCardTxs) {
             val impact = impactFor(tx, uid, all)
 
             if (tx.type == TransactionType.INCOME) {
@@ -914,8 +1064,40 @@ object FinanceEngine {
                 TransactionStatus.ESTIMATED -> committedEstimated += impact
                 TransactionStatus.PENDING -> committedPending += impact
             }
+        }
 
-            if (impact > 0.0) {
+        // 2. Faturas de Cartão (comprometimento consolidado exato: myShare abatido de estornos/créditos)
+        val processedCardIds = mutableSetOf<String>()
+        val monthCardIds = (monthTxs.mapNotNull { it.cardId } + cards.map { it.id }).distinct()
+        for (cardId in monthCardIds) {
+            val card = cardMap[cardId] ?: continue
+            if (processedCardIds.contains(cardId)) continue
+            processedCardIds.add(cardId)
+
+            val invoice = InvoiceEngine.buildInvoice(card, monthKey, all, uid)
+            val myShare = invoice.myShare
+            if (myShare > 0.0) {
+                val paidPart = if (invoice.status == InvoiceStatus.PAID) {
+                    myShare
+                } else {
+                    round2(min(myShare, invoice.paidRatio * myShare))
+                }
+                val openPart = round2(max(0.0, myShare - paidPart))
+
+                paid += paidPart
+                if (invoice.status == InvoiceStatus.OPEN) {
+                    committedEstimated += openPart
+                } else {
+                    committedPending += openPart
+                }
+            }
+        }
+
+        // 3. Categorias, Investimentos e A Receber / A Pagar (processa todas as despesas do mês)
+        for (tx in monthTxs) {
+            val impact = impactFor(tx, uid, all)
+
+            if (tx.type == TransactionType.EXPENSE && impact > 0.0) {
                 categoryMap[tx.category] = (categoryMap[tx.category] ?: 0.0) + impact
 
                 if (tx.category == "Investimentos") {
@@ -1172,6 +1354,158 @@ object FinanceEngine {
         }
 
         return date.toString()
+    }
+
+    data class PendingRecurringCandidate(
+        val id: String,
+        val bill: RecurringBill? = null,
+        val isSalary: Boolean = false,
+        val description: String,
+        val category: String,
+        val subcategory: String? = null,
+        val amount: Double,
+        val type: TransactionType,
+        val paymentMethod: PaymentMethod,
+        val cardId: String? = null,
+        val dueDay: Int,
+        val dueDate: String,
+        val launchDate: String,
+        val matchedManualTx: Transaction? = null
+    )
+
+    fun normalizeText(str: String): String {
+        val nfd = java.text.Normalizer.normalize(str, java.text.Normalizer.Form.NFD)
+        val pattern = java.util.regex.Pattern.compile("\\p{InCombiningDiacriticalMarks}+")
+        return pattern.matcher(nfd).replaceAll("").lowercase().trim()
+    }
+
+    fun findMatchingManualSalary(
+        allTxs: List<Transaction>,
+        monthKey: String,
+        expectedAmount: Double = 0.0
+    ): Transaction? {
+        val salaryWords = listOf("salario", "remuneracao", "holerite", "pro labore", "pro-labore", "renda fixa", "salario base")
+        val monthIncomes = allTxs.filter { it.competenceMonth == monthKey && it.type == TransactionType.INCOME }
+
+        val explicit = monthIncomes.firstOrNull { it.recurringBillId?.startsWith("salary_") == true }
+        if (explicit != null) return explicit
+
+        val descMatch = monthIncomes.firstOrNull { tx ->
+            val norm = normalizeText(tx.description)
+            salaryWords.any { norm.contains(it) }
+        }
+        if (descMatch != null) return descMatch
+
+        if (expectedAmount > 0.0) {
+            val amountMatch = monthIncomes.firstOrNull { Math.abs(it.totalAmount - expectedAmount) < 0.01 }
+            if (amountMatch != null) return amountMatch
+        }
+
+        return null
+    }
+
+    fun findMatchingManualBill(
+        allTxs: List<Transaction>,
+        monthKey: String,
+        bill: RecurringBill
+    ): Transaction? {
+        val normBill = normalizeText(bill.description)
+        val monthTxs = allTxs.filter { it.competenceMonth == monthKey && it.type == bill.type }
+
+        val explicit = monthTxs.firstOrNull { it.recurringBillId == bill.id }
+        if (explicit != null) return explicit
+
+        return monthTxs.firstOrNull { tx ->
+            val normTx = normalizeText(tx.description)
+            normTx.contains(normBill) || normBill.contains(normTx)
+        }
+    }
+
+    fun getPendingRecurringLaunches(
+        bills: List<RecurringBill>,
+        all: List<Transaction>,
+        monthKey: String,
+        todayStr: String,
+        me: UserProfile,
+        resolvedIds: List<String> = emptyList()
+    ): List<PendingRecurringCandidate> {
+        val resolvedSet = resolvedIds.toSet()
+        val candidates = mutableListOf<PendingRecurringCandidate>()
+
+        if (me.monthlyIncome > 0) {
+            val salaryId = "salary_${me.uid}"
+            val alreadyResolved = resolvedSet.contains(salaryId)
+            val hasExplicitTx = all.any { it.recurringBillId == salaryId && it.competenceMonth == monthKey }
+
+            if (!alreadyResolved && !hasExplicitTx) {
+                val salaryLaunchDate = "$monthKey-01"
+                if (todayStr >= salaryLaunchDate) {
+                    val matched = findMatchingManualSalary(all, monthKey, me.monthlyIncome)
+                    if (matched == null || matched.recurringBillId != salaryId) {
+                        candidates.add(
+                            PendingRecurringCandidate(
+                                id = salaryId,
+                                isSalary = true,
+                                description = "Salário Base",
+                                category = "Receita",
+                                subcategory = null,
+                                amount = me.monthlyIncome,
+                                type = TransactionType.INCOME,
+                                paymentMethod = PaymentMethod.PIX,
+                                cardId = null,
+                                dueDay = 5,
+                                dueDate = dateInMonth(monthKey, 5),
+                                launchDate = salaryLaunchDate,
+                                matchedManualTx = matched
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        val activeBills = bills.filter { it.active && it.ownerUid == me.uid }
+        for (bill in activeBills) {
+            if (!bill.startMonth.isNullOrBlank() && monthKey < bill.startMonth) continue
+            if (!bill.endMonth.isNullOrBlank() && monthKey > bill.endMonth) continue
+            if (resolvedSet.contains(bill.id)) continue
+
+            val hasExplicitTx = all.any { it.recurringBillId == bill.id && it.competenceMonth == monthKey }
+            if (hasExplicitTx) continue
+
+            val trigger = bill.launchTrigger
+            val launchDate = computeLaunchDate(bill.dueDay, monthKey, trigger)
+
+            if (todayStr >= launchDate) {
+                val estimate = estimateRecurring(bill, all, monthKey)
+                val matched = findMatchingManualBill(all, monthKey, bill)
+                if (matched == null || matched.recurringBillId != bill.id) {
+                    val isIncome = bill.type == TransactionType.INCOME
+                    val pm = bill.paymentMethod ?: if (isIncome) PaymentMethod.PIX else if (!bill.cardId.isNullOrBlank()) PaymentMethod.CREDIT_CARD else PaymentMethod.BILL
+
+                    candidates.add(
+                        PendingRecurringCandidate(
+                            id = bill.id,
+                            bill = bill,
+                            isSalary = false,
+                            description = bill.description,
+                            category = if (isIncome) "Receita" else bill.category,
+                            subcategory = bill.subcategory,
+                            amount = estimate.amount,
+                            type = bill.type,
+                            paymentMethod = pm,
+                            cardId = bill.cardId,
+                            dueDay = bill.dueDay,
+                            dueDate = dateInMonth(monthKey, bill.dueDay),
+                            launchDate = launchDate,
+                            matchedManualTx = matched
+                        )
+                    )
+                }
+            }
+        }
+
+        return candidates
     }
 
     /**
@@ -1462,7 +1796,8 @@ object FinanceEngine {
             }
 
             // 2. Projeta o salário e as contas fixas ativas que ainda NÃO foram lançadas como transação neste mês
-            val hasSalary = monthTxs.any { it.recurringBillId == "salary_$uid" }
+            val hasSalary = monthTxs.any { it.recurringBillId == "salary_$uid" } ||
+                findMatchingManualSalary(monthTxs, monthKey, profile?.monthlyIncome ?: 0.0) != null
             if (!hasSalary && profile != null && profile.monthlyIncome > 0) {
                 projectedIncome += profile.monthlyIncome
                 incomeCount++
@@ -1523,7 +1858,10 @@ object FinanceEngine {
         if (currentUid.isBlank()) return emptyList()
 
         val rawPending = transactions.filter {
-            it.assignedFriendUid == currentUid && it.acceptanceStatus == "pending_approval"
+            it.acceptanceStatus == "pending_approval" && (
+                it.assignedFriendUid == currentUid ||
+                (it.createdByUid != currentUid && it.allocations.any { a -> a.uid == currentUid && a.type == "PLATFORM_USER" })
+            )
         }
 
         val groups = mutableListOf<PendingChargeGroup>()

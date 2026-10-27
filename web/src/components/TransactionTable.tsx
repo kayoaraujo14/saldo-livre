@@ -29,7 +29,7 @@ import {
   isPureMineTx,
   isSharedWithMeTx,
 } from '@/lib/finance'
-import { formatBRL, formatShortDate, round2 } from '@/lib/utils'
+import { formatBRL, formatNubankDateHeader, formatShortDate, round2 } from '@/lib/utils'
 import {
   Search,
   RefreshCw,
@@ -51,9 +51,12 @@ import {
   User,
   X,
   Lock,
+  Receipt,
+  Calendar,
 } from 'lucide-react'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 import { MobileTransactionCard } from './mobile/MobileTransactionCard'
+import { consolidateMonthTransactions, type ConsolidatedTransaction } from '@/lib/invoices'
 
 type TabFilter = 'all' | 'income' | 'expense' | 'my_expenses' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
 
@@ -92,16 +95,26 @@ interface TransactionTableProps {
   onRefundTx?: (tx: Transaction) => void
   onToggleExpand?: () => void
   isExpanded?: boolean
+  onOpenInvoices?: (cardId?: string) => void
 }
 
-export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpanded }: TransactionTableProps) {
+export function TransactionTable({
+  onEditTx,
+  onRefundTx,
+  onToggleExpand,
+  isExpanded,
+  onOpenInvoices,
+}: TransactionTableProps) {
   const {
     summary,
     monthTransactions,
+    transactions,
+    month,
     cards,
     me,
     partner,
     cycleStatus,
+    setStatus,
     changeSplit,
     changeAmount,
     updateTransaction,
@@ -113,6 +126,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
   const [activeTab, setActiveTab] = useState<TabFilter>('all')
   const [search, setSearch] = useState('')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+  const [consolidateInvoices, setConsolidateInvoices] = useState(true)
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(INITIAL_COLUMN_FILTERS)
   const [categorySearchQuery, setCategorySearchQuery] = useState('')
   const [personSearchQuery, setPersonSearchQuery] = useState('')
@@ -124,10 +138,22 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
 
   const currentUid = me?.uid ?? ''
 
+  // Lista base de transações: consolida faturas de cartão no dia do vencimento quando ativado
+  const effectiveTransactions = useMemo(() => {
+    return consolidateMonthTransactions(
+      monthTransactions,
+      transactions,
+      cards,
+      currentUid,
+      month,
+      consolidateInvoices,
+    )
+  }, [monthTransactions, transactions, cards, currentUid, month, consolidateInvoices])
+
   // Unique options and counts for Excel popovers
   const availableCategories = useMemo(() => {
     const map = new Map<string, number>()
-    monthTransactions.forEach((tx) => {
+    effectiveTransactions.forEach((tx) => {
       const isLegacy =
         (LEGACY_CATEGORIES as readonly string[]).includes(tx.category) &&
         !(EXPENSE_CATEGORIES as readonly string[]).includes(tx.category) &&
@@ -137,16 +163,16 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       }
     })
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
-  }, [monthTransactions])
+  }, [effectiveTransactions])
 
   const availableSplits = useMemo(() => {
     const map = new Map<string, number>()
-    monthTransactions.forEach((tx) => {
+    effectiveTransactions.forEach((tx) => {
       const s = detectSplit(tx, currentUid)
       map.set(s, (map.get(s) || 0) + 1)
     })
     return Array.from(map.entries())
-  }, [monthTransactions, currentUid])
+  }, [effectiveTransactions, currentUid])
 
   const availablePersons = useMemo(() => {
     let myAllCount = 0
@@ -158,13 +184,13 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
 
     const othersMap = new Map<string, { count: number; totalAmount: number; role: string }>()
 
-    monthTransactions.forEach((tx) => {
-      const myImp = Math.abs(impactFor(tx, currentUid, monthTransactions))
+    effectiveTransactions.forEach((tx) => {
+      const myImp = Math.abs(impactFor(tx, currentUid, effectiveTransactions))
 
-      if (isMyExpenseTx(tx, currentUid, monthTransactions)) {
+      if (isMyExpenseTx(tx, currentUid, effectiveTransactions)) {
         myAllCount++
         myAllTotal += myImp
-        if (isPureMineTx(tx, currentUid, monthTransactions)) {
+        if (isPureMineTx(tx, currentUid, effectiveTransactions)) {
           myPureCount++
           myPureTotal += myImp
         } else {
@@ -173,7 +199,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
         }
       }
 
-      const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+      const pList = getTxPersons(tx, currentUid, partner?.name, effectiveTransactions)
       pList.forEach((p) => {
         if (p.role !== 'me' && p.name !== '100% Meu') {
           const prev = othersMap.get(p.name) || { count: 0, totalAmount: 0, role: p.role }
@@ -222,34 +248,33 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       })
 
     return [...result, ...sortedOthers]
-  }, [monthTransactions, currentUid, partner?.name])
+  }, [effectiveTransactions, currentUid, partner?.name])
 
   const availableDays = useMemo(() => {
     const map = new Map<string, number>()
-    monthTransactions.forEach((tx) => {
+    effectiveTransactions.forEach((tx) => {
       const d = (tx.dueDate || tx.competenceMonth || '').slice(8, 10)
       if (d) {
         map.set(d, (map.get(d) || 0) + 1)
       }
     })
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-  }, [monthTransactions])
+  }, [effectiveTransactions])
 
   const statusCounts = useMemo(() => {
     let paid = 0
     let pending = 0
     let estimated = 0
-    monthTransactions.forEach((tx) => {
+    effectiveTransactions.forEach((tx) => {
       if (tx.status === 'paid') paid++
       else if (tx.status === 'pending') pending++
       else if (tx.status === 'estimated') estimated++
     })
     return { paid, pending, estimated }
-  }, [monthTransactions])
-
+  }, [effectiveTransactions])
   // Filter and sort list by transaction date and excel column filters
   const filteredTxs = useMemo(() => {
-    const list = monthTransactions.filter((tx: Transaction) => {
+    const list = effectiveTransactions.filter((tx: ConsolidatedTransaction) => {
       // 1. Tab filter
       if (activeTab === 'income') {
         if (tx.type !== 'income') return false
@@ -257,7 +282,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
         if (tx.type === 'income') return false
       } else if (activeTab === 'my_expenses') {
         if (tx.type === 'income') return false
-        if (!isMyExpenseTx(tx, currentUid, monthTransactions)) return false
+        if (!isMyExpenseTx(tx, currentUid, effectiveTransactions)) return false
       } else if (activeTab === 'refund') {
         const isRef = tx.category === 'Estorno' || tx.totalAmount < 0 || effectiveAmount(tx) < 0
         if (!isRef) return false
@@ -285,7 +310,15 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
         const matchesCat = tx.category.toLowerCase().includes(q)
         const matchesSubcat = tx.subcategory?.toLowerCase().includes(q)
         const matchesAlloc = (tx.allocations || []).some((a) => a.name.toLowerCase().includes(q))
-        if (!matchesDesc && !matchesCat && !matchesSubcat && !matchesAlloc) return false
+        
+        // Se for fatura consolidada, também pesquisa nos itens individuais da fatura
+        const matchesInvoiceItems = tx.invoiceMeta?.invoice.items.some((item) =>
+          item.description.toLowerCase().includes(q) ||
+          item.category.toLowerCase().includes(q) ||
+          item.subcategory?.toLowerCase().includes(q)
+        )
+
+        if (!matchesDesc && !matchesCat && !matchesSubcat && !matchesAlloc && !matchesInvoiceItems) return false
       }
 
       // 3. Excel Column Filter: Status
@@ -304,10 +337,14 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
 
       // 5. Excel Column Filter: Category & Subcategory
       if (columnFilters.categories.length > 0) {
-        if (!columnFilters.categories.includes(tx.category)) return false
+        const matchesDirect = columnFilters.categories.includes(tx.category)
+        const matchesInvoice = tx.invoiceMeta?.invoice.items.some((item) => columnFilters.categories.includes(item.category))
+        if (!matchesDirect && !matchesInvoice) return false
       }
       if (columnFilters.subcategories.length > 0) {
-        if (!tx.subcategory || !columnFilters.subcategories.includes(tx.subcategory)) return false
+        const matchesDirect = tx.subcategory && columnFilters.subcategories.includes(tx.subcategory)
+        const matchesInvoice = tx.invoiceMeta?.invoice.items.some((item) => item.subcategory && columnFilters.subcategories.includes(item.subcategory))
+        if (!matchesDirect && !matchesInvoice) return false
       }
 
       // 6. Excel Column Filter: Split & Person / Responsável
@@ -318,15 +355,15 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       if (columnFilters.persons.length > 0) {
         const hasMatchingPerson = columnFilters.persons.some((pName) => {
           if (pName === 'Meus Gastos (Todos)' || pName === 'Todos os Meus') {
-            return isMyExpenseTx(tx, currentUid, monthTransactions)
+            return isMyExpenseTx(tx, currentUid, effectiveTransactions)
           }
           if (pName === '100% Meu (Exclusivo)' || pName === '100% Meu') {
-            return isPureMineTx(tx, currentUid, monthTransactions)
+            return isPureMineTx(tx, currentUid, effectiveTransactions)
           }
           if (pName === 'Meus Rateados' || pName === 'Rateados (Minha Cota)') {
-            return isSharedWithMeTx(tx, currentUid, monthTransactions)
+            return isSharedWithMeTx(tx, currentUid, effectiveTransactions)
           }
-          const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+          const pList = getTxPersons(tx, currentUid, partner?.name, effectiveTransactions)
           return pList.some((p) => p.name === pName)
         })
         if (!hasMatchingPerson) return false
@@ -334,7 +371,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
 
       // 7. Excel Column Filter: Amount Type & Range
       const eff = effectiveAmount(tx)
-      const myImpact = impactFor(tx, currentUid, monthTransactions)
+      const myImpact = impactFor(tx, currentUid, effectiveTransactions)
       const isRef = tx.category === 'Estorno' || eff < 0 || tx.totalAmount < 0
 
       if (columnFilters.amountType === 'income' && tx.type !== 'income') return false
@@ -357,13 +394,13 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
     return [...list].sort((a, b) => {
       // Custom Excel sort by amount if selected
       if (columnFilters.sortBy === 'amount_asc') {
-        const impA = impactFor(a, currentUid, monthTransactions)
-        const impB = impactFor(b, currentUid, monthTransactions)
+        const impA = impactFor(a, currentUid, effectiveTransactions)
+        const impB = impactFor(b, currentUid, effectiveTransactions)
         return impA - impB
       }
       if (columnFilters.sortBy === 'amount_desc') {
-        const impA = impactFor(a, currentUid, monthTransactions)
-        const impB = impactFor(b, currentUid, monthTransactions)
+        const impA = impactFor(a, currentUid, effectiveTransactions)
+        const impB = impactFor(b, currentUid, effectiveTransactions)
         return impB - impA
       }
 
@@ -381,7 +418,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       }
       return (b.createdAt || 0) - (a.createdAt || 0)
     })
-  }, [monthTransactions, activeTab, search, cards, sortOrder, columnFilters, currentUid, partner?.name])
+  }, [effectiveTransactions, activeTab, search, cards, sortOrder, columnFilters, currentUid, partner?.name])
 
   // Real-time Analytical Summary of filtered items
   const filteredSummary = useMemo(() => {
@@ -389,7 +426,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
     let expense = 0
 
     filteredTxs.forEach((tx) => {
-      const myImpact = impactFor(tx, currentUid, monthTransactions)
+      const myImpact = impactFor(tx, currentUid, effectiveTransactions)
       const eff = effectiveAmount(tx)
       const isRef = tx.category === 'Estorno' || eff < 0 || tx.totalAmount < 0
 
@@ -407,33 +444,33 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       expense,
       net: income - expense,
     }
-  }, [filteredTxs, currentUid, monthTransactions])
+  }, [filteredTxs, currentUid, effectiveTransactions])
 
   // Total dinâmico exato pertencente à(s) pessoa(s) ou terceiro(s) filtrado(s)
   const filteredPersonTotal = useMemo(() => {
     if (columnFilters.persons.length === 0) return 0
     let total = 0
     filteredTxs.forEach((tx) => {
-      const myImp = Math.abs(impactFor(tx, currentUid, monthTransactions))
+      const myImp = Math.abs(impactFor(tx, currentUid, effectiveTransactions))
       if (columnFilters.persons.includes('Meus Gastos (Todos)') || columnFilters.persons.includes('Todos os Meus')) {
-        if (isMyExpenseTx(tx, currentUid, monthTransactions)) {
+        if (isMyExpenseTx(tx, currentUid, effectiveTransactions)) {
           total += myImp
           return
         }
       }
       if (columnFilters.persons.includes('100% Meu (Exclusivo)') || columnFilters.persons.includes('100% Meu')) {
-        if (isPureMineTx(tx, currentUid, monthTransactions)) {
+        if (isPureMineTx(tx, currentUid, effectiveTransactions)) {
           total += myImp
           return
         }
       }
       if (columnFilters.persons.includes('Meus Rateados') || columnFilters.persons.includes('Rateados (Minha Cota)')) {
-        if (isSharedWithMeTx(tx, currentUid, monthTransactions)) {
+        if (isSharedWithMeTx(tx, currentUid, effectiveTransactions)) {
           total += myImp
           return
         }
       }
-      const pList = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+      const pList = getTxPersons(tx, currentUid, partner?.name, effectiveTransactions)
       pList.forEach((p) => {
         if (columnFilters.persons.includes(p.name)) {
           total += p.amount
@@ -441,7 +478,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       })
     })
     return round2(total)
-  }, [filteredTxs, columnFilters.persons, currentUid, partner?.name, monthTransactions])
+  }, [filteredTxs, columnFilters.persons, currentUid, partner?.name, effectiveTransactions])
 
   // Count if any column filter is active
   const isAnyFilterActive = useMemo(() => {
@@ -455,6 +492,31 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       Boolean(columnFilters.amountMin || columnFilters.amountMax || columnFilters.amountType !== 'all' || columnFilters.sortBy)
     )
   }, [columnFilters])
+
+  const mobileGroupedTxs = useMemo(() => {
+    const map = new Map<string, Transaction[]>()
+    filteredTxs.forEach((tx) => {
+      const key = tx.dueDate || tx.competenceMonth || 'Sem data'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(tx)
+    })
+    return Array.from(map.entries()).map(([dateKey, items]) => {
+      let dayExpenses = 0
+      let dayIncomes = 0
+      items.forEach((tx) => {
+        const imp = Math.abs(impactFor(tx, currentUid, monthTransactions))
+        if (tx.type === 'income' || tx.category === 'Estorno') {
+          dayIncomes += imp
+        } else {
+          dayExpenses += imp
+        }
+      })
+      const isNetIncome = dayIncomes > dayExpenses
+      const netAmount = isNetIncome ? dayIncomes - dayExpenses : dayExpenses - dayIncomes
+      const totalAmount = dayExpenses === 0 && dayIncomes > 0 ? dayIncomes : dayIncomes === 0 ? dayExpenses : netAmount
+      return { dateKey, items, totalAmount, isNetIncome }
+    })
+  }, [filteredTxs, currentUid, monthTransactions])
 
   // Handlers for toggling specific filter items
   const toggleStatusFilter = (st: 'paid' | 'pending' | 'estimated') => {
@@ -507,7 +569,7 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
 
   // Count badges
   const counts = useMemo(() => {
-    const txs = Array.isArray(monthTransactions) ? monthTransactions : []
+    const txs = Array.isArray(effectiveTransactions) ? effectiveTransactions : []
     const cardsList = Array.isArray(cards) ? cards : []
     return {
       all: txs.length,
@@ -525,7 +587,18 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
       third: txs.filter((t: Transaction) => (Array.isArray(t?.allocations) ? t.allocations : []).some((a) => a && a.type === 'EXTERNAL')).length,
       friends_installments: txs.filter((t: Transaction) => t && Boolean(t.assignedFriendUid || t.installmentGroupId)).length,
     }
-  }, [monthTransactions, cards, currentUid])
+  }, [effectiveTransactions, cards, currentUid])
+
+  const handlePayConsolidatedInvoice = async (invoiceTx: ConsolidatedTransaction) => {
+    if (!invoiceTx.invoiceMeta) return
+    const { invoice, card } = invoiceTx.invoiceMeta
+    if (card.ownerUid !== currentUid) return
+    const unpaidItems = invoice.items.filter((t) => t.type === 'expense' && t.status !== 'paid')
+    if (unpaidItems.length === 0) return
+    if (confirm(`Confirmar o pagamento da fatura ${card.cardName} no valor de ${formatBRL(invoice.openAmount)}? Todos os ${unpaidItems.length} lançamentos vinculados serão marcados como pagos.`)) {
+      await Promise.all(unpaidItems.map((item) => setStatus(item, 'paid')))
+    }
+  }
 
   const startEdit = (tx: Transaction) => {
     if (!canUserEditTransaction(tx, currentUid)) return
@@ -605,6 +678,26 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
                 className="h-8 pl-8 text-xs bg-slate-950/70 border-slate-800 focus-visible:ring-emerald-500/40"
               />
             </div>
+
+            {/* Toggle de Faturas Consolidadas no Extrato */}
+            <button
+              type="button"
+              onClick={() => setConsolidateInvoices((prev) => !prev)}
+              className={`h-8 px-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border cursor-pointer shrink-0 ${
+                consolidateInvoices
+                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 shadow-xs hover:bg-sky-500/30'
+                  : 'bg-slate-950/70 text-slate-400 border-slate-800 hover:text-slate-200'
+              }`}
+              title={
+                consolidateInvoices
+                  ? 'Faturas consolidadas ativadas: Exibe 1 único lançamento consolidado por cartão no vencimento. Clique para ver compras individuais.'
+                  : 'Exibindo compras individuais no extrato. Clique para consolidar em 1 lançamento por fatura.'
+              }
+            >
+              <CreditCard className="size-3.5" />
+              <span className="hidden sm:inline">Faturas Consolidadas</span>
+              <span className="sm:hidden">Faturas</span>
+            </button>
 
             {onToggleExpand && (
               <Button
@@ -997,25 +1090,51 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
             <p className="text-[11px] text-slate-500 mt-1">Tente ajustar os filtros ou adicione uma nova transação.</p>
           </div>
         ) : (
-          filteredTxs.map((tx: Transaction) => (
-            <MobileTransactionCard
-              key={tx.id}
-              tx={tx}
-              currentUid={currentUid}
-              allTransactions={monthTransactions}
-              cards={cards}
-              onEdit={onEditTx}
-              onRefund={onRefundTx}
-              onDelete={(targetTx) => {
-                if (targetTx.installmentGroupId) {
-                  setDeleteGroupTx(targetTx)
-                } else {
-                  deleteTransaction(targetTx.id)
-                }
-              }}
-              onCycleStatus={cycleStatus}
-            />
-          ))
+          mobileGroupedTxs.map(({ dateKey, items, totalAmount, isNetIncome }) => {
+            const hdr = formatNubankDateHeader(dateKey)
+            return (
+              <div key={dateKey} className="space-y-1.5">
+                <div className="flex items-center justify-between px-2 pt-2 text-[11px]">
+                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-slate-300">
+                    <span className={hdr.isToday ? 'text-cyan-400' : hdr.isYesterday ? 'text-amber-400' : 'text-slate-200'}>
+                      {hdr.title}
+                    </span>
+                    {hdr.subtitle && <span className="font-normal text-slate-500">· {hdr.subtitle}</span>}
+                  </div>
+                  <span className={`font-semibold tabular-nums text-[11px] ${isNetIncome ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    {isNetIncome ? `+ ${formatBRL(totalAmount)}` : formatBRL(totalAmount)}
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {items.map((tx: Transaction) => (
+                    <MobileTransactionCard
+                      key={tx.id}
+                      tx={tx}
+                      currentUid={currentUid}
+                      allTransactions={effectiveTransactions}
+                      cards={cards}
+                      onEdit={(targetTx) => {
+                        if (targetTx.id.startsWith('invoice_') && targetTx.cardId) {
+                          onOpenInvoices?.(targetTx.cardId)
+                        } else {
+                          onEditTx(targetTx)
+                        }
+                      }}
+                      onRefund={onRefundTx}
+                      onDelete={(targetTx) => {
+                        if (targetTx.installmentGroupId) {
+                          setDeleteGroupTx(targetTx)
+                        } else {
+                          deleteTransaction(targetTx.id)
+                        }
+                      }}
+                      onCycleStatus={cycleStatus}
+                    />
+                  ))}
+                </div>
+              </div>
+            )
+          })
         )}
       </div>
 
@@ -1669,18 +1788,181 @@ export function TransactionTable({ onEditTx, onRefundTx, onToggleExpand, isExpan
                 </td>
               </tr>
             ) : (
-              filteredTxs.map((tx: Transaction) => {
+              filteredTxs.map((tx: ConsolidatedTransaction) => {
+                if (tx.invoiceMeta) {
+                  const invMeta = tx.invoiceMeta
+                  const isOwner = invMeta.isOwner
+                  return (
+                    <tr
+                      key={tx.id}
+                      className="hover:bg-slate-800/40 transition-colors bg-sky-950/15 border-l-2 border-l-sky-500 group select-none"
+                    >
+                      {/* 1. Status da Fatura */}
+                      <td className="py-2.5 px-3 align-middle">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isOwner && tx.status !== 'paid') {
+                              handlePayConsolidatedInvoice(tx)
+                            } else {
+                              onOpenInvoices?.(invMeta.card.id)
+                            }
+                          }}
+                          title={
+                            isOwner
+                              ? tx.status === 'paid'
+                                ? 'Fatura quitada'
+                                : 'Clique para marcar a fatura como paga'
+                              : 'Fatura de cartão compartilhado (Modo leitura)'
+                          }
+                          className={isOwner && tx.status !== 'paid' ? 'cursor-pointer hover:scale-105 active:scale-95 transition-transform' : 'cursor-pointer'}
+                        >
+                          {tx.status === 'paid' ? (
+                            <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-300 border-emerald-500/40 gap-1 font-semibold">
+                              <CheckCircle2 className="size-2.5 text-emerald-400" />
+                              Fatura Paga
+                            </Badge>
+                          ) : invMeta.invoiceStatus === 'closed' ? (
+                            <Badge variant="outline" className="text-[10px] bg-amber-500/15 text-amber-300 border-amber-500/40 gap-1 font-semibold">
+                              <Clock className="size-2.5 text-amber-400" />
+                              Fatura Fechada
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] bg-sky-500/15 text-sky-300 border-sky-500/40 gap-1 font-semibold">
+                              <span className="size-1.5 rounded-full bg-sky-400 animate-pulse" />
+                              Fatura Aberta
+                            </Badge>
+                          )}
+                        </button>
+                      </td>
+
+                      {/* 2. Data de Vencimento */}
+                      <td className="py-2.5 px-3 text-slate-200 font-mono text-xs whitespace-nowrap align-middle font-semibold">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="size-3 text-slate-500 shrink-0" />
+                          <span>{formatShortDate(tx.dueDate)}</span>
+                        </div>
+                      </td>
+
+                      {/* 3. Descrição & Metadata Badges */}
+                      <td className="py-2.5 px-3 align-middle">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className="size-7 rounded-lg flex items-center justify-center shrink-0 border"
+                            style={{
+                              backgroundColor: `${invMeta.card.color ? '#8b5cf6' : '#0284c7'}20`,
+                              borderColor: `${invMeta.card.color ? '#8b5cf6' : '#0284c7'}40`,
+                            }}
+                          >
+                            <CreditCard className="size-3.5 text-sky-400" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-white tracking-wide">
+                                {tx.description}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                                {invMeta.itemsCount} {invMeta.itemsCount === 1 ? 'compra' : 'compras'} no ciclo
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => onOpenInvoices?.(invMeta.card.id)}
+                                className="text-[10px] text-sky-400 hover:text-sky-300 hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                              >
+                                <span>Ver compras</span>
+                                <Receipt className="size-2.5" />
+                              </button>
+                            </div>
+
+                            {/* Detalhes de Rateio e Terceiros */}
+                            {invMeta.othersShare > 0 && (
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                Sua parte: <strong className="text-emerald-400">{formatBRL(invMeta.myShare)}</strong> · Outros: <strong className="text-amber-400">{formatBRL(invMeta.othersShare)}</strong> (Total fatura: {formatBRL(invMeta.totalInvoiceAmount)})
+                              </p>
+                            )}
+                            {!isOwner && (
+                              <p className="text-[10px] text-indigo-300 mt-0.5">
+                                Cartão compartilhado por <strong>{invMeta.card.ownerName}</strong>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* 4. Categoria */}
+                      <td className="py-2.5 px-3 align-middle">
+                        <Badge variant="outline" className="text-[10px] bg-slate-800/80 text-slate-300 border-slate-700">
+                          Cartão de Crédito
+                        </Badge>
+                      </td>
+
+                      {/* 5. Responsável / Divisão */}
+                      <td className="py-2.5 px-3 align-middle text-xs">
+                        {isOwner ? (
+                          invMeta.othersShare > 0 ? (
+                            <span className="text-[10px] font-medium text-amber-300">Rateado com Terceiros</span>
+                          ) : (
+                            <span className="text-[10px] font-medium text-slate-300">100% Meu</span>
+                          )
+                        ) : (
+                          <span className="text-[10px] font-medium text-indigo-300">Minha Cota</span>
+                        )}
+                      </td>
+
+                      {/* 6. Valor (Minha parte!) */}
+                      <td className="py-2.5 px-3 align-middle text-right">
+                        <div className="font-mono font-bold text-xs text-white">
+                          {formatBRL(tx.totalAmount)}
+                        </div>
+                        {invMeta.othersShare > 0 && (
+                          <div className="text-[9px] text-slate-500 font-mono">
+                            total: {formatBRL(invMeta.totalInvoiceAmount)}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 7. Ações */}
+                      <td className="py-2.5 px-3 align-middle text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => onOpenInvoices?.(invMeta.card.id)}
+                            className="text-slate-400 hover:text-white h-7 w-7 rounded-lg cursor-pointer"
+                            title="Abrir fatura detalhada"
+                          >
+                            <Receipt className="size-3.5 text-sky-400" />
+                          </Button>
+                          {isOwner && tx.status !== 'paid' && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handlePayConsolidatedInvoice(tx)}
+                              className="text-slate-400 hover:text-emerald-400 h-7 w-7 rounded-lg cursor-pointer"
+                              title="Pagar fatura"
+                            >
+                              <CheckCircle2 className="size-3.5 text-emerald-400" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                }
+
                 const isEditing = editingId === tx.id
                 const canEdit = canUserEditTransaction(tx, currentUid)
                 const effAmount = effectiveAmount(tx)
-                const myImpact = impactFor(tx, currentUid, monthTransactions)
+                const myImpact = impactFor(tx, currentUid, effectiveTransactions)
                 const split = detectSplit(tx, currentUid)
                 const isRefund = tx.category === 'Estorno' || effAmount < 0 || tx.totalAmount < 0
                 const card = cards.find((c) => c.id === tx.cardId)
                 const isReserve = Boolean(tx.reserveCardId)
-                const reserveInfo = isReserve ? getReserveInfo(tx, monthTransactions) : null
+                const reserveInfo = isReserve ? getReserveInfo(tx, effectiveTransactions) : null
                 const thirdParty = getThirdPartyInfo(tx, currentUid, partner?.name)
-                const txPersons = getTxPersons(tx, currentUid, partner?.name, monthTransactions)
+                const txPersons = getTxPersons(tx, currentUid, partner?.name, effectiveTransactions)
 
                 // Estimation vs Actual comparison
                 const hasComparison = tx.recurringBillId && tx.actualAmount != null && tx.estimatedAmount != null

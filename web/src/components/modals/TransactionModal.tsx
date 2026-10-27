@@ -61,10 +61,9 @@ interface TransactionModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   editingTx?: Transaction | null
-  refundFromTx?: Transaction | null
 }
 
-export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }: TransactionModalProps) {
+export function TransactionModal({ open, onOpenChange, editingTx }: TransactionModalProps) {
   const {
     createManual,
     updateTransaction,
@@ -81,7 +80,6 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
   const [subcategory, setSubcategory] = useState<string>('Supermercado')
   const [date, setDate] = useState(todayKey())
   const [type, setType] = useState<'expense' | 'income'>('expense')
-  const [isEstorno, setIsEstorno] = useState(false)
   const [status, setStatus] = useState<TransactionStatus>('pending')
   const [splitType, setSplitType] = useState<SplitType>('mine')
   const [externalName, setExternalName] = useState('Mãe')
@@ -123,77 +121,15 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
     return list
   }
 
+  const isEditingRefund = Boolean(
+    editingTx && (editingTx.totalAmount < 0 || editingTx.category === 'Estorno' || Boolean(editingTx.refundedTransactionId)),
+  )
+
   useEffect(() => {
     setErrorMessage(null)
     setIsSubmitting(false)
 
-    if (refundFromTx) {
-      setIsEstorno(true)
-      setType('expense')
-      setDescription(`Estorno: ${stripInstallmentSuffix(refundFromTx.description)}`)
-      setAmount(String(Math.abs(effectiveAmount(refundFromTx))))
-      setCategory('Estorno')
-      setSubcategory('Crédito na Fatura')
-      setDate(todayKey())
-      setStatus('pending')
-      setPaymentMethod(refundFromTx.paymentMethod)
-      setCardId(refundFromTx.cardId || '')
-      setIsReserve(false)
-      setIsInstallment(false)
-      setInstallmentsCount(1)
-      setEditScope('all')
-
-      const allocs = refundFromTx.allocations || []
-      if (refundFromTx.splitType === 'custom' || allocs.length > 2) {
-        setSplitType('custom')
-        const total = Math.abs(effectiveAmount(refundFromTx)) || 1
-        const rows: CustomParticipantRow[] = allocs.map((a, i) => {
-          const isMe = a.uid === me?.uid
-          const isPart = partner && a.uid === partner.uid
-          const isFr = friends.some((f) => f.uid === a.uid)
-          const absAmount = Math.abs(a.amount)
-          const pct = round2((absAmount / total) * 100)
-          return {
-            id: `p_${i}_${a.uid || a.name}`,
-            type: isMe ? 'me' : isPart ? 'partner' : isFr ? 'friend' : (a.type === 'PLATFORM_USER' ? 'friend' : 'external'),
-            uid: a.uid,
-            name: a.name,
-            amount: absAmount,
-            percentage: pct,
-          }
-        })
-        setCustomParticipants(rows)
-      } else if (refundFromTx.assignedFriendUid) {
-        setSplitType('custom')
-        const total = Math.abs(effectiveAmount(refundFromTx)) || 1
-        const pct = friendPctOf(refundFromTx)
-        const friendVal = round2((total * pct) / 100)
-        const myVal = round2(total - friendVal)
-        const rows: CustomParticipantRow[] = [
-          { id: 'me', type: 'me', uid: me?.uid, name: me?.name || 'Você', amount: myVal, percentage: 100 - pct },
-          { id: `fr_${refundFromTx.assignedFriendUid}`, type: 'friend', uid: refundFromTx.assignedFriendUid, name: refundFromTx.assignedFriendName || 'Amigo', amount: friendVal, percentage: pct },
-        ]
-        setCustomParticipants(rows)
-      } else {
-        const hasExternal = allocs.some((a) => a.type === 'EXTERNAL')
-        if (hasExternal) {
-          setSplitType('external')
-          const ext = allocs.find((a) => a.type === 'EXTERNAL')
-          if (ext) setExternalName(ext.name)
-        } else if (refundFromTx.splitType === 'split_50' || allocs.length > 1) {
-          setSplitType('split_50')
-        } else if (refundFromTx.splitType === 'partner') {
-          setSplitType('partner')
-        } else {
-          setSplitType('mine')
-        }
-      }
-      return
-    }
-
     if (editingTx) {
-      const isRefund = editingTx.category === 'Estorno' || effectiveAmount(editingTx) < 0 || editingTx.totalAmount < 0
-      setIsEstorno(isRefund)
       const isGrp = Boolean(editingTx.installmentGroupId)
       setDescription(isGrp ? stripInstallmentSuffix(editingTx.description) : editingTx.description)
       setAmount(String(Math.abs(effectiveAmount(editingTx))))
@@ -256,7 +192,6 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
 
       setInstallmentsCount(editingTx.installmentsTotal || 3)
     } else {
-      setIsEstorno(false)
       setDescription('')
       setAmount('')
       setCategory('Alimentação')
@@ -275,7 +210,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
       setInstallmentMode('total')
       setEditScope('all')
     }
-  }, [editingTx, refundFromTx, open, cards, me, friends, partner])
+  }, [editingTx, open, cards, me, friends, partner])
 
   const handleAmountChange = (newAmountStr: string) => {
     setAmount(newAmountStr)
@@ -502,7 +437,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
       return
     }
 
-    const isEstornoMode = isEstorno || category === 'Estorno'
+    const isEstornoMode = isEditingRefund || category === 'Estorno'
     const numericAmount = isEstornoMode ? -Math.abs(rawVal) : Math.abs(rawVal)
     const posTotal = Math.abs(numericAmount)
 
@@ -564,6 +499,24 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
         }
       }
 
+      const isExplicitNonFriend =
+        splitType === 'mine' || splitType === 'partner' || splitType === 'split_50' || splitType === 'external'
+
+      if (!isExplicitNonFriend && !assignedFriendUid && editingTx?.assignedFriendUid) {
+        assignedFriendUid = editingTx.assignedFriendUid
+        assignedFriendName =
+          editingTx.assignedFriendName ||
+          friends.find((f) => f.uid === editingTx.assignedFriendUid)?.name ||
+          'Amigo'
+        friendSharePctNum = clampPct(editingTx.friendSharePct ?? 100)
+      }
+
+      const resolvedFriendUid = isExplicitNonFriend ? undefined : (assignedFriendUid || undefined)
+      const resolvedFriendName = resolvedFriendUid
+        ? (assignedFriendName || friends.find((f) => f.uid === resolvedFriendUid)?.name || 'Amigo')
+        : undefined
+      const resolvedFriendPct = friendSharePctNum ?? editingTx?.friendSharePct ?? 100
+
       if (editingTx) {
         if (editingTx.installmentGroupId && editScope === 'all') {
           await updateInstallmentGroup(editingTx.installmentGroupId, {
@@ -578,8 +531,8 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
             splitType: isCustom ? 'custom' : splitType,
             externalName: splitType === 'external' ? externalName : undefined,
             friend:
-              assignedFriendUid && assignedFriendName
-                ? { uid: assignedFriendUid, name: assignedFriendName, pct: friendSharePctNum ?? 100 }
+              resolvedFriendUid && resolvedFriendName
+                ? { uid: resolvedFriendUid, name: resolvedFriendName, pct: resolvedFriendPct }
                 : undefined,
             customAllocations,
           })
@@ -589,8 +542,8 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
             ? calculateCardInvoiceDates(date, card).competenceMonth
             : date.slice(0, 7)
 
-          const assignedFriend = assignedFriendUid && assignedFriendName
-            ? { uid: assignedFriendUid, name: assignedFriendName }
+          const assignedFriend = resolvedFriendUid && resolvedFriendName
+            ? { uid: resolvedFriendUid, name: resolvedFriendName }
             : null
 
           const payerUid = paymentMethod === 'credit_card' && card ? card.ownerUid : (me?.uid || editingTx.paidByUid)
@@ -604,7 +557,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
             createdByUid: editingTx.createdByUid,
             externalName: splitType === 'external' ? externalName : undefined,
             assignedFriend,
-            friendSharePct: friendSharePctNum ?? 100,
+            friendSharePct: resolvedFriendPct,
             customAllocations,
             acceptanceStatus: assignedFriend ? 'pending_approval' : null,
             previous: editingTx.allocations,
@@ -624,10 +577,15 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
             totalAmount: numericAmount,
             allocations: split.allocations,
             userImpact: split.userImpact,
-            visibleToUids: split.visibleToUids,
+            visibleToUids: Array.from(
+              new Set([
+                ...split.visibleToUids,
+                ...((paymentMethod === 'credit_card' && card?.sharedWithUids) || []),
+              ])
+            ),
             assignedFriendUid: assignedFriend?.uid ?? null,
             assignedFriendName: assignedFriend?.name ?? null,
-            friendSharePct: assignedFriend ? (friendSharePctNum ?? 100) : null,
+            friendSharePct: assignedFriend ? resolvedFriendPct : null,
             acceptanceStatus: assignedFriend ? 'pending_approval' : null,
             respondedAt: null,
             status,
@@ -668,8 +626,6 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
     }
   }
 
-  const isEstornoCat = category === 'Estorno'
-  const isEstornoMode = isEstorno || isEstornoCat
   const isIncomeType = type === 'income'
 
   return (
@@ -678,29 +634,27 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
         <form onSubmit={handleSubmit} className="space-y-4">
           <DialogHeader className="space-y-1 pb-1 border-b border-white/[0.06]">
             <DialogTitle className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-              <div className={`size-8 rounded-xl border flex items-center justify-center ${
-                isEstornoMode
-                  ? 'bg-gradient-to-tr from-cyan-500/20 to-teal-500/20 border-cyan-500/30 text-cyan-400'
-                  : 'bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border-emerald-500/30 text-emerald-400'
-              }`}>
-                {isEstornoMode ? <RotateCcw className="size-4" /> : <Sparkles className="size-4" />}
+              <div
+                className={`size-8 rounded-xl border flex items-center justify-center ${
+                  isEditingRefund
+                    ? 'bg-gradient-to-tr from-cyan-500/20 to-teal-500/20 border-cyan-500/30 text-cyan-400'
+                    : 'bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border-emerald-500/30 text-emerald-400'
+                }`}
+              >
+                {isEditingRefund ? <RotateCcw className="size-4" /> : <Sparkles className="size-4" />}
               </div>
               <span>
                 {editingTx
-                  ? (isEstornoMode ? 'Editar Estorno Rateado' : 'Editar Lançamento')
-                  : refundFromTx
-                    ? 'Cadastrar Estorno Rateado'
-                    : isEstornoMode
-                      ? 'Novo Estorno / Crédito Rateado'
-                      : 'Novo Lançamento'}
+                  ? isEditingRefund
+                    ? 'Editar Estorno Vinculado'
+                    : 'Editar Lançamento'
+                  : 'Novo Lançamento'}
               </span>
             </DialogTitle>
             <DialogDescription className="text-xs text-slate-400">
-              {isEstornoMode
-                ? 'Cadastre um estorno ou crédito na fatura/conta com rateio automático entre os participantes'
-                : editingTx
-                  ? 'Atualize descrição, valores, cartão ou divisão de participantes'
-                  : 'Cadastre receitas, compras individuais, parceladas ou compartilhadas com amigos'}
+              {editingTx
+                ? 'Atualize descrição, valores, cartão ou divisão de participantes'
+                : 'Cadastre receitas, compras individuais, parceladas ou compartilhadas com amigos'}
             </DialogDescription>
           </DialogHeader>
 
@@ -781,7 +735,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
             </div>
           )}
 
-          {/* 1. SELETOR DE TIPO (DESPESA vs ESTORNO vs RECEITA) & CAMPO HERO DE VALOR */}
+          {/* 1. SELETOR DE TIPO (DESPESA vs RECEITA) & CAMPO HERO DE VALOR */}
           <div className="space-y-3 p-3.5 sm:p-4 rounded-2xl bg-slate-950/60 border border-white/[0.07]">
             {/* Segmented Type Switcher */}
             <div className="flex p-1 bg-slate-900/90 border border-slate-800 rounded-xl gap-1">
@@ -789,15 +743,14 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
                 type="button"
                 onClick={() => {
                   setType('expense')
-                  setIsEstorno(false)
                   if (status === 'estimated') setStatus('pending')
-                  if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita' || category === 'Estorno') {
+                  if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
                     setCategory('Alimentação')
                     setSubcategory('Supermercado')
                   }
                 }}
                 className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
-                  type === 'expense' && !isEstornoMode
+                  type === 'expense'
                     ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
@@ -807,25 +760,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
               <button
                 type="button"
                 onClick={() => {
-                  setType('expense')
-                  setIsEstorno(true)
-                  setCategory('Estorno')
-                  setSubcategory('Crédito na Fatura')
-                  if (status === 'estimated') setStatus('pending')
-                }}
-                className={`flex-1 py-2 px-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
-                  type === 'expense' && isEstornoMode
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <span>🔄 Estorno</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
                   setType('income')
-                  setIsEstorno(false)
                   setCategory('Salário & Remuneração')
                   setSubcategory('Salário Principal')
                   setSplitType('mine')
@@ -845,23 +780,23 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
             {/* Hero Value Input (Clean Financial Display) */}
             <div className="pt-1">
               <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
-                {isEstornoMode
-                  ? 'Valor a Estornar (Crédito)'
-                  : isInstallment && installmentMode === 'total'
-                    ? 'Valor Total da Compra'
+                {isInstallment && installmentMode === 'total'
+                  ? 'Valor Total da Compra'
+                  : isEditingRefund
+                    ? 'Valor Estornado'
                     : 'Valor do Lançamento'}
               </label>
               <div
                 className={`flex items-center px-4 py-2.5 rounded-xl border transition-all ${
                   isIncomeType
                     ? 'bg-emerald-950/20 border-emerald-500/30 focus-within:border-emerald-400 focus-within:ring-2 focus-within:ring-emerald-500/20'
-                    : isEstornoMode
+                    : isEditingRefund
                       ? 'bg-cyan-950/20 border-cyan-500/30 focus-within:border-cyan-400'
                       : 'bg-slate-900/80 border-slate-700/80 focus-within:border-emerald-500/50 focus-within:ring-2 focus-within:ring-emerald-500/20'
                 }`}
               >
                 <span className="text-xl sm:text-2xl font-bold font-mono text-slate-400 mr-2 select-none">
-                  {isIncomeType ? '+ R$' : isEstornoMode ? '🔄 -R$' : 'R$'}
+                  {isIncomeType ? '+ R$' : isEditingRefund ? '🔄 -R$' : 'R$'}
                 </span>
                 <input
                   type="text"
@@ -875,19 +810,6 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
                 />
               </div>
             </div>
-
-            {/* Estorno Information Pill */}
-            {isEstornoMode && (
-              <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-500/30 flex items-start gap-2.5 text-xs text-cyan-300 animate-in fade-in">
-                <RotateCcw className="size-4 shrink-0 text-cyan-400 mt-0.5" />
-                <div className="space-y-0.5">
-                  <span className="font-bold text-white block">Estorno / Crédito Rateado</span>
-                  <p className="text-[11px] text-cyan-200/80 leading-relaxed">
-                    Este lançamento abaterá o valor no fechamento do cartão de crédito ou conta e aliviará o Saldo Livre. Ao definir a divisão abaixo, a cota de cada participante também será abatida proporcionalmente.
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* 2. DADOS PRINCIPAIS (DESCRIÇÃO, DATA, CATEGORIA E STATUS) */}
@@ -1003,9 +925,6 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
                     onValueChange={(v) => {
                       const newCat = v as Category
                       setCategory(newCat)
-                      if (newCat === 'Estorno') {
-                        setIsEstorno(true)
-                      }
                       const subs = getCategoryDetail(newCat)?.subcategories || []
                       setSubcategory(subs[0] || '')
                     }}
@@ -1117,24 +1036,30 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
                 {paymentMethod === 'credit_card' && (
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-300">Cartão Utilizado</label>
-                    {cards.length === 0 ? (
-                      <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-center gap-2">
-                        <span>Nenhum cartão cadastrado. Cadastre um cartão no menu para vincular faturas e vencimentos.</span>
-                      </div>
-                    ) : (
-                      <Select value={cardId} onValueChange={setCardId}>
-                        <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
-                          <SelectValue placeholder="Selecione o cartão" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {cards.map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.cardName} (Titular: {c.ownerName})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+                    {(() => {
+                      const launchableCards = cards.filter((c) => c.ownerUid === me?.uid)
+                      if (launchableCards.length === 0) {
+                        return (
+                          <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-center gap-2">
+                            <span>Nenhum cartão próprio disponível para lançar despesas. Cartões compartilhados com você são somente para visualização da fatura.</span>
+                          </div>
+                        )
+                      }
+                      return (
+                        <Select value={cardId} onValueChange={setCardId}>
+                          <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
+                            <SelectValue placeholder="Selecione o cartão" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {launchableCards.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.cardName} {c.sharedWithUsers?.length > 0 ? `(Dividido com ${c.sharedWithUsers.map((u) => u.name).join(', ')})` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )
+                    })()}
                   </div>
                 )}
               </div>
@@ -1554,7 +1479,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
               othersVal = rawVal
             }
 
-            if (isEstornoMode) {
+            if (isEditingRefund) {
               return (
                 <div className="p-3 rounded-2xl bg-cyan-950/30 border border-cyan-500/30 space-y-2 text-xs animate-in fade-in">
                   <span className="font-semibold text-cyan-300 block">
@@ -1642,7 +1567,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
                 size="sm"
                 disabled={isSubmitting || !canEdit}
                 className={`flex-1 sm:flex-initial h-9 text-xs text-white font-bold rounded-xl shadow-md disabled:opacity-50 ${
-                  isEstornoMode
+                  isEditingRefund
                     ? 'bg-cyan-600 hover:bg-cyan-500 shadow-cyan-950/40'
                     : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-950/40'
                 }`}
@@ -1655,13 +1580,9 @@ export function TransactionModal({ open, onOpenChange, editingTx, refundFromTx }
                 ) : editingTx ? (
                   editingTx.installmentGroupId && editScope === 'all'
                     ? `Salvar em Todas as ${editingTx.installmentsTotal || ''} Parcelas`
-                    : isEstornoMode
-                      ? 'Salvar Estorno Rateado'
+                    : isEditingRefund
+                      ? 'Salvar Alterações do Estorno'
                       : 'Atualizar Lançamento'
-                ) : isEstornoMode ? (
-                  isInstallment
-                    ? `Criar Estorno em ${installmentsCount} Parcelas`
-                    : 'Salvar Estorno Rateado'
                 ) : isInstallment ? (
                   `Criar ${installmentsCount} Parcelas`
                 ) : (

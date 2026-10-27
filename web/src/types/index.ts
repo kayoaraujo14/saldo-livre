@@ -671,6 +671,7 @@ export interface UserProfile {
   displayName: string
   photoURL: string | null
   monthlyIncome: number
+  resolvedRecurring?: Record<string, string[]>
 }
 
 export interface SharedUser {
@@ -736,6 +737,23 @@ export interface RecurringBill {
   launchTrigger?: LaunchTrigger
 }
 
+export interface PendingRecurringCandidate {
+  id: string // bill.id ou `salary_${uid}`
+  bill?: RecurringBill
+  isSalary: boolean
+  description: string
+  category: Category
+  subcategory?: string | null
+  amount: number
+  type: TransactionType
+  paymentMethod: PaymentMethod
+  cardId?: string | null
+  dueDay: number
+  dueDate: string // YYYY-MM-DD
+  launchDate: string // YYYY-MM-DD
+  matchedManualTx?: Transaction | null
+}
+
 export interface Allocation {
   type: 'PLATFORM_USER' | 'EXTERNAL'
   uid?: string
@@ -785,6 +803,8 @@ export interface Transaction {
   externalName?: string | null
   thirdPartyName?: string | null
   targetFriendName?: string | null
+  /** ID da compra original no cartão que foi estornada */
+  refundedTransactionId?: string | null
 }
 
 export interface FriendSplitInput {

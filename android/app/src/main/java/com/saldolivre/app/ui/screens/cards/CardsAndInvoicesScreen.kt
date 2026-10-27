@@ -2,6 +2,7 @@ package com.saldolivre.app.ui.screens.cards
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +40,7 @@ import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.ui.components.InvoiceDateGroup
 import com.saldolivre.app.ui.components.InvoiceDateGroupHeader
+import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
@@ -120,7 +122,7 @@ fun CardsAndInvoicesScreen(
             val part = selectedInvoice?.splitBreakdown?.find { it.name == participantName }
             if (part != null) {
                 items = items.filter { tx ->
-                    InvoiceEngine.participantAmountIn(tx, part, uiState.currentUser.uid) > 0.0
+                    InvoiceEngine.participantAmountIn(tx, part, uiState.currentUser.uid, selectedInvoice?.card) > 0.0
                 }
             }
         }
@@ -154,7 +156,7 @@ fun CardsAndInvoicesScreen(
         val part = if (participantName != null) selectedInvoice?.splitBreakdown?.find { it.name == participantName } else null
         if (part != null && selectedInvoice != null) {
             val expenses = selectedInvoice.items.filter { it.type == TransactionType.EXPENSE }
-            InvoiceEngine.calculateCategoryBreakdownForParticipant(expenses, part, uiState.currentUser.uid)
+            InvoiceEngine.calculateCategoryBreakdownForParticipant(expenses, part, uiState.currentUser.uid, selectedInvoice.card)
         } else {
             selectedInvoice?.byCategory.orEmpty()
         }
@@ -325,6 +327,7 @@ fun CardsAndInvoicesScreen(
         CardFormDialog(
             card = uiState.editingCard!!,
             partner = uiState.partner,
+            friends = uiState.friends,
             onDismiss = { viewModel.closeForm() },
             onSave = { updatedCard -> viewModel.saveCard(updatedCard) }
         )
@@ -377,6 +380,7 @@ private fun InvoicesTabContent(
     viewModel: CardsAndInvoicesViewModel,
     onEditTransaction: (String) -> Unit
 ) {
+    var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
     val participant = if (uiState.selectedParticipantName != null) {
         selectedInvoice?.splitBreakdown?.find { it.name == uiState.selectedParticipantName }
     } else null
@@ -390,7 +394,7 @@ private fun InvoicesTabContent(
         map.map { (dateKey, items) ->
             val dayTotal = items.sumOf { tx ->
                 val amt = if (participant != null) {
-                    InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid)
+                    InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid, selectedInvoice?.card)
                 } else tx.effectiveAmount
                 if (tx.type == TransactionType.INCOME) -amt else amt
             }
@@ -485,6 +489,7 @@ private fun InvoicesTabContent(
             item(key = "inv_summary_${selectedInvoice.card.id}") {
                 InvoiceSummaryCard(
                     invoice = selectedInvoice,
+                    isOwner = selectedInvoice.card.ownerUid == uiState.currentUser.uid,
                     showConfirm = uiState.showPayConfirm,
                     isPaying = uiState.isPaying,
                     onPay = viewModel::requestPay,
@@ -574,12 +579,15 @@ private fun InvoicesTabContent(
                     }
                     items(group.items, key = { "inv_tx_${it.id}" }) { tx ->
                         val share = if (participant != null) {
-                            InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid)
+                            InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid, selectedInvoice.card)
                         } else null
+                        val isRefunded = tx.refundedTransactionId != null ||
+                            selectedInvoice.items.any { it.refundedTransactionId == tx.id }
                         InvoiceItemRow(
                             tx = tx,
                             participantShare = share,
-                            onClick = { onEditTransaction(tx.id) }
+                            isRefunded = isRefunded,
+                            onClick = { selectedTxForDetails = tx }
                         )
                     }
                 }
@@ -587,6 +595,29 @@ private fun InvoicesTabContent(
         }
 
         item(key = "inv_bottom_spacer") { Spacer(Modifier.height(24.dp)) }
+    }
+
+    selectedTxForDetails?.let { tx ->
+        TransactionDetailDialog(
+            transaction = tx,
+            currentUserId = uiState.currentUser.uid,
+            currentUser = uiState.currentUser,
+            cardName = selectedInvoice?.card?.cardName,
+            allTransactions = selectedInvoice?.items ?: emptyList(),
+            onDismissRequest = { selectedTxForDetails = null },
+            onToggleStatus = {},
+            onSetStatus = { _, _ -> },
+            onNavigateToEditTransaction = { editTxId ->
+                selectedTxForDetails = null
+                onEditTransaction(editTxId)
+            },
+            onConfirmRefund = { origTx, amount ->
+                viewModel.createRefund(origTx, amount)
+            },
+            onDeleteRequest = {
+                selectedTxForDetails = null
+            }
+        )
     }
 }
 
@@ -771,6 +802,7 @@ private fun CardChip(invoice: CardInvoice, selected: Boolean, onClick: () -> Uni
 @Composable
 private fun InvoiceSummaryCard(
     invoice: CardInvoice,
+    isOwner: Boolean = true,
     showConfirm: Boolean,
     isPaying: Boolean,
     onPay: () -> Unit,
@@ -843,16 +875,32 @@ private fun InvoiceSummaryCard(
             // Ações & Chip
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(
-                        onClick = onEditCard,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Editar Cartão",
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(16.dp)
-                        )
+                    if (isOwner) {
+                        IconButton(
+                            onClick = onEditCard,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Editar Cartão",
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF312E81).copy(alpha = 0.7f),
+                            border = BorderStroke(1.dp, Color(0xFF818CF8).copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = "👁️ Somente Leitura",
+                                fontSize = 9.sp,
+                                color = Color(0xFFA5B4FC),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                     Box(
                         modifier = Modifier
@@ -973,6 +1021,29 @@ private fun InvoiceSummaryCard(
                             }
                             Text(if (isPaying) "Pagando..." else "Confirmar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
+                    }
+                }
+            } else if (!isOwner) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF312E81).copy(alpha = 0.6f))
+                        .border(1.dp, Color(0xFF818CF8).copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                        .padding(12.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Cartão de ${invoice.card.ownerName.ifBlank { "Titular" }}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Sua parte nesta fatura: ${FinanceEngine.formatCurrency(invoice.myShare)} (Apenas o titular pode quitar no banco)",
+                            fontSize = 11.sp,
+                            color = Color(0xFFA5B4FC)
+                        )
                     }
                 }
             } else {
@@ -1435,6 +1506,7 @@ private fun ItemsHeader(
 private fun InvoiceItemRow(
     tx: Transaction,
     participantShare: Double? = null,
+    isRefunded: Boolean = false,
     onClick: () -> Unit
 ) {
     val isCredit = tx.type == TransactionType.INCOME
@@ -1514,6 +1586,23 @@ private fun InvoiceItemRow(
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                if (isRefunded) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Cyan400.copy(alpha = 0.14f))
+                            .border(1.dp, Cyan400.copy(alpha = 0.3f), CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = "🔄 Estornado",
+                            fontSize = 9.sp,
+                            color = Cyan400,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }

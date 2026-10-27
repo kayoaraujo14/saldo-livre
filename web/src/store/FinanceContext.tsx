@@ -20,6 +20,7 @@ import type {
   Transaction,
   TransactionStatus,
   UserProfile,
+  PendingRecurringCandidate,
 } from '@/types'
 import {
   amountPatch,
@@ -30,7 +31,7 @@ import {
   computeSummary,
   friendPctOf,
   friendShareOf,
-  autoLaunchDueBills,
+  getPendingRecurringLaunches,
   generateMonthBills,
   nextStatus,
   resolvePartner,
@@ -185,6 +186,11 @@ export interface AutoLaunchedNotice {
 interface FinanceContextValue {
   autoLaunchedNotice: AutoLaunchedNotice | null
   dismissAutoLaunchNotice: () => void
+  pendingRecurringLaunches: PendingRecurringCandidate[]
+  confirmLaunchRecurring: (candidate: PendingRecurringCandidate) => Promise<void>
+  confirmLaunchAllRecurring: (candidates?: PendingRecurringCandidate[]) => Promise<void>
+  linkManualTransactionToRecurring: (candidateId: string, manualTxId: string) => Promise<void>
+  skipRecurringForMonth: (candidateId: string) => void
   mode: Mode
   firebaseAvailable: boolean
   authLoading: boolean
@@ -320,6 +326,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const [fbFriendships, setFbFriendships] = useState<Friendship[]>([])
   const [fbRules, setFbRules] = useState<UserRule[]>([])
   const [fbMonthClosures, setFbMonthClosures] = useState<MonthClosure[]>([])
+  const [isTxLoaded, setIsTxLoaded] = useState(mode === 'demo')
 
   useEffect(() => {
     if (mode !== 'firebase') {
@@ -371,6 +378,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       fb.subscribeTransactions(uid, (txs) => {
         fbTxRef.current = txs
         setFbTx(txs)
+        setIsTxLoaded(true)
       }),
       fb.subscribeCards(uid, setFbCards),
       fb.subscribeRecurring(uid, setFbRecurring),
@@ -461,6 +469,44 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     return resolvePartner(currentUid, cards, users)
   }, [currentUid, cards, users])
 
+  const [resolvedRecurring, setResolvedRecurring] = useState<Record<string, string[]>>({})
+
+  // Carrega e sincroniza o registro de resoluções de recorrentes
+  useEffect(() => {
+    if (!currentUid) return
+    let localMap: Record<string, string[]> = {}
+    try {
+      const raw = localStorage.getItem(`saldo-livre:resolved-recurring:${currentUid}`)
+      if (raw) localMap = JSON.parse(raw)
+    } catch {}
+
+    const profileMap = fbProfile?.resolvedRecurring || {}
+    const merged: Record<string, string[]> = { ...localMap }
+    for (const [m, ids] of Object.entries(profileMap)) {
+      merged[m] = Array.from(new Set([...(merged[m] || []), ...ids]))
+    }
+    setResolvedRecurring(merged)
+  }, [currentUid, fbProfile?.resolvedRecurring])
+
+  const markRecurringResolved = useCallback(
+    (billId: string, monthKey: string) => {
+      if (!currentUid) return
+      setResolvedRecurring((prev) => {
+        const existing = prev[monthKey] || []
+        if (existing.includes(billId)) return prev
+        const updated = { ...prev, [monthKey]: [...existing, billId] }
+        try {
+          localStorage.setItem(`saldo-livre:resolved-recurring:${currentUid}`, JSON.stringify(updated))
+        } catch {}
+        if (mode === 'firebase') {
+          fb.fsUpdateUserProfile(currentUid, { resolvedRecurring: updated }).catch(console.warn)
+        }
+        return updated
+      })
+    },
+    [currentUid, mode],
+  )
+
   // ---------------- Amizades & Pendências (Feature 2) ----------------
   const friends: FriendItem[] = useMemo(() => {
     if (!currentUid) return []
@@ -483,16 +529,32 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   const pendingChargeRequests = useMemo(() => {
     if (!currentUid) return []
-    return transactions.filter(
-      (t) => t.assignedFriendUid === currentUid && t.acceptanceStatus === 'pending_approval',
-    )
+    return transactions.filter((t) => {
+      if (t.acceptanceStatus !== 'pending_approval') return false
+      if (t.assignedFriendUid === currentUid) return true
+      if (
+        t.createdByUid !== currentUid &&
+        t.allocations?.some((a) => a.uid === currentUid && a.type === 'PLATFORM_USER')
+      ) {
+        return true
+      }
+      return false
+    })
   }, [transactions, currentUid])
 
   const pendingChargeGroups = useMemo((): PendingChargeGroup[] => {
     if (!currentUid) return []
-    const rawPending = transactions.filter(
-      (t) => t.assignedFriendUid === currentUid && t.acceptanceStatus === 'pending_approval',
-    )
+    const rawPending = transactions.filter((t) => {
+      if (t.acceptanceStatus !== 'pending_approval') return false
+      if (t.assignedFriendUid === currentUid) return true
+      if (
+        t.createdByUid !== currentUid &&
+        t.allocations?.some((a) => a.uid === currentUid && a.type === 'PLATFORM_USER')
+      ) {
+        return true
+      }
+      return false
+    })
 
     const groups: PendingChargeGroup[] = []
     const seenGroups = new Set<string>()
@@ -512,7 +574,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         const primaryTx = items[0]
         if (!primaryTx) continue
         const baseDesc = stripInstallmentSuffix(primaryTx.description)
-        const sender = users.find((u) => u.uid === primaryTx.createdByUid)
+        const sender = users.find((u) => u.uid === primaryTx.createdByUid || u.uid === primaryTx.paidByUid)
+        const senderName =
+          sender?.displayName ||
+          friends.find((f) => f.uid === primaryTx.createdByUid || f.uid === primaryTx.paidByUid)?.name ||
+          'Amigo'
         const friendPct = friendPctOf(primaryTx)
 
         const totalAmount = round2(items.reduce((s, t) => s + (Number(t.totalAmount) || 0), 0))
@@ -530,7 +596,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           baseDescription: baseDesc,
           cardId: primaryTx.cardId,
           senderUid: primaryTx.createdByUid,
-          senderName: sender?.displayName || 'Amigo',
+          senderName,
           totalAmount,
           friendShareAmount,
           friendSharePct: friendPct,
@@ -542,7 +608,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           primaryTx,
         })
       } else {
-        const sender = users.find((u) => u.uid === tx.createdByUid)
+        const sender = users.find((u) => u.uid === tx.createdByUid || u.uid === tx.paidByUid)
+        const senderName =
+          sender?.displayName ||
+          friends.find((f) => f.uid === tx.createdByUid || f.uid === tx.paidByUid)?.name ||
+          'Amigo'
         const friendPct = friendPctOf(tx)
         const friendShare = friendShareOf(tx)
 
@@ -554,7 +624,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           baseDescription: tx.description,
           cardId: tx.cardId,
           senderUid: tx.createdByUid,
-          senderName: sender?.displayName || 'Amigo',
+          senderName,
           totalAmount: tx.totalAmount,
           friendShareAmount: friendShare,
           friendSharePct: friendPct,
@@ -569,7 +639,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     }
 
     return groups
-  }, [transactions, currentUid, users])
+  }, [transactions, currentUid, users, friends])
 
   const sendFriendRequest = useCallback(
     async (email: string) => {
@@ -682,7 +752,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
       await fb.fsRespondChargeRequest(ids, accept)
     },
-    [mode, commitDemo, currentUid],
+    [mode, commitDemo, currentUid, partnerParty, friends],
   )
 
   // ---------------- Lançamentos do mês e resumo ----------------
@@ -693,8 +763,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   const summary = useMemo(() => {
     if (!currentUid) return null
-    return computeSummary(transactions, currentUid, month, monthClosures)
-  }, [transactions, currentUid, month, monthClosures])
+    return computeSummary(transactions, currentUid, month, monthClosures, cards)
+  }, [transactions, currentUid, month, monthClosures, cards])
 
   const saveMonthClosure = useCallback(
     async (closure: MonthClosure) => {
@@ -749,7 +819,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         await fb.fsSaveMonthClosure(currentUid, closure)
       }
     },
-    [mode, commitDemo, currentUid],
+    [mode, commitDemo, currentUid, partnerParty, friends],
   )
 
   const deleteMonthClosure = useCallback(
@@ -768,7 +838,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         await fb.fsDeleteMonthClosure(currentUid, closedMonth)
       }
     },
-    [mode, commitDemo, currentUid],
+    [mode, commitDemo, currentUid, partnerParty, friends],
   )
 
   // ---------------- Ações de sessão ----------------
@@ -903,13 +973,27 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
 
       // Regra 2: A pessoa que lançou ao editar submete de novo ao aceite de quem recebe o rateio
-      const targetFriendUid = patch.assignedFriendUid !== undefined ? patch.assignedFriendUid : currentTx?.assignedFriendUid
+      const targetFriendUid =
+        patch.assignedFriendUid !== undefined
+          ? patch.assignedFriendUid
+          : (currentTx?.assignedFriendUid ||
+             currentTx?.allocations?.find(
+               (a) => a.type === 'PLATFORM_USER' && a.uid && a.uid !== currentUid && (!partnerParty || a.uid !== partnerParty.uid)
+             )?.uid)
+
       if (targetFriendUid && (!currentTx || currentTx.createdByUid === currentUid || currentTx.paidByUid === currentUid)) {
         const keys = Object.keys(patch)
         const isOnlyResponse = keys.length > 0 && keys.every((k) => k === 'acceptanceStatus' || k === 'respondedAt')
-        if (!isOnlyResponse && patch.acceptanceStatus === undefined) {
+        if (!isOnlyResponse) {
           patch.acceptanceStatus = 'pending_approval'
           patch.respondedAt = null
+          if (patch.assignedFriendUid === undefined && targetFriendUid) {
+            patch.assignedFriendUid = targetFriendUid
+            patch.assignedFriendName =
+              currentTx?.assignedFriendName ||
+              friends.find((f) => f.uid === targetFriendUid)?.name ||
+              'Amigo'
+          }
         }
       }
 
@@ -922,7 +1006,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
       await fb.fsUpdateTransaction(id, patch)
     },
-    [mode, commitDemo, currentUid],
+    [mode, commitDemo, currentUid, partnerParty, friends],
   )
 
   const deleteTransaction = useCallback(
@@ -939,7 +1023,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
       await fb.fsDeleteTransaction(id)
     },
-    [mode, commitDemo, currentUid],
+    [mode, commitDemo, currentUid, partnerParty, friends],
   )
 
   const deleteInstallmentGroup = useCallback(
@@ -966,7 +1050,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       await fb.fsDeleteTransactionsBatch(targetIds)
       return targetIds.length
     },
-    [mode, commitDemo, currentUid],
+    [mode, commitDemo, currentUid, partnerParty, friends],
   )
 
   const updateInstallmentGroup = useCallback(
@@ -984,26 +1068,31 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
 
       // Detecta se há amigo no parcelamento (via input.friend, customAllocations ou registro original)
-      let assignedFriend: Party | null = null
-      if (input.friend) {
-        assignedFriend = { uid: input.friend.uid, name: input.friend.name }
-      } else if (input.customAllocations) {
-        const fa = input.customAllocations.find(
-          (a) => a.type === 'PLATFORM_USER' && a.uid && a.uid !== me.uid && (!partnerParty || a.uid !== partnerParty.uid),
-        )
-        if (fa && fa.uid) assignedFriend = { uid: fa.uid, name: fa.name }
-      } else if (
-        groupTxs[0]?.assignedFriendUid &&
-        groupTxs[0]?.assignedFriendName &&
-        input.splitType !== 'mine' &&
-        input.splitType !== 'split_50' &&
-        input.splitType !== 'partner' &&
-        input.splitType !== 'external'
-      ) {
-        assignedFriend = { uid: groupTxs[0].assignedFriendUid, name: groupTxs[0].assignedFriendName }
-      }
+      const isExplicitNonFriend =
+        input.splitType === 'mine' ||
+        input.splitType === 'split_50' ||
+        input.splitType === 'partner' ||
+        input.splitType === 'external'
 
-      const isFriend = Boolean(assignedFriend)
+      const targetFriendUid = isExplicitNonFriend
+        ? null
+        : (input.friend?.uid ||
+           input.customAllocations?.find(
+             (a) => a.type === 'PLATFORM_USER' && a.uid && a.uid !== me.uid && (!partnerParty || a.uid !== partnerParty.uid)
+           )?.uid ||
+           groupTxs[0]?.assignedFriendUid ||
+           null)
+
+      const targetFriendName = targetFriendUid
+        ? (input.friend?.name ||
+           input.customAllocations?.find((a) => a.uid === targetFriendUid)?.name ||
+           groupTxs[0]?.assignedFriendName ||
+           friends.find((f) => f.uid === targetFriendUid)?.name ||
+           'Amigo')
+        : null
+
+      const isFriend = Boolean(targetFriendUid)
+      const assignedFriend: Party | null = isFriend ? { uid: targetFriendUid!, name: targetFriendName! } : null
 
       const card = cards.find((c) => c.id === input.cardId)
       const payerUid = input.paymentMethod === 'credit_card' && card ? card.ownerUid : me.uid
@@ -1042,9 +1131,34 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         }
 
         const friendSharePct = isFriend ? clampPct(input.friend?.pct ?? t.friendSharePct ?? 100) : null
+        const effectiveSplitType = input.splitType ?? (isFriend ? 'custom' : (t.splitType ?? 'mine'))
+
+        let customAllocs = input.customAllocations
+        if (isFriend && (!customAllocs || customAllocs.length === 0)) {
+          const fPct = friendSharePct ?? 100
+          const fAmt = round2((curAmount * fPct) / 100)
+          const myAmt = round2(curAmount - fAmt)
+          customAllocs = []
+          if (Math.abs(myAmt) > 0.0001) {
+            customAllocs.push({
+              type: 'PLATFORM_USER',
+              uid: me.uid,
+              name: me.name || 'Você',
+              amount: myAmt,
+              reimbursed: true,
+            })
+          }
+          customAllocs.push({
+            type: 'PLATFORM_USER',
+            uid: targetFriendUid!,
+            name: targetFriendName!,
+            amount: fAmt,
+            reimbursed: false,
+          })
+        }
 
         const split = buildSplit({
-          splitType: input.splitType ?? 'mine',
+          splitType: effectiveSplitType,
           total: curAmount,
           me,
           partner: partnerParty,
@@ -1053,7 +1167,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           externalName: input.externalName,
           assignedFriend,
           friendSharePct,
-          customAllocations: input.customAllocations,
+          customAllocations: customAllocs,
           acceptanceStatus: isFriend ? 'pending_approval' : null,
           previous: t.allocations,
         })
@@ -1098,7 +1212,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       await fb.fsUpdateTransactionsBatch(updates)
       return updates.length
     },
-    [mode, commitDemo, me, partnerParty, cards, currentUid],
+    [mode, commitDemo, me, partnerParty, cards, currentUid, friends],
   )
 
   // Auto-repara qualquer grupo de parcelas cujas datas foram acidentalmente colapsadas no mesmo mês
@@ -1141,48 +1255,115 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     }
   }, [transactions, updateTransaction])
 
-  // Auto-lançamento inteligente de assinaturas e contas fixas por proximidade de vencimento
-  const autoLaunchRanRef = useRef<string>('')
-  useEffect(() => {
-    if (!me) return
+  // Candidatos a lançamento recorrente prontos e ainda não lançados
+  const pendingRecurringLaunches: PendingRecurringCandidate[] = useMemo(() => {
+    if (!me || !isTxLoaded) return []
     const now = new Date()
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    const runKey = `${me.uid}_${month}_${todayStr}_${recurring.length}_${transactions.length}`
-    if (autoLaunchRanRef.current === runKey) return
-    autoLaunchRanRef.current = runKey
-
-    const { created } = autoLaunchDueBills({
+    const monthResolved = resolvedRecurring[month] || []
+    return getPendingRecurringLaunches({
       bills: recurring,
       all: transactions,
       monthKey: month,
       todayStr,
       me,
-      partner: partnerParty,
       profile,
+      resolvedIds: monthResolved,
     })
+  }, [me, isTxLoaded, recurring, transactions, month, profile, resolvedRecurring])
 
-    if (created.length > 0) {
-      addMany(created).then(() => {
-        const notice: AutoLaunchedNotice = {
-          date: todayStr,
-          createdCount: created.length,
-          bills: created.map((c) => ({
-            id: c.recurringBillId || '',
-            description: c.description,
-            amount: c.totalAmount,
-            type: c.type,
-            dueDay: parseInt(c.dueDate.slice(-2), 10) || 10,
-          })),
-        }
-        setAutoLaunchedNotice(notice)
-        try {
-          sessionStorage.setItem('auto_launch_notice', JSON.stringify(notice))
-        } catch {
-          // ignore
-        }
+  const confirmLaunchRecurring = useCallback(
+    async (candidate: PendingRecurringCandidate) => {
+      if (!me) return
+      const split = buildSplit({
+        splitType: candidate.bill?.splitType ?? 'mine',
+        total: candidate.amount,
+        me,
+        partner: candidate.isSalary ? null : partnerParty,
+        payerUid: me.uid,
       })
-    }
-  }, [me, month, recurring, transactions, partnerParty, profile, addMany])
+      const newTx: NewTransaction = {
+        createdByUid: me.uid,
+        paidByUid: me.uid,
+        cardId: candidate.cardId || null,
+        description: candidate.description,
+        category: candidate.category,
+        subcategory: candidate.subcategory || null,
+        type: candidate.type,
+        paymentMethod: candidate.paymentMethod,
+        status: 'estimated',
+        estimatedAmount: candidate.amount,
+        actualAmount: null,
+        totalAmount: candidate.amount,
+        dueDate: candidate.dueDate,
+        competenceMonth: month,
+        recurringBillId: candidate.id,
+        allocations: split.allocations,
+        userImpact: split.userImpact,
+        visibleToUids: split.visibleToUids,
+        createdAt: Date.now(),
+      }
+      await addTransaction(newTx)
+      markRecurringResolved(candidate.id, month)
+    },
+    [me, partnerParty, month, addTransaction, markRecurringResolved],
+  )
+
+  const confirmLaunchAllRecurring = useCallback(
+    async (candidatesToLaunch?: PendingRecurringCandidate[]) => {
+      const list = candidatesToLaunch || pendingRecurringLaunches
+      if (!me || list.length === 0) return
+      const txs: NewTransaction[] = []
+      for (const candidate of list) {
+        const split = buildSplit({
+          splitType: candidate.bill?.splitType ?? 'mine',
+          total: candidate.amount,
+          me,
+          partner: candidate.isSalary ? null : partnerParty,
+          payerUid: me.uid,
+        })
+        txs.push({
+          createdByUid: me.uid,
+          paidByUid: me.uid,
+          cardId: candidate.cardId || null,
+          description: candidate.description,
+          category: candidate.category,
+          subcategory: candidate.subcategory || null,
+          type: candidate.type,
+          paymentMethod: candidate.paymentMethod,
+          status: 'estimated',
+          estimatedAmount: candidate.amount,
+          actualAmount: null,
+          totalAmount: candidate.amount,
+          dueDate: candidate.dueDate,
+          competenceMonth: month,
+          recurringBillId: candidate.id,
+          allocations: split.allocations,
+          userImpact: split.userImpact,
+          visibleToUids: split.visibleToUids,
+          createdAt: Date.now(),
+        })
+      }
+      await addMany(txs)
+      list.forEach((c) => markRecurringResolved(c.id, month))
+    },
+    [me, partnerParty, month, addMany, markRecurringResolved, pendingRecurringLaunches],
+  )
+
+  const linkManualTransactionToRecurring = useCallback(
+    async (candidateId: string, manualTxId: string) => {
+      await updateTransaction(manualTxId, { recurringBillId: candidateId })
+      markRecurringResolved(candidateId, month)
+    },
+    [updateTransaction, markRecurringResolved, month],
+  )
+
+  const skipRecurringForMonth = useCallback(
+    (candidateId: string) => {
+      markRecurringResolved(candidateId, month)
+    },
+    [markRecurringResolved, month],
+  )
 
   const cycleStatus = useCallback(
     async (tx: Transaction) => {
@@ -1388,7 +1569,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           totalAmount: curAmount,
           dueDate: curDueDate,
           competenceMonth: curCompetenceMonth,
-          visibleToUids: isReserve ? [me.uid] : split.visibleToUids,
+          visibleToUids: isReserve
+            ? [me.uid]
+            : Array.from(new Set([...split.visibleToUids, ...((input.paymentMethod === 'credit_card' && card?.sharedWithUids) || [])])),
           userImpact: split.userImpact,
           allocations: isReserve ? split.allocations.map((a) => ({ ...a, reimbursed: true })) : split.allocations,
           recurringBillId: null,
@@ -1673,6 +1856,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     generateBills,
     autoLaunchedNotice,
     dismissAutoLaunchNotice,
+    pendingRecurringLaunches,
+    confirmLaunchRecurring,
+    confirmLaunchAllRecurring,
+    linkManualTransactionToRecurring,
+    skipRecurringForMonth,
     saveCard,
     deleteCard,
     saveRecurring,

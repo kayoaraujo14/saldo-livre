@@ -286,13 +286,79 @@ export function normalizeRecurringBill(id: string, raw: any): RecurringBill {
 
 export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => void) {
   try {
-    // array-contains sem outros filtros → não exige índice composto.
-    const q = query(collection(ensure().db, COLLECTIONS.transactions), where('visibleToUids', 'array-contains', uid))
-    return onSnapshot(
+    const { db } = ensure()
+    const myTxsMap = new Map<string, Transaction>()
+    const sharedCardTxsMap = new Map<string, Map<string, Transaction>>()
+    const sharedCardUnsubs = new Map<string, () => void>()
+
+    const emit = () => {
+      const merged = new Map<string, Transaction>()
+      for (const [id, tx] of myTxsMap) merged.set(id, tx)
+      for (const cardMap of sharedCardTxsMap.values()) {
+        for (const [id, tx] of cardMap) merged.set(id, tx)
+      }
+      cb([...merged.values()])
+    }
+
+    // 1. Transações com visibleToUids do usuário
+    const q = query(collection(db, COLLECTIONS.transactions), where('visibleToUids', 'array-contains', uid))
+    const u1 = onSnapshot(
       q,
-      (snap) => cb(snap.docs.map((d) => normalizeTransaction(d.id, d.data()))),
+      (snap) => {
+        myTxsMap.clear()
+        for (const d of snap.docs) {
+          myTxsMap.set(d.id, normalizeTransaction(d.id, d.data()))
+        }
+        emit()
+      },
       (err) => console.warn('Erro ao sincronizar transações do Firestore:', err)
     )
+
+    // 2. Escuta cartões compartilhados onde o usuário é convidado e sincroniza todas as transações daquele cartão
+    const uCards = onSnapshot(
+      query(collection(db, COLLECTIONS.cards), where('sharedWithUids', 'array-contains', uid)),
+      (snap) => {
+        const currentCardIds = new Set(snap.docs.map((d) => d.id))
+
+        // Remove listeners de cartões que deixaram de ser compartilhados
+        for (const [id, unsub] of sharedCardUnsubs) {
+          if (!currentCardIds.has(id)) {
+            unsub()
+            sharedCardUnsubs.delete(id)
+            sharedCardTxsMap.delete(id)
+          }
+        }
+
+        // Adiciona listeners para novos cartões compartilhados
+        for (const cardId of currentCardIds) {
+          if (!sharedCardUnsubs.has(cardId)) {
+            const cardQuery = query(collection(db, COLLECTIONS.transactions), where('cardId', '==', cardId))
+            const uCard = onSnapshot(
+              cardQuery,
+              (txSnap) => {
+                const cardMap = new Map<string, Transaction>()
+                for (const d of txSnap.docs) {
+                  cardMap.set(d.id, normalizeTransaction(d.id, d.data()))
+                }
+                sharedCardTxsMap.set(cardId, cardMap)
+                emit()
+              },
+              (err) => console.warn(`Erro ao sincronizar transações do cartão compartilhado ${cardId}:`, err)
+            )
+            sharedCardUnsubs.set(cardId, uCard)
+          }
+        }
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar cartões compartilhados para transações:', err)
+    )
+
+    return () => {
+      u1()
+      uCards()
+      for (const unsub of sharedCardUnsubs.values()) unsub()
+      sharedCardUnsubs.clear()
+    }
   } catch (err) {
     console.warn('Falha ao iniciar listener de transações:', err)
     return () => {}
@@ -411,8 +477,42 @@ export async function fsSaveCard(card: Card) {
       : (Array.isArray(data.sharedWithUsers) ? data.sharedWithUsers.map((u: any) => u.uid) : []),
     frequentThirdParties: Array.isArray(data.frequentThirdParties) ? data.frequentThirdParties : [],
   }
-  if (id && !id.startsWith('new_')) return setDoc(doc(db, COLLECTIONS.cards, id), stripUndefined(payload))
-  await addDoc(collection(db, COLLECTIONS.cards), stripUndefined(payload))
+  const targetId = id && !id.startsWith('new_') ? id : null
+  if (targetId) {
+    await setDoc(doc(db, COLLECTIONS.cards, targetId), stripUndefined(payload))
+  } else {
+    await addDoc(collection(db, COLLECTIONS.cards), stripUndefined(payload))
+    return
+  }
+
+  // Sincroniza visibilidade das transações existentes deste cartão para os convidados
+  if (payload.sharedWithUids.length > 0) {
+    try {
+      const q = query(collection(db, COLLECTIONS.transactions), where('cardId', '==', targetId))
+      const snap = await getDocs(q)
+      if (!snap.empty) {
+        const batch = writeBatch(db)
+        let count = 0
+        for (const docSnap of snap.docs) {
+          const curVisible = Array.isArray(docSnap.data().visibleToUids) ? docSnap.data().visibleToUids : []
+          const merged = Array.from(new Set([...curVisible, ...payload.sharedWithUids]))
+          if (merged.length !== curVisible.length) {
+            batch.update(docSnap.ref, { visibleToUids: merged })
+            count++
+            if (count >= 400) {
+              await batch.commit()
+              count = 0
+            }
+          }
+        }
+        if (count > 0) {
+          await batch.commit()
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao sincronizar visibilidade de transações do cartão:', e)
+    }
+  }
 }
 
 export function fsDeleteCard(id: string) {

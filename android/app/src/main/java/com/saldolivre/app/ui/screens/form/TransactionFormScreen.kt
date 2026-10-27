@@ -83,8 +83,7 @@ fun TransactionFormScreen(
                 title = {
                     Text(
                         text = when {
-                            state.isEditing -> if (state.isEstorno) "Editar Estorno Rateado" else "Editar Lançamento"
-                            state.isEstorno -> "Novo Estorno Rateado"
+                            state.isEditing -> if (state.isEstorno) "Editar Estorno" else "Editar Lançamento"
                             state.type == TransactionType.EXPENSE -> "Nova Despesa"
                             else -> "Nova Receita"
                         },
@@ -264,7 +263,7 @@ fun TransactionFormScreen(
                 }
             }
 
-            // Type Toggle: Despesa vs Estorno vs Receita
+            // Type Toggle: Despesa vs Receita
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -276,33 +275,15 @@ fun TransactionFormScreen(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (state.type == TransactionType.EXPENSE && !state.isEstorno) Rose500 else Color.Transparent)
-                        .clickable { viewModel.onTypeChange(TransactionType.EXPENSE, isEstorno = false) }
+                        .background(if (state.type == TransactionType.EXPENSE) Rose500 else Color.Transparent)
+                        .clickable { viewModel.onTypeChange(TransactionType.EXPENSE) }
                         .padding(vertical = 10.dp, horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "💸 Despesa",
                         fontWeight = FontWeight.Bold,
-                        color = if (state.type == TransactionType.EXPENSE && !state.isEstorno) DarkBackground else TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (state.isEstorno) Cyan500 else Color.Transparent)
-                        .clickable { viewModel.onTypeChange(TransactionType.EXPENSE, isEstorno = true) }
-                        .padding(vertical = 10.dp, horizontal = 4.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "🔄 Estorno",
-                        fontWeight = FontWeight.Bold,
-                        color = if (state.isEstorno) DarkBackground else TextSecondary,
+                        color = if (state.type == TransactionType.EXPENSE) DarkBackground else TextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -313,7 +294,7 @@ fun TransactionFormScreen(
                         .weight(1f)
                         .clip(RoundedCornerShape(10.dp))
                         .background(if (state.type == TransactionType.INCOME) Emerald500 else Color.Transparent)
-                        .clickable { viewModel.onTypeChange(TransactionType.INCOME, isEstorno = false) }
+                        .clickable { viewModel.onTypeChange(TransactionType.INCOME) }
                         .padding(vertical = 10.dp, horizontal = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -324,37 +305,6 @@ fun TransactionFormScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                }
-            }
-
-            if (state.isEstorno) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Cyan500.copy(alpha = 0.12f))
-                        .border(1.dp, Cyan500.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                        .padding(12.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            tint = Cyan400,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .padding(top = 2.dp)
-                        )
-                        Text(
-                            text = "Cadastrando um estorno rateado: O valor inserido entrará como crédito na fatura/despesa e o abatimento será rateado proporcionalmente entre os participantes.",
-                            fontSize = 11.sp,
-                            color = Cyan400,
-                            lineHeight = 15.sp
-                        )
-                    }
                 }
             }
 
@@ -994,19 +944,23 @@ fun TransactionFormScreen(
             // Divisão do Lançamento (se despesa)
             if (state.type == TransactionType.EXPENSE) {
                 Text(text = "Divisão do Lançamento", style = Typography.titleMedium, color = TextPrimary)
+                val splitOptions = buildList {
+                    add(SplitType.MINE)
+                    if (state.partner != null) {
+                        add(SplitType.SPLIT_50)
+                    }
+                    add(SplitType.CUSTOM)
+                    add(SplitType.EXTERNAL)
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(
-                        SplitType.MINE,
-                        SplitType.SPLIT_50,
-                        SplitType.CUSTOM,
-                        SplitType.EXTERNAL
-                    ).forEach { split ->
-                        val isSelected = state.splitType == split
+                    splitOptions.forEach { split ->
+                        val isSelected = state.splitType == split || (split == SplitType.CUSTOM && state.splitType == SplitType.FRIEND)
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
@@ -1050,8 +1004,8 @@ fun TransactionFormScreen(
                     )
                 }
 
-                // Painel de Divisão Personalizada Multi-Pessoas (CUSTOM)
-                if (state.splitType == SplitType.CUSTOM) {
+                // Painel de Divisão Personalizada Multi-Pessoas (CUSTOM ou FRIEND)
+                if (state.splitType == SplitType.CUSTOM || state.splitType == SplitType.FRIEND) {
                     CustomSplitPanel(
                         state = state,
                         viewModel = viewModel
@@ -1070,8 +1024,7 @@ fun TransactionFormScreen(
                         SplitType.MINE -> totalAmount
                         SplitType.SPLIT_50 -> totalAmount / 2.0
                         SplitType.EXTERNAL, SplitType.PARTNER -> 0.0
-                        SplitType.CUSTOM -> state.customParticipants.find { it.type == "me" }?.amount ?: 0.0
-                        else -> totalAmount
+                        SplitType.CUSTOM, SplitType.FRIEND -> state.customParticipants.find { it.type == "me" }?.amount ?: 0.0
                     }
                     val othersVal = max(0.0, totalAmount - myVal)
 
@@ -1324,6 +1277,22 @@ private fun CustomSplitPanel(
                 if (state.friends.isNotEmpty()) {
                     val first = state.friends.first()
                     val shortName = first.friendName.split(" ").firstOrNull() ?: "Amigo"
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Purple500.copy(alpha = 0.2f))
+                            .border(1.dp, Purple400.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .clickable { viewModel.onQuickFriendPreset(first.friendUid, 100.0) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "100% $shortName",
+                            fontSize = 11.sp,
+                            color = Purple400,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))

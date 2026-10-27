@@ -2092,7 +2092,7 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
   const all = env.getTransactions()
   const targetMonth = parseMonthKey(args?.mes) || env.monthKey
   const closures = env.getClosures?.() || []
-  const s = computeSummary(all, env.me.uid, targetMonth, closures)
+  const s = computeSummary(all, env.me.uid, targetMonth, closures, env.getCards())
   const { receivables, payables } = listReceivables(all, env.me.uid, targetMonth, env.getCards())
   const monthTxs = all.filter((t) => t.competenceMonth === targetMonth && (t.visibleToUids || []).includes(env.me.uid))
 

@@ -34,11 +34,14 @@ interface FinanceRepository {
     suspend fun updateEstimatedWithActual(id: String, actualAmount: Double)
     suspend fun generateBillsForMonth(monthKey: String): Pair<Int, Int>
     suspend fun autoLaunchDueBillsForMonth(monthKey: String, todayStr: String): com.saldolivre.app.data.engine.FinanceEngine.AutoLaunchBillsResult
+    suspend fun markRecurringResolved(monthKey: String, billId: String)
+    suspend fun getResolvedRecurring(): Map<String, List<String>>
     suspend fun saveRecurringBill(bill: RecurringBill)
     suspend fun deleteRecurringBill(id: String)
     suspend fun updateMonthlyIncome(income: Double)
     suspend fun saveCard(card: Card)
     suspend fun deleteCard(id: String)
+    suspend fun syncCardTransactionsVisibility(card: Card)
 
     fun getFriendships(): Flow<List<Friendship>>
     suspend fun sendFriendRequest(email: String): Pair<Boolean, String>

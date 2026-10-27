@@ -43,8 +43,7 @@ data class TransactionFormState(
 
 class TransactionFormViewModel(
     private val repository: FinanceRepository,
-    private val editingTxId: String? = null,
-    private val refundFromTxId: String? = null
+    private val editingTxId: String? = null
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TransactionFormState())
@@ -67,10 +66,11 @@ class TransactionFormViewModel(
                     )
                 }
                 val partnerUser = FinanceEngine.resolvePartner(user.uid, cards, repository.allUsers)
+                val ownCards = cards.filter { it.ownerUid == user.uid }
                 _state.update { current ->
                     current.copy(
-                        availableCards = cards,
-                        selectedCardId = current.selectedCardId ?: cards.firstOrNull()?.id,
+                        availableCards = ownCards,
+                        selectedCardId = current.selectedCardId?.takeIf { id -> ownCards.any { it.id == id } } ?: ownCards.firstOrNull()?.id,
                         friends = activeFriends,
                         partner = partnerUser
                     )
@@ -105,7 +105,7 @@ class TransactionFormViewModel(
                                 percentage = pct
                             )
                         }
-                    } else if (!tx.assignedFriendUid.isNullOrBlank()) {
+                    } else if (!tx.assignedFriendUid.isNullOrBlank() || tx.splitType == SplitType.FRIEND) {
                         val pct = tx.friendSharePct ?: 50.0
                         val friendAmt = FinanceEngine.round2((totalAbs * pct) / 100.0)
                         val myAmt = FinanceEngine.round2(totalAbs - friendAmt)
@@ -129,12 +129,12 @@ class TransactionFormViewModel(
                         )
                     } else emptyList()
 
-                    val inferredSplit = tx.splitType ?: when {
-                        customRows.isNotEmpty() -> SplitType.CUSTOM
-                        extAlloc != null -> SplitType.EXTERNAL
-                        !tx.assignedFriendUid.isNullOrBlank() -> SplitType.CUSTOM
-                        tx.allocations.size > 1 -> SplitType.SPLIT_50
-                        tx.allocations.firstOrNull()?.uid != null && tx.allocations.first().uid != meUid -> SplitType.PARTNER
+                    val inferredSplit = when {
+                        tx.splitType == SplitType.CUSTOM || customRows.isNotEmpty() -> SplitType.CUSTOM
+                        tx.splitType == SplitType.FRIEND || !tx.assignedFriendUid.isNullOrBlank() -> SplitType.CUSTOM
+                        extAlloc != null || tx.splitType == SplitType.EXTERNAL -> SplitType.EXTERNAL
+                        tx.splitType == SplitType.SPLIT_50 || tx.allocations.size > 1 -> SplitType.SPLIT_50
+                        tx.splitType == SplitType.PARTNER || (tx.allocations.firstOrNull()?.uid != null && tx.allocations.first().uid != meUid) -> SplitType.PARTNER
                         else -> SplitType.MINE
                     }
 
@@ -167,88 +167,6 @@ class TransactionFormViewModel(
                             isInstallment = !tx.installmentGroupId.isNullOrBlank() || (tx.installmentsTotal != null && tx.installmentsTotal > 1),
                             installmentMode = "per_installment",
                             installmentsCount = tx.installmentsTotal ?: 1
-                        )
-                    }
-                }
-            }
-        } else if (!refundFromTxId.isNullOrBlank()) {
-            viewModelScope.launch {
-                val orig = repository.getTransactions().first().find { it.id == refundFromTxId }
-                if (orig != null) {
-                    val meUid = repository.currentUser.value.uid
-                    val baseDesc = "Estorno: " + (if (orig.isInstallment) FinanceEngine.stripInstallmentSuffix(orig.description) else orig.description)
-                    val totalAbs = Math.abs(orig.effectiveAmount)
-                    val extAlloc = orig.allocations.find { it.type == "EXTERNAL" }
-
-                    val customRows = if (orig.splitType == SplitType.CUSTOM || orig.allocations.size > 2) {
-                        orig.allocations.mapIndexed { i, a ->
-                            val isMe = a.uid == meUid
-                            val pct = if (totalAbs > 0) FinanceEngine.round2((Math.abs(a.amount) / totalAbs) * 100.0) else 0.0
-                            CustomParticipantRow(
-                                id = "p_${i}_${a.uid ?: a.name}",
-                                type = if (isMe) "me" else if (a.type == "EXTERNAL") "external" else "friend",
-                                uid = a.uid,
-                                name = a.name,
-                                amount = Math.abs(a.amount),
-                                percentage = pct
-                            )
-                        }
-                    } else if (!orig.assignedFriendUid.isNullOrBlank()) {
-                        val pct = orig.friendSharePct ?: 50.0
-                        val friendAmt = FinanceEngine.round2((totalAbs * pct) / 100.0)
-                        val myAmt = FinanceEngine.round2(totalAbs - friendAmt)
-                        listOf(
-                            CustomParticipantRow(
-                                id = "me",
-                                type = "me",
-                                uid = meUid,
-                                name = repository.currentUser.value.displayName.ifBlank { "Você" },
-                                amount = myAmt,
-                                percentage = 100.0 - pct
-                            ),
-                            CustomParticipantRow(
-                                id = "fr_${orig.assignedFriendUid}",
-                                type = "friend",
-                                uid = orig.assignedFriendUid,
-                                name = orig.assignedFriendName ?: "Amigo",
-                                amount = friendAmt,
-                                percentage = pct
-                            )
-                        )
-                    } else emptyList()
-
-                    val inferredSplit = orig.splitType ?: when {
-                        customRows.isNotEmpty() -> SplitType.CUSTOM
-                        extAlloc != null -> SplitType.EXTERNAL
-                        !orig.assignedFriendUid.isNullOrBlank() -> SplitType.CUSTOM
-                        orig.allocations.size > 1 -> SplitType.SPLIT_50
-                        orig.allocations.firstOrNull()?.uid != null && orig.allocations.first().uid != meUid -> SplitType.PARTNER
-                        else -> SplitType.MINE
-                    }
-
-                    _state.update { current ->
-                        current.copy(
-                            isEditing = false,
-                            editingTx = null,
-                            isEstorno = true,
-                            type = TransactionType.EXPENSE,
-                            description = baseDesc,
-                            amountText = if (totalAbs > 0) totalAbs.toString() else "",
-                            category = "Estorno",
-                            subcategory = "Crédito na Fatura",
-                            paymentMethod = orig.paymentMethod,
-                            selectedCardId = orig.cardId ?: current.selectedCardId,
-                            splitType = inferredSplit,
-                            externalName = orig.externalName ?: extAlloc?.name ?: "",
-                            assignedFriendUid = orig.assignedFriendUid,
-                            assignedFriendName = orig.assignedFriendName,
-                            friendSharePct = orig.friendSharePct,
-                            customParticipants = customRows,
-                            dueDateText = FinanceEngine.formatFullDate(FinanceEngine.todayKey()),
-                            status = TransactionStatus.PENDING,
-                            isInstallment = false,
-                            installmentMode = "total",
-                            installmentsCount = 1
                         )
                     }
                 }
@@ -321,25 +239,23 @@ class TransactionFormViewModel(
         _state.update { it.copy(editScope = scope) }
     }
 
-    fun onTypeChange(type: TransactionType, isEstorno: Boolean = false) {
-        val defaultCat = when {
-            isEstorno -> "Estorno"
-            type == TransactionType.INCOME -> "Salário & Remuneração"
-            else -> "Alimentação"
+    fun onTypeChange(type: TransactionType) {
+        val defaultCat = when (type) {
+            TransactionType.INCOME -> "Salário & Remuneração"
+            TransactionType.EXPENSE -> "Alimentação"
         }
-        val defaultSubcat = when {
-            isEstorno -> "Crédito na Fatura"
-            type == TransactionType.INCOME -> "Salário Principal"
-            else -> "Supermercado"
+        val defaultSubcat = when (type) {
+            TransactionType.INCOME -> "Salário Principal"
+            TransactionType.EXPENSE -> "Supermercado"
         }
         _state.update {
             it.copy(
                 type = type,
-                isEstorno = isEstorno,
+                isEstorno = false,
                 category = defaultCat,
                 subcategory = defaultSubcat,
-                isInstallment = if (type == TransactionType.INCOME || isEstorno) false else it.isInstallment,
-                installmentsCount = if (type == TransactionType.INCOME || isEstorno) 1 else it.installmentsCount
+                isInstallment = if (type == TransactionType.INCOME) false else it.isInstallment,
+                installmentsCount = if (type == TransactionType.INCOME) 1 else it.installmentsCount
             )
         }
     }
@@ -411,43 +327,193 @@ class TransactionFormViewModel(
         _state.update { it.copy(externalName = name) }
     }
 
+    fun onSetParticipantPreset(id: String, presetPct: Double) {
+        val total = _state.value.amountText.toDoubleOrNull() ?: 0.0
+        _state.update { current ->
+            val target = current.customParticipants.find { it.id == id } ?: return@update current
+            val count = current.customParticipants.size
+            val clampedPreset = presetPct.coerceIn(0.0, 100.0)
+
+            if (count == 2) {
+                val other = current.customParticipants.find { it.id != id }
+                val remainingOtherPct = FinanceEngine.round2(100.0 - clampedPreset)
+                val targetAmt = FinanceEngine.round2((total * clampedPreset) / 100.0)
+                val otherAmt = FinanceEngine.round2(max(0.0, total - targetAmt))
+
+                current.copy(
+                    customParticipants = current.customParticipants.map { p ->
+                        when (p.id) {
+                            id -> p.copy(percentage = clampedPreset, amount = targetAmt)
+                            other?.id -> p.copy(percentage = remainingOtherPct, amount = otherAmt)
+                            else -> p
+                        }
+                    }
+                )
+            } else if (target.type != "me") {
+                val othersAlloc = current.customParticipants
+                    .filter { it.id != id && it.type != "me" }
+                    .sumOf { it.percentage }
+                val clampedTargetPct = Math.min(100.0 - othersAlloc, max(0.0, clampedPreset))
+                val remainingForMe = max(0.0, FinanceEngine.round2(100.0 - othersAlloc - clampedTargetPct))
+
+                current.copy(
+                    customParticipants = current.customParticipants.map { p ->
+                        when {
+                            p.id == id -> p.copy(
+                                percentage = clampedTargetPct,
+                                amount = FinanceEngine.round2((total * clampedTargetPct) / 100.0)
+                            )
+                            p.type == "me" -> p.copy(
+                                percentage = remainingForMe,
+                                amount = FinanceEngine.round2((total * remainingForMe) / 100.0)
+                            )
+                            else -> p
+                        }
+                    }
+                )
+            } else {
+                val remaining = max(0.0, 100.0 - clampedPreset)
+                val otherCount = count - 1
+                val eachOtherPct = if (otherCount > 0) FinanceEngine.round2(remaining / otherCount) else 0.0
+                var allocated = 0.0
+                current.copy(
+                    customParticipants = current.customParticipants.mapIndexed { idx, p ->
+                        if (p.id == id) {
+                            p.copy(
+                                percentage = clampedPreset,
+                                amount = FinanceEngine.round2((total * clampedPreset) / 100.0)
+                            )
+                        } else {
+                            val isLast = idx == count - 1
+                            val pPct = if (isLast) max(0.0, FinanceEngine.round2(remaining - allocated)) else eachOtherPct
+                            allocated += pPct
+                            p.copy(
+                                percentage = pPct,
+                                amount = FinanceEngine.round2((total * pPct) / 100.0)
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+
     fun onParticipantPercentageChange(id: String, newPctRaw: Double) {
         val total = _state.value.amountText.toDoubleOrNull() ?: 0.0
-        val pct = newPctRaw.coerceIn(0.0, 100.0)
+        val clampedPct = newPctRaw.coerceIn(0.0, 100.0)
         _state.update { current ->
-            current.copy(
-                customParticipants = current.customParticipants.map { p ->
-                    if (p.id != id) p
-                    else p.copy(
-                        percentage = pct,
-                        amount = FinanceEngine.round2((total * pct) / 100.0)
+            val count = current.customParticipants.size
+            if (count == 2) {
+                val other = current.customParticipants.find { it.id != id }
+                val otherPct = FinanceEngine.round2(100.0 - clampedPct)
+                val targetAmt = FinanceEngine.round2((total * clampedPct) / 100.0)
+                val otherAmt = FinanceEngine.round2(max(0.0, total - targetAmt))
+
+                current.copy(
+                    customParticipants = current.customParticipants.map { p ->
+                        when (p.id) {
+                            id -> p.copy(percentage = clampedPct, amount = targetAmt)
+                            other?.id -> p.copy(percentage = otherPct, amount = otherAmt)
+                            else -> p
+                        }
+                    }
+                )
+            } else {
+                val target = current.customParticipants.find { it.id == id }
+                if (target?.type != "me" && current.customParticipants.any { it.type == "me" }) {
+                    val othersAlloc = current.customParticipants
+                        .filter { it.id != id && it.type != "me" }
+                        .sumOf { it.percentage }
+                    val safeClamped = clampedPct.coerceIn(0.0, max(0.0, 100.0 - othersAlloc))
+                    val remainingForMe = max(0.0, FinanceEngine.round2(100.0 - othersAlloc - safeClamped))
+
+                    current.copy(
+                        customParticipants = current.customParticipants.map { p ->
+                            when {
+                                p.id == id -> p.copy(
+                                    percentage = safeClamped,
+                                    amount = FinanceEngine.round2((total * safeClamped) / 100.0)
+                                )
+                                p.type == "me" -> p.copy(
+                                    percentage = remainingForMe,
+                                    amount = FinanceEngine.round2((total * remainingForMe) / 100.0)
+                                )
+                                else -> p
+                            }
+                        }
+                    )
+                } else {
+                    current.copy(
+                        customParticipants = current.customParticipants.map { p ->
+                            if (p.id != id) p
+                            else p.copy(
+                                percentage = clampedPct,
+                                amount = FinanceEngine.round2((total * clampedPct) / 100.0)
+                            )
+                        }
                     )
                 }
-            )
+            }
         }
     }
 
     fun onParticipantAmountChange(id: String, newAmtRaw: Double) {
         val total = _state.value.amountText.toDoubleOrNull() ?: 0.0
-        val amt = max(0.0, newAmtRaw)
+        val clampedAmt = max(0.0, newAmtRaw)
         _state.update { current ->
-            current.copy(
-                customParticipants = current.customParticipants.map { p ->
-                    if (p.id != id) p
-                    else {
-                        val pct = if (total > 0.0) FinanceEngine.round2((amt / total) * 100.0) else p.percentage
-                        p.copy(
-                            amount = FinanceEngine.round2(amt),
-                            percentage = pct
-                        )
-                    }
-                }
-            )
-        }
-    }
+            val count = current.customParticipants.size
+            if (count == 2) {
+                val other = current.customParticipants.find { it.id != id }
+                val targetAmt = if (total > 0.0) clampedAmt.coerceIn(0.0, total) else clampedAmt
+                val otherAmt = if (total > 0.0) FinanceEngine.round2(max(0.0, total - targetAmt)) else 0.0
+                val targetPct = if (total > 0.0) FinanceEngine.round2((targetAmt / total) * 100.0) else 0.0
+                val otherPct = if (total > 0.0) FinanceEngine.round2(100.0 - targetPct) else 0.0
 
-    fun onSetParticipantPreset(id: String, presetPct: Double) {
-        onParticipantPercentageChange(id, presetPct)
+                current.copy(
+                    customParticipants = current.customParticipants.map { p ->
+                        when (p.id) {
+                            id -> p.copy(amount = targetAmt, percentage = targetPct)
+                            other?.id -> p.copy(amount = otherAmt, percentage = otherPct)
+                            else -> p
+                        }
+                    }
+                )
+            } else {
+                val target = current.customParticipants.find { it.id == id }
+                if (target?.type != "me" && current.customParticipants.any { it.type == "me" } && total > 0.0) {
+                    val othersAlloc = current.customParticipants
+                        .filter { it.id != id && it.type != "me" }
+                        .sumOf { it.amount }
+                    val safeClamped = clampedAmt.coerceIn(0.0, max(0.0, total - othersAlloc))
+                    val remainingForMe = max(0.0, FinanceEngine.round2(total - othersAlloc - safeClamped))
+                    val targetPct = FinanceEngine.round2((safeClamped / total) * 100.0)
+                    val mePct = FinanceEngine.round2((remainingForMe / total) * 100.0)
+
+                    current.copy(
+                        customParticipants = current.customParticipants.map { p ->
+                            when {
+                                p.id == id -> p.copy(amount = safeClamped, percentage = targetPct)
+                                p.type == "me" -> p.copy(amount = remainingForMe, percentage = mePct)
+                                else -> p
+                            }
+                        }
+                    )
+                } else {
+                    current.copy(
+                        customParticipants = current.customParticipants.map { p ->
+                            if (p.id != id) p
+                            else {
+                                val pct = if (total > 0.0) FinanceEngine.round2((clampedAmt / total) * 100.0) else p.percentage
+                                p.copy(
+                                    amount = FinanceEngine.round2(clampedAmt),
+                                    percentage = pct
+                                )
+                            }
+                        }
+                    )
+                }
+            }
+        }
     }
 
     fun onAddParticipant(type: String, friendUid: String? = null) {
@@ -639,9 +705,27 @@ class TransactionFormViewModel(
             val total = if (current.isEstorno) -Math.abs(baseTotal) else baseTotal
             val isoInputDate = FinanceEngine.parseInputDateToIso(current.dueDateText)
 
-            val isCustom = current.splitType == SplitType.CUSTOM
-            val customAllocations = if (isCustom && current.customParticipants.isNotEmpty()) {
-                current.customParticipants.map { p ->
+            val isCustom = current.splitType == SplitType.CUSTOM || current.splitType == SplitType.FRIEND
+            var participantsToUse = current.customParticipants
+            if (isCustom && participantsToUse.isNotEmpty()) {
+                val totalPct = participantsToUse.sumOf { it.percentage }
+                if (Math.abs(totalPct - 100.0) > 0.5 && participantsToUse.any { it.type == "me" }) {
+                    val othersPct = participantsToUse.filter { it.type != "me" }.sumOf { it.percentage }
+                    val myClampedPct = FinanceEngine.round2(100.0 - othersPct).coerceIn(0.0, 100.0)
+                    val absTotal = Math.abs(total)
+                    participantsToUse = participantsToUse.map { p ->
+                        if (p.type == "me") {
+                            p.copy(
+                                percentage = myClampedPct,
+                                amount = FinanceEngine.round2((absTotal * myClampedPct) / 100.0)
+                            )
+                        } else p
+                    }
+                }
+            }
+
+            val customAllocations = if (isCustom && participantsToUse.isNotEmpty()) {
+                participantsToUse.map { p ->
                     val signedAmt = if (current.isEstorno) -Math.abs(p.amount) else Math.abs(p.amount)
                     Allocation(
                         type = if (p.type == "external") "EXTERNAL" else "PLATFORM_USER",
@@ -654,16 +738,17 @@ class TransactionFormViewModel(
             } else null
 
             val friendPart = if (isCustom) {
-                current.customParticipants.find {
+                participantsToUse.find {
                     it.type == "friend" || (it.uid != null && it.uid != user.uid && (partner == null || it.uid != partner.uid))
                 }
             } else null
 
-            val assignedFriendUid = friendPart?.uid ?: (if (current.splitType == SplitType.FRIEND) current.assignedFriendUid else null)
-            val assignedFriendName = friendPart?.name ?: (if (current.splitType == SplitType.FRIEND) current.assignedFriendName else null)
+            val isExplicitNonFriend = current.splitType == SplitType.MINE || current.splitType == SplitType.EXTERNAL || current.splitType == SplitType.SPLIT_50 || current.splitType == SplitType.PARTNER
+            val assignedFriendUid = friendPart?.uid ?: (if (current.splitType == SplitType.FRIEND) current.assignedFriendUid else if (!isExplicitNonFriend) (current.editingTx?.assignedFriendUid ?: current.assignedFriendUid) else null)
+            val assignedFriendName = friendPart?.name ?: (if (current.splitType == SplitType.FRIEND) current.assignedFriendName else if (!isExplicitNonFriend) (current.editingTx?.assignedFriendName ?: current.assignedFriendName) else null)
             val friendSharePct = if (friendPart != null) {
                 if (total > 0.0) FinanceEngine.round2((friendPart.amount / total) * 100.0) else friendPart.percentage
-            } else current.friendSharePct
+            } else current.friendSharePct ?: current.editingTx?.friendSharePct
             val acceptanceStatus = if (!assignedFriendUid.isNullOrBlank()) "pending_approval" else null
             val externalName = if (current.splitType == SplitType.EXTERNAL) current.externalName.trim() else null
 
@@ -760,7 +845,12 @@ class TransactionFormViewModel(
                         current.description.trim()
                     }
 
+                    val cardSharedUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.sharedWithUids.orEmpty() else emptyList()
+                    val customUids = customAllocations?.mapNotNull { it.uid } ?: emptyList()
+                    val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
+
                     val updatedTx = origTx.copy(
+                        createdByUid = origTx.createdByUid.ifBlank { user.uid },
                         paidByUid = payerUid,
                         cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.id else null,
                         description = formattedDesc,
@@ -774,7 +864,7 @@ class TransactionFormViewModel(
                         totalAmount = total,
                         dueDate = dueDate,
                         competenceMonth = competenceMonth,
-                        visibleToUids = split.visibleToUids,
+                        visibleToUids = effectiveVisible,
                         userImpact = split.userImpact,
                         allocations = split.allocations,
                         splitType = current.splitType,
@@ -782,6 +872,7 @@ class TransactionFormViewModel(
                         assignedFriendUid = assignedFriendUid,
                         assignedFriendName = assignedFriendName,
                         acceptanceStatus = acceptanceStatus,
+                        respondedAt = null,
                         friendSharePct = friendSharePct
                     )
 
@@ -856,6 +947,10 @@ class TransactionFormViewModel(
                         customAllocations = instCustomAllocs
                     )
 
+                    val cardSharedUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.sharedWithUids.orEmpty() else emptyList()
+                    val customUids = instCustomAllocs?.mapNotNull { it.uid } ?: emptyList()
+                    val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
+
                     val tx = Transaction(
                         id = "tx_" + UUID.randomUUID().toString().take(8),
                         createdByUid = user.uid,
@@ -872,7 +967,7 @@ class TransactionFormViewModel(
                         totalAmount = installmentAmount,
                         dueDate = dueDate,
                         competenceMonth = competenceMonth,
-                        visibleToUids = split.visibleToUids,
+                        visibleToUids = effectiveVisible,
                         userImpact = split.userImpact,
                         allocations = split.allocations,
                         installmentGroupId = groupId,
@@ -883,6 +978,7 @@ class TransactionFormViewModel(
                         assignedFriendUid = assignedFriendUid,
                         assignedFriendName = assignedFriendName,
                         acceptanceStatus = acceptanceStatus,
+                        respondedAt = null,
                         friendSharePct = friendSharePct
                     )
                     installmentList.add(tx)
@@ -924,6 +1020,10 @@ class TransactionFormViewModel(
                     customAllocations = customAllocations
                 )
 
+                val cardSharedUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.sharedWithUids.orEmpty() else emptyList()
+                val customUids = customAllocations?.mapNotNull { it.uid } ?: emptyList()
+                val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
+
                 val tx = Transaction(
                     id = "tx_" + UUID.randomUUID().toString().take(8),
                     createdByUid = user.uid,
@@ -940,7 +1040,7 @@ class TransactionFormViewModel(
                     totalAmount = total,
                     dueDate = dueDate,
                     competenceMonth = competenceMonth,
-                    visibleToUids = split.visibleToUids,
+                    visibleToUids = effectiveVisible,
                     userImpact = split.userImpact,
                     allocations = split.allocations,
                     splitType = current.splitType,

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { FinanceProvider, useFinance } from '@/store/FinanceContext'
 import { Header } from '@/components/Header'
 import { KpiGrid } from '@/components/KpiGrid'
@@ -10,6 +10,7 @@ import { RecurringBillsModal } from '@/components/modals/RecurringBillsModal'
 import { ReceivablesModal } from '@/components/modals/ReceivablesModal'
 import { ApiKeyModal } from '@/components/modals/ApiKeyModal'
 import { TransactionModal } from '@/components/modals/TransactionModal'
+import { QuickRefundModal } from '@/components/modals/QuickRefundModal'
 import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal'
 import { FriendsModal } from '@/components/modals/FriendsModal'
 import { RecentActivityModal } from '@/components/modals/RecentActivityModal'
@@ -23,15 +24,18 @@ import { AutoLaunchNoticeBanner } from '@/components/AutoLaunchNoticeBanner'
 import { Button } from '@/components/ui/button'
 import { Clock, ArrowRight, ReceiptText } from 'lucide-react'
 import type { Transaction } from '@/types'
+import { consolidateMonthTransactions } from '@/lib/invoices'
 
 type DesktopViewMode = 'chat_focus' | 'chat_full' | 'table_full'
 
 function MainDashboard() {
   const {
+    month,
     setMonth,
     pendingChargeGroups,
     pendingFriendRequests,
     monthTransactions,
+    transactions,
     cards,
     me,
     cycleStatus,
@@ -48,8 +52,9 @@ function MainDashboard() {
   const [recentActivityModalOpen, setRecentActivityModalOpen] = useState(false)
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
   const [invoicesModalOpen, setInvoicesModalOpen] = useState(false)
+  const [invoicesInitialCardId, setInvoicesInitialCardId] = useState<string | null>(null)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
-  const [refundFromTx, setRefundFromTx] = useState<Transaction | null>(null)
+  const [quickRefundTx, setQuickRefundTx] = useState<Transaction | null>(null)
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
   const [mobileTab, setMobileTab] = useState<MobileTab>('home')
@@ -78,27 +83,31 @@ function MainDashboard() {
 
   const handleOpenNewTx = () => {
     setEditingTx(null)
-    setRefundFromTx(null)
     setTxModalOpen(true)
   }
 
   const handleEditTx = (tx: Transaction) => {
+    if (tx.id.startsWith('invoice_') && tx.cardId) {
+      setInvoicesInitialCardId(tx.cardId)
+      setInvoicesModalOpen(true)
+      return
+    }
     setEditingTx(tx)
-    setRefundFromTx(null)
     setTxModalOpen(true)
   }
 
   const handleRefundTx = (tx: Transaction) => {
-    setEditingTx(null)
-    setRefundFromTx(tx)
-    setTxModalOpen(true)
+    setQuickRefundTx(tx)
   }
 
   const totalPendingNotifications = pendingChargeGroups.length + pendingFriendRequests.length
   const currentUid = me?.uid ?? ''
 
-  // Recent transactions preview for mobile home tab
-  const recentTransactions = monthTransactions.slice(0, 4)
+  // Recent transactions preview for mobile home tab (consolidated)
+  const recentTransactions = useMemo(() => {
+    const list = consolidateMonthTransactions(monthTransactions, transactions, cards, currentUid, month, true)
+    return list.slice(0, 4)
+  }, [monthTransactions, transactions, cards, currentUid, month])
 
   return (
     <div className="flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden">
@@ -112,7 +121,10 @@ function MainDashboard() {
         onOpenFriends={() => setFriendsModalOpen(true)}
         onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
         onOpenInvestments={() => setInvestmentsModalOpen(true)}
-        onOpenInvoices={() => setInvoicesModalOpen(true)}
+        onOpenInvoices={() => {
+          setInvoicesInitialCardId(null)
+          setInvoicesModalOpen(true)
+        }}
       />
 
       {/* 2. Main Content Area */}
@@ -176,6 +188,10 @@ function MainDashboard() {
               <TransactionTable
                 onEditTx={handleEditTx}
                 onRefundTx={handleRefundTx}
+                onOpenInvoices={(cardId) => {
+                  setInvoicesInitialCardId(cardId || null)
+                  setInvoicesModalOpen(true)
+                }}
                 onToggleExpand={() =>
                   setDesktopView((prev) => (prev === 'table_full' ? 'chat_focus' : 'table_full'))
                 }
@@ -268,6 +284,10 @@ function MainDashboard() {
               <TransactionTable
                 onEditTx={handleEditTx}
                 onRefundTx={handleRefundTx}
+                onOpenInvoices={(cardId) => {
+                  setInvoicesInitialCardId(cardId || null)
+                  setInvoicesModalOpen(true)
+                }}
               />
             </div>
           )}
@@ -291,7 +311,10 @@ function MainDashboard() {
               onOpenFriends={() => setFriendsModalOpen(true)}
               onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
               onOpenInvestments={() => setInvestmentsModalOpen(true)}
-              onOpenInvoices={() => setInvoicesModalOpen(true)}
+              onOpenInvoices={() => {
+                setInvoicesInitialCardId(null)
+                setInvoicesModalOpen(true)
+              }}
             />
           )}
         </div>
@@ -319,11 +342,16 @@ function MainDashboard() {
           setTxModalOpen(open)
           if (!open) {
             setEditingTx(null)
-            setRefundFromTx(null)
           }
         }}
         editingTx={editingTx}
-        refundFromTx={refundFromTx}
+      />
+      <QuickRefundModal
+        open={Boolean(quickRefundTx)}
+        onOpenChange={(open) => {
+          if (!open) setQuickRefundTx(null)
+        }}
+        transaction={quickRefundTx}
       />
       <FutureProjectionModal
         open={projectionModalOpen}
@@ -346,7 +374,11 @@ function MainDashboard() {
       />
       <CardInvoicesModal
         open={invoicesModalOpen}
-        onOpenChange={setInvoicesModalOpen}
+        onOpenChange={(open) => {
+          setInvoicesModalOpen(open)
+          if (!open) setInvoicesInitialCardId(null)
+        }}
+        initialCardId={invoicesInitialCardId}
         onEditTx={handleEditTx}
         onRefundTx={handleRefundTx}
       />

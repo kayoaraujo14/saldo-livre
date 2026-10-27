@@ -103,7 +103,7 @@ fun CardInvoicesScreen(
             val part = selected?.splitBreakdown?.find { it.name == participantName }
             if (part != null) {
                 items = items.filter { tx ->
-                    InvoiceEngine.participantAmountIn(tx, part, uiState.currentUser.uid) > 0.0
+                    InvoiceEngine.participantAmountIn(tx, part, uiState.currentUser.uid, selected?.card) > 0.0
                 }
             }
         }
@@ -137,7 +137,7 @@ fun CardInvoicesScreen(
         val part = if (participantName != null) selected?.splitBreakdown?.find { it.name == participantName } else null
         if (part != null && selected != null) {
             val expenses = selected.items.filter { it.type == TransactionType.EXPENSE }
-            InvoiceEngine.calculateCategoryBreakdownForParticipant(expenses, part, uiState.currentUser.uid)
+            InvoiceEngine.calculateCategoryBreakdownForParticipant(expenses, part, uiState.currentUser.uid, selected.card)
         } else {
             selected?.byCategory.orEmpty()
         }
@@ -156,7 +156,7 @@ fun CardInvoicesScreen(
         map.map { (dateKey, items) ->
             val dayTotal = items.sumOf { tx ->
                 val amt = if (participant != null) {
-                    InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid)
+                    InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid, selected?.card)
                 } else tx.effectiveAmount
                 if (tx.type == TransactionType.INCOME) -amt else amt
             }
@@ -351,7 +351,7 @@ fun CardInvoicesScreen(
                         }
                         items(group.items, key = { "tx_${it.id}" }) { tx ->
                             val share = if (participant != null) {
-                                InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid)
+                                InvoiceEngine.participantAmountIn(tx, participant, uiState.currentUser.uid, selected?.card)
                             } else null
                             InvoiceItemRow(
                                 tx = tx,
