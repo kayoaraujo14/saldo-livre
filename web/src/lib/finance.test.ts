@@ -1,114 +1,89 @@
 import { describe, it, expect } from 'vitest'
-import { friendShareOf } from './finance'
+import { amountPatch } from './finance'
 import type { Transaction } from '@/types'
 
-describe('finance > friendShareOf', () => {
-  it('should return 0 when tx or assignedFriendUid is missing', () => {
-    // @ts-expect-error - testing missing tx
-    expect(friendShareOf(null)).toBe(0)
-    // @ts-expect-error - testing missing tx
-    expect(friendShareOf(undefined)).toBe(0)
+describe('amountPatch', () => {
+  const baseTx: Transaction = {
+    id: 'tx_1',
+    createdByUid: 'uid1',
+    paidByUid: 'uid1',
+    description: 'Test Tx',
+    category: 'Test',
+    type: 'expense',
+    paymentMethod: 'pix',
+    status: 'estimated',
+    estimatedAmount: 100,
+    actualAmount: null,
+    totalAmount: 100,
+    dueDate: '2023-01-01',
+    competenceMonth: '2023-01',
+    visibleToUids: ['uid1'],
+    userImpact: { uid1: 100 },
+    allocations: [{ type: 'PLATFORM_USER', uid: 'uid1', name: 'Você', amount: 100, reimbursed: true }],
+    splitType: 'mine',
+    createdAt: Date.now(),
+  }
 
-    expect(friendShareOf({ assignedFriendUid: undefined } as any)).toBe(0)
-    expect(friendShareOf({ assignedFriendUid: null } as any)).toBe(0)
+  it('updates actualAmount and recalculates total and allocations', () => {
+    const patch = amountPatch(baseTx, { actualAmount: 90 })
+
+    expect(patch.actualAmount).toBe(90)
+    expect(patch.estimatedAmount).toBe(100)
+    expect(patch.totalAmount).toBe(90)
+
+    expect(patch.allocations).toBeDefined()
+    expect(patch.allocations![0].amount).toBe(90)
+
+    expect(patch.userImpact).toBeDefined()
+    expect(patch.userImpact!['uid1']).toBe(90)
   })
 
-  it('should sum allocation amounts when friend has explicit allocations (array)', () => {
-    const tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 100,
-      allocations: [
-        { type: 'PLATFORM_USER', uid: 'friend_123', name: 'Friend', amount: 30, reimbursed: false },
-        { type: 'PLATFORM_USER', uid: 'friend_123', name: 'Friend', amount: 20.5, reimbursed: false },
-        { type: 'PLATFORM_USER', uid: 'other', name: 'Other', amount: 49.5, reimbursed: false },
-      ]
-    }
-    expect(friendShareOf(tx)).toBe(50.5)
+  it('updates estimatedAmount and recalculates total and allocations when actualAmount is null', () => {
+    const patch = amountPatch(baseTx, { estimatedAmount: 120 })
+
+    expect(patch.actualAmount).toBe(null) // actualAmount remains unchanged from baseTx
+    expect(patch.estimatedAmount).toBe(120)
+    expect(patch.totalAmount).toBe(120)
+
+    expect(patch.allocations).toBeDefined()
+    expect(patch.allocations![0].amount).toBe(120)
+
+    expect(patch.userImpact).toBeDefined()
+    expect(patch.userImpact!['uid1']).toBe(120)
   })
 
-  it('should sum allocation amounts when friend has explicit allocations (object)', () => {
-    const tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 100,
-      // Record-style allocations
-      allocations: {
-        '0': { type: 'PLATFORM_USER', uid: 'friend_123', name: 'Friend', amount: 10, reimbursed: false },
-        '1': { type: 'PLATFORM_USER', uid: 'other', name: 'Other', amount: 90, reimbursed: false },
-      } as any
-    }
-    expect(friendShareOf(tx)).toBe(10)
+  it('handles both actualAmount and estimatedAmount updates', () => {
+    const patch = amountPatch(baseTx, { actualAmount: 85, estimatedAmount: 110 })
+
+    expect(patch.actualAmount).toBe(85)
+    expect(patch.estimatedAmount).toBe(110)
+    expect(patch.totalAmount).toBe(85) // actualAmount takes precedence for total
+
+    expect(patch.allocations).toBeDefined()
+    expect(patch.allocations![0].amount).toBe(85)
   })
 
-  it('should calculate share using totalAmount and friendSharePct when allocations array is empty', () => {
-    const tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 200,
-      allocations: [],
-      friendSharePct: 30
-    }
-    expect(friendShareOf(tx)).toBe(60)
+  it('preserves existing values if no new values are provided', () => {
+    const patch = amountPatch(baseTx, {})
+
+    expect(patch.actualAmount).toBe(null)
+    expect(patch.estimatedAmount).toBe(100)
+    expect(patch.totalAmount).toBe(100)
+
+    expect(patch.allocations).toBeDefined()
+    expect(patch.allocations![0].amount).toBe(100)
   })
 
-  it('should calculate share using totalAmount and friendSharePct when allocations misses the friend', () => {
-    const tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 150,
-      allocations: [
-         { type: 'PLATFORM_USER', uid: 'other', name: 'Other', amount: 150, reimbursed: false }
-      ],
-      friendSharePct: 40
-    }
-    expect(friendShareOf(tx)).toBe(60)
-  })
+  it('handles nulling out actualAmount and falling back to estimatedAmount', () => {
+    const txWithActual: Transaction = { ...baseTx, actualAmount: 90, totalAmount: 90 }
 
-  it('should calculate default 50% share when friendSharePct is undefined and no allocations match', () => {
-    const tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 100,
-      allocations: [],
-      // friendSharePct is omitted/undefined
-    }
-    expect(friendShareOf(tx)).toBe(50)
-  })
+    const patch = amountPatch(txWithActual, { actualAmount: null })
 
-  it('should clamp invalid friendSharePct values to 100%', () => {
-    const txNegative: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 100,
-      friendSharePct: -50
-    }
-    expect(friendShareOf(txNegative)).toBe(100) // Fallback for <= 0 is 100 (clampPct logic)
+    expect(patch.actualAmount).toBe(null)
+    expect(patch.estimatedAmount).toBe(100) // from baseTx
+    expect(patch.totalAmount).toBe(100) // fell back to estimatedAmount
 
-    const txOver100: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 100,
-      friendSharePct: 150
-    }
-    expect(friendShareOf(txOver100)).toBe(100)
-
-    const txZero: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 100,
-      friendSharePct: 0
-    }
-    expect(friendShareOf(txZero)).toBe(100)
-  })
-
-  it('should handle negative totalAmounts correctly', () => {
-    const tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: -200.5,
-      friendSharePct: 50
-    }
-    expect(friendShareOf(tx)).toBe(-100.25)
-  })
-
-  it('should handle undefined allocations correctly', () => {
-    const tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount'> = {
-      assignedFriendUid: 'friend_123',
-      totalAmount: 300,
-      allocations: undefined
-    }
-    expect(friendShareOf(tx)).toBe(150)
+    expect(patch.allocations).toBeDefined()
+    expect(patch.allocations![0].amount).toBe(100)
   })
 })

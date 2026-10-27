@@ -37,3 +37,4 @@ android/.gradle/
 local.properties
 *.apk
 *.aab
+google-services.json
