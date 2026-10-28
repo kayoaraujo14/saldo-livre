@@ -34,6 +34,7 @@ data class ActivityItemUi(
     val thirdPartyName: String?,
     val friendName: String?,
     val friendSharePct: Double?,
+    val installmentTag: String?,
     val status: TransactionStatus,
     val competenceMonth: String,
     val dueDate: String,
@@ -111,6 +112,7 @@ class RecentActivityViewModel(
                         thirdPartyName = thirdAlloc?.name,
                         friendName = tx.assignedFriendName,
                         friendSharePct = tx.friendSharePct,
+                        installmentTag = tx.installmentTag,
                         status = tx.status,
                         competenceMonth = tx.competenceMonth,
                         dueDate = tx.dueDate,
@@ -119,9 +121,7 @@ class RecentActivityViewModel(
                     )
                 }
 
-                // Aplica filtros de busca e aba
                 val filtered = items.filter { item ->
-                    // 1. Busca por texto
                     val matchesSearch = if (query.isBlank()) true else {
                         val q = query.lowercase().trim()
                         item.title.lowercase().contains(q) ||
@@ -132,7 +132,6 @@ class RecentActivityViewModel(
                                 (item.friendName?.lowercase()?.contains(q) == true)
                     }
 
-                    // 2. Filtro de abas
                     val matchesFilter = when (filter) {
                         ActivityFilter.ALL -> true
                         ActivityFilter.INCOME -> item.isIncome

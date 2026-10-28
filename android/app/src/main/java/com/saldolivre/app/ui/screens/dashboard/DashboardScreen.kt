@@ -461,19 +461,35 @@ fun DashboardScreen(
 
                                 val safeCount = uiState.pendingRecurringLaunches.count { it.matchedManualTx == null }
                                 if (safeCount > 1) {
-                                    OutlinedButton(
-                                        onClick = { viewModel.confirmAllCandidates() },
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.height(26.dp),
-                                        border = BorderStroke(1.dp, Amber500.copy(alpha = 0.5f))
-                                    ) {
-                                        Text(
-                                            text = "Confirmar Livres",
-                                            fontSize = 10.sp,
-                                            color = Amber400,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Button(
+                                            onClick = { viewModel.confirmAllCandidates(asPaid = true) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Text(
+                                                text = "Confirmar Tudo Pago",
+                                                fontSize = 10.sp,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                        OutlinedButton(
+                                            onClick = { viewModel.confirmAllCandidates(asPaid = false) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(26.dp),
+                                            border = BorderStroke(1.dp, Amber500.copy(alpha = 0.5f))
+                                        ) {
+                                            Text(
+                                                text = "Previsto",
+                                                fontSize = 10.sp,
+                                                color = Amber400,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -554,19 +570,40 @@ fun DashboardScreen(
                                                             )
                                                         }
                                                     } else {
+                                                        val isCardBill = item.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !item.cardId.isNullOrBlank()
+                                                        val isIncome = item.type == com.saldolivre.app.data.model.TransactionType.INCOME
                                                         Button(
-                                                            onClick = { viewModel.confirmLaunchCandidate(item) },
+                                                            onClick = { viewModel.confirmLaunchCandidate(item, asPaid = true) },
                                                             colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
                                                             shape = RoundedCornerShape(8.dp),
                                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                                             modifier = Modifier.height(26.dp)
                                                         ) {
                                                             Text(
-                                                                text = "Lançar",
+                                                                text = when {
+                                                                    isCardBill -> "Na Fatura"
+                                                                    isIncome -> "Já Recebi"
+                                                                    else -> "Já Paguei"
+                                                                },
                                                                 fontSize = 10.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 color = Color.White
                                                             )
+                                                        }
+                                                        if (!isCardBill) {
+                                                            OutlinedButton(
+                                                                onClick = { viewModel.confirmLaunchCandidate(item, asPaid = false) },
+                                                                shape = RoundedCornerShape(8.dp),
+                                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                                                modifier = Modifier.height(26.dp),
+                                                                border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.4f))
+                                                            ) {
+                                                                Text(
+                                                                    text = "Previsto",
+                                                                    fontSize = 10.sp,
+                                                                    color = Emerald400
+                                                                )
+                                                            }
                                                         }
                                                         OutlinedButton(
                                                             onClick = { viewModel.skipRecurring(item.id) },

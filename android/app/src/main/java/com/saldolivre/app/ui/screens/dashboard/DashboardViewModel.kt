@@ -73,14 +73,16 @@ class DashboardViewModel(
                 val todayStr = java.time.LocalDate.now().toString()
                 val monthResolved = user.resolvedRecurring[month] ?: emptyList()
 
-                val pending = FinanceEngine.getPendingRecurringLaunches(
-                    bills = bills,
-                    all = allTxs,
-                    monthKey = month,
-                    todayStr = todayStr,
-                    me = user,
-                    resolvedIds = monthResolved
-                )
+                val pending = if (month == FinanceEngine.currentMonthKey()) {
+                    FinanceEngine.getPendingRecurringLaunches(
+                        bills = bills,
+                        all = allTxs,
+                        monthKey = month,
+                        todayStr = todayStr,
+                        me = user,
+                        resolvedIds = monthResolved
+                    )
+                } else emptyList()
 
                 DashboardUiState(
                     currentUser = user,
@@ -102,10 +104,16 @@ class DashboardViewModel(
         }
     }
 
-    fun confirmLaunchCandidate(candidate: FinanceEngine.PendingRecurringCandidate) {
+    fun confirmLaunchCandidate(candidate: FinanceEngine.PendingRecurringCandidate, asPaid: Boolean = false) {
         viewModelScope.launch {
             val user = _uiState.value.currentUser
             val month = _uiState.value.selectedMonth
+            val isCardBill = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank()
+            val txStatus = when {
+                isCardBill -> com.saldolivre.app.data.model.TransactionStatus.PENDING
+                asPaid -> com.saldolivre.app.data.model.TransactionStatus.PAID
+                else -> com.saldolivre.app.data.model.TransactionStatus.ESTIMATED
+            }
             val split = FinanceEngine.buildSplit(
                 splitType = candidate.bill?.splitType ?: com.saldolivre.app.data.model.SplitType.MINE,
                 total = candidate.amount,
@@ -124,10 +132,10 @@ class DashboardViewModel(
                 category = candidate.category,
                 subcategory = candidate.subcategory,
                 type = candidate.type,
-                paymentMethod = candidate.paymentMethod,
-                status = com.saldolivre.app.data.model.TransactionStatus.ESTIMATED,
+                paymentMethod = if (isCardBill) com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD else candidate.paymentMethod,
+                status = txStatus,
                 estimatedAmount = candidate.amount,
-                actualAmount = null,
+                actualAmount = if (isCardBill || asPaid) candidate.amount else null,
                 totalAmount = candidate.amount,
                 dueDate = candidate.dueDate,
                 competenceMonth = month,
@@ -142,12 +150,18 @@ class DashboardViewModel(
         }
     }
 
-    fun confirmAllCandidates() {
+    fun confirmAllCandidates(asPaid: Boolean = false) {
         viewModelScope.launch {
             val user = _uiState.value.currentUser
             val month = _uiState.value.selectedMonth
             val candidates = _uiState.value.pendingRecurringLaunches.filter { it.matchedManualTx == null }
             val txs = candidates.map { candidate ->
+                val isCardBill = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank()
+                val txStatus = when {
+                    isCardBill -> com.saldolivre.app.data.model.TransactionStatus.PENDING
+                    asPaid -> com.saldolivre.app.data.model.TransactionStatus.PAID
+                    else -> com.saldolivre.app.data.model.TransactionStatus.ESTIMATED
+                }
                 val split = FinanceEngine.buildSplit(
                     splitType = candidate.bill?.splitType ?: com.saldolivre.app.data.model.SplitType.MINE,
                     total = candidate.amount,
@@ -166,10 +180,10 @@ class DashboardViewModel(
                     category = candidate.category,
                     subcategory = candidate.subcategory,
                     type = candidate.type,
-                    paymentMethod = candidate.paymentMethod,
-                    status = com.saldolivre.app.data.model.TransactionStatus.ESTIMATED,
+                    paymentMethod = if (isCardBill) com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD else candidate.paymentMethod,
+                    status = txStatus,
                     estimatedAmount = candidate.amount,
-                    actualAmount = null,
+                    actualAmount = if (isCardBill || asPaid) candidate.amount else null,
                     totalAmount = candidate.amount,
                     dueDate = candidate.dueDate,
                     competenceMonth = month,

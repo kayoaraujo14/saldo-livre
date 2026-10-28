@@ -227,6 +227,20 @@ class InvestmentsViewModel(
         _uiState.update { it.copy(activeTab = tab) }
     }
 
+    fun previousMonth() {
+        val prev = FinanceEngine.shiftMonth(_uiState.value.selectedMonth.ifBlank { FinanceEngine.currentMonthKey() }, -1)
+        repository.setSelectedMonth(prev)
+    }
+
+    fun nextMonth() {
+        val next = FinanceEngine.shiftMonth(_uiState.value.selectedMonth.ifBlank { FinanceEngine.currentMonthKey() }, 1)
+        repository.setSelectedMonth(next)
+    }
+
+    fun goToCurrentMonth() {
+        repository.setSelectedMonth(FinanceEngine.currentMonthKey())
+    }
+
     fun setHistoryFilter(filter: String) {
         _uiState.update { it.copy(historyFilter = filter) }
     }

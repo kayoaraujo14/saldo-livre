@@ -31,6 +31,7 @@ data class FriendRequestItem(
 
 data class FriendsUiState(
     val currentUser: UserProfile = UserProfile(),
+    val selectedMonth: String = FinanceEngine.currentMonthKey(),
     val activeTab: FriendsTab = FriendsTab.APPROVALS,
     val pendingChargeGroups: List<PendingChargeGroup> = emptyList(),
     val activeFriends: List<FriendItem> = emptyList(),
@@ -59,14 +60,12 @@ class FriendsViewModel(
                 repository.getCards(),
                 repository.getMonthSummary()
             ) { user, transactions, friendships, cards, summary ->
-                // 1. Grupos de cobranças pendentes de aprovação atribuídas a mim
                 val chargeGroups = FinanceEngine.groupPendingCharges(
                     transactions = transactions,
                     currentUid = user.uid,
                     allUsers = repository.allUsers
                 )
 
-                // 2. Amigos ativos (status == ACCEPTED)
                 val active = friendships.filter { it.status == FriendshipStatus.ACCEPTED }.map { f ->
                     val isRequester = f.requesterUid == user.uid
                     FriendItem(
@@ -77,7 +76,6 @@ class FriendsViewModel(
                     )
                 }
 
-                // 3. Convites pendentes recebidos por mim (status == PENDING e recipientUid == user.uid)
                 val requests = friendships.filter {
                     it.status == FriendshipStatus.PENDING &&
                     (it.recipientUid == user.uid || it.recipientEmail.equals(user.email, ignoreCase = true))
@@ -99,6 +97,7 @@ class FriendsViewModel(
 
                 _uiState.value.copy(
                     currentUser = user,
+                    selectedMonth = summary.monthKey.ifBlank { FinanceEngine.currentMonthKey() },
                     activeTab = autoTab,
                     pendingChargeGroups = chargeGroups,
                     activeFriends = active,
@@ -115,6 +114,20 @@ class FriendsViewModel(
 
     fun selectTab(tab: FriendsTab) {
         _uiState.update { it.copy(activeTab = tab) }
+    }
+
+    fun previousMonth() {
+        val prev = FinanceEngine.shiftMonth(_uiState.value.selectedMonth, -1)
+        repository.setSelectedMonth(prev)
+    }
+
+    fun nextMonth() {
+        val next = FinanceEngine.shiftMonth(_uiState.value.selectedMonth, 1)
+        repository.setSelectedMonth(next)
+    }
+
+    fun goToCurrentMonth() {
+        repository.setSelectedMonth(FinanceEngine.currentMonthKey())
     }
 
     fun toggleGroupExpand(groupId: String) {

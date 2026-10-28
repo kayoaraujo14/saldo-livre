@@ -17,6 +17,8 @@ import type {
   TransactionStatus,
   UserProfile,
   FutureMonthProjection,
+  ProjectedCategoryItem,
+  ProjectedMonthItem,
   LaunchTrigger,
   PendingRecurringCandidate,
 } from '@/types'
@@ -1292,10 +1294,14 @@ export function findMatchingManualBill(
   const explicit = monthTxs.find((t) => t.recurringBillId === bill.id)
   if (explicit) return explicit
 
-  // 2. Similaridade na descrição
+  // 2. Similaridade na descrição (evitando falso-positivo para strings curtas)
   const descMatch = monthTxs.find((t) => {
     const txDesc = normalizeText(t.description)
-    return txDesc.includes(normBill) || normBill.includes(txDesc)
+    if (!txDesc || !normBill) return false
+    if (txDesc === normBill) return true
+    if (normBill.length >= 4 && txDesc.includes(normBill)) return true
+    if (txDesc.length >= 4 && normBill.includes(txDesc)) return true
+    return false
   })
   return descMatch || null
 }
@@ -1525,6 +1531,8 @@ export function generateMonthBills(args: {
       payerUid: me.uid,
     })
     const isIncome = bill.type === 'income'
+    const effPaymentMethod = bill.paymentMethod ?? (isIncome ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
+    const isCardBill = effPaymentMethod === 'credit_card' && Boolean(bill.cardId)
     created.push({
       createdByUid: me.uid,
       paidByUid: me.uid,
@@ -1533,10 +1541,10 @@ export function generateMonthBills(args: {
       category: isIncome ? 'Receita' : bill.category,
       subcategory: bill.subcategory || null,
       type: bill.type ?? 'expense',
-      paymentMethod: bill.paymentMethod ?? (isIncome ? 'pix' : bill.cardId ? 'credit_card' : 'bill'),
-      status: 'estimated',
+      paymentMethod: effPaymentMethod,
+      status: isCardBill ? 'pending' : 'estimated',
       estimatedAmount: amount,
-      actualAmount: null,
+      actualAmount: isCardBill ? amount : null,
       totalAmount: amount,
       dueDate: dateInMonth(monthKey, bill.dueDay),
       competenceMonth: monthKey,
@@ -1557,9 +1565,11 @@ export function projectFutureMonths(args: {
   uid: string
   startMonthKey: string
   count?: number
+  cards?: Card[]
 }): FutureMonthProjection[] {
-  const { all, bills, profile, uid, startMonthKey, count = 6 } = args
+  const { all, bills, profile, uid, startMonthKey, count = 12, cards = [] } = args
   const projections: FutureMonthProjection[] = []
+  const cardsMap = new Map(cards.map((c) => [c.id, c]))
 
   for (let i = 0; i < count; i++) {
     const monthKey = shiftMonth(startMonthKey, i)
@@ -1567,22 +1577,114 @@ export function projectFutureMonths(args: {
     const dim = daysInMonth(monthKey)
 
     // Check existing transactions for that month visible to uid
-    const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
+    const monthTxs = (all || []).filter(
+      (t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid) && !t.reserveCardId,
+    )
 
     let projectedIncome = 0
     let projectedExpense = 0
+    let invoiceExpense = 0
+    let fixedBillsExpense = 0
+    let variableAccountExpense = 0
     let incomeCount = 0
     let expenseCount = 0
 
-    // 1. Sempre inclui transações reais agendadas para aquele mês (ex: parcelas de compras com cartão ou contas já lançadas)
+    const catMap = new Map<
+      string,
+      { amount: number; invoiceAmount: number; accountAmount: number; fixedBillAmount: number; count: number }
+    >()
+    const items: ProjectedMonthItem[] = []
+
+    const addCat = (
+      category: string,
+      impact: number,
+      bucket: 'invoice' | 'account' | 'fixed_bill',
+    ) => {
+      if (impact <= 0) return
+      const cur = catMap.get(category) ?? {
+        amount: 0,
+        invoiceAmount: 0,
+        accountAmount: 0,
+        fixedBillAmount: 0,
+        count: 0,
+      }
+      cur.amount = round2(cur.amount + impact)
+      if (bucket === 'invoice') cur.invoiceAmount = round2(cur.invoiceAmount + impact)
+      else if (bucket === 'fixed_bill') cur.fixedBillAmount = round2(cur.fixedBillAmount + impact)
+      else cur.accountAmount = round2(cur.accountAmount + impact)
+      cur.count += 1
+      catMap.set(category, cur)
+    }
+
+    // 1. Transações reais já lançadas/agendadas para aquele mês (parcelas de cartão, compras na fatura, Pix/débito/boleto, contas já geradas)
     for (const t of monthTxs) {
       const impact = impactFor(t, uid, all)
+      const isCard = t.paymentMethod === 'credit_card' || Boolean(t.cardId)
+      const cardObj = t.cardId ? cardsMap.get(t.cardId) : null
+
       if (t.type === 'income') {
-        projectedIncome += impact
-        incomeCount++
-      } else {
+        if (isCard) {
+          // Estornos/créditos no cartão reduzem a fatura
+          projectedExpense = Math.max(0, projectedExpense - impact)
+          invoiceExpense = Math.max(0, invoiceExpense - impact)
+        } else if (impact > 0) {
+          projectedIncome += impact
+          incomeCount++
+          items.push({
+            id: t.id,
+            description: t.description,
+            amount: effectiveAmount(t),
+            myImpact: impact,
+            category: t.category,
+            subcategory: t.subcategory || null,
+            dueDate: t.dueDate,
+            type: 'income',
+            paymentMethod: t.paymentMethod,
+            cardId: t.cardId || null,
+            cardName: cardObj?.cardName || null,
+            origin: 'income',
+            status: t.status,
+            isRecurringProjection: false,
+          })
+        }
+      } else if (impact !== 0) {
         projectedExpense += impact
         expenseCount++
+
+        const isFixedTx = Boolean(t.recurringBillId) || t.status === 'estimated'
+        if (isCard) {
+          invoiceExpense += impact
+          addCat(t.category, impact, 'invoice')
+        } else if (isFixedTx) {
+          fixedBillsExpense += impact
+          addCat(t.category, impact, 'fixed_bill')
+        } else {
+          variableAccountExpense += impact
+          addCat(t.category, impact, 'account')
+        }
+
+        const instInfo =
+          t.installmentsTotal && t.installmentsTotal > 1
+            ? `${t.installmentNumber || 1}/${t.installmentsTotal}`
+            : null
+
+        items.push({
+          id: t.id,
+          description: t.description,
+          amount: effectiveAmount(t),
+          myImpact: impact,
+          category: t.category,
+          subcategory: t.subcategory || null,
+          dueDate: t.dueDate,
+          type: 'expense',
+          paymentMethod: isCard ? 'credit_card' : t.paymentMethod,
+          cardId: t.cardId || null,
+          cardName: cardObj?.cardName || null,
+          origin: isCard ? 'invoice' : isFixedTx ? 'fixed_bill' : 'debit_pix',
+          status: t.status,
+          isRecurringProjection: false,
+          installmentInfo: instInfo,
+        })
       }
     }
 
@@ -1593,13 +1695,30 @@ export function projectFutureMonths(args: {
     if (!hasSalary && profile && profile.monthlyIncome > 0) {
       projectedIncome += profile.monthlyIncome
       incomeCount++
+      items.push({
+        id: `proj_salary_${uid}_${monthKey}`,
+        description: 'Salário Base',
+        amount: profile.monthlyIncome,
+        myImpact: profile.monthlyIncome,
+        category: 'Salário & Remuneração',
+        subcategory: 'Salário Principal',
+        dueDate: dateInMonth(monthKey, 5),
+        type: 'income',
+        paymentMethod: 'pix',
+        cardId: null,
+        cardName: null,
+        origin: 'income',
+        status: 'projected_recurring',
+        isRecurringProjection: true,
+      })
     }
 
     let ungeneratedCount = 0
-    const activeBills = bills.filter((b) => b.active && b.ownerUid === uid)
+    const activeBills = (bills || []).filter((b) => b.active && b.ownerUid === uid)
 
     for (const bill of activeBills) {
       if (monthTxs.some((t) => t.recurringBillId === bill.id)) continue
+      if (findMatchingManualBill(monthTxs, monthKey, bill)) continue
 
       // Limite temporal de vigência / parcelas
       if (bill.startMonth && monthKey < bill.startMonth) continue
@@ -1608,12 +1727,58 @@ export function projectFutureMonths(args: {
       ungeneratedCount++
       const { amount } = estimateRecurring(bill, all, monthKey)
       const myFraction = bill.splitType === 'split_50' ? round2(amount / 2) : amount
+      const effMethod =
+        bill.paymentMethod ?? (bill.type === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
+      const isCardBill = effMethod === 'credit_card' || Boolean(bill.cardId)
+      const cardObj = bill.cardId ? cardsMap.get(bill.cardId) : null
+      const dueStr = cardObj ? dateInMonth(monthKey, cardObj.dueDay) : dateInMonth(monthKey, bill.dueDay)
+
       if (bill.type === 'income') {
         projectedIncome += myFraction
         incomeCount++
+        items.push({
+          id: `proj_bill_${bill.id}_${monthKey}`,
+          description: bill.description,
+          amount,
+          myImpact: myFraction,
+          category: bill.category || 'Receita',
+          subcategory: bill.subcategory || null,
+          dueDate: dueStr,
+          type: 'income',
+          paymentMethod: effMethod,
+          cardId: bill.cardId || null,
+          cardName: cardObj?.cardName || null,
+          origin: 'income',
+          status: 'projected_recurring',
+          isRecurringProjection: true,
+        })
       } else {
         projectedExpense += myFraction
         expenseCount++
+        if (isCardBill) {
+          invoiceExpense += myFraction
+          addCat(bill.category, myFraction, 'invoice')
+        } else {
+          fixedBillsExpense += myFraction
+          addCat(bill.category, myFraction, 'fixed_bill')
+        }
+
+        items.push({
+          id: `proj_bill_${bill.id}_${monthKey}`,
+          description: bill.description,
+          amount,
+          myImpact: myFraction,
+          category: bill.category,
+          subcategory: bill.subcategory || null,
+          dueDate: dueStr,
+          type: 'expense',
+          paymentMethod: isCardBill ? 'credit_card' : effMethod,
+          cardId: bill.cardId || null,
+          cardName: cardObj?.cardName || null,
+          origin: isCardBill ? 'invoice' : 'fixed_bill',
+          status: 'projected_recurring',
+          isRecurringProjection: true,
+        })
       }
     }
 
@@ -1621,8 +1786,24 @@ export function projectFutureMonths(args: {
 
     projectedIncome = round2(projectedIncome)
     projectedExpense = round2(projectedExpense)
+    invoiceExpense = round2(invoiceExpense)
+    fixedBillsExpense = round2(fixedBillsExpense)
+    variableAccountExpense = round2(variableAccountExpense)
     const projectedFreeBalance = round2(projectedIncome - projectedExpense)
     const projectedDailyLimit = dim > 0 ? round2(projectedFreeBalance / dim) : null
+
+    const byCategory: ProjectedCategoryItem[] = [...catMap.entries()]
+      .map(([category, data]) => ({
+        category,
+        amount: data.amount,
+        invoiceAmount: data.invoiceAmount,
+        accountAmount: data.accountAmount,
+        fixedBillAmount: data.fixedBillAmount,
+        count: data.count,
+      }))
+      .sort((a, b) => b.amount - a.amount)
+
+    items.sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''))
 
     projections.push({
       monthKey,
@@ -1635,6 +1816,11 @@ export function projectFutureMonths(args: {
       isGenerated,
       incomeCount,
       expenseCount,
+      invoiceExpense,
+      fixedBillsExpense,
+      variableAccountExpense,
+      byCategory,
+      items,
     })
   }
 

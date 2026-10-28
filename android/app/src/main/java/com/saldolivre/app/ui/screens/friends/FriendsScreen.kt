@@ -1,47 +1,47 @@
 package com.saldolivre.app.ui.screens.friends
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.CallMade
+import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.PendingChargeGroup
+import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.theme.*
-import java.util.Locale
+
+private val DarkCyanHeroTint = Color(0xFF164E63)
+private val StatementHeroBrush = Brush.verticalGradient(
+    colors = listOf(DarkCyanHeroTint.copy(alpha = 0.5f), DarkSurface)
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,394 +51,401 @@ fun FriendsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    var friendToRemove by remember { mutableStateOf<FriendItem?>(null) }
 
     LaunchedEffect(uiState.userMessage) {
-        uiState.userMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        uiState.userMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
             viewModel.clearMessage()
         }
     }
 
+    val totalApprovals = uiState.pendingChargeGroups.size + uiState.pendingRequests.size
+
     Scaffold(
         containerColor = DarkBackground,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground),
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Voltar",
-                            tint = TextPrimary
-                        )
-                    }
-                },
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Purple500.copy(alpha = 0.2f)),
-                            contentAlignment = Alignment.Center
-                        ) {
+            Column(modifier = Modifier.background(DarkBackground)) {
+                TopAppBar(
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateBack) {
                             Icon(
-                                imageVector = Icons.Default.Group,
-                                contentDescription = null,
-                                tint = Purple400,
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Voltar",
+                                tint = TextPrimary
                             )
                         }
-                        Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Text(
-                                text = "Rede de Amizades",
-                                style = Typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "Conexões e aprovações de cartão",
-                                style = Typography.bodySmall,
-                                color = TextSecondary,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(Cyan500.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                                    .border(1.dp, Cyan500.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.People,
+                                    contentDescription = null,
+                                    tint = Cyan400,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Rede de Amigos",
+                                    style = Typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Rateios com aceite prévio e conexões",
+                                    style = Typography.bodySmall,
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                    }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
+                )
+
+                val selectedIndex = when (uiState.activeTab) {
+                    FriendsTab.APPROVALS -> 0
+                    FriendsTab.FRIENDS -> 1
+                    FriendsTab.STATEMENT -> 2
                 }
-            )
+
+                TabRow(
+                    selectedTabIndex = selectedIndex,
+                    containerColor = DarkBackground,
+                    contentColor = Cyan400,
+                    indicator = { tabPositions ->
+                        if (selectedIndex < tabPositions.size) {
+                            TabRowDefaults.SecondaryIndicator(
+                                modifier = Modifier
+                                    .tabIndicatorOffset(tabPositions[selectedIndex])
+                                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)),
+                                height = 3.dp,
+                                color = if (selectedIndex == 0 && totalApprovals > 0) Amber400 else Cyan400
+                            )
+                        }
+                    },
+                    divider = {
+                        HorizontalDivider(color = DarkBorder.copy(alpha = 0.7f))
+                    }
+                ) {
+                    Tab(
+                        selected = selectedIndex == 0,
+                        onClick = { viewModel.selectTab(FriendsTab.APPROVALS) },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = "Aprovações ($totalApprovals)",
+                                    fontWeight = if (selectedIndex == 0) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        },
+                        selectedContentColor = if (totalApprovals > 0) Amber400 else Cyan400,
+                        unselectedContentColor = TextSecondary
+                    )
+
+                    Tab(
+                        selected = selectedIndex == 1,
+                        onClick = { viewModel.selectTab(FriendsTab.FRIENDS) },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.People,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = "Amigos (${uiState.activeFriends.size})",
+                                    fontWeight = if (selectedIndex == 1) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        },
+                        selectedContentColor = Cyan400,
+                        unselectedContentColor = TextSecondary
+                    )
+
+                    Tab(
+                        selected = selectedIndex == 2,
+                        onClick = { viewModel.selectTab(FriendsTab.STATEMENT) },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Balance,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Text(
+                                    text = "Balanço",
+                                    fontWeight = if (selectedIndex == 2) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
+                        },
+                        selectedContentColor = Cyan400,
+                        unselectedContentColor = TextSecondary
+                    )
+                }
+            }
         }
-    ) { innerPadding ->
-        Column(
+    ) { paddingValues ->
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(paddingValues)
         ) {
-            // Segmented Tab Pills
-            FriendsTabPills(
-                activeTab = uiState.activeTab,
-                pendingApprovalsCount = uiState.pendingChargeGroups.size,
-                friendsCount = uiState.activeFriends.size,
-                pendingRequestsCount = uiState.pendingRequests.size,
-                onSelectTab = { viewModel.selectTab(it) }
-            )
-
             when (uiState.activeTab) {
-                FriendsTab.APPROVALS -> {
-                    ApprovalsTabContent(
-                        groups = uiState.pendingChargeGroups,
-                        cards = uiState.cards,
-                        expandedGroupIds = uiState.expandedGroupIds,
-                        onToggleExpand = { viewModel.toggleGroupExpand(it) },
-                        onRespond = { group, accept -> viewModel.respondCharge(group, accept) }
-                    )
-                }
-                FriendsTab.FRIENDS -> {
-                    FriendsTabContent(
-                        activeFriends = uiState.activeFriends,
-                        pendingRequests = uiState.pendingRequests,
-                        isSendingInvite = uiState.isSendingInvite,
-                        onSendInvite = { viewModel.sendFriendInvite(it) },
-                        onRespondRequest = { id, accept -> viewModel.respondFriendRequest(id, accept) },
-                        onRemoveFriend = { friendToRemove = it }
-                    )
-                }
-                FriendsTab.STATEMENT -> {
-                    StatementTabContent(
-                        receivableFromFriends = uiState.receivableFromFriends,
-                        payableToOthers = uiState.payableToOthers
-                    )
-                }
-            }
-        }
-    }
-
-    // Confirmation Dialog for removing friend
-    if (friendToRemove != null) {
-        val friend = friendToRemove!!
-        AlertDialog(
-            onDismissRequest = { friendToRemove = null },
-            containerColor = DarkSurface,
-            title = {
-                Text(
-                    text = "Remover Amizade",
-                    color = TextPrimary,
-                    fontWeight = FontWeight.Bold
+                FriendsTab.APPROVALS -> ApprovalsTabContent(
+                    chargeGroups = uiState.pendingChargeGroups,
+                    friendRequests = uiState.pendingRequests,
+                    cards = uiState.cards,
+                    expandedGroupIds = uiState.expandedGroupIds,
+                    onToggleExpand = { viewModel.toggleGroupExpand(it) },
+                    onRespondCharge = { group, accept -> viewModel.respondCharge(group, accept) },
+                    onRespondFriendRequest = { id, accept -> viewModel.respondFriendRequest(id, accept) }
                 )
-            },
-            text = {
-                Text(
-                    text = "Deseja remover a conexão de amizade com ${friend.friendName}? Novas cobranças não poderão ser enviadas diretamente até um novo convite.",
-                    color = TextSecondary
+
+                FriendsTab.FRIENDS -> FriendsTabContent(
+                    friends = uiState.activeFriends,
+                    isSending = uiState.isSendingInvite,
+                    onSendInvite = { email -> viewModel.sendFriendInvite(email) },
+                    onRemoveFriend = { id -> viewModel.removeFriend(id) }
                 )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.removeFriend(friend.friendshipId)
-                        friendToRemove = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Rose500)
-                ) {
-                    Text("Remover", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { friendToRemove = null }) {
-                    Text("Cancelar", color = TextSecondary)
-                }
-            }
-        )
-    }
-}
 
-// -------------------------------------------------------------
-// 1. Navigation Tab Pills
-// -------------------------------------------------------------
-@Composable
-private fun FriendsTabPills(
-    activeTab: FriendsTab,
-    pendingApprovalsCount: Int,
-    friendsCount: Int,
-    pendingRequestsCount: Int,
-    onSelectTab: (FriendsTab) -> Unit
-) {
-    Surface(
-        color = DarkSurface,
-        shape = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            // Approvals Pill
-            TabPillItem(
-                label = "Aprovações",
-                icon = Icons.Default.Schedule,
-                badgeCount = pendingApprovalsCount,
-                badgeColor = Amber500,
-                isSelected = activeTab == FriendsTab.APPROVALS,
-                selectedColor = Amber500.copy(alpha = 0.2f),
-                selectedTextColor = Amber400,
-                modifier = Modifier.weight(1f),
-                onClick = { onSelectTab(FriendsTab.APPROVALS) }
-            )
-
-            // Friends Pill
-            TabPillItem(
-                label = "Amigos ($friendsCount)",
-                icon = Icons.Default.Group,
-                badgeCount = pendingRequestsCount,
-                badgeColor = Purple500,
-                isSelected = activeTab == FriendsTab.FRIENDS,
-                selectedColor = Purple500.copy(alpha = 0.2f),
-                selectedTextColor = Purple400,
-                modifier = Modifier.weight(1f),
-                onClick = { onSelectTab(FriendsTab.FRIENDS) }
-            )
-
-            // Statement Pill
-            TabPillItem(
-                label = "Balanço",
-                icon = Icons.Default.CreditCard,
-                badgeCount = 0,
-                badgeColor = Color.Transparent,
-                isSelected = activeTab == FriendsTab.STATEMENT,
-                selectedColor = Emerald500.copy(alpha = 0.2f),
-                selectedTextColor = Emerald400,
-                modifier = Modifier.weight(1f),
-                onClick = { onSelectTab(FriendsTab.STATEMENT) }
-            )
-        }
-    }
-}
-
-@Composable
-private fun TabPillItem(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    badgeCount: Int,
-    badgeColor: Color,
-    isSelected: Boolean,
-    selectedColor: Color,
-    selectedTextColor: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (isSelected) selectedColor else Color.Transparent)
-            .border(
-                1.dp,
-                if (isSelected) selectedTextColor.copy(alpha = 0.4f) else Color.Transparent,
-                RoundedCornerShape(10.dp)
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp, horizontal = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (isSelected) selectedTextColor else TextSecondary,
-                modifier = Modifier.size(14.dp)
-            )
-            Text(
-                text = label,
-                fontSize = 11.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) selectedTextColor else TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
-            )
-            if (badgeCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(badgeColor)
-                        .padding(horizontal = 5.dp, vertical = 1.dp)
-                ) {
-                    Text(
-                        text = badgeCount.toString(),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black
-                    )
-                }
+                FriendsTab.STATEMENT -> StatementTabContent(
+                    selectedMonth = uiState.selectedMonth,
+                    receivable = uiState.receivableFromFriends,
+                    payable = uiState.payableToOthers,
+                    onPreviousMonth = { viewModel.previousMonth() },
+                    onNextMonth = { viewModel.nextMonth() },
+                    onCurrentMonth = { viewModel.goToCurrentMonth() }
+                )
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// 2. TAB 1: Aprovações de Cobrança Pendentes
-// -------------------------------------------------------------
 @Composable
 private fun ApprovalsTabContent(
-    groups: List<PendingChargeGroup>,
+    chargeGroups: List<PendingChargeGroup>,
+    friendRequests: List<FriendRequestItem>,
     cards: List<Card>,
     expandedGroupIds: Set<String>,
     onToggleExpand: (String) -> Unit,
-    onRespond: (PendingChargeGroup, Boolean) -> Unit
+    onRespondCharge: (PendingChargeGroup, Boolean) -> Unit,
+    onRespondFriendRequest: (String, Boolean) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (groups.isEmpty()) {
+        if (friendRequests.isNotEmpty()) {
             item {
-                Surface(
-                    color = DarkSurface,
-                    shape = RoundedCornerShape(16.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(Emerald500.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = Emerald400,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Text(
-                            text = "Nenhuma cobrança pendente",
-                            style = Typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Quando amigos cadastrarem compras feitas no cartão deles com a sua cota, elas aparecerão aqui para você aprovar antes de comprometer seu Saldo Livre.",
-                            style = Typography.bodySmall,
-                            color = TextSecondary,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
+                Text(
+                    text = "CONVITES DE AMIZADE RECEBIDOS (${friendRequests.size})",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Cyan400,
+                    letterSpacing = 0.8.sp,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
             }
-        } else {
-            item {
-                Surface(
-                    color = Amber500.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.25f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Amber400,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Ao aceitar, a sua cota atribuída entrará no cálculo das suas saídas comprometidas mês a mês, atualizando com precisão seu Saldo Livre.",
-                            style = Typography.bodySmall,
-                            color = Amber400,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-            }
-
-            items(
-                items = groups,
-                key = { it.id },
-                contentType = { "pending_charge_group" }
-            ) { group ->
-                val card = cards.find { it.id == group.cardId }
-                val isExpanded = expandedGroupIds.contains(group.id)
-
-                ChargeGroupCard(
-                    group = group,
-                    card = card,
-                    isExpanded = isExpanded,
-                    onToggleExpand = { onToggleExpand(group.id) },
-                    onAccept = { onRespond(group, true) },
-                    onReject = { onRespond(group, false) }
+            items(friendRequests, key = { it.friendshipId }) { req ->
+                FriendRequestCard(
+                    request = req,
+                    onAccept = { onRespondFriendRequest(req.friendshipId, true) },
+                    onReject = { onRespondFriendRequest(req.friendshipId, false) }
                 )
             }
         }
 
         item {
-            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "RATEIOS AGUARDANDO SEU ACEITE (${chargeGroups.size})",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (chargeGroups.isNotEmpty()) Amber400 else TextMuted,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.padding(top = if (friendRequests.isNotEmpty()) 8.dp else 0.dp, start = 4.dp)
+            )
+        }
+
+        if (chargeGroups.isEmpty()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = DarkSurface,
+                    border = BorderStroke(1.dp, DarkBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .background(Emerald500.copy(alpha = 0.14f), CircleShape)
+                                .border(1.dp, Emerald500.copy(alpha = 0.35f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VerifiedUser,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Text(
+                            text = "Nenhuma cobrança pendente!",
+                            style = Typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Quando um amigo dividir uma despesa à vista ou parcelada com você, ela aparecerá aqui para aprovação antes de afetar seu Saldo Livre.",
+                            style = Typography.bodySmall,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        } else {
+            items(chargeGroups, key = { it.id }) { group ->
+                ChargeGroupCard(
+                    group = group,
+                    cards = cards,
+                    isExpanded = expandedGroupIds.contains(group.id),
+                    onToggleExpand = { onToggleExpand(group.id) },
+                    onAccept = { onRespondCharge(group, true) },
+                    onReject = { onRespondCharge(group, false) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FriendRequestCard(
+    request: FriendRequestItem,
+    onAccept: () -> Unit,
+    onReject: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, Cyan500.copy(alpha = 0.35f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(Cyan500.copy(alpha = 0.16f), CircleShape)
+                        .border(1.dp, Cyan500.copy(alpha = 0.4f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PersonAdd,
+                        contentDescription = null,
+                        tint = Cyan400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = request.requesterName,
+                        style = Typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = request.requesterEmail,
+                        style = Typography.bodySmall,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = onReject,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Rose500.copy(alpha = 0.4f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose400),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Text("Recusar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                FilledTonalButton(
+                    onClick = onAccept,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Emerald500.copy(alpha = 0.2f),
+                        contentColor = Emerald400
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Text("Aceitar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }
@@ -446,218 +453,181 @@ private fun ApprovalsTabContent(
 @Composable
 private fun ChargeGroupCard(
     group: PendingChargeGroup,
-    card: Card?,
+    cards: List<Card>,
     isExpanded: Boolean,
     onToggleExpand: () -> Unit,
     onAccept: () -> Unit,
     onReject: () -> Unit
 ) {
-    val formattedFriendShare = String.format(Locale("pt", "BR"), "R$ %,.2f", group.friendShareAmount)
-    val formattedPerInstallment = String.format(Locale("pt", "BR"), "R$ %,.2f", group.perInstallmentFriendShare)
+    val cardName = group.cardId?.let { id -> cards.find { it.id == id }?.cardName }
 
     Surface(
+        shape = RoundedCornerShape(18.dp),
         color = DarkSurface,
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.35f)),
+        border = BorderStroke(1.dp, Amber500.copy(alpha = 0.35f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header: Description + Badges + Amount
+            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Text(
-                        text = group.baseDescription,
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-
+                Column(modifier = Modifier.weight(1f)) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (group.isInstallment) {
-                            Surface(
-                                color = Purple500.copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = "${group.installmentsCount}x Parcelas",
-                                    color = Purple400,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (group.isInstallment) Purple500.copy(alpha = 0.16f) else Amber500.copy(alpha = 0.16f),
+                                    CircleShape
                                 )
-                            }
-                        }
-
-                        Surface(
-                            color = if (group.friendSharePct < 100) Cyan500.copy(alpha = 0.2f) else Amber500.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(6.dp)
+                                .border(
+                                    1.dp,
+                                    if (group.isInstallment) Purple500.copy(alpha = 0.4f) else Amber500.copy(alpha = 0.4f),
+                                    CircleShape
+                                )
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = if (group.friendSharePct < 100) "Sua Cota: ${group.friendSharePct.toInt()}%" else "100% Para Você",
-                                color = if (group.friendSharePct < 100) Cyan400 else Amber400,
+                                text = if (group.isInstallment) "Parcelado (${group.installmentsCount}x)" else "À Vista",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                color = if (group.isInstallment) Purple400 else Amber400,
+                                style = LocalTextStyle.current.copy(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                )
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .background(Cyan500.copy(alpha = 0.14f), CircleShape)
+                                .border(1.dp, Cyan500.copy(alpha = 0.35f), CircleShape)
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Sua parte: ${group.friendSharePct.toInt()}%",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Cyan400,
+                                style = LocalTextStyle.current.copy(
+                                    platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                )
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = group.baseDescription,
+                        style = Typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+
+                    Text(
+                        text = buildString {
+                            append("Enviado por ${group.senderName}")
+                            if (!cardName.isNullOrBlank()) append(" • Cartão $cardName")
+                        },
+                        style = Typography.bodySmall,
+                        color = TextSecondary
+                    )
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = formattedFriendShare,
+                        text = FinanceEngine.formatCurrency(group.friendShareAmount),
                         style = Typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Amber400,
-                        maxLines = 1
+                        color = Amber400
                     )
-                    if (group.isInstallment) {
-                        Text(
-                            text = "${group.installmentsCount}x de $formattedPerInstallment",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextSecondary,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-
-            // Info Details: Dates, Card, Sender
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (group.isInstallment) {
-                        "Período: ${FinanceEngine.formatFullDate(group.firstDueDate)} até ${FinanceEngine.formatFullDate(group.lastDueDate)}"
-                    } else {
-                        "Vencimento: ${FinanceEngine.formatFullDate(group.firstDueDate)}"
-                    },
-                    fontSize = 11.sp,
-                    color = TextSecondary,
-                    maxLines = 1
-                )
-
-                if (card != null) {
-                    Text(text = "•", color = TextMuted)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.CreditCard, contentDescription = null, tint = Cyan400, modifier = Modifier.size(12.dp))
-                        Text(
-                            text = card.cardName,
-                            fontSize = 11.sp,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                if (group.senderName.isNotBlank()) {
-                    Text(text = "•", color = TextMuted)
                     Text(
-                        text = "Por: ${group.senderName}",
+                        text = "de ${FinanceEngine.formatCurrency(group.totalAmount)} total",
                         fontSize = 11.sp,
-                        color = Amber400,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = TextMuted
                     )
                 }
             }
 
-            // Expandable Schedule for Installments
+            // Resumo de parcelas (se parcelado)
             if (group.isInstallment) {
-                Row(
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { onToggleExpand() }
-                        .padding(vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .fillMaxWidth()
+                        .background(DarkBackground.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = Purple400,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = if (isExpanded) "Ocultar cronograma" else "Ver cronograma das ${group.installmentsCount} parcelas",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Purple400,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = isExpanded,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    Surface(
-                        color = DarkBackground.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        Text(
+                            text = "${group.installmentsCount}x de ${FinanceEngine.formatCurrency(group.perInstallmentFriendShare)}/mês",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Purple400
+                        )
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onToggleExpand() }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            group.items.forEach { itx ->
-                                val itxShare = FinanceEngine.friendShareOf(itx)
-                                val formattedItxShare = String.format(Locale("pt", "BR"), "R$ %,.2f", itxShare)
+                            Text(
+                                text = if (isExpanded) "Ocultar cronograma" else "Ver parcelas",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Cyan400
+                            )
+                            Icon(
+                                imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = Cyan400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(visible = isExpanded) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            HorizontalDivider(color = DarkBorder.copy(alpha = 0.6f))
+                            group.items.forEachIndexed { idx, tx ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Parcela ${itx.installmentNumber ?: 1}/${group.installmentsCount}",
+                                        text = "Parcela ${idx + 1}/${group.installmentsCount} • ${FinanceEngine.formatMonthLabel(tx.competenceMonth)}",
                                         fontSize = 11.sp,
-                                        color = TextSecondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
+                                        color = TextSecondary
                                     )
                                     Text(
-                                        text = FinanceEngine.formatFullDate(itx.dueDate),
-                                        fontSize = 11.sp,
-                                        color = TextMuted,
-                                        maxLines = 1,
-                                        modifier = Modifier.padding(horizontal = 8.dp)
-                                    )
-                                    Text(
-                                        text = formattedItxShare,
+                                        text = FinanceEngine.formatCurrency(FinanceEngine.friendShareOf(tx)),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Amber400,
-                                        maxLines = 1
+                                        color = TextPrimary
                                     )
                                 }
                             }
@@ -666,247 +636,161 @@ private fun ChargeGroupCard(
                 }
             }
 
-            HorizontalDivider(color = DarkBorder)
-
-            // Action Buttons: Recusar e Aceitar
+            // Botões de Decisão
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = if (group.isInstallment) "${group.installmentsCount} parcelas serão agendadas" else "Entra nas despesas do mês",
-                    fontSize = 10.sp,
-                    color = TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                OutlinedButton(
+                    onClick = onReject,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Rose500.copy(alpha = 0.4f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose400),
                     modifier = Modifier
                         .weight(1f)
-                        .padding(end = 8.dp)
-                )
+                        .height(42.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Recusar", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = onReject,
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Rose400),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Rose500.copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.heightIn(min = 32.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Recusar",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
-                        )
-                    }
-
-                    Button(
-                        onClick = onAccept,
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier.heightIn(min = 32.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Aceitar ($formattedFriendShare)",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                Button(
+                    onClick = onAccept,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Emerald500,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .height(42.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (group.isInstallment) "Aceitar (${group.installmentsCount}x)" else "Aceitar Rateio",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// 3. TAB 2: Amigos e Convites
-// -------------------------------------------------------------
 @Composable
 private fun FriendsTabContent(
-    activeFriends: List<FriendItem>,
-    pendingRequests: List<FriendRequestItem>,
-    isSendingInvite: Boolean,
+    friends: List<FriendItem>,
+    isSending: Boolean,
     onSendInvite: (String) -> Unit,
-    onRespondRequest: (String, Boolean) -> Unit,
-    onRemoveFriend: (FriendItem) -> Unit
+    onRemoveFriend: (String) -> Unit
 ) {
     var emailInput by remember { mutableStateOf("") }
-    val keyboardController = LocalSoftwareKeyboardController.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Invite Form Card
+        // Card de Adicionar Amigo (CircleShape search/invite bar)
         item {
             Surface(
+                shape = RoundedCornerShape(18.dp),
                 color = DarkSurface,
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                border = BorderStroke(1.dp, DarkBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.PersonAdd, contentDescription = null, tint = Purple400, modifier = Modifier.size(18.dp))
-                        Text(
-                            text = "Adicionar Novo Amigo por E-mail",
-                            style = Typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Text(
+                        text = "CONECTAR NOVO AMIGO POR E-MAIL",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Cyan400,
+                        letterSpacing = 0.6.sp
+                    )
+                    Text(
+                        text = "Conecte-se com amigos que usam o Saldo Livre para dividir contas e compras parceladas com aprovação transparente.",
+                        style = Typography.bodySmall,
+                        color = TextSecondary
+                    )
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedTextField(
                             value = emailInput,
                             onValueChange = { emailInput = it },
-                            placeholder = {
-                                Text(
-                                    "email.do.amigo@exemplo.com",
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                            placeholder = { Text("email@amigo.com", color = TextMuted, fontSize = 13.sp) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.AlternateEmail,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             },
                             singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = {
-                                if (emailInput.isNotBlank()) {
-                                    onSendInvite(emailInput.trim())
-                                    emailInput = ""
-                                    keyboardController?.hide()
-                                }
-                            }),
-                            modifier = Modifier.weight(1f),
+                            shape = CircleShape,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Email,
+                                imeAction = ImeAction.Send
+                            ),
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Purple400,
+                                focusedBorderColor = Cyan400,
                                 unfocusedBorderColor = DarkBorder,
+                                focusedContainerColor = DarkBackground,
+                                unfocusedContainerColor = DarkBackground,
                                 focusedTextColor = TextPrimary,
                                 unfocusedTextColor = TextPrimary
-                            )
+                            ),
+                            modifier = Modifier.weight(1f)
                         )
 
-                        Button(
+                        FilledTonalButton(
                             onClick = {
                                 if (emailInput.isNotBlank()) {
                                     onSendInvite(emailInput.trim())
                                     emailInput = ""
-                                    keyboardController?.hide()
                                 }
                             },
-                            enabled = emailInput.isNotBlank() && !isSendingInvite,
-                            colors = ButtonDefaults.buttonColors(containerColor = Purple500),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.heightIn(min = 50.dp)
+                            enabled = emailInput.isNotBlank() && !isSending,
+                            shape = CircleShape,
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Cyan500.copy(alpha = 0.2f),
+                                contentColor = Cyan400
+                            ),
+                            modifier = Modifier.height(52.dp)
                         ) {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isSendingInvite) "..." else "Convidar",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pending Received Requests
-        if (pendingRequests.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Convites Recebidos (${pendingRequests.size})",
-                    style = Typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Amber400,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            items(
-                items = pendingRequests,
-                key = { it.friendshipId },
-                contentType = { "pending_friend_request" }
-            ) { req ->
-                Surface(
-                    color = DarkSurface,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Amber500.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 8.dp)
-                        ) {
-                            Text(
-                                text = req.requesterName,
-                                style = Typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = req.requesterEmail,
-                                style = Typography.bodySmall,
-                                color = TextSecondary,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            TextButton(
-                                onClick = { onRespondRequest(req.friendshipId, false) },
-                                colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
-                            ) {
-                                Text(text = "Recusar", fontSize = 11.sp, maxLines = 1)
-                            }
-                            Button(
-                                onClick = { onRespondRequest(req.friendshipId, true) },
-                                colors = ButtonDefaults.buttonColors(containerColor = Emerald500),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.heightIn(min = 32.dp)
-                            ) {
-                                Text(text = "Aceitar", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                            if (isSending) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Cyan400
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.PersonAdd,
+                                    contentDescription = "Convidar",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Convidar", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -914,84 +798,91 @@ private fun FriendsTabContent(
             }
         }
 
-        // Active Friends List
         item {
             Text(
-                text = "Amigos Conectados (${activeFriends.size})",
-                style = Typography.titleSmall,
+                text = "CONEXÕES ATIVAS (${friends.size})",
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                color = TextMuted,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier.padding(start = 4.dp)
             )
         }
 
-        if (activeFriends.isEmpty()) {
+        if (friends.isEmpty()) {
             item {
                 Surface(
+                    shape = RoundedCornerShape(18.dp),
                     color = DarkSurface,
-                    shape = RoundedCornerShape(14.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    border = BorderStroke(1.dp, DarkBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.Group, contentDescription = null, tint = TextMuted, modifier = Modifier.size(28.dp))
-                        Text(text = "Nenhum amigo conectado ainda", style = Typography.bodyMedium, color = TextSecondary)
-                        Text(text = "Convide amigos pelo formulário acima para dividir compras com agilidade.", fontSize = 11.sp, color = TextMuted)
+                        Icon(
+                            imageVector = Icons.Default.GroupAdd,
+                            contentDescription = null,
+                            tint = TextMuted,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = "Nenhum amigo conectado ainda",
+                            style = Typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Envie um convite pelo e-mail acima para começar a dividir despesas.",
+                            style = Typography.bodySmall,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }
         } else {
-            items(
-                items = activeFriends,
-                key = { it.friendshipId },
-                contentType = { "active_friend_item" }
-            ) { friend ->
+            items(friends, key = { it.friendshipId }) { friend ->
                 Surface(
+                    shape = RoundedCornerShape(16.dp),
                     color = DarkSurface,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                    border = BorderStroke(1.dp, DarkBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Purple500.copy(alpha = 0.2f)),
+                                    .size(42.dp)
+                                    .background(Cyan500.copy(alpha = 0.14f), CircleShape)
+                                    .border(1.dp, Cyan500.copy(alpha = 0.35f), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = friend.friendName.take(1).uppercase(),
-                                    fontWeight = FontWeight.Bold,
-                                    color = Purple400,
+                                    text = friend.friendName.take(2).uppercase(),
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Cyan400,
                                     fontSize = 14.sp
                                 )
                             }
-
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = friend.friendName,
-                                    style = Typography.bodyMedium,
+                                    style = Typography.bodyLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary,
                                     maxLines = 1,
@@ -1001,181 +892,181 @@ private fun FriendsTabContent(
                                     text = friend.friendEmail,
                                     style = Typography.bodySmall,
                                     color = TextSecondary,
-                                    fontSize = 11.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Surface(
-                                color = Emerald500.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                ) {
-                                    Icon(imageVector = Icons.Default.Verified, contentDescription = null, tint = Emerald400, modifier = Modifier.size(10.dp))
-                                    Text(
-                                        text = "Conectado",
-                                        fontSize = 10.sp,
-                                        color = Emerald400,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-
-                            IconButton(
-                                onClick = { onRemoveFriend(friend) },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Remover",
-                                    tint = Rose400.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+                        IconButton(onClick = { onRemoveFriend(friend.friendshipId) }) {
+                            Icon(
+                                imageVector = Icons.Default.PersonRemove,
+                                contentDescription = "Remover Amigo",
+                                tint = Rose400,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
             }
         }
-
-        item {
-            Spacer(modifier = Modifier.height(24.dp))
-        }
     }
 }
 
-// -------------------------------------------------------------
-// 4. TAB 3: Balanço e Acertos
-// -------------------------------------------------------------
 @Composable
 private fun StatementTabContent(
-    receivableFromFriends: Double,
-    payableToOthers: Double
+    selectedMonth: String,
+    receivable: Double,
+    payable: Double,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onCurrentMonth: () -> Unit
 ) {
-    val formattedReceivable = String.format(Locale("pt", "BR"), "R$ %,.2f", receivableFromFriends)
-    val formattedPayable = String.format(Locale("pt", "BR"), "R$ %,.2f", payableToOthers)
+    val netBalance = FinanceEngine.round2(receivable - payable)
+    val netColor = if (netBalance > 0) Emerald400 else if (netBalance < 0) Rose400 else Cyan400
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Receivable Card
-        Surface(
-            color = DarkSurface,
-            shape = RoundedCornerShape(16.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Emerald500.copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth()
+        MonthSelector(
+            selectedMonth = selectedMonth,
+            onPreviousMonth = onPreviousMonth,
+            onNextMonth = onNextMonth,
+            onCurrentMonth = onCurrentMonth
+        )
+
+        // Hero Card: Saldo Líquido de Rateios no Mês
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+            border = BorderStroke(1.dp, netColor.copy(alpha = 0.4f))
         ) {
             Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(brush = StatementHeroBrush)
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Emerald500.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(imageVector = Icons.Default.ArrowDownward, contentDescription = null, tint = Emerald400, modifier = Modifier.size(18.dp))
-                    }
-                    Text(
-                        text = "A Receber de Amigos",
-                        style = Typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Emerald400,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
                 Text(
-                    text = formattedReceivable,
-                    style = Typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Emerald400,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = "SALDO LÍQUIDO DE RATEIOS NO MÊS",
+                    style = Typography.labelMedium,
+                    color = netColor,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
                 )
 
                 Text(
-                    text = "Compras efetuadas no seu cartão em benefício de amigos que já foram aceitas e aguardam acerto.",
+                    text = "${if (netBalance > 0) "+" else ""}${FinanceEngine.formatCurrency(netBalance)}",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = netColor
+                )
+
+                Text(
+                    text = when {
+                        netBalance > 0 -> "Seus amigos têm mais reembolsos a fazer para você neste mês."
+                        netBalance < 0 -> "Você possui mais valores a reembolsar para amigos/parceiro neste mês."
+                        else -> "Seus rateios estão perfeitamente equilibrados neste mês."
+                    },
                     style = Typography.bodySmall,
-                    color = TextSecondary,
-                    fontSize = 11.sp
+                    color = TextSecondary
                 )
             }
         }
 
-        // Payable Card
-        Surface(
-            color = DarkSurface,
-            shape = RoundedCornerShape(16.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Rose500.copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth()
+        // Cards detalhados: A Receber vs A Pagar
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = DarkSurface,
+                border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.35f)),
+                modifier = Modifier.weight(1f)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Rose500.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.ArrowUpward, contentDescription = null, tint = Rose400, modifier = Modifier.size(18.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.CallReceived,
+                            contentDescription = null,
+                            tint = Emerald400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "A RECEBER",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Emerald400,
+                            letterSpacing = 0.6.sp
+                        )
                     }
                     Text(
-                        text = "A Pagar para Amigos",
-                        style = Typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = Rose400,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        text = FinanceEngine.formatCurrency(receivable),
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Emerald400
+                    )
+                    Text(
+                        text = "Cotas de amigos em compras pagas por você",
+                        fontSize = 11.sp,
+                        color = TextSecondary
                     )
                 }
+            }
 
-                Text(
-                    text = formattedPayable,
-                    style = Typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Rose400,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Text(
-                    text = "Compras realizadas em cartões de amigos aceitas por você para pagamento no mês de competência.",
-                    style = Typography.bodySmall,
-                    color = TextSecondary,
-                    fontSize = 11.sp
-                )
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = DarkSurface,
+                border = BorderStroke(1.dp, Rose500.copy(alpha = 0.35f)),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.CallMade,
+                            contentDescription = null,
+                            tint = Rose400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "EU DEVO",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Rose400,
+                            letterSpacing = 0.6.sp
+                        )
+                    }
+                    Text(
+                        text = FinanceEngine.formatCurrency(payable),
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Rose400
+                    )
+                    Text(
+                        text = "Sua cota em compras pagas por outros",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                }
             }
         }
     }

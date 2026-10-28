@@ -241,10 +241,9 @@ export function stripInstallmentSuffix(desc?: string): string {
   return desc.replace(/\s*\(\d+\/\d+\)\s*$/, '').trim()
 }
 
-/** Formata a descrição da parcela com a numeração correspondente (ex: "Celular (3/10)") */
-export function formatInstallmentDesc(baseDesc: string | undefined, num: number, total: number): string {
-  const clean = stripInstallmentSuffix(baseDesc)
-  return clean ? `${clean} (${num}/${total})` : `(${num}/${total})`
+/** Retorna a descrição limpa da parcela sem o número embutido, pois a tag visual de parcela já é exibida na interface */
+export function formatInstallmentDesc(baseDesc: string | undefined, _num: number, _total: number): string {
+  return stripInstallmentSuffix(baseDesc)
 }
 
 export function formatCreatedAt(timestamp?: number): string {

@@ -244,8 +244,7 @@ object FinanceEngine {
      * Formata a descrição da parcela com a numeração correspondente (ex: "Celular (3/10)").
      */
     fun formatInstallmentDesc(baseDesc: String?, num: Int, total: Int): String {
-        val clean = stripInstallmentSuffix(baseDesc)
-        return if (clean.isNotBlank()) "$clean ($num/$total)" else "($num/$total)"
+        return stripInstallmentSuffix(baseDesc)
     }
 
     fun shiftMonth(monthKey: String, delta: Int): String {
@@ -1758,7 +1757,7 @@ object FinanceEngine {
 
     /**
      * Projeta os próximos N meses com base nas transações existentes e moldes de contas ativas,
-     * espelhando projectFutureMonths de finance.ts na web.
+     * espelhando projectFutureMonths de finance.ts na web (padrão 12 meses).
      */
     fun projectFutureMonths(
         all: List<Transaction>,
@@ -1766,31 +1765,122 @@ object FinanceEngine {
         profile: UserProfile?,
         uid: String,
         startMonthKey: String,
-        count: Int = 6
+        count: Int = 12,
+        cards: List<Card> = emptyList()
     ): List<FutureMonthProjection> {
         val projections = mutableListOf<FutureMonthProjection>()
+        val cardsMap = cards.associateBy { it.id }
 
         for (i in 0 until count) {
             val monthKey = shiftMonth(startMonthKey, i)
             val label = formatMonthLabel(monthKey)
             val dim = daysInMonth(monthKey)
 
-            val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
+            val monthTxs = all.filter {
+                it.competenceMonth == monthKey && it.visibleToUids.contains(uid) && it.reserveCardId == null
+            }
 
             var projectedIncome = 0.0
             var projectedExpense = 0.0
+            var invoiceExpense = 0.0
+            var fixedBillsExpense = 0.0
+            var variableAccountExpense = 0.0
             var incomeCount = 0
             var expenseCount = 0
 
-            // 1. Sempre inclui transações reais agendadas para aquele mês (ex: parcelas de compras com cartão)
+            data class CatAcc(
+                var amount: Double = 0.0,
+                var invoiceAmount: Double = 0.0,
+                var accountAmount: Double = 0.0,
+                var fixedBillAmount: Double = 0.0,
+                var count: Int = 0
+            )
+            val catMap = mutableMapOf<String, CatAcc>()
+            val items = mutableListOf<ProjectedMonthItem>()
+
+            fun addCat(category: String, impact: Double, bucket: String) {
+                if (impact <= 0.0) return
+                val cur = catMap.getOrPut(category) { CatAcc() }
+                cur.amount = round2(cur.amount + impact)
+                when (bucket) {
+                    "invoice" -> cur.invoiceAmount = round2(cur.invoiceAmount + impact)
+                    "fixed_bill" -> cur.fixedBillAmount = round2(cur.fixedBillAmount + impact)
+                    else -> cur.accountAmount = round2(cur.accountAmount + impact)
+                }
+                cur.count += 1
+            }
+
+            // 1. Transações reais agendadas para aquele mês (parcelas de compras com cartão, fatura, Pix/débito/boleto)
             for (t in monthTxs) {
                 val impact = impactFor(t, uid, all)
+                val isCard = t.paymentMethod == PaymentMethod.CREDIT_CARD || !t.cardId.isNullOrBlank()
+                val cardObj = t.cardId?.let { cardsMap[it] }
+
                 if (t.type == TransactionType.INCOME) {
-                    projectedIncome += impact
-                    incomeCount++
-                } else {
+                    if (isCard) {
+                        projectedExpense = max(0.0, projectedExpense - impact)
+                        invoiceExpense = max(0.0, invoiceExpense - impact)
+                    } else if (impact > 0.0) {
+                        projectedIncome += impact
+                        incomeCount++
+                        items.add(
+                            ProjectedMonthItem(
+                                id = t.id,
+                                description = t.description,
+                                amount = effectiveAmount(t),
+                                myImpact = impact,
+                                category = t.category,
+                                subcategory = t.subcategory,
+                                dueDate = t.dueDate,
+                                type = TransactionType.INCOME,
+                                paymentMethod = t.paymentMethod,
+                                cardId = t.cardId,
+                                cardName = cardObj?.cardName,
+                                origin = "income",
+                                status = t.status.value,
+                                isRecurringProjection = false
+                            )
+                        )
+                    }
+                } else if (impact != 0.0) {
                     projectedExpense += impact
                     expenseCount++
+
+                    val isFixedTx = !t.recurringBillId.isNullOrBlank() || t.status == TransactionStatus.ESTIMATED
+                    if (isCard) {
+                        invoiceExpense += impact
+                        addCat(t.category, impact, "invoice")
+                    } else if (isFixedTx) {
+                        fixedBillsExpense += impact
+                        addCat(t.category, impact, "fixed_bill")
+                    } else {
+                        variableAccountExpense += impact
+                        addCat(t.category, impact, "account")
+                    }
+
+                    val instInfo = if ((t.installmentsTotal ?: 0) > 1) {
+                        "${t.installmentNumber ?: 1}/${t.installmentsTotal}"
+                    } else null
+
+                    items.add(
+                        ProjectedMonthItem(
+                            id = t.id,
+                            description = t.description,
+                            amount = effectiveAmount(t),
+                            myImpact = impact,
+                            category = t.category,
+                            subcategory = t.subcategory,
+                            dueDate = t.dueDate,
+                            type = TransactionType.EXPENSE,
+                            paymentMethod = if (isCard) PaymentMethod.CREDIT_CARD else t.paymentMethod,
+                            cardId = t.cardId,
+                            cardName = cardObj?.cardName,
+                            origin = if (isCard) "invoice" else if (isFixedTx) "fixed_bill" else "debit_pix",
+                            status = t.status.value,
+                            isRecurringProjection = false,
+                            installmentInfo = instInfo
+                        )
+                    )
                 }
             }
 
@@ -1800,11 +1890,30 @@ object FinanceEngine {
             if (!hasSalary && profile != null && profile.monthlyIncome > 0) {
                 projectedIncome += profile.monthlyIncome
                 incomeCount++
+                items.add(
+                    ProjectedMonthItem(
+                        id = "proj_salary_${uid}_$monthKey",
+                        description = "Salário Base",
+                        amount = profile.monthlyIncome,
+                        myImpact = profile.monthlyIncome,
+                        category = "Salário & Remuneração",
+                        subcategory = "Salário Principal",
+                        dueDate = dateInMonth(monthKey, 5),
+                        type = TransactionType.INCOME,
+                        paymentMethod = PaymentMethod.PIX,
+                        cardId = null,
+                        cardName = null,
+                        origin = "income",
+                        status = "projected_recurring",
+                        isRecurringProjection = true
+                    )
+                )
             }
 
             var ungeneratedCount = 0
             for (bill in bills.filter { it.active && it.ownerUid == uid }) {
                 if (monthTxs.any { it.recurringBillId == bill.id }) continue
+                if (findMatchingManualBill(monthTxs, monthKey, bill) != null) continue
 
                 if (!bill.startMonth.isNullOrBlank() && monthKey < bill.startMonth) continue
                 if (!bill.endMonth.isNullOrBlank() && monthKey > bill.endMonth) continue
@@ -1813,13 +1922,66 @@ object FinanceEngine {
                 val estimate = estimateRecurring(bill, all, monthKey)
                 val amount = estimate.amount
                 val myFraction = if (bill.splitType == SplitType.SPLIT_50) round2(amount / 2.0) else amount
+                val effMethod = bill.paymentMethod ?: if (bill.type == TransactionType.INCOME) {
+                    PaymentMethod.PIX
+                } else if (!bill.cardId.isNullOrBlank()) {
+                    PaymentMethod.CREDIT_CARD
+                } else {
+                    PaymentMethod.BILL
+                }
+                val isCardBill = effMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank()
+                val cardObj = bill.cardId?.let { cardsMap[it] }
+                val dueStr = if (cardObj != null) dateInMonth(monthKey, cardObj.dueDay) else dateInMonth(monthKey, bill.dueDay)
 
                 if (bill.type == TransactionType.INCOME) {
                     projectedIncome += myFraction
                     incomeCount++
+                    items.add(
+                        ProjectedMonthItem(
+                            id = "proj_bill_${bill.id}_$monthKey",
+                            description = bill.description,
+                            amount = amount,
+                            myImpact = myFraction,
+                            category = bill.category.ifBlank { "Receita" },
+                            subcategory = bill.subcategory,
+                            dueDate = dueStr,
+                            type = TransactionType.INCOME,
+                            paymentMethod = effMethod,
+                            cardId = bill.cardId,
+                            cardName = cardObj?.cardName,
+                            origin = "income",
+                            status = "projected_recurring",
+                            isRecurringProjection = true
+                        )
+                    )
                 } else {
                     projectedExpense += myFraction
                     expenseCount++
+                    if (isCardBill) {
+                        invoiceExpense += myFraction
+                        addCat(bill.category, myFraction, "invoice")
+                    } else {
+                        fixedBillsExpense += myFraction
+                        addCat(bill.category, myFraction, "fixed_bill")
+                    }
+                    items.add(
+                        ProjectedMonthItem(
+                            id = "proj_bill_${bill.id}_$monthKey",
+                            description = bill.description,
+                            amount = amount,
+                            myImpact = myFraction,
+                            category = bill.category,
+                            subcategory = bill.subcategory,
+                            dueDate = dueStr,
+                            type = TransactionType.EXPENSE,
+                            paymentMethod = if (isCardBill) PaymentMethod.CREDIT_CARD else effMethod,
+                            cardId = bill.cardId,
+                            cardName = cardObj?.cardName,
+                            origin = if (isCardBill) "invoice" else "fixed_bill",
+                            status = "projected_recurring",
+                            isRecurringProjection = true
+                        )
+                    )
                 }
             }
 
@@ -1827,8 +1989,26 @@ object FinanceEngine {
 
             projectedIncome = round2(projectedIncome)
             projectedExpense = round2(projectedExpense)
+            invoiceExpense = round2(invoiceExpense)
+            fixedBillsExpense = round2(fixedBillsExpense)
+            variableAccountExpense = round2(variableAccountExpense)
             val projectedFreeBalance = round2(projectedIncome - projectedExpense)
             val projectedDailyLimit = if (dim > 0) round2(projectedFreeBalance / dim.toDouble()) else null
+
+            val byCategory = catMap.entries
+                .map { (cat, acc) ->
+                    ProjectedCategoryItem(
+                        category = cat,
+                        amount = acc.amount,
+                        invoiceAmount = acc.invoiceAmount,
+                        accountAmount = acc.accountAmount,
+                        fixedBillAmount = acc.fixedBillAmount,
+                        count = acc.count
+                    )
+                }
+                .sortedByDescending { it.amount }
+
+            val sortedItems = items.sortedBy { it.dueDate }
 
             projections.add(
                 FutureMonthProjection(
@@ -1841,7 +2021,12 @@ object FinanceEngine {
                     projectedDailyLimit = projectedDailyLimit,
                     isGenerated = isGenerated,
                     incomeCount = incomeCount,
-                    expenseCount = expenseCount
+                    expenseCount = expenseCount,
+                    invoiceExpense = invoiceExpense,
+                    fixedBillsExpense = fixedBillsExpense,
+                    variableAccountExpense = variableAccountExpense,
+                    byCategory = byCategory,
+                    items = sortedItems
                 )
             )
         }

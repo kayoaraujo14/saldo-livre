@@ -1,9 +1,10 @@
 /**
  * Implementação das ferramentas do agente (executadas pelo motor do Google Gemini).
  */
-import type { Allocation, Card, Category, FutureMonthProjection, MonthClosure, NewTransaction, PaymentMethod, PendingBatchTransaction, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
+import type { Allocation, Card, Category, EstimationRule, MonthClosure, NewTransaction, PaymentMethod, PendingBatchTransaction, RecurringBill, SplitType, Transaction, TransactionStatus, UserProfile } from '@/types'
 import { CATEGORIES, INCOME_CATEGORIES, getCategoryDetail } from '@/types'
 import { extractCounterparty } from './pdfParser'
+import { buildCardInvoice } from './invoices'
 import {
   amountPatch,
   buildSplit,
@@ -13,6 +14,8 @@ import {
   computeSummary,
   detectSplit,
   effectiveAmount,
+  estimateRecurring,
+  findMatchingManualBill,
   getReserveInfo,
   guessCategoryAndSubcategory,
   impactFor,
@@ -1771,9 +1774,14 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   const pessoa = typeof args.pessoa === 'string' ? args.pessoa.trim() : typeof args.terceiro === 'string' ? args.terceiro.trim() : ''
   const apenasTerceiros = args.apenasTerceiros === true || args.terceiros === true || /^(terceiro|terceiros|amigos|amigo)$/i.test(pessoa)
   const cartaoFiltro = typeof args.cartao === 'string' ? args.cartao.trim() : ''
+  const metodoPagamentoFiltro = typeof args.metodoPagamento === 'string' ? args.metodoPagamento.trim().toLowerCase() : ''
   const tipoFiltro = typeof args.tipo === 'string' ? args.tipo.trim().toLowerCase() : ''
   const status = typeof args.status === 'string' ? args.status : ''
-  const limite = typeof args.limite === 'number' && args.limite > 0 ? args.limite : 25
+  const incluirRecorrentesProjetadas =
+    typeof args.incluirRecorrentesProjetadas === 'boolean'
+      ? args.incluirRecorrentesProjetadas
+      : Boolean(mes && mes >= currentMonthKey())
+  const limite = typeof args.limite === 'number' && args.limite > 0 ? args.limite : 40
 
   const cards = env.getCards()
   const cardsMap = new Map(cards.map((c) => [c.id, c]))
@@ -1850,6 +1858,19 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
     // 6. Status
     if (status && t.status !== status) return false
 
+    // 6.5. Meio de Pagamento / Canal (Fatura vs Débito/Pix/Boleto)
+    if (metodoPagamentoFiltro) {
+      const isCard = t.paymentMethod === 'credit_card' || Boolean(t.cardId)
+      if (metodoPagamentoFiltro === 'credit_card') {
+        if (!isCard) return false
+      } else if (metodoPagamentoFiltro === 'extrato_conta') {
+        if (isCard) return false
+      } else {
+        if (isCard && metodoPagamentoFiltro !== 'credit_card') return false
+        if (t.paymentMethod !== metodoPagamentoFiltro) return false
+      }
+    }
+
     // 7. Termo de busca livre
     if (termo && !matchesSearch(t.description, termo) && !(t.subcategory && matchesSearch(t.subcategory, termo))) return false
 
@@ -1898,13 +1919,135 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
     return true
   })
 
+  // Se houver um mês filtrado e incluirRecorrentesProjetadas estiver ativo, inclui também as contas fixas não lançadas que atendam aos filtros
+  const projectedRecurringItems: Array<{
+    id: string
+    descricao: string
+    valorTotal: number
+    meuImpacto: number
+    impactoTerceiros: number
+    dataVencimento: string
+    dataCompra: string
+    mesCompetencia: string
+    categoria: string
+    subcategoria: string | null
+    cartao: string | null
+    metodoPagamento: string
+    canal: string
+    status: string
+    tipo: string
+    divisao: string
+    nomeAmigo: null
+    detalhesDivisao: string
+    ehContaFixaProjetada: boolean
+  }> = []
+
+  if (mes && incluirRecorrentesProjetadas && !status) {
+    const monthTxs = all.filter((t) => t.competenceMonth === mes)
+    const activeBills = (env.getRecurring?.() || []).filter((b) => b.active && b.ownerUid === env.me.uid)
+    for (const bill of activeBills) {
+      if (bill.startMonth && mes < bill.startMonth) continue
+      if (bill.endMonth && mes > bill.endMonth) continue
+      if (monthTxs.some((t) => t.recurringBillId === bill.id)) continue
+      if (findMatchingManualBill(monthTxs, mes, bill)) continue
+
+      const bType = bill.type ?? 'expense'
+      if (tipoFiltro && tipoFiltro !== 'all' && bType !== tipoFiltro) continue
+      if (!tipoFiltro && (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria) && bType !== 'expense' && categoria !== 'Receita') continue
+      if (categoria && bill.category !== categoria) continue
+      if (subcategoria && (!bill.subcategory || !normalize(bill.subcategory).includes(normalize(subcategoria)))) continue
+      if (termo && !matchesSearch(bill.description, termo)) continue
+      if (apenasTerceiros && bill.splitType !== 'split_50') continue
+      if (somenteMinhas && bill.splitType === 'split_50') continue
+
+      const effMethod = bill.paymentMethod ?? (bType === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
+      const isCard = effMethod === 'credit_card' || Boolean(bill.cardId)
+      const cardObj = bill.cardId ? cardsMap.get(bill.cardId) : undefined
+
+      if (cartaoFiltro) {
+        if (matchedCard) {
+          if (bill.cardId !== matchedCard.id) continue
+        } else if (!cardObj || !matchesSearch(cardObj.cardName, cartaoFiltro)) {
+          continue
+        }
+      }
+      if (metodoPagamentoFiltro) {
+        if (metodoPagamentoFiltro === 'credit_card' && !isCard) continue
+        if (metodoPagamentoFiltro === 'extrato_conta' && isCard) continue
+        if (metodoPagamentoFiltro !== 'credit_card' && metodoPagamentoFiltro !== 'extrato_conta' && effMethod !== metodoPagamentoFiltro) continue
+      }
+
+      const { amount } = estimateRecurring(bill, all, mes)
+      const myImp = bill.splitType === 'split_50' ? round2(amount / 2) : amount
+      const thirdImp = round2(Math.max(0, amount - myImp))
+      const dueStr = cardObj ? dateInMonth(mes, cardObj.dueDay) : dateInMonth(mes, bill.dueDay)
+
+      projectedRecurringItems.push({
+        id: `proj_${bill.id}_${mes}`,
+        descricao: `${bill.description} (Conta Fixa Prevista)`,
+        valorTotal: amount,
+        meuImpacto: myImp,
+        impactoTerceiros: thirdImp,
+        dataVencimento: dueStr,
+        dataCompra: dueStr,
+        mesCompetencia: mes,
+        categoria: bill.category,
+        subcategoria: bill.subcategory || null,
+        cartao: cardObj ? cardObj.cardName : null,
+        metodoPagamento: isCard ? 'credit_card' : effMethod,
+        canal: isCard ? `Fatura Cartão ${cardObj?.cardName || ''}`.trim() : effMethod === 'debit' ? 'Débito' : effMethod === 'bill' ? 'Boleto' : 'PIX',
+        status: 'projected_recurring',
+        tipo: bType,
+        divisao: bill.splitType || 'mine',
+        nomeAmigo: null,
+        detalhesDivisao: bill.splitType === 'split_50' ? `Dividido 50/50 (Sua parte: ${money(myImp)})` : '100% do usuário',
+        ehContaFixaProjetada: true,
+      })
+    }
+  }
+
   // Ordena por data de vencimento / createdAt mais recente primeiro
   filtered.sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '') || (b.createdAt || 0) - (a.createdAt || 0))
 
   const targets = filtered.slice(0, limite)
-  const somaTotal = filtered.reduce((acc, t) => acc + (t.totalAmount || 0), 0)
-  const somaMeuImpacto = filtered.reduce((acc, t) => acc + impactFor(t, env.me.uid, all), 0)
+  const somaRealTotal = filtered.reduce((acc, t) => acc + (t.totalAmount || 0), 0)
+  const somaRealImpacto = filtered.reduce((acc, t) => acc + impactFor(t, env.me.uid, all), 0)
+  const somaRecorrentesTotal = projectedRecurringItems.reduce((acc, i) => acc + i.valorTotal, 0)
+  const somaRecorrentesImpacto = projectedRecurringItems.reduce((acc, i) => acc + i.meuImpacto, 0)
+
+  const somaTotal = somaRealTotal + somaRecorrentesTotal
+  const somaMeuImpacto = somaRealImpacto + somaRecorrentesImpacto
   const somaTerceiros = Math.max(0, somaTotal - somaMeuImpacto)
+
+  // Separação por Canal: Fatura de Cartão vs Extrato Conta Corrente (Pix, Débito, Boleto)
+  let totalFaturasCartao = 0
+  let totalExtratoConta = 0
+  let totalPix = 0
+  let totalDebito = 0
+  let totalBoleto = 0
+
+  for (const t of filtered) {
+    const imp = impactFor(t, env.me.uid, all)
+    const isCard = t.paymentMethod === 'credit_card' || Boolean(t.cardId)
+    if (isCard) {
+      totalFaturasCartao += imp
+    } else {
+      totalExtratoConta += imp
+      if (t.paymentMethod === 'debit') totalDebito += imp
+      else if (t.paymentMethod === 'bill') totalBoleto += imp
+      else totalPix += imp
+    }
+  }
+  for (const r of projectedRecurringItems) {
+    if (r.metodoPagamento === 'credit_card') {
+      totalFaturasCartao += r.meuImpacto
+    } else {
+      totalExtratoConta += r.meuImpacto
+      if (r.metodoPagamento === 'debit') totalDebito += r.meuImpacto
+      else if (r.metodoPagamento === 'bill') totalBoleto += r.meuImpacto
+      else totalPix += r.meuImpacto
+    }
+  }
 
   // Agrupamento por subcategoria para relatórios analíticos ricos
   const subcategoryTotals: Record<string, { total: number; count: number; category: string }> = {}
@@ -1995,6 +2138,7 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
       detalheDivisao = t.allocations.map((a) => `${a.name}: ${money(a.amount)}`).join(' | ')
     }
 
+    const isCard = t.paymentMethod === 'credit_card' || Boolean(t.cardId)
     return {
       id: t.id,
       descricao: t.description,
@@ -2007,14 +2151,24 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
       categoria: t.category,
       subcategoria: t.subcategory || null,
       cartao: cardObj ? cardObj.cardName : null,
-      metodoPagamento: t.paymentMethod,
+      metodoPagamento: isCard ? 'credit_card' : t.paymentMethod,
+      canal: isCard
+        ? `Fatura Cartão ${cardObj?.cardName || ''}`.trim()
+        : t.paymentMethod === 'debit'
+          ? 'Débito'
+          : t.paymentMethod === 'bill'
+            ? 'Boleto'
+            : 'PIX',
       status: t.status,
       tipo: t.type,
       divisao: t.splitType || 'mine',
       nomeAmigo: t.assignedFriendName || null,
       detalhesDivisao: detalheDivisao,
+      ehContaFixaProjetada: false,
     }
   })
+
+  const allItemsCombined = [...items, ...projectedRecurringItems]
 
   // Título e linhas do ActionCard dinâmicos e elegantes
   let reportTitle = `Consulta: ${filtered.length} lançamento(s)`
@@ -2069,16 +2223,25 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
   return {
     response: {
       ok: true,
-      totalEncontrados: filtered.length,
+      totalEncontrados: filtered.length + projectedRecurringItems.length,
       somaTotal: round2(somaTotal),
       somaMeuImpacto: round2(somaMeuImpacto),
       somaTerceiros: round2(somaTerceiros),
+      resumoCanaisPagamento: {
+        totalFaturasCartao: round2(totalFaturasCartao),
+        totalExtratoConta: round2(totalExtratoConta),
+        detalheExtrato: {
+          pix: round2(totalPix),
+          debito: round2(totalDebito),
+          boleto: round2(totalBoleto),
+        },
+      },
       cartaoReferenciado,
       porSubcategoria,
       porPessoa,
       porCartao,
-      exibindoQuantidade: items.length,
-      transacoes: items,
+      exibindoQuantidade: allItemsCombined.length,
+      transacoes: allItemsCombined,
     },
     action: {
       kind: 'report',
@@ -2091,27 +2254,88 @@ async function consultar(env: AgentEnv, args: Record<string, unknown>): Promise<
 async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise<ToolResult> {
   const all = env.getTransactions()
   const targetMonth = parseMonthKey(args?.mes) || env.monthKey
+  const countRaw = typeof args?.quantidadeMeses === 'number' ? Math.round(args.quantidadeMeses) : 1
+  const count = Math.min(12, Math.max(1, countRaw))
+  const cartaoFiltro = typeof args?.cartao === 'string' ? args.cartao.trim() : ''
   const closures = env.getClosures?.() || []
-  const s = computeSummary(all, env.me.uid, targetMonth, closures, env.getCards())
-  const { receivables, payables } = listReceivables(all, env.me.uid, targetMonth, env.getCards())
+  const cards = env.getCards()
+  const s = computeSummary(all, env.me.uid, targetMonth, closures, cards)
+  const { receivables, payables } = listReceivables(all, env.me.uid, targetMonth, cards)
   const monthTxs = all.filter((t) => t.competenceMonth === targetMonth && (t.visibleToUids || []).includes(env.me.uid))
 
   const isFutureMonth = targetMonth > currentMonthKey()
   const bills = env.getRecurring?.() || []
   const profile = env.getProfile?.() || null
 
-  let projectedFuture: FutureMonthProjection | null = null
-  if (isFutureMonth) {
-    const projections = projectFutureMonths({
-      all,
-      bills,
-      profile,
-      uid: env.me.uid,
-      startMonthKey: targetMonth,
-      count: 1,
+  const projections12 = projectFutureMonths({
+    all,
+    bills,
+    profile,
+    uid: env.me.uid,
+    startMonthKey: targetMonth,
+    count,
+    cards,
+  })
+  const projectedTarget = projections12[0] || null
+
+  // Detalhamento completo de Faturas por Cartão no targetMonth via buildCardInvoice
+  const faturasPorCartao = cards
+    .filter((c) => {
+      if (!cartaoFiltro) return true
+      return normalize(c.cardName).includes(normalize(cartaoFiltro)) || c.id === cartaoFiltro
     })
-    projectedFuture = projections[0] || null
-  }
+    .map((card) => {
+      const inv = buildCardInvoice(card, targetMonth, all, env.me.uid)
+      // Inclui assinaturas fixas vinculadas a este cartão que ainda não foram lançadas no mês
+      const unlaunchedCardBills = (projectedTarget?.items || []).filter(
+        (i) => i.isRecurringProjection && i.cardId === card.id && i.type === 'expense',
+      )
+      const unlaunchedTotal = round2(unlaunchedCardBills.reduce((acc, b) => acc + b.myImpact, 0))
+      return {
+        cartaoId: card.id,
+        cartaoNome: card.cardName,
+        titular: card.ownerName,
+        dataFechamento: inv.closingDate,
+        dataVencimento: inv.dueDate,
+        statusFatura: inv.status,
+        totalBrutoFatura: round2(inv.total + unlaunchedTotal),
+        creditosEstornos: inv.credits,
+        minhaParteFatura: round2(inv.myShare + unlaunchedTotal),
+        parteTerceirosFatura: inv.othersShare,
+        jaPagoFatura: inv.paidAmount,
+        emAbertoFatura: round2(inv.openAmount + unlaunchedTotal),
+        divisaoPorPessoa: inv.splitBreakdown,
+        gastosPorCategoriaNaFatura: inv.byCategory,
+        itensDaFatura: [
+          ...inv.items.map((t) => ({
+            id: t.id,
+            descricao: t.description,
+            valorTotal: effectiveAmount(t),
+            meuImpacto: round2(impactFor(t, env.me.uid, all)),
+            categoria: t.category,
+            subcategoria: t.subcategory || null,
+            vencimento: t.dueDate,
+            status: t.status,
+            parcela:
+              t.installmentsTotal && t.installmentsTotal > 1
+                ? `${t.installmentNumber || 1}/${t.installmentsTotal}`
+                : null,
+          })),
+          ...unlaunchedCardBills.map((b) => ({
+            id: b.id,
+            descricao: `${b.description} (Assinatura Fixa Prevista)`,
+            valorTotal: b.amount,
+            meuImpacto: b.myImpact,
+            categoria: b.category,
+            subcategoria: b.subcategory || null,
+            vencimento: b.dueDate,
+            status: 'projected_recurring',
+            parcela: null,
+          })),
+        ],
+      }
+    })
+    .filter((f) => f.totalBrutoFatura > 0 || Boolean(cartaoFiltro))
 
   // Detalhamento de contas em aberto e compras de cartão pendentes
   const pendingCreditCardTxs = monthTxs
@@ -2120,7 +2344,9 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
       descricao: t.description,
       status: 'Pendente na Fatura do Cartão',
       vencimento: t.dueDate,
-      cartao: t.cardId ? env.getCards().find((c) => c.id === t.cardId)?.cardName : undefined,
+      categoria: t.category,
+      subcategoria: t.subcategory || null,
+      cartao: t.cardId ? cards.find((c) => c.id === t.cardId)?.cardName : undefined,
       meuImpacto: impactFor(t, env.me.uid, all),
     }))
 
@@ -2130,7 +2356,22 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
       descricao: t.description,
       status: 'Estimado (Previsão Recorrente)',
       vencimento: t.dueDate,
+      categoria: t.category,
       meuImpacto: impactFor(t, env.me.uid, all),
+    }))
+
+  const unlaunchedFixedItems = (projectedTarget?.items || [])
+    .filter((i) => i.isRecurringProjection)
+    .map((i) => ({
+      descricao: i.description,
+      tipo: i.type,
+      categoria: i.category,
+      subcategoria: i.subcategory || null,
+      vencimento: i.dueDate,
+      metodoPagamento: i.paymentMethod,
+      cartao: i.cardName || null,
+      meuImpacto: i.myImpact,
+      status: 'Programado (Conta Fixa / Renda Ativa)',
     }))
 
   const open = monthTxs
@@ -2139,16 +2380,33 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
       descricao: t.description,
       status: t.status === 'estimated' ? 'Estimado' : 'Pendente (A Pagar na Fatura)',
       vencimento: t.dueDate,
+      categoria: t.category,
       meuImpacto: impactFor(t, env.me.uid, all),
     }))
   const reserves = monthTxs
     .filter((t) => t.reserveCardId && t.createdByUid === env.me.uid)
     .map((t) => ({ descricao: t.description, ...getReserveInfo(t, all) }))
 
-  const effectiveIncome = projectedFuture ? projectedFuture.projectedIncome : s.income
-  const effectiveExpense = projectedFuture ? projectedFuture.projectedExpense : (s.paid + s.committed)
-  const effectiveFreeBalance = projectedFuture ? projectedFuture.projectedFreeBalance : s.freeBalance
-  const effectiveDailyLimit = projectedFuture ? projectedFuture.projectedDailyLimit : s.dailyLimit
+  // Separação Canais de Pagamento no mês: Faturas de Cartão vs Débito/Pix/Boleto (Extrato)
+  const totalFaturasCartao = projectedTarget ? (projectedTarget.invoiceExpense || 0) : s.committedPending
+  const totalContasFixasForaCartao = projectedTarget ? (projectedTarget.fixedBillsExpense || 0) : s.committedEstimated
+  const totalAvulsosExtrato = projectedTarget ? (projectedTarget.variableAccountExpense || 0) : 0
+  const totalExtratoConta = round2(totalContasFixasForaCartao + totalAvulsosExtrato)
+
+  const effectiveIncome = isFutureMonth && projectedTarget ? projectedTarget.projectedIncome : Math.max(s.income, projectedTarget?.projectedIncome || 0)
+  const effectiveExpense = isFutureMonth && projectedTarget ? projectedTarget.projectedExpense : (s.paid + s.committed)
+  const effectiveFreeBalance = isFutureMonth && projectedTarget ? projectedTarget.projectedFreeBalance : s.freeBalance
+  const effectiveDailyLimit = isFutureMonth && projectedTarget ? projectedTarget.projectedDailyLimit : s.dailyLimit
+
+  // Categorias unificadas (somando itens da fatura + extrato + contas fixas previstas)
+  const gastosPorCategoriaDetalhado = projectedTarget?.byCategory || s.byCategory.map((c) => ({
+    category: c.category,
+    amount: c.amount,
+    invoiceAmount: 0,
+    accountAmount: c.amount,
+    fixedBillAmount: 0,
+    count: 1,
+  }))
 
   return {
     response: {
@@ -2156,6 +2414,7 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
       mes: monthLabel(targetMonth),
       competenceMonth: targetMonth,
       ehProjecaoFutura: isFutureMonth,
+      quantidadeMesesProjetados: count,
       receitas: effectiveIncome,
       jaPago: s.paid,
       comprasCartaoPendentes: s.committedPending,
@@ -2165,13 +2424,41 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
       saldoLivreReal: s.freeBalance,
       diasRestantes: s.daysRemaining,
       limiteDiarioSeguro: effectiveDailyLimit,
+      resumoCanaisPagamento: {
+        totalFaturasCartao: round2(totalFaturasCartao),
+        totalExtratoConta: round2(totalExtratoConta),
+        contasFixasBoletoPixDebito: round2(totalContasFixasForaCartao),
+        gastosAvulsosPixDebito: round2(totalAvulsosExtrato),
+      },
+      faturasPorCartao,
       resumoFaturaCartao: {
-        totalPendenteCartao: s.committedPending,
+        totalPendenteCartao: round2(totalFaturasCartao),
         quantidadeItensPendentes: pendingCreditCardTxs.length,
         itensPendentesFatura: pendingCreditCardTxs,
       },
-      gastosPorCategoria: s.byCategory,
+      gastosPorCategoria: gastosPorCategoriaDetalhado.map((c) => ({
+        category: c.category,
+        amount: c.amount,
+        noCartaoFatura: c.invoiceAmount,
+        noExtratoPixDebito: round2(c.accountAmount + c.fixedBillAmount),
+      })),
+      gastosPorCategoriaDetalhado,
       gastosPorSubcategoria: s.bySubcategory || [],
+      itensDoMes: projectedTarget?.items || [],
+      contasFixasProgramadasNaoLancadas: unlaunchedFixedItems,
+      projecaoFluxoMeses: projections12.map((p) => ({
+        mesKey: p.monthKey,
+        mesLabel: p.label,
+        entradasPrevistas: p.projectedIncome,
+        saidasPrevistas: p.projectedExpense,
+        faturasCartao: p.invoiceExpense || 0,
+        contasFixasExtrato: p.fixedBillsExpense || 0,
+        avulsosPixDebito: p.variableAccountExpense || 0,
+        saldoLivreProjetado: p.projectedFreeBalance,
+        limiteDiarioSeguro: p.projectedDailyLimit,
+        porCategoria: p.byCategory || [],
+        quantidadeItens: (p.items || []).length,
+      })),
       totalInvestido: s.totalInvested || 0,
       totalInvestidoAcumulado: s.totalInvestedAccumulated || 0,
       investimentosPorClasse: s.byInvestmentSubcategory || [],
@@ -2187,12 +2474,17 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
     },
     action: {
       kind: 'report',
-      title: isFutureMonth ? `Projeção de ${monthLabel(targetMonth)}` : `Resumo de ${monthLabel(targetMonth)}`,
+      title:
+        count > 1
+          ? `Projeção de Fluxo (${count} Meses a partir de ${monthLabel(targetMonth)})`
+          : isFutureMonth
+            ? `Projeção de ${monthLabel(targetMonth)}`
+            : `Resumo de ${monthLabel(targetMonth)}`,
       lines: [
         { label: isFutureMonth ? 'Saldo Livre Previsto' : 'Saldo Livre Real', value: money(effectiveFreeBalance), tone: effectiveFreeBalance >= 0 ? 'positive' : 'negative' },
         { label: 'Receitas Previstas', value: money(effectiveIncome), tone: 'positive' },
-        { label: 'Fatura Cartão (Pendente)', value: money(s.committedPending) },
-        { label: 'Contas Estimadas', value: money(s.committedEstimated) },
+        { label: 'Faturas de Cartão', value: money(totalFaturasCartao) },
+        { label: 'Extrato (Fixas + Pix/Débito)', value: money(totalExtratoConta) },
         { label: 'Total Comprometido', value: money(effectiveExpense) },
       ],
     },
@@ -2201,20 +2493,55 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
 
 async function gerenciarCartoes(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
   const acao = String(args.acao || 'listar')
-  if (acao === 'listar') {
-    const cartoes = env.getCards().map((c) => ({
-      id: c.id,
-      nome: c.cardName,
-      titular: c.ownerName,
-      diaFechamento: c.closingDay,
-      diaVencimento: c.dueDay
-    }))
+  const cards = env.getCards()
+  const all = env.getTransactions()
+  const targetMonth = parseMonthKey(args.mes) || env.monthKey
+
+  if (acao === 'listar' || acao === 'detalhar_fatura') {
+    const filtroNome = typeof args.nome === 'string' ? args.nome.trim() : ''
+    const filtroId = typeof args.id === 'string' ? args.id.trim() : ''
+    const selectedCards = cards.filter((c) => {
+      if (filtroId && c.id === filtroId) return true
+      if (filtroNome && normalize(c.cardName).includes(normalize(filtroNome))) return true
+      return !filtroId && !filtroNome
+    })
+
+    const cartoes = selectedCards.map((c) => {
+      const inv = buildCardInvoice(c, targetMonth, all, env.me.uid)
+      return {
+        id: c.id,
+        nome: c.cardName,
+        titular: c.ownerName,
+        diaFechamento: c.closingDay,
+        diaVencimento: c.dueDay,
+        faturaMes: targetMonth,
+        statusFatura: inv.status,
+        totalFatura: inv.total,
+        minhaParte: inv.myShare,
+        parteTerceiros: inv.othersShare,
+        gastosPorCategoria: inv.byCategory,
+        divisaoParticipantes: inv.splitBreakdown,
+        itensFatura: inv.items.map((t) => ({
+          id: t.id,
+          descricao: t.description,
+          valor: effectiveAmount(t),
+          meuImpacto: round2(impactFor(t, env.me.uid, all)),
+          categoria: t.category,
+          subcategoria: t.subcategory || null,
+          vencimento: t.dueDate,
+          status: t.status,
+        })),
+      }
+    })
     return {
-      response: { ok: true, cartoes },
+      response: { ok: true, mesCompetencia: targetMonth, cartoes },
       action: {
         kind: 'report',
-        title: 'Cartões Listados',
-        lines: [{ label: 'Cartões Encontrados', value: cartoes.length.toString() }],
+        title: acao === 'detalhar_fatura' ? `Faturas de ${monthLabel(targetMonth)}` : 'Cartões e Faturas Listados',
+        lines: cartoes.map((c) => ({
+          label: `💳 ${c.nome} (Vence dia ${c.diaVencimento})`,
+          value: `${money(c.minhaParte)} (Total: ${money(c.totalFatura)})`,
+        })),
       },
     }
   }
@@ -2294,20 +2621,32 @@ async function gerenciarCartoes(env: AgentEnv, args: Record<string, unknown>): P
 
 async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
   const acao = String(args.acao || 'listar')
+  const cards = env.getCards()
   if (acao === 'listar') {
-    const contas = (env.getRecurring?.() || []).map((c) => ({
-      id: c.id,
-      descricao: c.description,
-      valorBase: c.defaultAmount,
-      diaVencimento: c.dueDay,
-      ativo: c.active,
-      categoria: c.category
-    }))
+    const contas = (env.getRecurring?.() || []).map((c) => {
+      const cardObj = c.cardId ? cards.find((x) => x.id === c.cardId) : null
+      return {
+        id: c.id,
+        descricao: c.description,
+        valorBase: c.defaultAmount,
+        diaVencimento: c.dueDay,
+        ativo: c.active,
+        tipo: c.type || 'expense',
+        categoria: c.category,
+        subcategoria: c.subcategory || null,
+        metodoPagamento: c.paymentMethod || (c.cardId ? 'credit_card' : 'bill'),
+        cartao: cardObj?.cardName || null,
+        regraEstimativa: c.estimationRule || 'fixed',
+        mesInicio: c.startMonth || null,
+        mesFim: c.endMonth || null,
+        parcelas: c.installmentsCount || null,
+      }
+    })
     return {
       response: { ok: true, contas },
       action: {
         kind: 'report',
-        title: 'Contas Recorrentes Listadas',
+        title: 'Contas Fixas e Rendas Recorrentes',
         lines: [{ label: 'Contas Encontradas', value: contas.length.toString() }],
       },
     }
@@ -2321,27 +2660,44 @@ async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, un
     const desc = String(args.descricao || '')
     const valor = Number(args.valor || 0)
     if (!desc || valor <= 0) return { response: { ok: false, erro: 'Descrição e valor são obrigatórios.' } }
+    const bType: 'expense' | 'income' = args.tipo === 'income' ? 'income' : 'expense'
     const guessed = guessCategoryAndSubcategory(desc, valor)
-    const cat = (args.categoria as Category) || guessed.category || 'Outros'
-    const subcat = typeof args.subcategoria === 'string' && args.subcategoria.trim()
-      ? args.subcategoria.trim()
-      : (cat === guessed.category ? guessed.subcategory : null)
+    const cat = (args.categoria as Category) || (bType === 'income' ? 'Salário & Remuneração' : guessed.category || 'Outros')
+    const subcat =
+      typeof args.subcategoria === 'string' && args.subcategoria.trim()
+        ? args.subcategoria.trim()
+        : cat === guessed.category
+          ? guessed.subcategory
+          : null
     const dueDay = Number(args.diaVencimento || 10)
+    const cartaoStr = typeof args.cartao === 'string' ? args.cartao.trim() : ''
+    const matchedCard = cartaoStr
+      ? cards.find((c) => normalize(c.cardName).includes(normalize(cartaoStr)) || c.id === cartaoStr)
+      : undefined
+    const pm: PaymentMethod =
+      (args.metodoPagamento as PaymentMethod) ||
+      (matchedCard ? 'credit_card' : bType === 'income' ? 'pix' : 'bill')
+    const rule: EstimationRule = (args.regraEstimativa as EstimationRule) || 'fixed'
+    const mesesLimite = typeof args.mesesLimite === 'number' && args.mesesLimite > 0 ? Math.round(args.mesesLimite) : undefined
+    const startM = parseMonthKey(args.mesInicio) || (mesesLimite ? env.monthKey : undefined)
+    const endM = mesesLimite && startM ? shiftMonth(startM, mesesLimite - 1) : undefined
 
     const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
     if (isPendingConfirmation) {
-      const title = `Adicionar Assinatura: ${desc}`
+      const title = `${bType === 'income' ? 'Adicionar Renda Fixa' : 'Adicionar Conta Fixa'}: ${desc}`
       const confirmationLines = [
         { label: 'Descrição', value: desc },
         { label: 'Valor Mensal', value: money(valor) },
-        { label: 'Dia de Vencimento', value: `Todo dia ${dueDay}` },
+        { label: 'Dia', value: `Todo dia ${dueDay}` },
         { label: 'Categoria', value: subcat ? `${cat} › ${subcat}` : cat },
+        { label: 'Canal', value: matchedCard ? `Cartão ${matchedCard.cardName}` : pm.toUpperCase() },
+        ...(endM ? [{ label: 'Vigência', value: `${mesesLimite} meses (até ${monthLabel(endM)})` }] : []),
       ]
       return {
         response: {
           ok: true,
           aguardandoConfirmacao: true,
-          mensagem: `Entendi que você deseja cadastrar a assinatura/conta recorrente "${desc}" no valor de ${money(valor)} (vencimento todo dia ${dueDay}). Por favor, confirme no botão abaixo.`,
+          mensagem: `Entendi que você deseja cadastrar "${desc}" no valor de ${money(valor)} (dia ${dueDay}). Por favor, confirme no botão abaixo.`,
         },
         action: {
           kind: 'confirmation',
@@ -2367,17 +2723,69 @@ async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<string, un
       subcategory: subcat,
       active: true,
       ownerUid: env.me.uid,
-      estimationRule: 'fixed',
-      type: 'expense'
+      estimationRule: rule,
+      type: bType,
+      paymentMethod: pm,
+      cardId: pm === 'credit_card' ? matchedCard?.id || null : null,
+      startMonth: startM,
+      endMonth: endM,
+      installmentsCount: mesesLimite,
     })
     return {
       response: { ok: true, id },
-      action: { kind: 'created', title: 'Assinatura/Conta Recorrente Criada', lines: [{ label: 'Descrição', value: desc }] },
+      action: { kind: 'created', title: 'Conta/Renda Recorrente Criada', lines: [{ label: 'Descrição', value: desc }] },
     }
   }
 
-  const id = String(args.id || '')
-  if (!id) return { response: { ok: false, erro: 'ID obrigatório.' } }
+  // Localiza por ID ou por descrição
+  const rawId = String(args.id || '').trim()
+  const rawDesc = String(args.descricao || '').trim()
+  const allBills = env.getRecurring?.() || []
+  const targetBill =
+    allBills.find((b) => b.id === rawId) ||
+    (rawDesc ? allBills.find((b) => normalize(b.description).includes(normalize(rawDesc))) : undefined)
+
+  const id = targetBill?.id || rawId
+  if (!id) return { response: { ok: false, erro: 'ID ou descrição da conta recorrente é obrigatório.' } }
+
+  if (acao === 'editar') {
+    const patch: Partial<RecurringBill> = {}
+    if (typeof args.descricao === 'string' && args.descricao.trim() && targetBill && args.id) {
+      patch.description = args.descricao.trim()
+    }
+    if (typeof args.valor === 'number' && args.valor > 0) patch.defaultAmount = args.valor
+    if (typeof args.diaVencimento === 'number' && args.diaVencimento >= 1 && args.diaVencimento <= 31) {
+      patch.dueDay = Math.round(args.diaVencimento)
+    }
+    if (typeof args.categoria === 'string' && args.categoria.trim()) patch.category = args.categoria as Category
+    if (typeof args.subcategoria === 'string') patch.subcategory = args.subcategoria.trim() || null
+    if (args.tipo === 'income' || args.tipo === 'expense') patch.type = args.tipo
+    if (typeof args.metodoPagamento === 'string') patch.paymentMethod = args.metodoPagamento as PaymentMethod
+    if (typeof args.regraEstimativa === 'string') patch.estimationRule = args.regraEstimativa as EstimationRule
+    if (typeof args.cartao === 'string' && args.cartao.trim()) {
+      const mc = cards.find((c) => normalize(c.cardName).includes(normalize(String(args.cartao))) || c.id === args.cartao)
+      if (mc) {
+        patch.cardId = mc.id
+        patch.paymentMethod = 'credit_card'
+      }
+    }
+    if (typeof args.mesesLimite === 'number' && args.mesesLimite > 0) {
+      const mLim = Math.round(args.mesesLimite)
+      const sM = parseMonthKey(args.mesInicio) || targetBill?.startMonth || env.monthKey
+      patch.startMonth = sM
+      patch.endMonth = shiftMonth(sM, mLim - 1)
+      patch.installmentsCount = mLim
+    }
+    await env.updateRecurring(id, patch)
+    return {
+      response: { ok: true, id, atualizado: patch },
+      action: {
+        kind: 'updated',
+        title: 'Conta Fixa Atualizada',
+        lines: [{ label: 'Conta', value: targetBill?.description || id }],
+      },
+    }
+  }
 
   if (acao === 'pausar' || acao === 'ativar') {
     const active = acao === 'ativar'

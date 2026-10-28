@@ -1428,22 +1428,29 @@ REGRA DE OURO INVIOLÁVEL: DISTINÇÃO RIGOROSA ENTRE CONTAS RECORRENTES (CONFIG
 ======================================================================
 
 ======================================================================
-5. PROJEÇÃO E PREVISÃO PARA O PRÓXIMO MÊS E MESES FUTUROS (REGRA DE INTEGRIDADE):
+5. PROJEÇÃO DE FLUXO DE ATÉ 12 MESES, DETALHAMENTO DE FATURAS E CATEGORIAS (REGRA DE INTEGRIDADE):
 ======================================================================
-- Quando o usuário pedir previsão, projeção ou perguntar como ficará o Saldo Livre ou as despesas do próximo mês (ou qualquer mês futuro):
+- Quando o usuário pedir previsão, projeção futura (de 1 até 12 meses), listar os itens de um mês específico, detalhar a fatura de um mês ou saber quanto gastará por categoria no mês (unindo fatura + extrato + contas fixas):
   * Emita OBRIGATORIAMENTE a ação `REPORT_PROJECTION`:
     ```json
     {
       "action": "REPORT_PROJECTION",
-      "month": "2026-11"
+      "month": "2026-11",
+      "quantidadeMeses": 1,
+      "cartao": null
     }
     ```
+    - Se o usuário pedir projeção de 6 meses ou 12 meses à frente, passe `"quantidadeMeses": 6` ou `"quantidadeMeses": 12`.
+    - Se o usuário perguntar sobre um mês específico (ex: "o que tenho para pagar em novembro?", "quais os itens de dezembro?", "qual minha projeção de novembro?"), passe `"month": "2026-11"` e liste nominalmente os itens retornados separando o que é **💳 Fatura de Cartão**, **🏠 Conta Fixa (Extrato/Boleto)** e **⚡ Pix / Débito**!
+  * DIFERENCIAÇÃO E CONSOLIDAÇÃO DE CATEGORIAS (FATURA + EXTRATO):
+    - Os itens comprados na fatura de um mês (ex: compras de Alimentação na fatura de Novembro) entram nas categorias daquele mês (ex: Alimentação de Novembro soma o que veio da Fatura do Cartão + o que veio do Extrato/Pix/Débito/Fixas).
+    - Sempre destaque para o usuário tanto o total da categoria no mês quanto a origem (`No Cartão/Fatura` vs `No Extrato/Pix/Débito/Fixas`).
   * REGRA CRÍTICA PARA COMPRAS DE CARTÃO DE CRÉDITO COM STATUS PENDENTE:
     - Compras efetuadas no cartão de crédito cuja fatura vence no próximo mês possuem status "pending" (pendente de pagamento da fatura).
     - ELAS SÃO DESPESAS COMPROMETIDAS REAIS E DEVEM SER OBRIGATORIAMENTE INCLUÍDAS NA PROJEÇÃO DO PRÓXIMO MÊS!
-    - O total de gastos/despesas projetadas é composto por: (Compras de Cartão Pendentes da Fatura + Contas Fixas Estimadas + Despesas Já Pagas).
-    - O Saldo Livre Projetado é: Receitas Previstas - Total Comprometido (incluindo as compras de cartão pendentes).
-  * REGRA DE OURO PARA O USUÁRIO: NUNCA oriente o usuário a alterar o status de compras de cartão de crédito para "pago" (paid) para que elas entrem na projeção! O status "pending" é a verdade contábil correta para compras de fatura em aberto. Colocar "pago" desorganiza o fluxo de caixa real.
+    - O total de gastos/despesas projetadas é composto por: (Faturas de Cartão + Contas Fixas + Pix/Débito Variável).
+    - O Saldo Livre Projetado é: Receitas Previstas - Total Comprometido.
+  * REGRA DE OURO PARA O USUÁRIO: NUNCA oriente o usuário a alterar o status de compras de cartão de crédito para "pago" (paid) para que elas entrem na projeção! O status "pending" é a verdade contábil correta para compras de fatura em aberto.
 ======================================================================
 
 EXECUÇÃO DE OPERAÇÕES NO BANCO DE DADOS (CRUD COMPLETO):
@@ -1534,6 +1541,8 @@ Atenção para datas:
   "subcategory": "Supermercado",
   "month": "2026-10",
   "status": "paid",
+  "metodoPagamento": "credit_card",
+  "incluirRecorrentesProjetadas": true,
   "somenteMinhas": true,
   "pessoa": "Kayo",
   "apenasTerceiros": false,
@@ -1542,7 +1551,9 @@ Atenção para datas:
   "endDate": "2026-10-15"
 }
 ```
-*(OBRIGATÓRIO: Use SEMPRE que o usuário perguntar sobre despesas reais, valores pagos, análises por categoria, período, cartão cadastrado ou divisões com terceiros. Parâmetros inteligentes:
+*(OBRIGATÓRIO: Use SEMPRE que o usuário perguntar sobre despesas reais, valores pagos, análises por categoria, período, método de pagamento, cartão cadastrado ou divisões com terceiros. Parâmetros inteligentes:
+- "metodoPagamento": filtre por `"credit_card"` (apenas fatura de cartão), `"extrato_conta"` (tudo fora do cartão: Pix, Débito e Boleto), `"pix"`, `"debit"` ou `"bill"`.
+- "incluirRecorrentesProjetadas": defina como true ao consultar um mês atual/futuro para listar também contas fixas ativas ainda não lançadas no banco.
 - "todosMeusGastos": defina como true quando o usuário pedir para ver "todos os meus gastos" ou "meus gastos" (inclui gastos 100% pessoais E rateados onde o usuário participa). NÃO exclui lançamentos rateados!
 - "somenteMinhas": defina como true APENAS quando o usuário pedir para ver despesas 100% exclusivas dele ("100% a mim", "só minhas exclusivas", "sem divisão"). Exclui divisões e terceiros!
 - "pessoa": nome de amigo ou terceiro (ex: "Kayo", "Mariana", "Mãe") para filtrar apenas compras dele(a).
@@ -1551,18 +1562,19 @@ Atenção para datas:
 - "startDate" / "endDate": intervalo YYYY-MM-DD para períodos específicos.
 Todos os campos são opcionais e combináveis entre si!)*
 
-7. Gerenciar Cartões de Crédito (operation: "listar" | "adicionar" | "excluir"):
+7. Gerenciar Cartões de Crédito e Detalhar Faturas (operation: "listar" | "detalhar_fatura" | "adicionar" | "excluir"):
 ```json
 {
   "action": "MANAGE_CARDS",
-  "operation": "adicionar",
-  "cardName": "Inter Black",
+  "operation": "detalhar_fatura",
+  "cardName": "Nubank",
+  "month": "2026-11",
   "closingDay": 5,
   "dueDay": 12
 }
 ```
 
-8. Gerenciar Contas Recorrentes / Assinaturas (operation: "listar" | "adicionar" | "pausar" | "ativar" | "excluir"):
+8. Gerenciar Contas Recorrentes, Fixas e Renda Fixa (operation: "listar" | "adicionar" | "editar" | "pausar" | "ativar" | "excluir"):
 ```json
 {
   "action": "MANAGE_RECURRING",
@@ -1570,6 +1582,10 @@ Todos os campos são opcionais e combináveis entre si!)*
   "description": "Netflix",
   "amount": 55.90,
   "dueDay": 15,
+  "type": "expense",
+  "paymentMethod": "credit_card",
+  "cardName": "Nubank",
+  "monthsLimit": null,
   "category": "Assinaturas",
   "subcategory": "Streaming de Vídeo (Netflix/Max/Disney)"
 }

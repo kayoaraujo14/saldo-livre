@@ -893,6 +893,33 @@ export interface MonthSummary {
   byInvestmentSubcategory?: { subcategory: string; amount: number; percentage: number }[]
 }
 
+export interface ProjectedCategoryItem {
+  category: string
+  amount: number
+  invoiceAmount: number
+  accountAmount: number
+  fixedBillAmount: number
+  count: number
+}
+
+export interface ProjectedMonthItem {
+  id: string
+  description: string
+  amount: number
+  myImpact: number
+  category: string
+  subcategory?: string | null
+  dueDate: string
+  type: 'income' | 'expense'
+  paymentMethod: PaymentMethod
+  cardId?: string | null
+  cardName?: string | null
+  origin: 'invoice' | 'fixed_bill' | 'debit_pix' | 'income'
+  status: 'paid' | 'pending' | 'estimated' | 'projected_recurring'
+  isRecurringProjection?: boolean
+  installmentInfo?: string | null
+}
+
 export interface FutureMonthProjection {
   monthKey: string // YYYY-MM
   label: string // Outubro 2026
@@ -904,6 +931,16 @@ export interface FutureMonthProjection {
   isGenerated: boolean
   incomeCount: number
   expenseCount: number
+  /** Total de despesas originadas de Faturas de Cartão (parcelas + compras + assinaturas de cartão) */
+  invoiceExpense?: number
+  /** Total de Contas Fixas fora do cartão (Boleto, Pix, Débito recorrentes) */
+  fixedBillsExpense?: number
+  /** Total de gastos variáveis avulsos em Débito/Pix/Boleto já lançados no mês */
+  variableAccountExpense?: number
+  /** Categorias consolidadas do mês (somando itens de Fatura + Extrato + Contas Fixas previstas) */
+  byCategory?: ProjectedCategoryItem[]
+  /** Lista nominal unificada dos itens que compõem a projeção do mês */
+  items?: ProjectedMonthItem[]
 }
 
 export interface ReceivableItem {

@@ -77,20 +77,6 @@ class FutureProjectionsViewModel(
         }
     }
 
-    fun generateBillsForMonth(monthKey: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            val (created, skipped) = repository.generateBillsForMonth(monthKey)
-            repository.setSelectedMonth(monthKey)
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    userMessage = "Lançamentos gerados para ${FinanceEngine.formatMonthLabel(monthKey)}: $created criado(s), $skipped ignorado(s)."
-                )
-            }
-        }
-    }
-
     fun clearMessage() {
         _uiState.update { it.copy(userMessage = null) }
     }

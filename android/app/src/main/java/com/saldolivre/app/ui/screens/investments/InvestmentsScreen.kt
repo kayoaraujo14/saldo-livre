@@ -1,11 +1,12 @@
 package com.saldolivre.app.ui.screens.investments
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -14,25 +15,35 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionType
+import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.theme.*
+import kotlin.math.min
+
+private val DarkPurpleHeroTint = Color(0xFF3B0764)
+private val PatrimonyHeroBrush = Brush.verticalGradient(
+    colors = listOf(DarkPurpleHeroTint.copy(alpha = 0.55f), DarkSurface)
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,20 +54,6 @@ fun InvestmentsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val filteredHistory = remember(uiState.allInvestments, uiState.historyFilter) {
-        if (uiState.historyFilter == "all") uiState.allInvestments
-        else uiState.allInvestments.filter { (it.subcategory ?: "Outros Investimentos") == uiState.historyFilter }
-    }
-    val safeAssets = remember(uiState.assets) {
-        uiState.assets.filter { it.bucketType == InvestmentBucketType.SAFE_RESERVE }
-    }
-    val riskAssets = remember(uiState.assets) {
-        uiState.assets.filter { it.bucketType == InvestmentBucketType.RISK_VARIABLE }
-    }
-    val formattedMonthLabel = remember(uiState.selectedMonth) {
-        FinanceEngine.formatMonthLabel(uiState.selectedMonth)
-    }
-
     LaunchedEffect(uiState.feedbackMessage) {
         uiState.feedbackMessage?.let { msg ->
             snackbarHostState.showSnackbar(msg)
@@ -64,466 +61,368 @@ fun InvestmentsScreen(
         }
     }
 
+    val safeAssets = remember(uiState.assets) {
+        uiState.assets.filter { it.bucketType == InvestmentBucketType.SAFE_RESERVE }
+    }
+    val riskAssets = remember(uiState.assets) {
+        uiState.assets.filter { it.bucketType == InvestmentBucketType.RISK_VARIABLE }
+    }
+    val filteredHistory = remember(uiState.allInvestments, uiState.historyFilter) {
+        if (uiState.historyFilter == "all") uiState.allInvestments
+        else uiState.allInvestments.filter { (it.subcategory ?: "Outros Investimentos") == uiState.historyFilter }
+    }
+
     Scaffold(
         containerColor = DarkBackground,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkBackground,
-                    navigationIconContentColor = TextPrimary,
-                    titleContentColor = TextPrimary
-                ),
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar")
-                    }
-                },
-                title = {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.background(DarkBackground)) {
+                TopAppBar(
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    navigationIcon = {
+                        IconButton(onClick = onNavigateBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Voltar",
+                                tint = TextPrimary
+                            )
+                        }
+                    },
+                    title = {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(
-                                text = "Investimentos & Patrimônio",
-                                style = Typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Purple500.copy(alpha = 0.2f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .size(34.dp)
+                                    .background(Purple500.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                                    .border(1.dp, Purple500.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                                contentAlignment = Alignment.Center
                             ) {
+                                Icon(
+                                    imageVector = Icons.Default.Savings,
+                                    contentDescription = null,
+                                    tint = Purple400,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
                                 Text(
-                                    text = formattedMonthLabel,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Purple400,
-                                    maxLines = 1
+                                    text = "Investimentos",
+                                    style = Typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Caixinhas, patrimônio e regra 50/30/20",
+                                    style = Typography.bodySmall,
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
-                        Text(
-                            text = "Caixinhas seguras, ativos de risco e evolução",
-                            fontSize = 11.sp,
-                            color = TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    },
+                    actions = {
+                        FilledTonalButton(
+                            onClick = { viewModel.openAddAporte(null) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = Emerald500.copy(alpha = 0.2f),
+                                contentColor = Emerald400
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .height(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Aportar",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
+                )
+
+                val selectedIndex = when (uiState.activeTab) {
+                    InvestmentTab.OVERVIEW -> 0
+                    InvestmentTab.CALCULATOR -> 1
+                    InvestmentTab.RULE_50_30_20 -> 2
+                    InvestmentTab.HISTORY -> 3
+                }
+
+                TabRow(
+                    selectedTabIndex = selectedIndex,
+                    containerColor = DarkBackground,
+                    contentColor = Purple400,
+                    indicator = { tabPositions ->
+                        if (selectedIndex < tabPositions.size) {
+                            TabRowDefaults.SecondaryIndicator(
+                                modifier = Modifier
+                                    .tabIndicatorOffset(tabPositions[selectedIndex])
+                                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)),
+                                height = 3.dp,
+                                color = Purple400
+                            )
+                        }
+                    },
+                    divider = {
+                        HorizontalDivider(color = DarkBorder.copy(alpha = 0.7f))
                     }
-                },
-                actions = {
-                    Button(
-                        onClick = { viewModel.openAddAporte() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Emerald500,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.padding(end = 8.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Aporte",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp,
-                            maxLines = 1
+                ) {
+                    listOf(
+                        InvestmentTab.OVERVIEW to "Carteira",
+                        InvestmentTab.CALCULATOR to "Simulador",
+                        InvestmentTab.RULE_50_30_20 to "50/30/20",
+                        InvestmentTab.HISTORY to "Histórico"
+                    ).forEachIndexed { idx, (tab, label) ->
+                        Tab(
+                            selected = selectedIndex == idx,
+                            onClick = { viewModel.setTab(tab) },
+                            text = {
+                                Text(
+                                    text = label,
+                                    fontWeight = if (selectedIndex == idx) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            },
+                            selectedContentColor = Purple400,
+                            unselectedContentColor = TextSecondary
                         )
                     }
                 }
-            )
+            }
         }
-    ) { innerPadding ->
+    ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(paddingValues),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // 1. KPI Cards Grid
-            item(key = "investments_kpi_grid", contentType = "investments_kpi_grid") {
-                InvestmentsKpiGrid(
-                    monthInvested = uiState.totalInvestedThisMonth,
-                    allInvested = uiState.totalInvestedAllTime,
-                    totalCurrentBalance = uiState.totalCurrentBalance,
-                    monthlyIncome = uiState.monthlyIncome,
-                    target = uiState.monthlyTarget,
-                    isEditingTarget = uiState.isEditingTarget,
-                    targetInput = uiState.targetInput,
+            // MonthSelector
+            item {
+                MonthSelector(
+                    selectedMonth = uiState.selectedMonth.ifBlank { FinanceEngine.currentMonthKey() },
+                    onPreviousMonth = { viewModel.previousMonth() },
+                    onNextMonth = { viewModel.nextMonth() },
+                    onCurrentMonth = { viewModel.goToCurrentMonth() }
+                )
+            }
+
+            // Hero Patrimonial & Meta Mensal
+            item {
+                PatrimonyHeroSection(
+                    uiState = uiState,
                     onStartEditTarget = { viewModel.startEditingTarget() },
                     onCancelEditTarget = { viewModel.cancelEditingTarget() },
                     onTargetInputChange = { viewModel.setTargetInput(it) },
-                    onSaveTarget = { viewModel.saveTarget() }
+                    onSaveTarget = { viewModel.saveTarget() },
+                    onQuickResgate = { viewModel.openResgate(null) }
                 )
             }
 
-            // 2. Tab Navigation Pills
-            item(key = "investments_tab_pills", contentType = "investments_tab_pills") {
-                InvestmentsTabPills(
-                    activeTab = uiState.activeTab,
-                    onSelectTab = { viewModel.setTab(it) }
-                )
-            }
-
-            // 3. Tab Contents
             when (uiState.activeTab) {
                 InvestmentTab.OVERVIEW -> {
-                    // Caixinhas & Reservas Seguras
-                    item(key = "safe_reserves_header", contentType = "section_header") {
-                        SectionHeader(
-                            title = "Caixinhas & Reservas Seguras",
-                            subtitle = "Renda Fixa, Tesouro Selic e Reserva de Emergência",
-                            icon = Icons.Default.Shield,
+                    item {
+                        BucketSectionHeader(
+                            title = InvestmentBucketType.SAFE_RESERVE.title,
+                            subtitle = InvestmentBucketType.SAFE_RESERVE.subtitle,
                             accentColor = Cyan400
                         )
                     }
-
-                    items(
-                        items = safeAssets,
-                        key = { "safe_${it.subcategory}" },
-                        contentType = { "investment_asset_card" }
-                    ) { asset ->
+                    items(safeAssets, key = { it.subcategory }) { asset ->
                         InvestmentAssetCard(
                             asset = asset,
-                            onAddAporte = { viewModel.openAddAporte(asset) },
-                            onResgate = { viewModel.openResgate(asset) },
+                            totalPatrimony = uiState.totalCurrentBalance,
+                            onAportar = { viewModel.openAddAporte(asset) },
+                            onResgatar = { viewModel.openResgate(asset) },
                             onEditBalance = { viewModel.openEditBalance(asset) }
                         )
                     }
 
-                    // Investimentos de Risco & Renda Variável
-                    item(key = "risk_variable_header", contentType = "section_header") {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        SectionHeader(
-                            title = "Investimentos de Risco & Renda Variável",
-                            subtitle = "Ações B3, FIIs, Criptomoedas e Ativos com Oscilação",
-                            icon = Icons.AutoMirrored.Filled.TrendingUp,
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        BucketSectionHeader(
+                            title = InvestmentBucketType.RISK_VARIABLE.title,
+                            subtitle = InvestmentBucketType.RISK_VARIABLE.subtitle,
                             accentColor = Purple400
                         )
                     }
-
-                    items(
-                        items = riskAssets,
-                        key = { "risk_${it.subcategory}" },
-                        contentType = { "investment_asset_card" }
-                    ) { asset ->
+                    items(riskAssets, key = { it.subcategory }) { asset ->
                         InvestmentAssetCard(
                             asset = asset,
-                            onAddAporte = { viewModel.openAddAporte(asset) },
-                            onResgate = { viewModel.openResgate(asset) },
+                            totalPatrimony = uiState.totalCurrentBalance,
+                            onAportar = { viewModel.openAddAporte(asset) },
+                            onResgatar = { viewModel.openResgate(asset) },
                             onEditBalance = { viewModel.openEditBalance(asset) }
-                        )
-                    }
-
-                    // Lançamentos do Mês
-                    item(key = "month_investments_section", contentType = "month_investments_section") {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        MonthInvestmentsSection(
-                            monthTxs = uiState.monthInvestments,
-                            monthLabel = formattedMonthLabel
                         )
                     }
                 }
 
                 InvestmentTab.CALCULATOR -> {
-                    item(key = "compound_interest_simulator", contentType = "compound_interest_simulator") {
-                        CompoundInterestSimulator(
-                            onSimulate = { init, month, rate, years ->
-                                viewModel.simulateCompoundInterest(init, month, rate, years)
+                    item {
+                        CompoundInterestSimulatorCard(
+                            initialPatrimony = uiState.totalCurrentBalance,
+                            defaultMonthlyTarget = uiState.monthlyTarget,
+                            onSimulate = { init, monthly, rate, years ->
+                                viewModel.simulateCompoundInterest(init, monthly, rate, years)
                             }
                         )
                     }
                 }
 
                 InvestmentTab.RULE_50_30_20 -> {
-                    item(key = "rule_50_30_20_section", contentType = "rule_50_30_20_section") {
-                        Rule503020Section(data = uiState.rule503020)
+                    item {
+                        Rule503020SectionCard(
+                            data = uiState.rule503020,
+                            monthLabel = FinanceEngine.formatMonthLabel(
+                                uiState.selectedMonth.ifBlank { FinanceEngine.currentMonthKey() }
+                            )
+                        )
                     }
                 }
 
                 InvestmentTab.HISTORY -> {
-                    item(key = "history_filter_pills", contentType = "history_filter_pills") {
+                    item {
                         HistoryFilterPills(
-                            currentFilter = uiState.historyFilter,
-                            allAssets = uiState.assets,
+                            selectedFilter = uiState.historyFilter,
+                            assets = uiState.assets,
                             onSelectFilter = { viewModel.setHistoryFilter(it) }
                         )
                     }
 
                     if (filteredHistory.isEmpty()) {
-                        item(key = "empty_history_box", contentType = "empty_history_box") {
-                            EmptyHistoryBox()
+                        item {
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = DarkSurface,
+                                border = BorderStroke(1.dp, DarkBorder),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(28.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = null,
+                                        tint = TextMuted,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                    Text(
+                                        text = "Nenhuma movimentação encontrada",
+                                        style = Typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "Seus aportes e resgates aparecerão aqui em ordem cronológica.",
+                                        style = Typography.bodySmall,
+                                        color = TextSecondary,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
                         }
                     } else {
-                        items(
-                            items = filteredHistory,
-                            key = { it.id },
-                            contentType = { "investment_history_item" }
-                        ) { tx ->
+                        items(filteredHistory, key = { it.id }) { tx ->
                             InvestmentHistoryItemCard(tx = tx)
                         }
                     }
                 }
             }
 
-            item(key = "investments_bottom_spacer", contentType = "investments_bottom_spacer") {
-                Spacer(modifier = Modifier.height(40.dp))
-            }
+            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 
-    // Modal: Novo Aporte
+    // BottomSheet: Aportar
     if (uiState.isAddAporteOpen) {
-        AporteFormDialog(
-            preselectedSubcat = uiState.selectedAssetForAction?.subcategory,
+        AporteOrResgateBottomSheet(
+            isAporte = true,
+            initialAsset = uiState.selectedAssetForAction,
+            assets = uiState.assets,
             onDismiss = { viewModel.closeAddAporte() },
-            onSubmit = { sub, amt, desc, date -> viewModel.submitAporte(sub, amt, desc, date) }
+            onSubmit = { subcat, amount, desc, date ->
+                viewModel.submitAporte(subcat, amount, desc, date)
+            }
         )
     }
 
-    // Modal: Resgatar
+    // BottomSheet: Resgatar
     if (uiState.isResgateOpen) {
-        ResgateFormDialog(
-            preselectedSubcat = uiState.selectedAssetForAction?.subcategory,
+        AporteOrResgateBottomSheet(
+            isAporte = false,
+            initialAsset = uiState.selectedAssetForAction,
+            assets = uiState.assets,
             onDismiss = { viewModel.closeResgate() },
-            onSubmit = { sub, amt, desc, date -> viewModel.submitResgate(sub, amt, desc, date) }
+            onSubmit = { subcat, amount, desc, date ->
+                viewModel.submitResgate(subcat, amount, desc, date)
+            }
         )
     }
 
-    // Modal: Editar Saldo Atual
+    // BottomSheet: Ajustar Saldo Patrimonial Real
     if (uiState.isEditBalanceOpen && uiState.selectedAssetForAction != null) {
-        val asset = uiState.selectedAssetForAction!!
-        EditBalanceDialog(
-            asset = asset,
+        EditAssetBalanceBottomSheet(
+            asset = uiState.selectedAssetForAction!!,
             onDismiss = { viewModel.closeEditBalance() },
-            onSubmit = { newBal -> viewModel.submitEditBalance(asset.subcategory, newBal) }
+            onSave = { newBal ->
+                viewModel.submitEditBalance(uiState.selectedAssetForAction!!.subcategory, newBal)
+            }
         )
     }
 }
 
-// -------------------------------------------------------------
-// Componente: Header de Seção
-// -------------------------------------------------------------
 @Composable
-private fun SectionHeader(
-    title: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    accentColor: Color
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .background(accentColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                .border(1.dp, accentColor.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = subtitle,
-                fontSize = 11.sp,
-                color = TextMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 1. Grid de 4 KPIs
-// -------------------------------------------------------------
-@Composable
-private fun InvestmentsKpiGrid(
-    monthInvested: Double,
-    allInvested: Double,
-    totalCurrentBalance: Double,
-    monthlyIncome: Double,
-    target: Double,
-    isEditingTarget: Boolean,
-    targetInput: String,
+private fun PatrimonyHeroSection(
+    uiState: InvestmentsUiState,
     onStartEditTarget: () -> Unit,
     onCancelEditTarget: () -> Unit,
     onTargetInputChange: (String) -> Unit,
-    onSaveTarget: () -> Unit
+    onSaveTarget: () -> Unit,
+    onQuickResgate: () -> Unit
 ) {
-    val savingsRate = if (monthlyIncome > 0) (monthInvested / monthlyIncome) * 100 else 0.0
-    val targetProgress = if (target > 0) ((monthInvested / target) * 100).coerceIn(0.0, 100.0) else 0.0
-    val overallProfit = totalCurrentBalance - allInvested
+    val totalProfit = FinanceEngine.round2(uiState.totalCurrentBalance - uiState.totalInvestedAllTime)
+    val profitPct = if (uiState.totalInvestedAllTime > 0) {
+        FinanceEngine.round2((totalProfit / uiState.totalInvestedAllTime) * 100.0)
+    } else 0.0
+    val targetProgress = if (uiState.monthlyTarget > 0) {
+        min(1f, (uiState.totalInvestedThisMonth / uiState.monthlyTarget).toFloat())
+    } else 0f
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Card 1: Aporte do Mês
-            KpiItemCard(
-                title = "Aporte do Mês",
-                value = FinanceEngine.formatCurrency(monthInvested),
-                subtitle = "${savingsRate.toInt()}% da renda do mês",
-                icon = Icons.Default.Wallet,
-                accentColor = Emerald400,
-                modifier = Modifier.weight(1f)
-            )
-
-            // Card 2: Saldo Atual / Patrimônio
-            KpiItemCard(
-                title = "Saldo Patrimonial",
-                value = FinanceEngine.formatCurrency(totalCurrentBalance),
-                subtitle = if (overallProfit >= 0) "+${FinanceEngine.formatCurrency(overallProfit)} rendimento" else "${FinanceEngine.formatCurrency(overallProfit)} oscilação",
-                icon = Icons.Default.AccountBalance,
-                accentColor = Cyan400,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Card 3: Histórico Total Aportado
-            KpiItemCard(
-                title = "Total Aportado",
-                value = FinanceEngine.formatCurrency(allInvested),
-                subtitle = "Acumulado em carteira",
-                icon = Icons.Default.Savings,
-                accentColor = Purple400,
-                modifier = Modifier.weight(1f)
-            )
-
-            // Card 4: Meta Mensal
-            val shape = RoundedCornerShape(16.dp)
-            Card(
-                shape = shape,
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                modifier = Modifier
-                    .weight(1f)
-                    .border(1.dp, DarkBorder, shape)
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Meta Mensal",
-                            fontSize = 11.sp,
-                            color = TextMuted,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 4.dp)
-                        )
-                        Icon(imageVector = Icons.Default.TrackChanges, contentDescription = null, tint = Amber400, modifier = Modifier.size(16.dp))
-                    }
-
-                    if (isEditingTarget) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            OutlinedTextField(
-                                value = targetInput,
-                                onValueChange = onTargetInputChange,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
-                                textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = TextPrimary),
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(onClick = onSaveTarget, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = Emerald400)
-                            }
-                            IconButton(onClick = onCancelEditTarget, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = TextMuted)
-                            }
-                        }
-                    } else {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth().clickable { onStartEditTarget() }
-                        ) {
-                            Text(
-                                text = FinanceEngine.formatCurrency(target),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(end = 4.dp)
-                            )
-                            Icon(Icons.Default.Edit, contentDescription = null, tint = TextMuted, modifier = Modifier.size(12.dp))
-                        }
-                    }
-
-                    // Progress bar
-                    LinearProgressIndicator(
-                        progress = { (targetProgress / 100.0).toFloat() },
-                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
-                        color = Amber500,
-                        trackColor = DarkSurfaceVariant
-                    )
-                    Text(
-                        text = "${targetProgress.toInt()}% da meta atingida",
-                        fontSize = 10.sp,
-                        color = Amber400,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun KpiItemCard(
-    title: String,
-    value: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    accentColor: Color,
-    modifier: Modifier = Modifier
-) {
-    val shape = RoundedCornerShape(16.dp)
     Card(
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        modifier = modifier.border(1.dp, DarkBorder, shape)
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        border = BorderStroke(1.dp, Purple500.copy(alpha = 0.45f))
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(brush = PatrimonyHeroBrush)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -531,219 +430,732 @@ private fun KpiItemCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = title,
-                    fontSize = 11.sp,
-                    color = TextMuted,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                    text = "PATRIMÔNIO CONSOLIDADO ATUAL",
+                    style = Typography.labelMedium,
+                    color = Purple400,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+
+                OutlinedButton(
+                    onClick = onQuickResgate,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Amber500.copy(alpha = 0.4f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber400),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.CallReceived,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Resgatar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = FinanceEngine.formatCurrency(uiState.totalCurrentBalance),
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = TextPrimary
+                )
+                if (totalProfit != 0.0) {
+                    val isPos = totalProfit >= 0
+                    val pColor = if (isPos) Emerald400 else Rose400
+                    Box(
+                        modifier = Modifier
+                            .padding(bottom = 4.dp)
+                            .background(pColor.copy(alpha = 0.16f), CircleShape)
+                            .border(1.dp, pColor.copy(alpha = 0.4f), CircleShape)
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "${if (isPos) "+" else ""}$profitPct%",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = pColor,
+                            style = LocalTextStyle.current.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            )
+                        )
+                    }
+                }
+            }
+
+            // Sub-containers: Aporte no Mês vs Total Aportado
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Column(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(end = 4.dp)
-                )
-                Icon(imageVector = icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
+                        .background(DarkSurfaceVariant.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                        .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "APORTE NO MÊS",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextMuted
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = FinanceEngine.formatCurrency(uiState.totalInvestedThisMonth),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Emerald400
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(DarkSurfaceVariant.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                        .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "TOTAL APORTADO",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextMuted
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = FinanceEngine.formatCurrency(uiState.totalInvestedAllTime),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Cyan400
+                    )
+                }
             }
-            Text(
-                text = value,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = subtitle,
-                fontSize = 10.sp,
-                color = accentColor,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+
+            // Barra de Meta Mensal Interativa
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DarkBackground.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                    .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (uiState.isEditingTarget) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = uiState.targetInput,
+                            onValueChange = onTargetInputChange,
+                            label = { Text("Meta mensal de aporte (R$)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = onSaveTarget) {
+                            Icon(Icons.Default.Check, contentDescription = "Salvar", tint = Emerald400)
+                        }
+                        IconButton(onClick = onCancelEditTarget) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancelar", tint = TextSecondary)
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Flag,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Meta Mensal: ${FinanceEngine.formatCurrency(uiState.monthlyTarget)}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { onStartEditTarget() }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "${(targetProgress * 100).toInt()}% atingida",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Emerald400
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Editar Meta",
+                                tint = TextMuted,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { targetProgress },
+                        color = Emerald400,
+                        trackColor = DarkSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape)
+                    )
+                }
+            }
         }
     }
 }
 
-// -------------------------------------------------------------
-// 2. Tabs de Navegação
-// -------------------------------------------------------------
 @Composable
-private fun InvestmentsTabPills(
-    activeTab: InvestmentTab,
-    onSelectTab: (InvestmentTab) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(DarkSurfaceVariant.copy(alpha = 0.5f))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        TabItem(
-            title = "Carteira",
-            icon = Icons.Default.PieChart,
-            isSelected = activeTab == InvestmentTab.OVERVIEW,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelectTab(InvestmentTab.OVERVIEW) }
-        )
-        TabItem(
-            title = "Simulador",
-            icon = Icons.Default.Calculate,
-            isSelected = activeTab == InvestmentTab.CALCULATOR,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelectTab(InvestmentTab.CALCULATOR) }
-        )
-        TabItem(
-            title = "50/30/20",
-            icon = Icons.Default.AutoAwesome,
-            isSelected = activeTab == InvestmentTab.RULE_50_30_20,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelectTab(InvestmentTab.RULE_50_30_20) }
-        )
-        TabItem(
-            title = "Histórico",
-            icon = Icons.Default.History,
-            isSelected = activeTab == InvestmentTab.HISTORY,
-            modifier = Modifier.weight(1f),
-            onClick = { onSelectTab(InvestmentTab.HISTORY) }
-        )
-    }
-}
-
-@Composable
-private fun TabItem(
+private fun BucketSectionHeader(
     title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    isSelected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    subtitle: String,
+    accentColor: Color
 ) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) Purple500 else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (isSelected) Color.White else TextMuted,
-                modifier = Modifier.size(13.dp)
-            )
-            Text(
-                text = title,
-                fontSize = 11.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = if (isSelected) Color.White else TextMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+    Column(modifier = Modifier.padding(start = 4.dp)) {
+        Text(
+            text = title.uppercase(),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = accentColor,
+            letterSpacing = 0.8.sp
+        )
+        Text(
+            text = subtitle,
+            fontSize = 11.sp,
+            color = TextMuted
+        )
     }
 }
 
-// -------------------------------------------------------------
-// 3. Card de Ativo Individual (Caixinha ou Ativo de Risco)
-// -------------------------------------------------------------
 @Composable
 private fun InvestmentAssetCard(
     asset: InvestmentAsset,
-    onAddAporte: () -> Unit,
-    onResgate: () -> Unit,
+    totalPatrimony: Double,
+    onAportar: () -> Unit,
+    onResgatar: () -> Unit,
     onEditBalance: () -> Unit
 ) {
-    val shape = RoundedCornerShape(16.dp)
-    val isProfit = asset.profitOrLoss >= 0
+    val sharePct = if (totalPatrimony > 0) ((asset.currentBalance / totalPatrimony) * 100).toInt() else 0
+    val profit = asset.profitOrLoss
 
-    Card(
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, DarkBorder, shape)
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header: Dot color + Name + Edit Balance button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(asset.color.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                            .border(1.dp, asset.color.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (asset.bucketType == InvestmentBucketType.SAFE_RESERVE)
+                                Icons.Default.Shield else Icons.AutoMirrored.Filled.TrendingUp,
+                            contentDescription = null,
+                            tint = asset.color,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = asset.subcategory,
+                            style = Typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "$sharePct% da carteira • Aportado: ${FinanceEngine.formatCurrency(asset.totalInvestedAllTime)}",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = FinanceEngine.formatCurrency(asset.currentBalance),
+                        style = Typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextPrimary
+                    )
+                    if (profit != 0.0) {
+                        val pColor = if (profit >= 0) Emerald400 else Rose400
+                        Text(
+                            text = "${if (profit >= 0) "+" else ""}${FinanceEngine.formatCurrency(profit)} (${asset.profitPercentage}%)",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = pColor
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = DarkBorder.copy(alpha = 0.55f))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(asset.color, CircleShape)
-                    )
-                    Text(
-                        text = asset.subcategory,
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                IconButton(
+                TextButton(
                     onClick = onEditBalance,
-                    modifier = Modifier.size(28.dp)
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Editar Saldo",
-                        tint = TextMuted,
+                        imageVector = Icons.Default.SyncAlt,
+                        contentDescription = null,
+                        tint = Cyan400,
                         modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Ajustar Saldo", fontSize = 11.sp, color = Cyan400, fontWeight = FontWeight.SemiBold)
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (asset.currentBalance > 0) {
+                        OutlinedButton(
+                            onClick = onResgatar,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Amber500.copy(alpha = 0.4f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber400),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Resgatar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    FilledTonalButton(
+                        onClick = onAportar,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = Emerald500.copy(alpha = 0.18f),
+                            contentColor = Emerald400
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Aportar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompoundInterestSimulatorCard(
+    initialPatrimony: Double,
+    defaultMonthlyTarget: Double,
+    onSimulate: (Double, Double, Double, Int) -> CompoundSimulationResult
+) {
+    var initialText by remember { mutableStateOf(initialPatrimony.toInt().toString()) }
+    var monthlyText by remember { mutableStateOf(defaultMonthlyTarget.toInt().toString()) }
+    var rateText by remember { mutableStateOf("11.5") }
+    var years by remember { mutableIntStateOf(5) }
+
+    val result = remember(initialText, monthlyText, rateText, years) {
+        val init = initialText.replace(',', '.').toDoubleOrNull() ?: 0.0
+        val mon = monthlyText.replace(',', '.').toDoubleOrNull() ?: 0.0
+        val rate = rateText.replace(',', '.').toDoubleOrNull() ?: 10.0
+        onSimulate(init, mon, rate, years)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "SIMULADOR DE JUROS COMPOSTOS",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = Purple400,
+                letterSpacing = 0.8.sp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = initialText,
+                    onValueChange = { initialText = it },
+                    label = { Text("Patrimônio Inicial (R$)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = monthlyText,
+                    onValueChange = { monthlyText = it },
+                    label = { Text("Aporte Mensal (R$)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = rateText,
+                    onValueChange = { rateText = it },
+                    label = { Text("Taxa Anual (% a.a.)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
+                )
+
+                Column(modifier = Modifier.weight(1.2f)) {
+                    Text(
+                        text = "Prazo: $years ano(s)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Slider(
+                        value = years.toFloat(),
+                        onValueChange = { years = it.toInt().coerceIn(1, 30) },
+                        valueRange = 1f..30f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Purple400,
+                            activeTrackColor = Purple500
+                        )
                     )
                 }
             }
 
-            // Values Row: Saldo Atual & Total Aportado
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Resultado Projetado
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(DarkBackground.copy(alpha = 0.65f), RoundedCornerShape(14.dp))
+                    .border(1.dp, Purple500.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
+                Text(
+                    text = "PATRIMÔNIO ESTIMADO EM $years ANO(S)",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Purple400
+                )
+                Text(
+                    text = FinanceEngine.formatCurrency(result.futureValue),
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Emerald400
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(text = "Saldo Atual", fontSize = 10.sp, color = TextMuted, maxLines = 1)
                     Text(
-                        text = FinanceEngine.formatCurrency(asset.currentBalance),
-                        fontSize = 17.sp,
+                        text = "Do seu bolso: ${FinanceEngine.formatCurrency(result.totalInvested)}",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "Juros: +${FinanceEngine.formatCurrency(result.totalInterest)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Emerald400
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Rule503020SectionCard(
+    data: Rule503020Data,
+    monthLabel: String
+) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Column {
+                Text(
+                    text = "EQUILÍBRIO ORÇAMENTÁRIO 50 / 30 / 20",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Cyan400,
+                    letterSpacing = 0.8.sp
+                )
+                Text(
+                    text = "Baseado na renda de ${FinanceEngine.formatCurrency(data.income)} em $monthLabel",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
+
+            RulePillarRow(
+                title = "50% Necessidades Essenciais",
+                realAmount = data.realNeeds,
+                targetAmount = data.targetNeeds,
+                realPct = data.needsPct,
+                targetPct = 50.0,
+                accentColor = Cyan400
+            )
+
+            RulePillarRow(
+                title = "30% Desejos & Estilo de Vida",
+                realAmount = data.realWants,
+                targetAmount = data.targetWants,
+                realPct = data.wantsPct,
+                targetPct = 30.0,
+                accentColor = Purple400
+            )
+
+            RulePillarRow(
+                title = "20% Investimentos & Futuro",
+                realAmount = data.realInvest,
+                targetAmount = data.targetInvest,
+                realPct = data.investPct,
+                targetPct = 20.0,
+                accentColor = Emerald400
+            )
+        }
+    }
+}
+
+@Composable
+private fun RulePillarRow(
+    title: String,
+    realAmount: Double,
+    targetAmount: Double,
+    realPct: Double,
+    targetPct: Double,
+    accentColor: Color
+) {
+    val progress = if (targetAmount > 0) min(1f, (realAmount / targetAmount).toFloat()) else 0f
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(DarkBackground.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+            .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                text = "${realPct.toInt()}% (Ideal: ${targetPct.toInt()}%)",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = accentColor
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = { progress },
+            color = accentColor,
+            trackColor = DarkSurface,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(CircleShape)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Realizado: ${FinanceEngine.formatCurrency(realAmount)}",
+                fontSize = 11.sp,
+                color = TextSecondary
+            )
+            Text(
+                text = "Teto sugerido: ${FinanceEngine.formatCurrency(targetAmount)}",
+                fontSize = 11.sp,
+                color = TextMuted
+            )
+        }
+    }
+}
+
+@Composable
+private fun HistoryFilterPills(
+    selectedFilter: String,
+    assets: List<InvestmentAsset>,
+    onSelectFilter: (String) -> Unit
+) {
+    val options = remember(assets) {
+        listOf("all" to "Todas") + assets.map { it.subcategory to it.subcategory }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { (key, label) ->
+            val selected = selectedFilter == key
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (selected) Purple500.copy(alpha = 0.2f) else DarkSurface)
+                    .border(
+                        1.dp,
+                        if (selected) Purple400 else DarkBorder,
+                        CircleShape
+                    )
+                    .clickable { onSelectFilter(key) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 11.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (selected) Purple400 else TextSecondary,
+                    style = LocalTextStyle.current.copy(
+                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InvestmentHistoryItemCard(
+    tx: Transaction
+) {
+    val isResgate = tx.type == TransactionType.INCOME
+    val accent = if (isResgate) Amber400 else Emerald400
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .background(accent.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                        .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isResgate) Icons.AutoMirrored.Filled.CallReceived else Icons.Default.Savings,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = tx.description,
+                        style = Typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(text = "Total Aportado", fontSize = 10.sp, color = TextMuted, maxLines = 1)
                     Text(
-                        text = FinanceEngine.formatCurrency(asset.totalInvestedAllTime),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        text = "${tx.subcategory ?: "Investimentos"} • ${FinanceEngine.formatFullDate(tx.dueDate)}",
+                        fontSize = 11.sp,
                         color = TextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -751,705 +1163,138 @@ private fun InvestmentAssetCard(
                 }
             }
 
-            // Rendimento / Oscilação Badge
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (isProfit) Emerald500.copy(alpha = 0.15f) else Rose500.copy(alpha = 0.15f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = if (isProfit) "+${FinanceEngine.formatCurrency(asset.profitOrLoss)} (+${asset.profitPercentage}%)"
-                            else "${FinanceEngine.formatCurrency(asset.profitOrLoss)} (${asset.profitPercentage}%)",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isProfit) Emerald400 else Rose400,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    if (asset.totalInvestedThisMonth > 0) {
-                        Text(
-                            text = "+${FinanceEngine.formatCurrency(asset.totalInvestedThisMonth)} no mês",
-                            fontSize = 10.sp,
-                            color = TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
-                }
-
-                // Action Buttons: Aporte (+) e Resgate (-)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(
-                        onClick = onResgate,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.heightIn(min = 32.dp)
-                    ) {
-                        Text("Resgatar", fontSize = 10.sp, color = TextSecondary, maxLines = 1)
-                    }
-
-                    Button(
-                        onClick = onAddAporte,
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald500, contentColor = Color.Black),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.heightIn(min = 32.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text("Aportar", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 4. Lançamentos do Mês
-// -------------------------------------------------------------
-@Composable
-private fun MonthInvestmentsSection(
-    monthTxs: List<Transaction>,
-    monthLabel: String
-) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        modifier = Modifier.fillMaxWidth().border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Lançamentos em $monthLabel",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
-                )
-                Text(text = "${monthTxs.size} movimentação(ões)", fontSize = 11.sp, color = TextMuted, maxLines = 1)
-            }
-
-            if (monthTxs.isEmpty()) {
-                Text(
-                    text = "Nenhum aporte ou resgate neste mês ainda.",
-                    fontSize = 12.sp,
-                    color = TextMuted,
-                    modifier = Modifier.padding(vertical = 12.dp)
-                )
-            } else {
-                monthTxs.forEach { tx ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkBackground.copy(alpha = 0.5f))
-                            .padding(10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 8.dp)
-                        ) {
-                            Text(
-                                text = tx.description,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${FinanceEngine.formatFullDate(tx.dueDate)} · ${tx.subcategory ?: "Investimentos"}",
-                                fontSize = 10.sp,
-                                color = TextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Text(
-                            text = if (tx.type == TransactionType.INCOME) "-${FinanceEngine.formatCurrency(tx.effectiveAmount)}"
-                            else "+${FinanceEngine.formatCurrency(tx.effectiveAmount)}",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (tx.type == TransactionType.INCOME) Rose400 else Emerald400,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 5. Simulador de Juros Compostos
-// -------------------------------------------------------------
-@Composable
-private fun CompoundInterestSimulator(
-    onSimulate: (Double, Double, Double, Int) -> CompoundSimulationResult
-) {
-    var initialAmount by remember { mutableStateOf("1000") }
-    var monthlyContribution by remember { mutableStateOf("500") }
-    var annualRate by remember { mutableStateOf("11.0") }
-    var years by remember { mutableStateOf("10") }
-
-    val simulation = remember(initialAmount, monthlyContribution, annualRate, years) {
-        val init = initialAmount.toDoubleOrNull() ?: 1000.0
-        val month = monthlyContribution.toDoubleOrNull() ?: 500.0
-        val rate = annualRate.toDoubleOrNull() ?: 11.0
-        val yr = years.toIntOrNull() ?: 10
-        onSimulate(init, month, rate, yr)
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            modifier = Modifier.fillMaxWidth().border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Simulador de Futuro & Bola de Neve",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = "Descubra como o efeito dos juros compostos transforma pequenos aportes regulares.",
-                    fontSize = 11.sp,
-                    color = TextMuted
-                )
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = initialAmount,
-                        onValueChange = { initialAmount = it },
-                        label = { Text("Aporte Inicial (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = monthlyContribution,
-                        onValueChange = { monthlyContribution = it },
-                        label = { Text("Aporte Mensal (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = annualRate,
-                        onValueChange = { annualRate = it },
-                        label = { Text("Taxa (% a.a.)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = years,
-                        onValueChange = { years = it },
-                        label = { Text("Prazo (anos)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                // Benchmarks
-                Text(text = "Benchmarks de Mercado:", fontSize = 11.sp, color = TextMuted, fontWeight = FontWeight.SemiBold)
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    val presets = listOf(
-                        "CDI / Selic (10.75%)" to "10.75",
-                        "Tesouro IPCA+ (12%)" to "12.0",
-                        "Ações / FIIs (14%)" to "14.0",
-                        "Conservador (8%)" to "8.0"
-                    )
-                    items(presets) { (label, rateVal) ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DarkSurfaceVariant)
-                                .clickable { annualRate = rateVal }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(text = label, fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Result Cards
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            KpiItemCard(
-                title = "Valor Final Acumulado",
-                value = FinanceEngine.formatCurrency(simulation.futureValue),
-                subtitle = "Patrimônio em ${years} anos",
-                icon = Icons.AutoMirrored.Filled.TrendingUp,
-                accentColor = Emerald400,
-                modifier = Modifier.weight(1f)
-            )
-
-            KpiItemCard(
-                title = "Juros Compostos",
-                value = FinanceEngine.formatCurrency(simulation.totalInterest),
-                subtitle = "Rendimento gerado",
-                icon = Icons.Default.AutoAwesome,
-                accentColor = Purple400,
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // Yearly Timeline
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            modifier = Modifier.fillMaxWidth().border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(text = "Evolução Ano a Ano", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(8.dp).background(Purple400, CircleShape))
-                            Text("Aportado", fontSize = 10.sp, color = TextMuted)
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(8.dp).background(Emerald400, CircleShape))
-                            Text("Juros", fontSize = 10.sp, color = TextMuted)
-                        }
-                    }
-                }
-
-                simulation.yearlyData.forEach { data ->
-                    val maxVal = simulation.futureValue.coerceAtLeast(1.0)
-                    val investedWeight = ((data.invested / maxVal) * 100).toFloat().coerceIn(0.01f, 100f)
-                    val interestWeight = ((data.interest / maxVal) * 100).toFloat().coerceIn(0.01f, 100f)
-                    val remainingWeight = (100f - investedWeight - interestWeight).coerceAtLeast(0f)
-
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(text = "Ano ${data.year}", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
-                            Text(text = FinanceEngine.formatCurrency(data.total), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(DarkSurfaceVariant)
-                        ) {
-                            Box(modifier = Modifier.weight(investedWeight).fillMaxHeight().background(Purple400))
-                            Box(modifier = Modifier.weight(interestWeight).fillMaxHeight().background(Emerald400))
-                            if (remainingWeight > 0f) {
-                                Box(modifier = Modifier.weight(remainingWeight).fillMaxHeight().background(DarkSurfaceVariant))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 6. Diagnóstico Regra 50 / 30 / 20
-// -------------------------------------------------------------
-@Composable
-private fun Rule503020Section(data: Rule503020Data) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            modifier = Modifier.fillMaxWidth().border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
-                ) {
-                    Text(
-                        text = "Diagnóstico 50 / 30 / 20",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "Equilíbrio recomendado por educadores financeiros",
-                        fontSize = 11.sp,
-                        color = TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(text = "Renda Computada", fontSize = 10.sp, color = TextMuted, maxLines = 1)
-                    Text(
-                        text = FinanceEngine.formatCurrency(data.income),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Emerald400,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-
-        // 3 Pillars
-        RulePillarCard(
-            title = "50% Necessidades Essenciais",
-            description = "Moradia, Alimentação, Saúde e Transporte",
-            targetAmount = data.targetNeeds,
-            actualAmount = data.realNeeds,
-            actualPct = data.needsPct,
-            targetPct = 50.0,
-            accentColor = Color(0xFF818CF8)
-        )
-
-        RulePillarCard(
-            title = "30% Estilo de Vida & Lazer",
-            description = "Compras, Passeios, Delivery e Streaming",
-            targetAmount = data.targetWants,
-            actualAmount = data.realWants,
-            actualPct = data.wantsPct,
-            targetPct = 30.0,
-            accentColor = Cyan400
-        )
-
-        RulePillarCard(
-            title = "20% Investimentos & Futuro",
-            description = "Aportes em Caixinhas, Renda Fixa e Ações",
-            targetAmount = data.targetInvest,
-            actualAmount = data.realInvest,
-            actualPct = data.investPct,
-            targetPct = 20.0,
-            accentColor = Purple400
-        )
-    }
-}
-
-@Composable
-private fun RulePillarCard(
-    title: String,
-    description: String,
-    targetAmount: Double,
-    actualAmount: Double,
-    actualPct: Double,
-    targetPct: Double,
-    accentColor: Color
-) {
-    val shape = RoundedCornerShape(16.dp)
-    Card(
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        modifier = Modifier.fillMaxWidth().border(1.dp, DarkBorder, shape)
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
-                )
-                Text(text = "Teto: ${FinanceEngine.formatCurrency(targetAmount)}", fontSize = 11.sp, color = TextMuted, maxLines = 1)
-            }
-            Text(text = description, fontSize = 10.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = FinanceEngine.formatCurrency(actualAmount), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Text(text = "${actualPct.toInt()}% da renda", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = accentColor)
-            }
-
-            val progressRatio = (actualPct / (targetPct * 2.0)).coerceIn(0.0, 1.0).toFloat()
-            LinearProgressIndicator(
-                progress = { progressRatio },
-                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                color = accentColor,
-                trackColor = DarkSurfaceVariant
-            )
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 7. Histórico & Filtros
-// -------------------------------------------------------------
-@Composable
-private fun HistoryFilterPills(
-    currentFilter: String,
-    allAssets: List<InvestmentAsset>,
-    onSelectFilter: (String) -> Unit
-) {
-    LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
-        item {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (currentFilter == "all") Purple500 else DarkSurfaceVariant)
-                    .clickable { onSelectFilter("all") }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text(text = "Todos", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (currentFilter == "all") Color.White else TextMuted)
-            }
-        }
-
-        items(allAssets) { asset ->
-            val isSelected = currentFilter == asset.subcategory
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isSelected) Purple500 else DarkSurfaceVariant)
-                    .clickable { onSelectFilter(asset.subcategory) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text(text = asset.subcategory, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (isSelected) Color.White else TextMuted)
-            }
-        }
-    }
-}
-
-@Composable
-private fun InvestmentHistoryItemCard(tx: Transaction) {
-    val shape = RoundedCornerShape(14.dp)
-    val isRedemption = tx.type == TransactionType.INCOME
-    val formattedAmount = remember(tx.effectiveAmount, isRedemption) {
-        if (isRedemption) "-${FinanceEngine.formatCurrency(tx.effectiveAmount)}"
-        else "+${FinanceEngine.formatCurrency(tx.effectiveAmount)}"
-    }
-
-    Card(
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        modifier = Modifier.fillMaxWidth().border(1.dp, DarkBorder, shape)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background((if (isRedemption) Rose500 else Emerald500).copy(alpha = 0.2f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isRedemption) Icons.Default.ArrowDownward else Icons.AutoMirrored.Filled.TrendingUp,
-                        contentDescription = null,
-                        tint = if (isRedemption) Rose400 else Emerald400,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = tx.description, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(text = "${FinanceEngine.formatFullDate(tx.dueDate)} · ${tx.subcategory ?: "Investimentos"}", fontSize = 11.sp, color = TextMuted)
-                }
-            }
-
             Text(
-                text = formattedAmount,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isRedemption) Rose400 else Emerald400
+                text = "${if (isResgate) "-" else "+"}${FinanceEngine.formatCurrency(tx.effectiveAmount)}",
+                style = Typography.bodyLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = accent
             )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EmptyHistoryBox() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(DarkSurface.copy(alpha = 0.5f))
-            .border(1.dp, DarkBorder, RoundedCornerShape(16.dp))
-            .padding(vertical = 30.dp),
-        contentAlignment = Alignment.Center
+private fun AporteOrResgateBottomSheet(
+    isAporte: Boolean,
+    initialAsset: InvestmentAsset?,
+    assets: List<InvestmentAsset>,
+    onDismiss: () -> Unit,
+    onSubmit: (String, Double, String, String) -> Unit
+) {
+    var selectedSubcat by remember {
+        mutableStateOf(initialAsset?.subcategory ?: assets.firstOrNull()?.subcategory ?: "Reserva de Emergência")
+    }
+    var amountText by remember { mutableStateOf("") }
+    var descText by remember { mutableStateOf("") }
+    var dateText by remember { mutableStateOf(FinanceEngine.todayFormatted()) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
+
+    val accent = if (isAporte) Emerald500 else Amber500
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = DarkBorder) }
     ) {
-        Text(text = "Nenhum lançamento encontrado para este filtro.", fontSize = 12.sp, color = TextMuted)
-    }
-}
-
-// -------------------------------------------------------------
-// 8. Diálogos de Aporte, Resgate e Edição de Saldo
-// -------------------------------------------------------------
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AporteFormDialog(
-    preselectedSubcat: String?,
-    onDismiss: () -> Unit,
-    onSubmit: (String, Double, String, String) -> Unit
-) {
-    var subcat by remember { mutableStateOf(preselectedSubcat ?: "Renda Fixa (CDB / Tesouro / LCI / LCA)") }
-    var amount by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf(FinanceEngine.todayFormatted()) }
-    var expandedDropdown by remember { mutableStateOf(false) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkBackground)
-                .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
-                .padding(20.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Registrar Novo Aporte",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Text(
+                text = if (isAporte) "Novo Aporte Patrimonial" else "Resgate de Caixinha / Ativo",
+                style = Typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
 
-                ExposedDropdownMenuBox(expanded = expandedDropdown, onExpandedChange = { expandedDropdown = it }) {
-                    OutlinedTextField(
-                        value = subcat,
-                        onValueChange = {},
-                        readOnly = true,
-                        singleLine = true,
-                        label = { Text("Classe / Ativo", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expandedDropdown,
-                        onDismissRequest = { expandedDropdown = false },
-                        modifier = Modifier.background(DarkSurface)
-                    ) {
-                        InvestmentsViewModel.ASSET_DEFINITIONS.forEach { (name, _, _) ->
-                            DropdownMenuItem(
-                                text = { Text(name, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                onClick = { subcat = name; expandedDropdown = false }
-                            )
-                        }
+            ExposedDropdownMenuBox(
+                expanded = dropdownExpanded,
+                onExpandedChange = { dropdownExpanded = !dropdownExpanded }
+            ) {
+                OutlinedTextField(
+                    value = selectedSubcat,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Caixinha / Ativo") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
+                )
+                ExposedDropdownMenu(
+                    expanded = dropdownExpanded,
+                    onDismissRequest = { dropdownExpanded = false },
+                    modifier = Modifier.background(DarkSurface)
+                ) {
+                    assets.forEach { a ->
+                        DropdownMenuItem(
+                            text = { Text(a.subcategory, color = TextPrimary) },
+                            onClick = {
+                                selectedSubcat = a.subcategory
+                                dropdownExpanded = false
+                            }
+                        )
                     }
                 }
+            }
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 OutlinedTextField(
-                    value = amount,
-                    onValueChange = { amount = it },
-                    label = { Text("Valor do Aporte (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Valor (R$)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1.2f)
                 )
-
                 OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Descrição (Opcional)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    placeholder = { Text("Ex: Compra CDB 110%, Aporte Tesouro", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    value = dateText,
+                    onValueChange = { dateText = it },
+                    label = { Text("Data (DD/MM/AAAA)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
                 )
+            }
 
-                OutlinedTextField(
-                    value = date,
-                    onValueChange = { date = it },
-                    label = { Text("Data (DD/MM/AAAA)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+            OutlinedTextField(
+                value = descText,
+                onValueChange = { descText = it },
+                label = { Text("Descrição opcional") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Button(
+                onClick = {
+                    val amt = amountText.replace(',', '.').toDoubleOrNull() ?: 0.0
+                    if (amt > 0.0) {
+                        onSubmit(selectedSubcat, amt, descText.trim(), dateText.trim())
+                    }
+                },
+                enabled = (amountText.replace(',', '.').toDoubleOrNull() ?: 0.0) > 0.0,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = accent),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text(
+                    text = if (isAporte) "Confirmar Aporte" else "Confirmar Resgate",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
-
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancelar", color = TextSecondary, maxLines = 1)
-                    }
-                    Button(
-                        onClick = {
-                            val num = amount.replace(',', '.').toDoubleOrNull() ?: 0.0
-                            if (num > 0.0) onSubmit(subcat, num, description.trim(), date.trim())
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald500, contentColor = Color.Black),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Confirmar", fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
-                }
             }
         }
     }
@@ -1457,160 +1302,59 @@ private fun AporteFormDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ResgateFormDialog(
-    preselectedSubcat: String?,
-    onDismiss: () -> Unit,
-    onSubmit: (String, Double, String, String) -> Unit
-) {
-    var subcat by remember { mutableStateOf(preselectedSubcat ?: "Reserva de Emergência") }
-    var amount by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var date by remember { mutableStateOf(FinanceEngine.todayFormatted()) }
-    var expandedDropdown by remember { mutableStateOf(false) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkBackground)
-                .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
-                .padding(20.dp)
-        ) {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Resgatar Aplicação",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                ExposedDropdownMenuBox(expanded = expandedDropdown, onExpandedChange = { expandedDropdown = it }) {
-                    OutlinedTextField(
-                        value = subcat,
-                        onValueChange = {},
-                        readOnly = true,
-                        singleLine = true,
-                        label = { Text("Resgatar de", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expandedDropdown,
-                        onDismissRequest = { expandedDropdown = false },
-                        modifier = Modifier.background(DarkSurface)
-                    ) {
-                        InvestmentsViewModel.ASSET_DEFINITIONS.forEach { (name, _, _) ->
-                            DropdownMenuItem(
-                                text = { Text(name, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                onClick = { subcat = name; expandedDropdown = false }
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = amount,
-                    onValueChange = { amount = it },
-                    label = { Text("Valor a Resgatar (R$)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Motivo / Descrição (Opcional)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    placeholder = { Text("Ex: Resgate para cobrir imprevisto", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancelar", color = TextSecondary, maxLines = 1)
-                    }
-                    Button(
-                        onClick = {
-                            val num = amount.replace(',', '.').toDoubleOrNull() ?: 0.0
-                            if (num > 0.0) onSubmit(subcat, num, description.trim(), date.trim())
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Rose500, contentColor = Color.White),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Resgatar", fontWeight = FontWeight.Bold, maxLines = 1)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EditBalanceDialog(
+private fun EditAssetBalanceBottomSheet(
     asset: InvestmentAsset,
     onDismiss: () -> Unit,
-    onSubmit: (Double) -> Unit
+    onSave: (Double) -> Unit
 ) {
-    var newBalanceInput by remember { mutableStateOf(asset.currentBalance.toString()) }
+    var balanceText by remember(asset) { mutableStateOf(asset.currentBalance.toString()) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Box(
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = DarkBorder) }
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkBackground)
-                .border(1.dp, DarkBorder, RoundedCornerShape(20.dp))
-                .padding(20.dp)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            Text(
+                text = "Ajustar Saldo Patrimonial",
+                style = Typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                text = "${asset.subcategory} • Atualize com o valor real da corretora/banco para refletir os rendimentos sem afetar seu Saldo Livre do mês.",
+                style = Typography.bodySmall,
+                color = TextSecondary
+            )
+
+            OutlinedTextField(
+                value = balanceText,
+                onValueChange = { balanceText = it },
+                label = { Text("Saldo atual na corretora/banco (R$)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Button(
+                onClick = {
+                    val v = balanceText.replace(',', '.').toDoubleOrNull() ?: asset.currentBalance
+                    onSave(v)
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Cyan500),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
             ) {
-                Text(
-                    text = "Ajustar Saldo Atual",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "Defina o saldo real atual para ${asset.subcategory}. Isso calculará a rentabilidade ou oscilação de mercado.",
-                    fontSize = 12.sp,
-                    color = TextMuted
-                )
-
-                OutlinedTextField(
-                    value = newBalanceInput,
-                    onValueChange = { newBalanceInput = it },
-                    label = { Text("Saldo Atual (R$)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
-                        Text("Cancelar", color = TextSecondary)
-                    }
-                    Button(
-                        onClick = {
-                            val num = newBalanceInput.replace(',', '.').toDoubleOrNull() ?: 0.0
-                            onSubmit(num)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Cyan500, contentColor = Color.Black),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Salvar Saldo", fontWeight = FontWeight.Bold)
-                    }
-                }
+                Text("Salvar Saldo Atualizado", fontWeight = FontWeight.Bold, color = Color.White)
             }
         }
     }

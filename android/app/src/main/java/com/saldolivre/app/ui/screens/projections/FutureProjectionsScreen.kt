@@ -1,8 +1,8 @@
 package com.saldolivre.app.ui.screens.projections
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,7 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.TrendingDown
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -28,7 +29,19 @@ import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.FutureMonthProjection
 import com.saldolivre.app.ui.theme.*
-import java.util.Locale
+import kotlin.math.max
+import kotlin.math.min
+
+private val DarkCyanHeroTint = Color(0xFF164E63)
+private val DarkRoseHeroTint = Color(0xFF4C0519)
+
+private val PositiveProjectionsBrush = Brush.verticalGradient(
+    colors = listOf(DarkCyanHeroTint.copy(alpha = 0.5f), DarkSurface)
+)
+
+private val NegativeProjectionsBrush = Brush.verticalGradient(
+    colors = listOf(DarkRoseHeroTint.copy(alpha = 0.5f), DarkSurface)
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,18 +53,19 @@ fun FutureProjectionsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.userMessage) {
-        uiState.userMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        uiState.userMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
             viewModel.clearMessage()
         }
     }
 
     Scaffold(
         containerColor = DarkBackground,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground),
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -64,126 +78,114 @@ fun FutureProjectionsScreen(
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(34.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Cyan500.copy(alpha = 0.2f))
-                                .border(1.dp, Cyan500.copy(alpha = 0.35f), RoundedCornerShape(8.dp)),
+                                .background(Cyan500.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                                .border(1.dp, Cyan500.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.CalendarMonth,
+                                imageVector = Icons.Default.QueryStats,
                                 contentDescription = null,
                                 tint = Cyan400,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
-                        Column(modifier = Modifier.weight(1f, fill = false)) {
+                        Column {
                             Text(
-                                text = "Projeção de Fluxo de Caixa",
-                                style = Typography.titleMedium,
+                                text = "Projeção de Fluxo",
+                                style = Typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "Próximos 6 meses simulados",
+                                text = "Horizonte preditivo de 6 meses",
                                 style = Typography.bodySmall,
-                                color = TextSecondary,
+                                color = TextMuted,
                                 fontSize = 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
             )
         }
-    ) { innerPadding ->
+    ) { paddingValues ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(paddingValues),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Consolidated Summary Card
-            item(key = "projections_consolidated_banner", contentType = "projections_consolidated_banner") {
-                ProjectionsConsolidatedBanner(
+            // 1. Hero Card Consolidado (6 Meses)
+            item {
+                ProjectionsHeroBanner(
                     averageFreeBalance = uiState.averageFreeBalance,
                     totalIncome = uiState.totalProjectedIncome,
                     totalExpense = uiState.totalProjectedExpense
                 )
             }
 
-            // Month Projections List
-            items(
-                items = uiState.projections,
-                key = { it.monthKey },
-                contentType = { "month_projection_card" }
-            ) { projection ->
-                val isSelected = projection.monthKey == uiState.selectedMonth
-                val isCurrent = projection.monthKey == uiState.currentMonth
+            item {
+                Text(
+                    text = "CRONOGRAMA MENSAL PROJETADO (${uiState.projections.size} MESES)",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextMuted,
+                    letterSpacing = 0.8.sp,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                )
+            }
 
+            items(uiState.projections, key = { it.monthKey }) { proj ->
                 MonthProjectionCard(
-                    projection = projection,
-                    isSelected = isSelected,
-                    isCurrent = isCurrent,
+                    projection = proj,
+                    isCurrentMonth = proj.monthKey == uiState.currentMonth,
+                    isSelectedMonth = proj.monthKey == uiState.selectedMonth,
                     onSelectMonth = {
-                        viewModel.selectMonth(projection.monthKey)
+                        viewModel.selectMonth(proj.monthKey)
                         onNavigateBack()
                     }
                 )
             }
 
-            item(key = "projections_disclaimer", contentType = "projections_disclaimer") {
-                Surface(
-                    color = DarkSurface.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "* As previsões são calculadas a partir do salário cadastrado, contas fixas ativas e parcelas de cartões com vencimento futuro já agendadas.",
-                        style = Typography.bodySmall,
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(14.dp)
-                    )
-                }
-            }
-
-            item(key = "projections_bottom_spacer", contentType = "projections_bottom_spacer") {
-                Spacer(modifier = Modifier.height(24.dp))
-            }
+            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 }
 
 @Composable
-private fun ProjectionsConsolidatedBanner(
+private fun ProjectionsHeroBanner(
     averageFreeBalance: Double,
     totalIncome: Double,
     totalExpense: Double
 ) {
-    val isPositive = averageFreeBalance >= 0
-    val formattedAvg = String.format(Locale("pt", "BR"), "R$ %,.2f", averageFreeBalance)
-    val formattedIncome = String.format(Locale("pt", "BR"), "R$ %,.2f", totalIncome)
-    val formattedExpense = String.format(Locale("pt", "BR"), "R$ %,.2f", totalExpense)
+    val isPositive = averageFreeBalance >= 0.0
+    val accentColor = if (isPositive) Cyan400 else Rose400
+    val borderColor = if (isPositive) Cyan500.copy(alpha = 0.4f) else Rose500.copy(alpha = 0.4f)
+    val brush = if (isPositive) PositiveProjectionsBrush else NegativeProjectionsBrush
 
-    Surface(
-        color = DarkSurface,
-        shape = RoundedCornerShape(18.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (isPositive) Emerald500.copy(alpha = 0.35f) else Rose500.copy(alpha = 0.35f)),
-        modifier = Modifier.fillMaxWidth()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        border = BorderStroke(1.dp, borderColor)
     ) {
         Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(brush = brush)
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -191,93 +193,83 @@ private fun ProjectionsConsolidatedBanner(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "MÉDIA PROJETADA (6 MESES)",
-                    fontSize = 11.sp,
+                    text = "SALDO LIVRE MÉDIO PROJETADO (6M)",
+                    style = Typography.labelMedium,
+                    color = accentColor,
                     fontWeight = FontWeight.Bold,
-                    color = TextSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
+                    letterSpacing = 1.sp
                 )
-                Surface(
-                    color = if (isPositive) Emerald500.copy(alpha = 0.15f) else Rose500.copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(8.dp)
+                Box(
+                    modifier = Modifier
+                        .background(accentColor.copy(alpha = 0.16f), CircleShape)
+                        .border(1.dp, accentColor.copy(alpha = 0.35f), CircleShape)
+                        .padding(horizontal = 9.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = if (isPositive) "Superávit Saudável" else "Atenção ao Limite",
-                        color = if (isPositive) Emerald400 else Rose400,
+                        text = "Automático",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        color = accentColor,
+                        style = LocalTextStyle.current.copy(
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        )
                     )
                 }
             }
 
+            Text(
+                text = FinanceEngine.formatCurrency(averageFreeBalance),
+                fontSize = 32.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = accentColor
+            )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(DarkSurfaceVariant.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                        .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                ) {
                     Text(
-                        text = "Saldo Livre Médio / Mês",
-                        style = Typography.bodySmall,
-                        color = TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "ENTRADAS (6 MESES)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextMuted
                     )
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
-                        text = formattedAvg,
-                        style = Typography.headlineMedium,
+                        text = FinanceEngine.formatCurrency(totalIncome),
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        color = if (isPositive) Emerald400 else Rose400,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            HorizontalDivider(color = DarkBorder)
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Total Entradas (6m)",
-                        fontSize = 10.sp,
-                        color = TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "+$formattedIncome",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
                         color = Emerald400,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+
                 Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.End
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(DarkSurfaceVariant.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                        .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
                 ) {
                     Text(
-                        text = "Total Saídas (6m)",
+                        text = "SAÍDAS (6 MESES)",
                         fontSize = 10.sp,
-                        color = TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "-$formattedExpense",
-                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
+                        color = TextMuted
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = FinanceEngine.formatCurrency(totalExpense),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
                         color = Rose400,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -291,322 +283,242 @@ private fun ProjectionsConsolidatedBanner(
 @Composable
 private fun MonthProjectionCard(
     projection: FutureMonthProjection,
-    isSelected: Boolean,
-    isCurrent: Boolean,
+    isCurrentMonth: Boolean,
+    isSelectedMonth: Boolean,
     onSelectMonth: () -> Unit
 ) {
-    val isPositive = projection.projectedFreeBalance >= 0
-    val formattedIncome = remember(projection.projectedIncome) { FinanceEngine.formatCurrency(projection.projectedIncome) }
-    val formattedExpense = remember(projection.projectedExpense) { FinanceEngine.formatCurrency(projection.projectedExpense) }
-    val formattedFreeBalance = remember(projection.projectedFreeBalance) { FinanceEngine.formatCurrency(projection.projectedFreeBalance) }
-    val formattedDailyLimit = remember(projection.projectedDailyLimit) {
-        projection.projectedDailyLimit?.let { FinanceEngine.formatCurrency(it) }
-    }
+    val isPositive = projection.projectedFreeBalance >= 0.0
+    val balanceColor = if (isPositive) Emerald400 else Rose400
 
-    val retentionPct = if (projection.projectedIncome > 0) {
-        ((projection.projectedFreeBalance / projection.projectedIncome) * 100).toInt().coerceIn(0, 100)
-    } else 0
+    val retentionRatio = if (projection.projectedIncome > 0) {
+        min(1f, max(0f, (projection.projectedFreeBalance / projection.projectedIncome).toFloat()))
+    } else 0f
 
     Surface(
+        shape = RoundedCornerShape(18.dp),
         color = DarkSurface,
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(
+        border = BorderStroke(
             1.dp,
-            if (isSelected) Emerald400.copy(alpha = 0.6f) else DarkBorder
+            when {
+                isSelectedMonth -> Cyan400.copy(alpha = 0.6f)
+                isCurrentMonth -> Emerald500.copy(alpha = 0.45f)
+                else -> DarkBorder
+            }
         ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header: Month Label + Badges
+            // Header: Mês + Badges + Saldo Livre Projetado
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = projection.label,
+                            style = Typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = TextPrimary
+                        )
+                        if (isCurrentMonth) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Emerald500.copy(alpha = 0.16f), CircleShape)
+                                    .border(1.dp, Emerald500.copy(alpha = 0.4f), CircleShape)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Mês Atual",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Emerald400,
+                                    style = LocalTextStyle.current.copy(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
+                                )
+                            }
+                        }
+                        if (isSelectedMonth && !isCurrentMonth) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Cyan500.copy(alpha = 0.16f), CircleShape)
+                                    .border(1.dp, Cyan500.copy(alpha = 0.4f), CircleShape)
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Em Exibição",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Cyan400,
+                                    style = LocalTextStyle.current.copy(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(3.dp))
+
+                    Text(
+                        text = buildString {
+                            append("${projection.daysInMonth} dias • ")
+                            projection.projectedDailyLimit?.let {
+                                append("Teto diário: ${FinanceEngine.formatCurrency(it)}/dia")
+                            }
+                        },
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = FinanceEngine.formatCurrency(projection.projectedFreeBalance),
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = balanceColor
+                    )
+                    Text(
+                        text = "Saldo Livre Previsto",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
+                }
+            }
+
+            // Caixas: Receitas vs Comprometido
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(end = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = projection.label,
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-
-                    if (isCurrent) {
-                        Surface(
-                            color = Emerald500.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = "Mês Atual",
-                                color = Emerald400,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    if (isSelected && !isCurrent) {
-                        Surface(
-                            color = Cyan500.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = "Ativo",
-                                color = Cyan400,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-
-                if (projection.isGenerated) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = Emerald400, modifier = Modifier.size(14.dp))
-                        Text(text = "Gerados", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Emerald400, maxLines = 1)
-                    }
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Amber400, modifier = Modifier.size(14.dp))
-                        Text(text = "Simulado", fontSize = 11.sp, color = TextSecondary, maxLines = 1)
-                    }
-                }
-            }
-
-            // Grid: Entradas Previstas vs Saídas Previstas
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Incomes
-                Surface(
-                    color = DarkBackground.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Emerald400, modifier = Modifier.size(14.dp))
-                            Text(
-                                text = "Entradas Previstas",
-                                fontSize = 10.sp,
-                                color = TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Text(
-                            text = "+$formattedIncome",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Emerald400,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                        Text(
-                            text = "${projection.incomeCount} fonte(s)",
-                            fontSize = 10.sp,
-                            color = TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                // Expenses
-                Surface(
-                    color = DarkBackground.copy(alpha = 0.5f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.TrendingDown, contentDescription = null, tint = Rose400, modifier = Modifier.size(14.dp))
-                            Text(
-                                text = "Saídas Previstas",
-                                fontSize = 10.sp,
-                                color = TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Text(
-                            text = "-$formattedExpense",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                        Text(
-                            text = "${projection.expenseCount} conta(s)",
-                            fontSize = 10.sp,
-                            color = TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            // Projected Free Balance & Daily Safe Limit
-            Surface(
-                color = DarkBackground.copy(alpha = 0.7f),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
+                        .background(DarkBackground.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                        .border(1.dp, DarkBorder, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 8.dp)
-                    ) {
+                    Column {
                         Text(
-                            text = "Saldo Livre Estimado:",
-                            fontSize = 11.sp,
-                            color = TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            text = "Receitas (${projection.incomeCount})",
+                            fontSize = 10.sp,
+                            color = TextMuted
                         )
                         Text(
-                            text = formattedFreeBalance,
-                            style = Typography.titleLarge,
-                            fontWeight = FontWeight.Black,
-                            color = if (isPositive) Emerald400 else Rose400,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "Gasto Seguro:",
-                            fontSize = 11.sp,
-                            color = TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = formattedDailyLimit?.let { "$it/dia" } ?: "—",
+                            text = FinanceEngine.formatCurrency(projection.projectedIncome),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Cyan400,
-                            maxLines = 1
+                            color = Emerald400
                         )
                     }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                        contentDescription = null,
+                        tint = Emerald400,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
-            }
 
-            // Retention Progress Bar
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(DarkBackground.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                        .border(1.dp, DarkBorder, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Retenção de Saldo Livre",
-                        fontSize = 10.sp,
-                        color = TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "$retentionPct% livre",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary,
-                        maxLines = 1
+                    Column {
+                        Text(
+                            text = "Saídas (${projection.expenseCount})",
+                            fontSize = 10.sp,
+                            color = TextMuted
+                        )
+                        Text(
+                            text = FinanceEngine.formatCurrency(projection.projectedExpense),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Rose400
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.TrendingDown,
+                        contentDescription = null,
+                        tint = Rose400,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
-
-                LinearProgressIndicator(
-                    progress = { (retentionPct / 100f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = if (isPositive) Emerald400 else Rose400,
-                    trackColor = DarkSurfaceVariant
-                )
             }
 
-            HorizontalDivider(color = DarkBorder)
-
-            // Card Footer Actions
+            // Barra de Retenção + Botão Abrir Mês
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(imageVector = Icons.Default.AutoAwesome, contentDescription = null, tint = Cyan400, modifier = Modifier.size(14.dp))
-                    Text(
-                        text = if (projection.isGenerated) "Lançamentos integrados" else "Lançamento automático",
-                        fontSize = 11.sp,
-                        color = TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Margem Livre da Renda",
+                            fontSize = 10.sp,
+                            color = TextSecondary
+                        )
+                        Text(
+                            text = "${(retentionRatio * 100).toInt()}%",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = balanceColor
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = { retentionRatio },
+                        color = balanceColor,
+                        trackColor = DarkBackground,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(CircleShape)
                     )
                 }
 
-                Button(
+                FilledTonalButton(
                     onClick = onSelectMonth,
-                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant, contentColor = TextPrimary),
                     shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Cyan500.copy(alpha = 0.18f),
+                        contentColor = Cyan400
+                    ),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.heightIn(min = 36.dp)
+                    modifier = Modifier.height(32.dp)
                 ) {
                     Text(
-                        text = "Abrir Mês",
+                        text = if (isSelectedMonth) "Mês Ativo" else "Abrir Mês",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
+                        fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Icon(imageVector = Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp)
+                    )
                 }
             }
         }

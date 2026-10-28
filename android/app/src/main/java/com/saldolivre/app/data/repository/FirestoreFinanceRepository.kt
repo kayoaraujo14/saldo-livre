@@ -1007,6 +1007,7 @@ class FirestoreFinanceRepository(
         val payStr = doc.getString("paymentMethod")
         val splitStr = doc.getString("splitType")
         val ruleStr = doc.getString("estimationRule")
+        val triggerStr = doc.getString("launchTrigger")
 
         return RecurringBill(
             id = doc.id,
@@ -1020,10 +1021,12 @@ class FirestoreFinanceRepository(
             active = doc.getBoolean("active") ?: true,
             splitType = SplitType.from(splitStr),
             paymentMethod = PaymentMethod.from(payStr),
+            cardId = doc.getString("cardId"),
             type = TransactionType.from(typeStr),
             startMonth = doc.getString("startMonth"),
             endMonth = doc.getString("endMonth"),
-            installmentsCount = doc.getLong("installmentsCount")?.toInt()
+            installmentsCount = doc.getLong("installmentsCount")?.toInt(),
+            launchTrigger = LaunchTrigger.from(triggerStr)
         )
     }
 
@@ -1040,10 +1043,12 @@ class FirestoreFinanceRepository(
             "active" to bill.active,
             "splitType" to bill.splitType?.value,
             "paymentMethod" to bill.paymentMethod?.value,
+            "cardId" to bill.cardId,
             "type" to bill.type.value,
             "startMonth" to bill.startMonth,
             "endMonth" to bill.endMonth,
-            "installmentsCount" to bill.installmentsCount
+            "installmentsCount" to bill.installmentsCount,
+            "launchTrigger" to bill.launchTrigger.value
         )
     }
 

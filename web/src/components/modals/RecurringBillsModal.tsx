@@ -43,9 +43,24 @@ interface RecurringBillsModalProps {
 }
 
 export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalProps) {
-  const { recurring, saveRecurring, deleteRecurring, me, partner, profile, updateProfile, cards, transactions, month } = useFinance()
+  const {
+    recurring,
+    saveRecurring,
+    deleteRecurring,
+    me,
+    partner,
+    profile,
+    updateProfile,
+    cards,
+    transactions,
+    monthTransactions,
+    month,
+    launchBillForCurrentMonth,
+    setStatus,
+  } = useFinance()
   const [editingBill, setEditingBill] = useState<RecurringBill | null>(null)
   const [activeTab, setActiveTab] = useState<'all' | 'income' | 'expense'>('all')
+  const [busyBillId, setBusyBillId] = useState<string | null>(null)
 
   // Base monthly income editor
   const [editingIncome, setEditingIncome] = useState(false)
@@ -201,6 +216,48 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       return true
     })
 
+  // Métricas executivas de Comprometimento Fixo no mês selecionado
+  const fixedMetrics = useMemo(() => {
+    const activeMyBills = recurring.filter(
+      (b) =>
+        b.active &&
+        b.ownerUid === me?.uid &&
+        (!b.startMonth || month >= b.startMonth) &&
+        (!b.endMonth || month <= b.endMonth),
+    )
+    const baseSalary = profile?.monthlyIncome || 0
+    let extraFixedIncome = 0
+    let fixedCardExpense = 0
+    let fixedAccountExpense = 0
+
+    for (const b of activeMyBills) {
+      const { amount } = estimateRecurring(b, transactions, month)
+      const myShare = b.splitType === 'split_50' ? amount / 2 : amount
+      if (b.type === 'income') {
+        extraFixedIncome += myShare
+      } else {
+        const isCard = b.paymentMethod === 'credit_card' || Boolean(b.cardId)
+        if (isCard) fixedCardExpense += myShare
+        else fixedAccountExpense += myShare
+      }
+    }
+
+    const totalFixedIncome = baseSalary + extraFixedIncome
+    const totalFixedExpense = fixedCardExpense + fixedAccountExpense
+    const baseFreeBalance = totalFixedIncome - totalFixedExpense
+    const commitmentPct =
+      totalFixedIncome > 0 ? Math.min(100, Math.round((totalFixedExpense / totalFixedIncome) * 100)) : 0
+
+    return {
+      totalFixedIncome,
+      totalFixedExpense,
+      fixedCardExpense,
+      fixedAccountExpense,
+      baseFreeBalance,
+      commitmentPct,
+    }
+  }, [recurring, me?.uid, month, profile?.monthlyIncome, transactions])
+
   const get503020Badge = (cat: Category) => {
     const detail = CATEGORY_GROUPS[cat]
     if (!detail) return null
@@ -335,6 +392,55 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
               <span>Alterar Renda</span>
             </Button>
           )}
+        </div>
+
+        {/* 1.5. Painel de Comprometimento Fixo Mensal */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+              Renda Fixa Total
+            </span>
+            <span className="text-sm font-bold font-mono text-emerald-400 mt-0.5 block">
+              +{formatBRL(fixedMetrics.totalFixedIncome)}
+            </span>
+            <span className="text-[10px] text-slate-500">Salário + Recorrentes</span>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+              Fixas (Extrato/Boleto)
+            </span>
+            <span className="text-sm font-bold font-mono text-amber-300 mt-0.5 block">
+              −{formatBRL(fixedMetrics.fixedAccountExpense)}
+            </span>
+            <span className="text-[10px] text-slate-500">Pix, Débito & Boletos</span>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+              Assinaturas Cartão
+            </span>
+            <span className="text-sm font-bold font-mono text-violet-300 mt-0.5 block">
+              −{formatBRL(fixedMetrics.fixedCardExpense)}
+            </span>
+            <span className="text-[10px] text-slate-500">Caem na Fatura</span>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800/80">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block">
+              Comprometimento Fixo
+            </span>
+            <span
+              className={`text-sm font-bold font-mono mt-0.5 block ${
+                fixedMetrics.commitmentPct <= 60 ? 'text-cyan-400' : 'text-rose-400'
+              }`}
+            >
+              {fixedMetrics.commitmentPct}% da renda
+            </span>
+            <span className="text-[10px] text-slate-500">
+              Livre base: {formatBRL(fixedMetrics.baseFreeBalance)}
+            </span>
+          </div>
         </div>
 
         {/* 2. Bill Editor Form */}
@@ -788,6 +894,10 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                 myBills.map((bill) => {
                   const isIncome = bill.type === 'income'
                   const linkedCard = bill.cardId ? cards.find((c) => c.id === bill.cardId) : null
+                  const monthTx = (monthTransactions || []).find((t) => t.recurringBillId === bill.id)
+                  const isBusy = busyBillId === bill.id
+                  const isCardMethod = bill.paymentMethod === 'credit_card' || Boolean(bill.cardId)
+                  const { amount: estimatedMonthVal } = estimateRecurring(bill, transactions, month)
 
                   return (
                     <div
@@ -812,6 +922,41 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                               {bill.category}
                             </Badge>
                           )}
+                          {/* Status no mês selecionado (Checklist do Mês) */}
+                          {monthTx ? (
+                            monthTx.status === 'paid' ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] bg-emerald-500/15 text-emerald-300 border-emerald-500/40 gap-1"
+                              >
+                                <Check className="size-2.5" />
+                                {isIncome ? 'Recebido em ' : 'Pago em '}
+                                {monthLabel(month)}
+                              </Badge>
+                            ) : monthTx.paymentMethod === 'credit_card' || monthTx.cardId ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] bg-violet-500/15 text-violet-300 border-violet-500/40 gap-1"
+                              >
+                                <CreditCard className="size-2.5" />
+                                Na Fatura ({monthLabel(month)})
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] bg-amber-500/15 text-amber-300 border-amber-500/40 gap-1"
+                              >
+                                ⏳ Previsto no Extrato ({monthLabel(month)})
+                              </Badge>
+                            )
+                          ) : bill.active ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] bg-slate-800/80 text-slate-400 border-slate-700 gap-1"
+                            >
+                              ⚪ A lançar em {monthLabel(month)}
+                            </Badge>
+                          ) : null}
                           {!isIncome && get503020Badge(bill.category)}
                           {bill.subcategory && (
                             <Badge variant="outline" className="text-[10px] bg-slate-800/80 text-slate-300 border-slate-700 font-medium">
@@ -854,7 +999,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                           </span>
                           <span>·</span>
                           <span className={`font-mono font-bold ${isIncome ? 'text-emerald-400' : 'text-slate-200'}`}>
-                            {isIncome ? `+${formatBRL(bill.defaultAmount)}` : formatBRL(bill.defaultAmount)}
+                            {isIncome ? `+${formatBRL(estimatedMonthVal)}` : formatBRL(estimatedMonthVal)}
                           </span>
                           <span>·</span>
                           <span className="text-[11px] text-slate-500">
@@ -863,7 +1008,58 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0 flex-wrap">
+                        {/* Ações Rápidas de Efetivação no Mês */}
+                        {bill.active && !monthTx && (
+                          <Button
+                            size="sm"
+                            disabled={isBusy}
+                            onClick={async () => {
+                              setBusyBillId(bill.id)
+                              try {
+                                await launchBillForCurrentMonth(bill, { asPaid: !isCardMethod })
+                              } finally {
+                                setBusyBillId(null)
+                              }
+                            }}
+                            className={`text-xs h-8 rounded-lg cursor-pointer gap-1 ${
+                              isCardMethod
+                                ? 'bg-violet-600 hover:bg-violet-500 text-white'
+                                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                            }`}
+                            title={
+                              isCardMethod
+                                ? 'Lançar na fatura do cartão neste mês'
+                                : isIncome
+                                  ? 'Confirmar recebimento neste mês'
+                                  : 'Confirmar pagamento neste mês'
+                            }
+                          >
+                            <Check className="size-3" />
+                            <span>
+                              {isCardMethod ? 'Lançar Fatura' : isIncome ? 'Já Recebi' : 'Já Paguei'}
+                            </span>
+                          </Button>
+                        )}
+                        {monthTx && monthTx.status === 'estimated' && (
+                          <Button
+                            size="sm"
+                            disabled={isBusy}
+                            onClick={async () => {
+                              setBusyBillId(bill.id)
+                              try {
+                                await setStatus(monthTx, 'paid')
+                              } finally {
+                                setBusyBillId(null)
+                              }
+                            }}
+                            className="text-xs h-8 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer gap-1"
+                            title="Confirmar pagamento/recebimento deste mês"
+                          >
+                            <Check className="size-3" />
+                            <span>{isIncome ? 'Confirmar Recebido' : 'Confirmar Pago'}</span>
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"

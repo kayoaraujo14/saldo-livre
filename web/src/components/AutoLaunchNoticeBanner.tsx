@@ -36,10 +36,13 @@ export function AutoLaunchNoticeBanner({ onGoToTransactions }: AutoLaunchNoticeB
   const [loadingActionId, setLoadingActionId] = useState<string | null>(null)
 
   // AÇÕES PARA PENDÊNCIAS DE RECORRENTES
-  const handleConfirmSingle = async (candidate: (typeof pendingRecurringLaunches)[0]) => {
+  const handleConfirmSingle = async (
+    candidate: (typeof pendingRecurringLaunches)[0],
+    asPaid = false,
+  ) => {
     setLoadingActionId(candidate.id)
     try {
-      await confirmLaunchRecurring(candidate)
+      await confirmLaunchRecurring(candidate, { asPaid })
     } finally {
       setLoadingActionId(null)
     }
@@ -58,13 +61,13 @@ export function AutoLaunchNoticeBanner({ onGoToTransactions }: AutoLaunchNoticeB
     skipRecurringForMonth(candidateId)
   }
 
-  const handleConfirmAll = async () => {
+  const handleConfirmAll = async (asPaid = false) => {
     setLoadingActionId('all')
     try {
       // Confirma apenas os que não tem conflito de match manual, para segurança
       const safeToLaunch = pendingRecurringLaunches.filter((c) => !c.matchedManualTx)
       if (safeToLaunch.length > 0) {
-        await confirmLaunchAllRecurring(safeToLaunch)
+        await confirmLaunchAllRecurring(safeToLaunch, asPaid)
       }
     } finally {
       setLoadingActionId(null)
@@ -124,16 +127,27 @@ export function AutoLaunchNoticeBanner({ onGoToTransactions }: AutoLaunchNoticeB
                 </Button>
               )}
               {pendingRecurringLaunches.filter((c) => !c.matchedManualTx).length > 1 && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={loadingActionId === 'all'}
-                  onClick={handleConfirmAll}
-                  className="h-7 text-xs px-2.5 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 rounded-lg gap-1 hidden sm:flex cursor-pointer"
-                >
-                  <CheckCheck className="size-3.5" />
-                  <span>Confirmar Livres</span>
-                </Button>
+                <div className="hidden sm:flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={loadingActionId === 'all'}
+                    onClick={() => handleConfirmAll(true)}
+                    className="h-7 text-xs px-2.5 bg-emerald-500/15 border-emerald-500/35 text-emerald-300 hover:bg-emerald-500/25 rounded-lg gap-1 cursor-pointer"
+                  >
+                    <CheckCheck className="size-3.5" />
+                    <span>Confirmar Tudo Pago</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={loadingActionId === 'all'}
+                    onClick={() => handleConfirmAll(false)}
+                    className="h-7 text-xs px-2.5 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 rounded-lg gap-1 cursor-pointer"
+                  >
+                    <span>Lançar Previsto</span>
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -224,24 +238,54 @@ export function AutoLaunchNoticeBanner({ onGoToTransactions }: AutoLaunchNoticeB
                         </>
                       ) : (
                         <>
-                          <Button
-                            size="sm"
-                            disabled={isLoading}
-                            onClick={() => handleConfirmSingle(item)}
-                            className="h-7 text-xs px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg gap-1 cursor-pointer"
-                          >
-                            <Check className="size-3" />
-                            <span>Lançar</span>
-                          </Button>
+                          {item.paymentMethod === 'credit_card' || item.cardId ? (
+                            <Button
+                              size="sm"
+                              disabled={isLoading}
+                              onClick={() => handleConfirmSingle(item, false)}
+                              className="h-7 text-xs px-2.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg gap-1 cursor-pointer"
+                              title="Lança na fatura do cartão vinculado como Pendente"
+                            >
+                              <CreditCard className="size-3" />
+                              <span>Lançar na Fatura</span>
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                size="sm"
+                                disabled={isLoading}
+                                onClick={() => handleConfirmSingle(item, true)}
+                                className="h-7 text-xs px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg gap-1 cursor-pointer"
+                                title={
+                                  item.type === 'income'
+                                    ? 'Confirmar que já foi recebido'
+                                    : 'Confirmar que já foi pago no extrato'
+                                }
+                              >
+                                <Check className="size-3" />
+                                <span>{item.type === 'income' ? 'Já Recebi' : 'Já Paguei'}</span>
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={isLoading}
+                                onClick={() => handleConfirmSingle(item, false)}
+                                className="h-7 text-xs px-2 bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20 rounded-lg cursor-pointer"
+                                title="Lançar no extrato como Previsto (a pagar)"
+                              >
+                                <span>Previsto</span>
+                              </Button>
+                            </>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
                             disabled={isLoading}
                             onClick={() => handleSkip(item.id)}
                             className="h-7 text-xs px-2 bg-slate-800/80 border-slate-700 text-slate-300 hover:text-white rounded-lg cursor-pointer"
-                            title="Marcar como já lançada manualmente ou não lançar este mês"
+                            title="Marcar como já lançada manualmente ou pular este mês"
                           >
-                            <span>Já Lancei / Pular</span>
+                            <span>Pular</span>
                           </Button>
                         </>
                       )}

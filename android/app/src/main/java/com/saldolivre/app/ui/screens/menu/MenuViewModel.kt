@@ -5,13 +5,11 @@ import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.SaldoLivreApplication
 import com.saldolivre.app.data.ai.GeminiLoadBalancer
 import com.saldolivre.app.data.engine.FinanceEngine
-import com.saldolivre.app.data.model.AcceptanceStatus
 import com.saldolivre.app.data.model.FriendshipStatus
 import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.data.repository.MockFinanceRepository
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -29,9 +27,7 @@ data class MenuUiState(
     val hasGeminiKey: Boolean = false,
     val apiKey: String = "",
     val activeGeminiModel: String = "gemini-3-flash",
-    val isTestingConnection: Boolean = false,
-    val isGeneratingBills: Boolean = false,
-    val generateFeedback: String? = null
+    val isTestingConnection: Boolean = false
 )
 
 class MenuViewModel(
@@ -60,7 +56,7 @@ class MenuViewModel(
                 Triple(
                     Pair(user, month),
                     summary,
-                    Pair(cards.size, recurring.count { it.active })
+                    Pair(cards.size, recurring.count { it.active && it.ownerUid == user.uid })
                 )
             }.combine(
                 combine(
@@ -130,6 +126,16 @@ class MenuViewModel(
         }
     }
 
+    fun clearAiKey() {
+        loadBalancer.saveApiKeys("")
+        _uiState.update {
+            it.copy(
+                hasGeminiKey = false,
+                apiKey = ""
+            )
+        }
+    }
+
     fun testConnection(testKey: String, onResult: (Pair<Boolean, String>) -> Unit) {
         viewModelScope.launch {
             _uiState.update { it.copy(isTestingConnection = true) }
@@ -141,27 +147,5 @@ class MenuViewModel(
 
     fun switchUser(uid: String) {
         repository.switchUser(uid)
-    }
-
-    fun generateBillsForCurrentMonth() {
-        if (_uiState.value.isGeneratingBills) return
-        _uiState.update { it.copy(isGeneratingBills = true, generateFeedback = null) }
-
-        viewModelScope.launch {
-            try {
-                val (created, skipped) = repository.generateBillsForMonth(_uiState.value.selectedMonth)
-                val msg = "✓ $created conta(s) gerada(s) · $skipped já existiam em ${FinanceEngine.monthLabel(_uiState.value.selectedMonth)}"
-                _uiState.update { it.copy(isGeneratingBills = false, generateFeedback = msg) }
-                delay(4000)
-                _uiState.update { it.copy(generateFeedback = null) }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isGeneratingBills = false,
-                        generateFeedback = "Não foi possível gerar as contas recorrentes."
-                    )
-                }
-            }
-        }
     }
 }

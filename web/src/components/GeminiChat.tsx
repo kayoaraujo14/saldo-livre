@@ -969,15 +969,21 @@ Atenção crítica:
               byInvestmentSubcategory: summary.byInvestmentSubcategory,
             }
           : null,
-        recentTransactions: (monthTransactions || []).slice(0, 40).map((t) => ({
-          id: t.id,
-          date: formatShortDate(t.dueDate),
-          description: t.description,
-          amount: effectiveAmount(t),
-          category: t.category,
-          status: t.status,
-          split: SPLIT_LABELS[t.splitType || 'mine']?.label || t.splitType || 'mine',
-        })),
+        recentTransactions: (monthTransactions || []).slice(0, 40).map((t) => {
+          const cObj = t.cardId ? cards.find((c) => c.id === t.cardId) : null
+          return {
+            id: t.id,
+            date: formatShortDate(t.dueDate),
+            description: t.description,
+            amount: effectiveAmount(t),
+            category: t.category,
+            subcategory: t.subcategory || null,
+            status: t.status,
+            split: SPLIT_LABELS[t.splitType || 'mine']?.label || t.splitType || 'mine',
+            paymentMethod: t.paymentMethod,
+            cardName: cObj?.cardName || null,
+          }
+        }),
         pendingTransactions: activePendingTxs.length > 0 ? activePendingTxs : undefined,
       })
 

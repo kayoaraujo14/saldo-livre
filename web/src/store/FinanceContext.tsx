@@ -29,6 +29,7 @@ import {
   canUserEditTransaction,
   clampPct,
   computeSummary,
+  estimateRecurring,
   friendPctOf,
   friendShareOf,
   getPendingRecurringLaunches,
@@ -187,8 +188,15 @@ interface FinanceContextValue {
   autoLaunchedNotice: AutoLaunchedNotice | null
   dismissAutoLaunchNotice: () => void
   pendingRecurringLaunches: PendingRecurringCandidate[]
-  confirmLaunchRecurring: (candidate: PendingRecurringCandidate) => Promise<void>
-  confirmLaunchAllRecurring: (candidates?: PendingRecurringCandidate[]) => Promise<void>
+  confirmLaunchRecurring: (
+    candidate: PendingRecurringCandidate,
+    options?: { asPaid?: boolean; customAmount?: number },
+  ) => Promise<void>
+  confirmLaunchAllRecurring: (candidates?: PendingRecurringCandidate[], asPaid?: boolean) => Promise<void>
+  launchBillForCurrentMonth: (
+    bill: RecurringBill,
+    options?: { asPaid?: boolean; customAmount?: number },
+  ) => Promise<void>
   linkManualTransactionToRecurring: (candidateId: string, manualTxId: string) => Promise<void>
   skipRecurringForMonth: (candidateId: string) => void
   mode: Mode
@@ -1259,6 +1267,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const pendingRecurringLaunches: PendingRecurringCandidate[] = useMemo(() => {
     if (!me || !isTxLoaded) return []
     const now = new Date()
+    const currentM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    // Evita disparar banner de pendências automáticas quando o usuário está navegando em meses passados ou futuros
+    if (month !== currentM) return []
     const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     const monthResolved = resolvedRecurring[month] || []
     return getPendingRecurringLaunches({
@@ -1273,15 +1284,30 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   }, [me, isTxLoaded, recurring, transactions, month, profile, resolvedRecurring])
 
   const confirmLaunchRecurring = useCallback(
-    async (candidate: PendingRecurringCandidate) => {
+    async (
+      candidate: PendingRecurringCandidate,
+      options?: { asPaid?: boolean; customAmount?: number },
+    ) => {
       if (!me) return
+      const finalAmount =
+        options?.customAmount != null && options.customAmount > 0 ? round2(options.customAmount) : candidate.amount
       const split = buildSplit({
         splitType: candidate.bill?.splitType ?? 'mine',
-        total: candidate.amount,
+        total: finalAmount,
         me,
         partner: candidate.isSalary ? null : partnerParty,
         payerUid: me.uid,
       })
+      const isCardBill = candidate.paymentMethod === 'credit_card' || Boolean(candidate.cardId)
+      const linkedCard = candidate.cardId ? cards.find((c) => c.id === candidate.cardId) : null
+      const dueStr = linkedCard ? dateInMonth(month, linkedCard.dueDay) : candidate.dueDate
+      const status: TransactionStatus = options?.asPaid
+        ? 'paid'
+        : isCardBill
+          ? 'pending'
+          : 'estimated'
+      const actualAmount = status === 'paid' || status === 'pending' ? finalAmount : null
+
       const newTx: NewTransaction = {
         createdByUid: me.uid,
         paidByUid: me.uid,
@@ -1290,12 +1316,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         category: candidate.category,
         subcategory: candidate.subcategory || null,
         type: candidate.type,
-        paymentMethod: candidate.paymentMethod,
-        status: 'estimated',
-        estimatedAmount: candidate.amount,
-        actualAmount: null,
-        totalAmount: candidate.amount,
-        dueDate: candidate.dueDate,
+        paymentMethod: isCardBill ? 'credit_card' : candidate.paymentMethod,
+        status,
+        estimatedAmount: finalAmount,
+        actualAmount,
+        totalAmount: finalAmount,
+        dueDate: dueStr,
         competenceMonth: month,
         recurringBillId: candidate.id,
         allocations: split.allocations,
@@ -1306,11 +1332,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       await addTransaction(newTx)
       markRecurringResolved(candidate.id, month)
     },
-    [me, partnerParty, month, addTransaction, markRecurringResolved],
+    [me, partnerParty, month, cards, addTransaction, markRecurringResolved],
   )
 
   const confirmLaunchAllRecurring = useCallback(
-    async (candidatesToLaunch?: PendingRecurringCandidate[]) => {
+    async (candidatesToLaunch?: PendingRecurringCandidate[], asPaid?: boolean) => {
       const list = candidatesToLaunch || pendingRecurringLaunches
       if (!me || list.length === 0) return
       const txs: NewTransaction[] = []
@@ -1322,6 +1348,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           partner: candidate.isSalary ? null : partnerParty,
           payerUid: me.uid,
         })
+        const isCardBill = candidate.paymentMethod === 'credit_card' || Boolean(candidate.cardId)
+        const linkedCard = candidate.cardId ? cards.find((c) => c.id === candidate.cardId) : null
+        const dueStr = linkedCard ? dateInMonth(month, linkedCard.dueDay) : candidate.dueDate
+        const status: TransactionStatus = asPaid ? 'paid' : isCardBill ? 'pending' : 'estimated'
+        const actualAmount = status === 'paid' || status === 'pending' ? candidate.amount : null
+
         txs.push({
           createdByUid: me.uid,
           paidByUid: me.uid,
@@ -1330,12 +1362,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           category: candidate.category,
           subcategory: candidate.subcategory || null,
           type: candidate.type,
-          paymentMethod: candidate.paymentMethod,
-          status: 'estimated',
+          paymentMethod: isCardBill ? 'credit_card' : candidate.paymentMethod,
+          status,
           estimatedAmount: candidate.amount,
-          actualAmount: null,
+          actualAmount,
           totalAmount: candidate.amount,
-          dueDate: candidate.dueDate,
+          dueDate: dueStr,
           competenceMonth: month,
           recurringBillId: candidate.id,
           allocations: split.allocations,
@@ -1347,7 +1379,53 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       await addMany(txs)
       list.forEach((c) => markRecurringResolved(c.id, month))
     },
-    [me, partnerParty, month, addMany, markRecurringResolved, pendingRecurringLaunches],
+    [me, partnerParty, month, cards, addMany, markRecurringResolved, pendingRecurringLaunches],
+  )
+
+  const launchBillForCurrentMonth = useCallback(
+    async (bill: RecurringBill, options?: { asPaid?: boolean; customAmount?: number }) => {
+      if (!me) return
+      const { amount: estimated } = estimateRecurring(bill, transactions, month)
+      const finalAmount =
+        options?.customAmount != null && options.customAmount > 0 ? round2(options.customAmount) : estimated
+      const split = buildSplit({
+        splitType: bill.splitType ?? 'mine',
+        total: finalAmount,
+        me,
+        partner: bill.type === 'income' ? null : partnerParty,
+        payerUid: me.uid,
+      })
+      const effMethod = bill.paymentMethod ?? (bill.type === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
+      const isCardBill = effMethod === 'credit_card' || Boolean(bill.cardId)
+      const linkedCard = bill.cardId ? cards.find((c) => c.id === bill.cardId) : null
+      const dueStr = linkedCard ? dateInMonth(month, linkedCard.dueDay) : dateInMonth(month, bill.dueDay)
+      const status: TransactionStatus = options?.asPaid ? 'paid' : isCardBill ? 'pending' : 'estimated'
+      const actualAmount = status === 'paid' || status === 'pending' ? finalAmount : null
+
+      await addTransaction({
+        createdByUid: me.uid,
+        paidByUid: me.uid,
+        cardId: bill.cardId || null,
+        description: bill.description,
+        category: bill.type === 'income' ? (bill.category || 'Receita') : bill.category,
+        subcategory: bill.subcategory || null,
+        type: bill.type ?? 'expense',
+        paymentMethod: isCardBill ? 'credit_card' : effMethod,
+        status,
+        estimatedAmount: finalAmount,
+        actualAmount,
+        totalAmount: finalAmount,
+        dueDate: dueStr,
+        competenceMonth: month,
+        recurringBillId: bill.id,
+        allocations: split.allocations,
+        userImpact: split.userImpact,
+        visibleToUids: split.visibleToUids,
+        createdAt: Date.now(),
+      })
+      markRecurringResolved(bill.id, month)
+    },
+    [me, partnerParty, transactions, month, cards, addTransaction, markRecurringResolved],
   )
 
   const linkManualTransactionToRecurring = useCallback(
@@ -1536,9 +1614,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           curDueDate = curDate
           curCompetenceMonth = cardDates.competenceMonth
         }
-        const curDesc = isInstallment
-          ? `${input.description} (${i}/${installmentsTotal})`
-          : input.description
+        const curDesc = stripInstallmentSuffix(input.description)
 
         const split = buildSplit({
           splitType: input.type === 'income' ? 'mine' : input.splitType,
@@ -1859,6 +1935,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     pendingRecurringLaunches,
     confirmLaunchRecurring,
     confirmLaunchAllRecurring,
+    launchBillForCurrentMonth,
     linkManualTransactionToRecurring,
     skipRecurringForMonth,
     saveCard,

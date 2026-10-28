@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.ui.screens.chat.ChartDataItem
@@ -1379,7 +1380,9 @@ class AndroidAgentToolsEngine(
         cardFilter: String? = null,
         startDate: String? = null,
         endDate: String? = null,
-        type: TransactionType? = null
+        type: TransactionType? = null,
+        paymentMethodFilter: String? = null,
+        includeProjectedRecurring: Boolean = false
     ): ToolExecutionResult {
         val all = repository.getTransactions().first()
         val user = repository.currentUser.value
@@ -1418,6 +1421,24 @@ class AndroidAgentToolsEngine(
             // Intervalo de datas
             if (!startDate.isNullOrBlank() && t.dueDate < startDate) return@filter false
             if (!endDate.isNullOrBlank() && t.dueDate > endDate) return@filter false
+
+            // Método de pagamento (Fatura Cartão vs Extrato/Pix/Débito/Boleto)
+            if (!paymentMethodFilter.isNullOrBlank()) {
+                val pmNorm = paymentMethodFilter.trim().lowercase(Locale.ROOT)
+                val isTxCard = t.paymentMethod == PaymentMethod.CREDIT_CARD || !t.cardId.isNullOrBlank()
+                when {
+                    pmNorm == "extrato_conta" || pmNorm == "extrato" || pmNorm == "conta" -> {
+                        if (isTxCard) return@filter false
+                    }
+                    pmNorm == "credit_card" || pmNorm == "cartao" || pmNorm == "cartão" || pmNorm == "fatura" -> {
+                        if (!isTxCard) return@filter false
+                    }
+                    else -> {
+                        val expectedMethod = PaymentMethod.from(pmNorm)
+                        if (t.paymentMethod != expectedMethod) return@filter false
+                    }
+                }
+            }
 
             // Cartão de crédito
             if (matchedCard != null) {
@@ -1540,10 +1561,59 @@ class AndroidAgentToolsEngine(
         val totalRefunds = refundTxs.sumOf { kotlin.math.abs(it.effectiveAmount) }
         val netExpenses = kotlin.math.max(0.0, totalExpensesGross - totalRefunds)
 
-        // 2. Seu Impacto Real nas Despesas (Sua Parte)
+        // 2.Seu Impacto Real nas Despesas (Sua Parte)
         val myExpensesGrossImpact = expenseTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
         val myRefundsImpact = refundTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
         val myImpactTotal = kotlin.math.max(0.0, myExpensesGrossImpact - myRefundsImpact)
+
+        // Subtotais por Canal de Pagamento (Fatura de Cartão vs Extrato/Pix/Débito/Boleto)
+        val cardExpenseTxs = expenseTxs.filter { it.paymentMethod == PaymentMethod.CREDIT_CARD || !it.cardId.isNullOrBlank() }
+        val accountExpenseTxs = expenseTxs.filter { it.paymentMethod != PaymentMethod.CREDIT_CARD && it.cardId.isNullOrBlank() }
+        val cardImpactTotal = cardExpenseTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
+        val accountImpactTotal = accountExpenseTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
+
+        // Contas recorrentes ativas que ainda não foram lançadas no mês consultado
+        val unlaunchedRecurringLines = if (!activeMonth.isNullOrBlank() && (includeProjectedRecurring || activeMonth >= FinanceEngine.currentMonthKey())) {
+            val unlaunched = recurringBills.filter { bill ->
+                if (!bill.active) return@filter false
+                val startM = bill.startMonth ?: activeMonth
+                if (activeMonth < startM) return@filter false
+                if (!bill.endMonth.isNullOrBlank() && activeMonth > bill.endMonth) return@filter false
+                if (bill.installmentsCount != null && bill.installmentsCount > 0 && !bill.startMonth.isNullOrBlank()) {
+                    val endM = FinanceEngine.shiftMonth(bill.startMonth, bill.installmentsCount - 1)
+                    if (activeMonth > endM) return@filter false
+                }
+                val alreadyInDb = monthTransactions.any {
+                    it.recurringBillId == bill.id
+                } || FinanceEngine.findMatchingManualBill(monthTransactions, activeMonth, bill) != null
+                if (alreadyInDb) return@filter false
+                if (type != null && bill.type != type) return@filter false
+                if (!category.isNullOrBlank() && !bill.category.equals(category, ignoreCase = true) && !matchesSearch(bill.category, category)) return@filter false
+                if (!searchTerm.isNullOrBlank() && !matchesSearch(bill.description, searchTerm) && !matchesSearch(bill.category, searchTerm)) return@filter false
+                if (!paymentMethodFilter.isNullOrBlank()) {
+                    val pmNorm = paymentMethodFilter.trim().lowercase(Locale.ROOT)
+                    val isBillCard = bill.paymentMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank()
+                    when {
+                        pmNorm == "extrato_conta" || pmNorm == "extrato" || pmNorm == "conta" -> if (isBillCard) return@filter false
+                        pmNorm == "credit_card" || pmNorm == "cartao" || pmNorm == "cartão" || pmNorm == "fatura" -> if (!isBillCard) return@filter false
+                        else -> if (bill.paymentMethod != PaymentMethod.from(pmNorm)) return@filter false
+                    }
+                }
+                true
+            }
+            if (unlaunched.isNotEmpty()) {
+                val recLines = unlaunched.joinToString("\n") { b ->
+                    val est = FinanceEngine.estimateRecurring(b, all, activeMonth).amount
+                    val myShare = if (b.splitType == SplitType.SPLIT_50) est * 0.5 else if (b.splitType == SplitType.PARTNER) 0.0 else est
+                    val channelLabel = if (b.paymentMethod == PaymentMethod.CREDIT_CARD || !b.cardId.isNullOrBlank()) {
+                        val cn = b.cardId?.let { cardsMap[it]?.cardName } ?: "Cartão"
+                        "💳 Assinatura Cartão $cn"
+                    } else "🏠 Conta Fixa (${b.paymentMethod?.label ?: "Boleto/Pix"})"
+                    "  * **${b.description}**: ${FinanceEngine.formatCurrency(myShare)} (Vence dia ${b.dueDay}) • ${b.category} • $channelLabel [Prevista/Não lançada no banco]"
+                }
+                "\n\n🔄 **Contas Fixas / Recorrentes Previstas para $activeMonthLabel (${unlaunched.size} item(ns) ainda não lançados no banco):**\n$recLines"
+            } else ""
+        } else ""
 
         // 3. Cota de Terceiros (A Receber)
         val thirdPartyTotal = kotlin.math.max(0.0, totalExpensesGross - myExpensesGrossImpact)
@@ -1685,6 +1755,9 @@ class AndroidAgentToolsEngine(
         if (expenseTxs.isNotEmpty()) {
             summaryMetricsBuilder.append("• **Total Bruto de Despesas**: ${FinanceEngine.formatCurrency(totalExpensesGross)}\n")
             summaryMetricsBuilder.append("• **Seu Impacto Real nas Despesas (Sua Parte)**: ${FinanceEngine.formatCurrency(myImpactTotal)}\n")
+            if (cardExpenseTxs.isNotEmpty() || accountExpenseTxs.isNotEmpty()) {
+                summaryMetricsBuilder.append("  ↳ 💳 **No Cartão (Fatura)**: ${FinanceEngine.formatCurrency(cardImpactTotal)} (${cardExpenseTxs.size} item(ns)) | ⚡ **No Extrato (Pix/Débito/Boleto)**: ${FinanceEngine.formatCurrency(accountImpactTotal)} (${accountExpenseTxs.size} item(ns))\n")
+            }
             if (thirdPartyTotal > 0.01) {
                 summaryMetricsBuilder.append("• **Cota de Terceiros (A Receber)**: ${FinanceEngine.formatCurrency(thirdPartyTotal)}\n")
             }
@@ -1701,6 +1774,7 @@ class AndroidAgentToolsEngine(
                     "$lines$extraNote\n\n" +
                     summaryMetricsBuilder.toString().trimEnd() +
                     subcategoryBreakdownText +
+                    unlaunchedRecurringLines +
                     recurringDivergenceNote,
             actionCard = finalCard,
             actions = listOf(finalCard)
@@ -1720,7 +1794,9 @@ class AndroidAgentToolsEngine(
         cardFilter: String? = null,
         startDate: String? = null,
         endDate: String? = null,
-        type: TransactionType? = null
+        type: TransactionType? = null,
+        paymentMethodFilter: String? = null,
+        includeProjectedRecurring: Boolean = false
     ): ToolExecutionResult = executeSearchTransactions(
         searchTerm = searchTerm,
         category = category,
@@ -1734,7 +1810,9 @@ class AndroidAgentToolsEngine(
         cardFilter = cardFilter,
         startDate = startDate,
         endDate = endDate,
-        type = type
+        type = type,
+        paymentMethodFilter = paymentMethodFilter,
+        includeProjectedRecurring = includeProjectedRecurring
     )
 
     private suspend fun executeSearchFromJson(jsonObj: JsonObject): ToolExecutionResult {
@@ -1782,6 +1860,13 @@ class AndroidAgentToolsEngine(
         val endDate = jsonObj.getStringOrNull("endDate")
             ?: jsonObj.getStringOrNull("dataFim")
 
+        val paymentMethodFilter = jsonObj.getStringOrNull("paymentMethod")
+            ?: jsonObj.getStringOrNull("metodoPagamento")
+
+        val includeProjectedRecurring = jsonObj.getBooleanOrNull("incluirRecorrentesProjetadas")
+            ?: jsonObj.getBooleanOrNull("includeProjectedRecurring")
+            ?: false
+
         val typeStr = jsonObj.getStringOrNull("type")
             ?: jsonObj.getStringOrNull("tipo")
         val type = when {
@@ -1803,7 +1888,9 @@ class AndroidAgentToolsEngine(
             cardFilter = cardFilter,
             startDate = startDate,
             endDate = endDate,
-            type = type
+            type = type,
+            paymentMethodFilter = paymentMethodFilter,
+            includeProjectedRecurring = includeProjectedRecurring
         )
     }
 
@@ -1819,7 +1906,8 @@ class AndroidAgentToolsEngine(
         cardName: String? = null,
         closingDay: Int? = null,
         dueDay: Int? = null,
-        cardId: String? = null
+        cardId: String? = null,
+        month: String? = null
     ): ToolExecutionResult {
         val cards = repository.getCards().first()
         val user = repository.currentUser.value
@@ -1835,6 +1923,66 @@ class AndroidAgentToolsEngine(
                 return ToolExecutionResult(
                     text = "💳 **Seus Cartões de Crédito cadastrados:**\n\n$list",
                     actionCard = ActionCardData(title = "Cartões Listados", description = "${cards.size} cartões encontrados")
+                )
+            }
+            "detalhar_fatura", "fatura" -> {
+                if (cards.isEmpty()) {
+                    return ToolExecutionResult(text = "💳 Você ainda não possui nenhum cartão de crédito cadastrado.")
+                }
+                val all = repository.getTransactions().first()
+                val bills = repository.getRecurringBills().first()
+                val defaultMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+                val targetMonth = parseMonthKey(month, defaultMonth) ?: defaultMonth
+                val targetMonthLabel = FinanceEngine.formatMonthLabel(targetMonth)
+
+                val targetCards = if (!cardId.isNullOrBlank() || !cardName.isNullOrBlank()) {
+                    cards.filter {
+                        it.id == cardId || (cardName != null && (it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true)))
+                    }
+                } else cards
+
+                if (targetCards.isEmpty()) {
+                    return ToolExecutionResult(text = "⚠️ Cartão \"${cardName ?: cardId}\" não encontrado.")
+                }
+
+                val sections = targetCards.map { card ->
+                    val inv = InvoiceEngine.buildInvoice(card, targetMonth, all, user.uid)
+                    val unlaunchedCardBills = bills.filter { b ->
+                        b.active && b.type == TransactionType.EXPENSE &&
+                            (b.cardId == card.id || (b.paymentMethod == PaymentMethod.CREDIT_CARD && b.cardId == null && targetCards.size == 1)) &&
+                            !inv.items.any { tx -> tx.recurringBillId == b.id || FinanceEngine.findMatchingManualBill(listOf(tx), targetMonth, b) != null }
+                    }
+                    val unlaunchedSum = unlaunchedCardBills.sumOf { FinanceEngine.estimateRecurring(it, all, targetMonth).amount }
+                    val catText = if (inv.byCategory.isNotEmpty()) {
+                        "\n  • **Categorias na Fatura**: " + inv.byCategory.joinToString(", ") { "${it.category}: ${FinanceEngine.formatCurrency(it.amount)} (${it.pct}%)" }
+                    } else ""
+                    val itemsLines = inv.items.take(15).joinToString("\n") { tx ->
+                        val myImp = FinanceEngine.impactFor(tx, user.uid, all)
+                        val splitNote = if (kotlin.math.abs(myImp - tx.effectiveAmount) > 0.01) " (Sua parte: ${FinanceEngine.formatCurrency(myImp)})" else ""
+                        "    - **${tx.description}**: ${FinanceEngine.formatCurrency(tx.effectiveAmount)}$splitNote • ${tx.category}${if (!tx.subcategory.isNullOrBlank()) " › ${tx.subcategory}" else ""} • ${tx.status.label}"
+                    }
+                    val unlaunchedLines = if (unlaunchedCardBills.isNotEmpty()) {
+                        "\n  • **Assinaturas Recorrentes Previstas no Cartão (${unlaunchedCardBills.size})**:\n" +
+                            unlaunchedCardBills.joinToString("\n") { b ->
+                                "    - **${b.description}**: ${FinanceEngine.formatCurrency(FinanceEngine.estimateRecurring(b, all, targetMonth).amount)} • ${b.category} (Projetada)"
+                            }
+                    } else ""
+
+                    "💳 **Fatura ${card.cardName} — $targetMonthLabel**\n" +
+                        "  • **Status**: ${inv.status.label} (Fecha: ${FinanceEngine.formatShortDate(inv.closingDate)} | Vence: ${FinanceEngine.formatShortDate(inv.dueDate)})\n" +
+                        "  • **Total Lançado na Fatura**: ${FinanceEngine.formatCurrency(inv.total)} (Sua Parte: ${FinanceEngine.formatCurrency(inv.myShare)} | Terceiros: ${FinanceEngine.formatCurrency(inv.othersShare)})" +
+                        (if (unlaunchedSum > 0) "\n  • **Total Projetado c/ Assinaturas**: ${FinanceEngine.formatCurrency(inv.total + unlaunchedSum)}" else "") +
+                        catText +
+                        (if (itemsLines.isNotBlank()) "\n  • **Compras Lançadas (${inv.items.size})**:\n$itemsLines" else "\n  • *Nenhuma compra lançada nesta fatura ainda.*") +
+                        unlaunchedLines
+                }
+
+                return ToolExecutionResult(
+                    text = sections.joinToString("\n\n"),
+                    actionCard = ActionCardData(
+                        title = "Fatura(s) — $targetMonthLabel",
+                        description = "${targetCards.size} cartão(ões) detalhado(s)"
+                    )
                 )
             }
             "adicionar" -> {
@@ -1883,12 +2031,13 @@ class AndroidAgentToolsEngine(
 
     private suspend fun executeManageCardsFromJson(jsonObj: JsonObject): ToolExecutionResult {
         val op = jsonObj.getStringOrNull("operation") ?: jsonObj.getStringOrNull("acao") ?: "listar"
-        val name = jsonObj.getStringOrNull("cardName") ?: jsonObj.getStringOrNull("nome")
+        val name = jsonObj.getStringOrNull("cardName") ?: jsonObj.getStringOrNull("nome") ?: jsonObj.getStringOrNull("cartao")
         val closing = jsonObj.getIntOrNull("closingDay") ?: jsonObj.getIntOrNull("fechamento")
         val due = jsonObj.getIntOrNull("dueDay") ?: jsonObj.getIntOrNull("vencimento")
         val id = jsonObj.getStringOrNull("cardId") ?: jsonObj.getStringOrNull("id")
+        val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
 
-        return executeManageCards(operation = op, cardName = name, closingDay = closing, dueDay = due, cardId = id)
+        return executeManageCards(operation = op, cardName = name, closingDay = closing, dueDay = due, cardId = id, month = month)
     }
 
     // -------------------------------------------------------------
@@ -1902,23 +2051,45 @@ class AndroidAgentToolsEngine(
         dueDay: Int? = null,
         category: String? = null,
         subcategory: String? = null,
-        billId: String? = null
+        billId: String? = null,
+        type: TransactionType? = null,
+        paymentMethod: PaymentMethod? = null,
+        cardName: String? = null,
+        monthsLimit: Int? = null
     ): ToolExecutionResult {
         val bills = repository.getRecurringBills().first()
+        val cards = repository.getCards().first()
+        val cardsMap = cards.associateBy { it.id }
         val user = repository.currentUser.value
 
         when (operation.lowercase()) {
             "listar" -> {
                 if (bills.isEmpty()) {
-                    return ToolExecutionResult(text = "⚡ Você não possui nenhuma conta recorrente cadastrada.")
+                    return ToolExecutionResult(text = "⚡ Você não possui nenhuma conta recorrente ou renda fixa cadastrada.")
                 }
-                val list = bills.joinToString("\n") {
-                    val status = if (it.active) "🟢 Ativa" else "⏸️ Pausada"
-                    "• **${it.description}**: ${FinanceEngine.formatCurrency(it.defaultAmount)} (Vence dia ${it.dueDay}) • ${it.category} • [$status]"
+                val allTxs = repository.getTransactions().first()
+                val curMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+                val monthTxs = allTxs.filter { it.competenceMonth == curMonth }
+
+                val list = bills.joinToString("\n") { b ->
+                    val status = if (b.active) "🟢 Ativa" else "⏸️ Pausada"
+                    val typeTag = if (b.type == TransactionType.INCOME) "💰 Renda Fixa" else "🏠 Conta Fixa"
+                    val cardLabel = b.cardId?.let { cardsMap[it]?.cardName }
+                    val channel = if (b.paymentMethod == PaymentMethod.CREDIT_CARD || !cardLabel.isNullOrBlank()) {
+                        "💳 Cartão ${cardLabel ?: ""}".trim()
+                    } else "⚡ ${b.paymentMethod?.label ?: "Boleto/Pix"}"
+                    val matchedTx = monthTxs.find { it.recurringBillId == b.id } ?: FinanceEngine.findMatchingManualBill(monthTxs, curMonth, b)
+                    val monthBadge = when {
+                        matchedTx?.status == TransactionStatus.PAID -> "✅ Já Pago/Recebido no mês"
+                        matchedTx?.status == TransactionStatus.PENDING -> "💳 Na Fatura no mês"
+                        matchedTx != null -> "⏳ Previsto no Extrato"
+                        else -> "📅 A lançar no mês"
+                    }
+                    "• **${b.description}** ($typeTag): ${FinanceEngine.formatCurrency(b.defaultAmount)} (Dia ${b.dueDay}) • ${b.category} • $channel • [$status | $monthBadge]"
                 }
                 return ToolExecutionResult(
-                    text = "⚡ **Suas Contas Fixas e Assinaturas Recorrentes:**\n\n$list",
-                    actionCard = ActionCardData(title = "Contas Recorrentes", description = "${bills.size} contas cadastradas")
+                    text = "⚡ **Suas Contas Fixas, Assinaturas e Rendas Recorrentes:**\n\n$list",
+                    actionCard = ActionCardData(title = "Contas Fixas & Renda", description = "${bills.size} itens cadastrados")
                 )
             }
             "adicionar" -> {
@@ -1928,28 +2099,71 @@ class AndroidAgentToolsEngine(
                     return ToolExecutionResult(text = "⚠️ Informe o nome e o valor da conta recorrente.")
                 }
                 val guessed = neuralClassifier.guessCategoryAndSubcategory(desc, amt)
+                val matchedCard = if (!cardName.isNullOrBlank()) {
+                    cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
+                } else null
+                val effectiveMethod = when {
+                    matchedCard != null -> PaymentMethod.CREDIT_CARD
+                    paymentMethod != null -> paymentMethod
+                    else -> PaymentMethod.BILL
+                }
                 val newBill = RecurringBill(
                     id = "rec_" + UUID.randomUUID().toString().take(8),
                     ownerUid = user.uid,
                     description = desc,
                     defaultAmount = amt,
-                    dueDay = dueDay ?: 10,
+                    dueDay = dueDay ?: matchedCard?.dueDay ?: 10,
                     category = category ?: guessed.category,
                     subcategory = subcategory ?: guessed.subcategory,
+                    type = type ?: TransactionType.EXPENSE,
+                    paymentMethod = effectiveMethod,
+                    cardId = matchedCard?.id,
+                    startMonth = FinanceEngine.currentMonthKey(),
+                    installmentsCount = monthsLimit,
                     active = true
                 )
                 repository.saveRecurringBill(newBill)
                 return ToolExecutionResult(
                     text = "⚡ **Conta recorrente adicionada com sucesso!**\n\n" +
-                            "• **Assinatura**: $desc\n" +
+                            "• **Descrição**: $desc\n" +
                             "• **Valor Mensal**: ${FinanceEngine.formatCurrency(amt)}\n" +
                             "• **Vencimento**: Todo dia ${newBill.dueDay}\n" +
+                            "• **Canal**: ${if (matchedCard != null) "Cartão ${matchedCard.cardName}" else effectiveMethod.label}\n" +
                             "• **Categoria**: ${newBill.category}\n\n" +
-                            "Essa conta será projetada automaticamente nos seus próximos meses!",
+                            "Essa conta será projetada automaticamente nos seus próximos 12 meses!",
                     actionCard = ActionCardData(
-                        title = "Assinatura Salva",
+                        title = "Recorrência Salva",
                         description = "$desc — ${FinanceEngine.formatCurrency(amt)}",
                         detail = "Todo dia ${newBill.dueDay} • ${newBill.category}"
+                    )
+                )
+            }
+            "editar" -> {
+                val target = bills.find { it.id == billId || (description != null && matchesSearch(it.description, description)) }
+                if (target == null) {
+                    return ToolExecutionResult(text = "⚠️ Conta recorrente não encontrada para edição.")
+                }
+                val matchedCard = if (!cardName.isNullOrBlank()) {
+                    cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
+                } else null
+                val updated = target.copy(
+                    defaultAmount = amount ?: target.defaultAmount,
+                    dueDay = dueDay ?: target.dueDay,
+                    category = category ?: target.category,
+                    subcategory = subcategory ?: target.subcategory,
+                    type = type ?: target.type,
+                    paymentMethod = matchedCard?.let { PaymentMethod.CREDIT_CARD } ?: paymentMethod ?: target.paymentMethod,
+                    cardId = if (matchedCard != null) matchedCard.id else target.cardId,
+                    installmentsCount = monthsLimit ?: target.installmentsCount
+                )
+                repository.saveRecurringBill(updated)
+                return ToolExecutionResult(
+                    text = "✏️ **Conta recorrente \"${updated.description}\" atualizada com sucesso!**\n" +
+                        "• **Valor**: ${FinanceEngine.formatCurrency(updated.defaultAmount)} | **Vencimento**: Dia ${updated.dueDay} | **Categoria**: ${updated.category}",
+                    actionCard = ActionCardData(
+                        title = "Recorrência Editada",
+                        description = "${updated.description} — ${FinanceEngine.formatCurrency(updated.defaultAmount)}",
+                        detail = "Dia ${updated.dueDay} • ${updated.category}"
                     )
                 )
             }
@@ -1989,8 +2203,30 @@ class AndroidAgentToolsEngine(
         val cat = jsonObj.getStringOrNull("category") ?: jsonObj.getStringOrNull("categoria")
         val sub = jsonObj.getStringOrNull("subcategory") ?: jsonObj.getStringOrNull("subcategoria")
         val id = jsonObj.getStringOrNull("billId") ?: jsonObj.getStringOrNull("id")
+        val typeStr = jsonObj.getStringOrNull("type") ?: jsonObj.getStringOrNull("tipo")
+        val type = when {
+            typeStr?.equals("income", ignoreCase = true) == true || typeStr?.equals("receita", ignoreCase = true) == true -> TransactionType.INCOME
+            typeStr?.equals("expense", ignoreCase = true) == true || typeStr?.equals("despesa", ignoreCase = true) == true -> TransactionType.EXPENSE
+            else -> null
+        }
+        val pmStr = jsonObj.getStringOrNull("paymentMethod") ?: jsonObj.getStringOrNull("metodoPagamento")
+        val pm = pmStr?.let { PaymentMethod.from(it) }
+        val cardName = jsonObj.getStringOrNull("cardName") ?: jsonObj.getStringOrNull("cartao")
+        val monthsLimit = jsonObj.getIntOrNull("monthsLimit") ?: jsonObj.getIntOrNull("mesesLimite")
 
-        return executeManageRecurring(operation = op, description = desc, amount = amt, dueDay = day, category = cat, subcategory = sub, billId = id)
+        return executeManageRecurring(
+            operation = op,
+            description = desc,
+            amount = amt,
+            dueDay = day,
+            category = cat,
+            subcategory = sub,
+            billId = id,
+            type = type,
+            paymentMethod = pm,
+            cardName = cardName,
+            monthsLimit = monthsLimit
+        )
     }
 
     // -------------------------------------------------------------
@@ -2110,71 +2346,152 @@ class AndroidAgentToolsEngine(
     }
 
     // -------------------------------------------------------------
-    // 10.1. REPORT PROJECTION (RELATÓRIO E PROJEÇÃO MENSAL)
+    // 10.1. REPORT PROJECTION (RELATÓRIO E PROJEÇÃO MENSAL — ATÉ 12 MESES)
     // -------------------------------------------------------------
 
     private suspend fun executeReportProjectionFromJson(jsonObj: JsonObject): ToolExecutionResult {
         val monthStr = jsonObj.getStringOrNull("mes")
             ?: jsonObj.getStringOrNull("month")
             ?: jsonObj.getStringOrNull("competenceMonth")
-        return executeReportProjection(monthStr)
+        val monthsCount = jsonObj.getIntOrNull("quantidadeMeses")
+            ?: jsonObj.getIntOrNull("monthsCount")
+            ?: jsonObj.getIntOrNull("meses")
+            ?: 1
+        val cardFilter = jsonObj.getStringOrNull("cartao")
+            ?: jsonObj.getStringOrNull("cardName")
+            ?: jsonObj.getStringOrNull("card")
+        return executeReportProjection(monthStr, monthsCount, cardFilter)
     }
 
-    suspend fun executeReportProjection(month: String? = null): ToolExecutionResult {
+    suspend fun executeReportProjection(
+        month: String? = null,
+        monthsCount: Int = 1,
+        cardFilter: String? = null
+    ): ToolExecutionResult {
         val all = repository.getTransactions().first()
         val bills = repository.getRecurringBills().first()
+        val cards = repository.getCards().first()
         val user = repository.currentUser.value
         val defaultMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
         val targetMonth = parseMonthKey(month, defaultMonth) ?: defaultMonth
         val targetMonthLabel = FinanceEngine.formatMonthLabel(targetMonth)
         val isFutureMonth = targetMonth > FinanceEngine.currentMonthKey()
         val profile = repository.allUsers.find { it.uid == user.uid }
+        val safeCount = monthsCount.coerceIn(1, 12)
 
         val summary = FinanceEngine.computeSummary(all, user.uid, targetMonth)
-        val projections = if (isFutureMonth) {
-            FinanceEngine.projectFutureMonths(all, bills, profile, user.uid, targetMonth, count = 1)
-        } else emptyList()
+        val projections = FinanceEngine.projectFutureMonths(
+            all = all,
+            bills = bills,
+            profile = profile,
+            uid = user.uid,
+            startMonthKey = targetMonth,
+            count = safeCount,
+            cards = cards
+        )
         val proj = projections.firstOrNull()
 
         val effectiveIncome = proj?.projectedIncome ?: summary.income
         val effectiveExpense = proj?.projectedExpense ?: summary.committed
         val effectiveFreeBalance = proj?.projectedFreeBalance ?: summary.freeBalance
         val effectiveDailyLimit = proj?.projectedDailyLimit ?: summary.dailyLimit
+        val invoiceExpense = proj?.invoiceExpense ?: 0.0
+        val fixedBillsExpense = proj?.fixedBillsExpense ?: summary.committedEstimated
+        val variableAccountExpense = proj?.variableAccountExpense ?: 0.0
 
-        val monthTxs = all.filter { it.competenceMonth == targetMonth && it.visibleToUids.contains(user.uid) }
-        val pendingCardTxs = monthTxs.filter { it.type == TransactionType.EXPENSE && it.status == TransactionStatus.PENDING }
-        val pendingTotal = pendingCardTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
+        // 1. Detalhamento de Faturas por Cartão no mês-alvo (InvoiceEngine.buildInvoice)
+        val targetCards = if (!cardFilter.isNullOrBlank()) {
+            cards.filter { it.cardName.contains(cardFilter, ignoreCase = true) || cardFilter.contains(it.cardName, ignoreCase = true) }
+        } else cards
 
-        val cards = repository.getCards().first()
-        val cardsMap = cards.associateBy { it.id }
-
-        val pendingLines = if (pendingCardTxs.isNotEmpty()) {
-            val list = pendingCardTxs.take(10).joinToString("\n") { t ->
-                val cName = t.cardId?.let { cid -> cardsMap[cid]?.cardName } ?: "Cartão"
-                val myImp = FinanceEngine.impactFor(t, user.uid, all)
-                "  * **${t.description}** ($cName): ${FinanceEngine.formatCurrency(myImp)} (Vence ${FinanceEngine.formatShortDate(t.dueDate)})"
+        val invoiceSections = targetCards.mapNotNull { card ->
+            val inv = InvoiceEngine.buildInvoice(card, targetMonth, all, user.uid)
+            val unlaunchedCardBills = bills.filter { b ->
+                b.active && b.type == TransactionType.EXPENSE &&
+                    (b.cardId == card.id || (b.paymentMethod == PaymentMethod.CREDIT_CARD && b.cardId == null && targetCards.size == 1)) &&
+                    !inv.items.any { tx -> tx.recurringBillId == b.id || FinanceEngine.findMatchingManualBill(listOf(tx), targetMonth, b) != null }
             }
-            "\n\n💳 **Lançamentos Pendentes da Fatura do Cartão (${pendingCardTxs.size} itens — Total: ${FinanceEngine.formatCurrency(pendingTotal)}):**\n$list"
+            if (inv.items.isEmpty() && unlaunchedCardBills.isEmpty()) return@mapNotNull null
+            val unlaunchedSum = unlaunchedCardBills.sumOf { FinanceEngine.estimateRecurring(it, all, targetMonth).amount }
+            val catSummary = if (inv.byCategory.isNotEmpty()) {
+                " | Categorias na fatura: " + inv.byCategory.joinToString(", ") { "${it.category} (${FinanceEngine.formatCurrency(it.amount)})" }
+            } else ""
+            val itemLines = inv.items.take(12).joinToString("\n") { tx ->
+                val myImp = FinanceEngine.impactFor(tx, user.uid, all)
+                "    - **${tx.description}**: ${FinanceEngine.formatCurrency(myImp)} • ${tx.category}${if (!tx.subcategory.isNullOrBlank()) " › ${tx.subcategory}" else ""} • ${tx.status.label}"
+            }
+            val recLines = unlaunchedCardBills.joinToString("\n") { b ->
+                val est = FinanceEngine.estimateRecurring(b, all, targetMonth).amount
+                "    - **${b.description}**: ${FinanceEngine.formatCurrency(est)} • ${b.category} • 🔄 Assinatura Projetada"
+            }
+            val combinedItems = listOfNotNull(itemLines.takeIf { it.isNotBlank() }, recLines.takeIf { it.isNotBlank() }).joinToString("\n")
+            "  * 💳 **Cartão ${card.cardName}** (${inv.status.label} • Fecha ${FinanceEngine.formatShortDate(inv.closingDate)} • Vence ${FinanceEngine.formatShortDate(inv.dueDate)}): " +
+                "Total Fatura: **${FinanceEngine.formatCurrency(inv.total + unlaunchedSum)}** (Sua Parte: ${FinanceEngine.formatCurrency(inv.myShare + unlaunchedSum)})$catSummary\n$combinedItems"
+        }
+        val invoicesBlock = if (invoiceSections.isNotEmpty()) {
+            "\n\n💳 **Detalhamento das Faturas de Cartão ($targetMonthLabel):**\n" + invoiceSections.joinToString("\n")
+        } else ""
+
+        // 2. Categorias Consolidadas do Mês (unindo itens da fatura + contas fixas + pix/débito)
+        val categoriesBlock = if (proj != null && proj.byCategory.isNotEmpty()) {
+            val catLines = proj.byCategory.take(10).joinToString("\n") { c ->
+                val originParts = mutableListOf<String>()
+                if (c.invoiceAmount > 0.01) originParts.add("Fatura Cartão: ${FinanceEngine.formatCurrency(c.invoiceAmount)}")
+                if (c.fixedBillAmount > 0.01) originParts.add("Fixas: ${FinanceEngine.formatCurrency(c.fixedBillAmount)}")
+                if (c.accountAmount > 0.01) originParts.add("Pix/Débito: ${FinanceEngine.formatCurrency(c.accountAmount)}")
+                val originDetail = if (originParts.isNotEmpty()) " (${originParts.joinToString(" • ")})" else ""
+                "  * **${c.category}**: ${FinanceEngine.formatCurrency(c.amount)}$originDetail — ${c.count} item(ns)"
+            }
+            "\n\n🏷️ **Gastos por Categoria Consolidados em $targetMonthLabel (Fatura + Extrato + Fixas):**\n$catLines"
+        } else ""
+
+        // 3. Todos os Itens Previstos / Lançados do Mês-Alvo
+        val itemsBlock = if (proj != null && proj.items.isNotEmpty()) {
+            val itemLines = proj.items.take(25).joinToString("\n") { item ->
+                val badge = when (item.origin) {
+                    "invoice" -> "💳 Fatura${item.cardName?.let { " $it" } ?: ""}"
+                    "fixed_bill" -> "🏠 Conta Fixa"
+                    "income" -> "🟢 Receita"
+                    else -> "⚡ ${item.paymentMethod.label}"
+                }
+                val projTag = if (item.isRecurringProjection) " [Projetado]" else ""
+                val instTag = item.installmentInfo?.let { " ($it)" } ?: ""
+                "  * **${item.description}**$instTag: ${FinanceEngine.formatCurrency(item.myImpact)} • ${item.category} • $badge$projTag (Dia ${item.dueDate.takeLast(2)})"
+            }
+            val moreItems = if (proj.items.size > 25) "\n  *(e mais ${proj.items.size - 25} itens no mês)*" else ""
+            "\n\n📋 **Itens Listados de $targetMonthLabel (${proj.items.size} lançamentos/projeções):**\n$itemLines$moreItems"
+        } else ""
+
+        // 4. Horizonte Multi-Mês (quando solicitado 2 a 12 meses para frente)
+        val multiMonthBlock = if (projections.size > 1) {
+            val rows = projections.joinToString("\n") { p ->
+                "  * **${p.label}**: Entradas ${FinanceEngine.formatCurrency(p.projectedIncome)} | " +
+                    "Saídas ${FinanceEngine.formatCurrency(p.projectedExpense)} " +
+                    "(💳 Faturas: ${FinanceEngine.formatCurrency(p.invoiceExpense)} • 🏠 Fixas: ${FinanceEngine.formatCurrency(p.fixedBillsExpense)} • ⚡ Pix/Déb: ${FinanceEngine.formatCurrency(p.variableAccountExpense)}) " +
+                    "→ **Saldo Livre: ${FinanceEngine.formatCurrency(p.projectedFreeBalance)}**"
+            }
+            "\n\n🗓️ **Projeção de Fluxo para ${projections.size} Meses:**\n$rows"
         } else ""
 
         val text = """
-📊 **${if (isFutureMonth) "Projeção Financeira Futura" else "Relatório Consolidado"} ($targetMonthLabel):**
+📊 **${if (isFutureMonth || safeCount > 1) "Projeção Financeira e Raio-X" else "Relatório Consolidado e Raio-X"} ($targetMonthLabel):**
 
 • **Receitas Previstas**: ${FinanceEngine.formatCurrency(effectiveIncome)}
-• **Despesas Já Pagas**: ${FinanceEngine.formatCurrency(summary.paid)}
-• **Compras no Cartão Pendentes (Fatura a Vencer)**: ${FinanceEngine.formatCurrency(pendingTotal)}
-• **Contas Fixas / Estimadas**: ${FinanceEngine.formatCurrency(summary.committedEstimated)}
 • **Total de Despesas Comprometidas**: ${FinanceEngine.formatCurrency(effectiveExpense)}
+  ↳ 💳 **Faturas de Cartão**: ${FinanceEngine.formatCurrency(invoiceExpense)}
+  ↳ 🏠 **Contas Fixas (Extrato/Boleto/Pix)**: ${FinanceEngine.formatCurrency(fixedBillsExpense)}
+  ↳ ⚡ **Pix / Débito Variável**: ${FinanceEngine.formatCurrency(variableAccountExpense)}
+• **Despesas Já Pagas**: ${FinanceEngine.formatCurrency(summary.paid)}
 • **Saldo Livre Projetado**: ${FinanceEngine.formatCurrency(effectiveFreeBalance)}
-• **Limite Diário Seguro**: ${effectiveDailyLimit?.let { "${FinanceEngine.formatCurrency(it)}/dia" } ?: "Mês encerrado"}$pendingLines
+• **Limite Diário Seguro**: ${effectiveDailyLimit?.let { "${FinanceEngine.formatCurrency(it)}/dia" } ?: "Mês encerrado"}$invoicesBlock$categoriesBlock$itemsBlock$multiMonthBlock
 """.trimIndent()
 
         return ToolExecutionResult(
             text = text,
             actionCard = ActionCardData(
-                title = if (isFutureMonth) "Projeção $targetMonthLabel" else "Resumo $targetMonthLabel",
-                description = "Saldo Livre Previsto: ${FinanceEngine.formatCurrency(effectiveFreeBalance)}",
-                detail = "Total Comprometido: ${FinanceEngine.formatCurrency(effectiveExpense)} (Cartão Pendente: ${FinanceEngine.formatCurrency(pendingTotal)})"
+                title = if (safeCount > 1) "Projeção $safeCount Meses" else if (isFutureMonth) "Projeção $targetMonthLabel" else "Raio-X $targetMonthLabel",
+                description = "Saldo Livre Previsto ($targetMonthLabel): ${FinanceEngine.formatCurrency(effectiveFreeBalance)}",
+                detail = "Faturas: ${FinanceEngine.formatCurrency(invoiceExpense)} • Fixas: ${FinanceEngine.formatCurrency(fixedBillsExpense)} • Pix/Déb: ${FinanceEngine.formatCurrency(variableAccountExpense)}"
             )
         )
     }

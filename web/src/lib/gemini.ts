@@ -478,7 +478,18 @@ export const functionDeclarations: FunctionDeclaration[] = [
           description: 'Filtra pelo tipo: "expense" para despesas/saídas, "income" para receitas/entradas, ou "all" para ambos. Padrão: expense para análises de gastos.',
         },
         status: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'], description: 'Filtra por status (pendente na fatura, pago, estimado).' },
-        limite: { type: Type.NUMBER, description: 'Quantidade máxima de resultados a detalhar individualmente (padrão: 25).' },
+        metodoPagamento: {
+          type: Type.STRING,
+          enum: ['pix', 'debit', 'bill', 'credit_card', 'extrato_conta'],
+          description:
+            'Filtra pelo meio de pagamento ou canal: "credit_card" (Fatura de Cartão de Crédito), "pix" (Pix), "debit" (Débito), "bill" (Boleto) ou "extrato_conta" (todos os lançamentos de conta corrente: Pix + Débito + Boleto, excluindo faturas de cartão).',
+        },
+        incluirRecorrentesProjetadas: {
+          type: Type.BOOLEAN,
+          description:
+            'Quando true (padrão true para meses futuros), inclui na listagem e na soma as contas fixas e rendas recorrentes ativas previstas para o mês que ainda não foram lançadas no extrato.',
+        },
+        limite: { type: Type.NUMBER, description: 'Quantidade máxima de resultados a detalhar individualmente (padrão: 40).' },
       },
     },
   },
@@ -514,7 +525,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
   {
     name: 'obterRelatorioEProjecaoMensal',
     description:
-      'Retorna os totais consolidados ou a projeção financeira detalhada de qualquer mês (mês atual ou mês futuro, ex: próximo mês): Saldo Livre Real/Projetado, Limite Diário Seguro, receitas previstas, despesas pagas, compras de cartão de crédito pendentes na fatura (status pending), contas estimadas (status estimated) e gastos por categoria.',
+      'Retorna o relatório completo, projeção futura (1 a 12 meses para frente), detalhamento de faturas de cartão de crédito, separação Fatura vs Débito/Pix/Boleto, todos os itens do mês (incluindo contas fixas projetadas) e os gastos por categoria (com os itens da fatura do cartão devidamente somados em suas categorias reais do mês).',
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -523,18 +534,29 @@ export const functionDeclarations: FunctionDeclaration[] = [
           description:
             'Mês de competência para o relatório ou projeção (YYYY-MM). Ex: "2026-11" para o próximo mês. Se omitido, usa o mês atual em análise.',
         },
+        quantidadeMeses: {
+          type: Type.NUMBER,
+          description:
+            'Quantidade de meses para projetar à frente a partir de "mes" (1 a 12). Use 12 quando o usuário pedir a projeção anual ou de 12 meses; use 1 quando perguntar de um mês específico.',
+        },
+        cartao: {
+          type: Type.STRING,
+          description:
+            'Opcional: Nome ou ID de um cartão específico caso o usuário peça para detalhar a fatura daquele cartão naquele mês.',
+        },
       },
     },
   },
   {
     name: 'gerenciarCartoes',
-    description: 'Adiciona, edita, exclui ou lista os cartões de crédito do usuário.',
+    description: 'Adiciona, edita, exclui, lista os cartões de crédito do usuário ou detalha a fatura completa de um cartão.',
     parameters: {
       type: Type.OBJECT,
       properties: {
-        acao: { type: Type.STRING, enum: ['listar', 'adicionar', 'editar', 'excluir'] },
-        id: { type: Type.STRING, description: 'ID do cartão para edição/exclusão.' },
+        acao: { type: Type.STRING, enum: ['listar', 'detalhar_fatura', 'adicionar', 'editar', 'excluir'] },
+        id: { type: Type.STRING, description: 'ID do cartão para edição/exclusão/detalhamento.' },
         nome: { type: Type.STRING, description: 'Nome do novo cartão ou novo nome na edição.' },
+        mes: { type: Type.STRING, description: 'Mês da fatura (YYYY-MM) para detalhar_fatura.' },
         fechamento: { type: Type.NUMBER, description: 'Dia de fechamento do cartão.' },
         vencimento: { type: Type.NUMBER, description: 'Dia de vencimento da fatura do cartão.' },
       },
@@ -543,17 +565,23 @@ export const functionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: 'gerenciarContasRecorrentes',
-    description: 'Adiciona, pausa, ativa ou lista contas recorrentes (assinaturas e despesas fixas) do usuário.',
+    description: 'Adiciona, edita, pausa, ativa, exclui ou lista contas recorrentes (assinaturas, despesas fixas e rendas recorrentes) do usuário.',
     parameters: {
       type: Type.OBJECT,
       properties: {
-        acao: { type: Type.STRING, enum: ['listar', 'adicionar', 'pausar', 'ativar', 'excluir'] },
+        acao: { type: Type.STRING, enum: ['listar', 'adicionar', 'editar', 'pausar', 'ativar', 'excluir'] },
         id: { type: Type.STRING, description: 'ID da conta recorrente.' },
         descricao: { type: Type.STRING, description: 'Nome da assinatura/conta (ex: "Netflix").' },
         valor: { type: Type.NUMBER, description: 'Valor base da assinatura.' },
         diaVencimento: { type: Type.NUMBER, description: 'Dia de vencimento.' },
         categoria: { type: Type.STRING, enum: [...CATEGORIES] },
+        subcategoria: { type: Type.STRING, description: 'Subcategoria específica.' },
+        tipo: { type: Type.STRING, enum: ['expense', 'income'], description: '"expense" para conta fixa/assinatura; "income" para renda recorrente.' },
+        metodoPagamento: { type: Type.STRING, enum: ['pix', 'debit', 'bill', 'credit_card'], description: 'Forma de pagamento da conta fixa.' },
+        cartao: { type: Type.STRING, description: 'Nome ou ID do cartão de crédito (se metodoPagamento = credit_card).' },
+        regraEstimativa: { type: Type.STRING, enum: ['fixed', 'last_month', 'avg_3_months'], description: 'Regra de cálculo: valor fixo, último mês ou média de 3 meses.' },
         mesesLimite: { type: Type.NUMBER, description: 'Se for um plano temporário, quantos meses vai durar.' },
+        mesInicio: { type: Type.STRING, description: 'Mês inicial YYYY-MM (quando mesesLimite for informado).' },
       },
       required: ['acao'],
     },
@@ -667,6 +695,8 @@ export function buildSystemInstruction(ctx: {
     subcategory?: string | null
     status: string
     split?: string
+    paymentMethod?: string
+    cardName?: string | null
   }>
 }) {
   const cardsDesc = ctx.cards
@@ -700,7 +730,7 @@ ${ctx.summary.byInvestmentSubcategory && ctx.summary.byInvestmentSubcategory.len
   const recentTxsDesc =
     ctx.recentTransactions && ctx.recentTransactions.length > 0
       ? `LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS (${ctx.recentTransactions.length} itens):
-${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.subcategory ? `${t.category} › ${t.subcategory}` : t.category} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
+${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.subcategory ? `${t.category} › ${t.subcategory}` : t.category} | Canal: ${t.cardName ? `Cartão ${t.cardName} (Fatura)` : t.paymentMethod === 'debit' ? 'Débito' : t.paymentMethod === 'bill' ? 'Boleto' : 'PIX'} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
       : 'LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento.'
 
   const validPending = (ctx.pendingTransactions || []).filter((t) => t.categoria_filtro === 'valida')
@@ -749,21 +779,14 @@ REGRAS DE FUNCIONAMENTO:
 - Compras no cartão de crédito comprometem a renda do MÊS DE VENCIMENTO DA FATURA (mesFatura/competenceMonth), e NÃO a data em que a compra foi feita!
 - Se a compra foi feita após o dia de fechamento (closingDay) do cartão, a fatura fecha no ciclo seguinte e compromete o mês de vencimento (dueDay). Envie "mesFatura" com o mês correto da fatura (ex: "2026-11").
 
-1.1. PROJEÇÃO E PREVISÃO PARA O PRÓXIMO MÊS E MESES FUTUROS (REGRA DE INTEGRIDADE):
-- Quando o usuário pedir previsão, projeção ou perguntar como ficará o Saldo Livre ou as despesas do próximo mês (ou qualquer mês futuro):
-  * CHAME OBRIGATORIAMENTE a ferramenta "obterRelatorioEProjecaoMensal" passando o parâmetro "mes" com o mês solicitado (ex: mes: "2026-11")!
-  * REGRA CRÍTICA PARA COMPRAS DE CARTÃO DE CRÉDITO COM STATUS PENDENTE:
-    - Compras efetuadas no cartão de crédito cuja fatura vence no próximo mês possuem status "pending" (pendente de pagamento da fatura).
-    - ELAS SÃO DESPESAS COMPROMETIDAS REAIS E DEVEM SER OBRIGATORIAMENTE INCLUÍDAS NA PROJEÇÃO DO PRÓXIMO MÊS!
-    - O total de gastos/despesas projetadas é composto por: (Compras de Cartão Pendentes da Fatura + Contas Fixas Estimadas + Despesas Já Pagas).
-    - O Saldo Livre Projetado é: Receitas Previstas - Total Comprometido (incluindo as compras de cartão pendentes).
-  * REGRA DE OURO PARA O USUÁRIO: NUNCA oriente o usuário a alterar o status de compras de cartão de crédito para "pago" (paid) para que elas entrem na projeção! O status "pending" é a verdade contábil correta para compras de fatura em aberto. Colocar "pago" desorganiza o fluxo de caixa real.
-  * Apresente a projeção detalhando:
-    1. Receitas Previstas (Salário / Renda)
-    2. Fatura do Cartão de Crédito a Vencer (Lançamentos Pendentes comprometidos)
-    3. Contas Fixas Recorrentes / Estimadas
-    4. Total de Despesas Comprometidas
-    5. Saldo Livre Previsto e Limite Diário Seguro para o próximo mês.
+1.1. PROJEÇÃO DE ATÉ 12 MESES, DETALHAMENTO DE FATURAS, CATEGORIAS E SEPARAÇÃO FATURA VS DÉBITO/PIX:
+- Quando o usuário pedir previsão, projeção de fluxo de caixa (para o próximo mês ou para os próximos 12 meses) ou perguntar quais são os itens/gastos de determinado mês:
+  * CHAME OBRIGATORIAMENTE a ferramenta "obterRelatorioEProjecaoMensal" passando "mes" (ex: "2026-11") e "quantidadeMeses" (use 12 se ele pedir a projeção anual/12 meses, ou 1 se perguntar de um mês específico)!
+  * LISTAGEM COMPLETA DE ITENS DO MÊS: Quando o usuário perguntar os itens/gastos de um mês, liste TODOS os itens retornados em "itensDoMes" (separando claramente o que é Fatura de Cartão, o que é Conta Fixa Prevista e o que é Débito/Pix/Boleto). As contas fixas programadas ainda não lançadas no banco vêm incluídas em "itensDoMes" e nas categorias para que a soma bata 100% com o total projetado!
+  * DIFERENCIAÇÃO FATURA VS DÉBITO E PIX: Sempre diferencie com clareza na resposta quanto dos gastos vem de **💳 Faturas de Cartão de Crédito** ("resumoCanaisPagamento.totalFaturasCartao") vs quanto vem de **🏦 Débito, Pix e Boletos (Extrato de Conta)** ("resumoCanaisPagamento.totalExtratoConta": detalhando Pix, Débito, Boleto e Contas Fixas fora do cartão).
+  * DETALHAMENTO DE FATURA: Quando o usuário pedir para detalhar a fatura de um mês ou de um cartão específico, use os dados de "faturasPorCartao" (retornados por "obterRelatorioEProjecaoMensal" ou "gerenciarCartoes" com "acao: detalhar_fatura"), mostrando: Fechamento/Vencimento, Status, Total da Fatura, Sua Parte vs Parte de Terceiros, **Gastos por Categoria daquela fatura** e **Lista completa dos itens da fatura**.
+  * ITENS DA FATURA NAS CATEGORIAS DO MÊS: Toda compra feita no cartão cuja fatura pertence ao mês M (ex: compra na fatura de novembro em Alimentação) + contas fixas + gastos em débito/pix já estão somados na categoria real ("gastosPorCategoriaDetalhado"). Sempre mostre o total de cada categoria e destaque quanto daquela categoria veio da **Fatura do Cartão** vs **Débito/Pix/Fixas**!
+  * REGRA DE OURO PARA O USUÁRIO: NUNCA oriente o usuário a alterar o status de compras de cartão de crédito para "pago" (paid) para que elas entrem na projeção! O status "pending" é a verdade contábil correta para compras de fatura em aberto.
 
 2. AMIGOS NA REDE E DIVISÃO DE CONTAS (PORCENTAGEM, VALORES ESPECÍFICOS E MULTI-PESSOAS):
 - Se o usuário disser que um gasto é de um amigo na plataforma (ex: "KAYO", "kayoaraujo2002@gmail.com"):
@@ -1048,7 +1071,7 @@ Exemplo B — Compra parcelada com notação brasileira XX/YY:
 Entrada: "Lança Magazine Luiza 03/10 R$ 189,90 na fatura de novembro"
 Ação da IA:
 Chamar "registrarTransacao" com:
-- descricao: "Magazine Luiza (3/10)"
+- descricao: "Magazine Luiza"
 - valorTotal: 189.90
 - parcelaAtual: 3, totalParcelas: 10
 - mesFatura: "2026-11"

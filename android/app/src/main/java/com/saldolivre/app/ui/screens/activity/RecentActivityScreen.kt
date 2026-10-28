@@ -1,47 +1,55 @@
 package com.saldolivre.app.ui.screens.activity
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.RotateLeft
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.ui.components.StatusBadge
 import com.saldolivre.app.ui.theme.*
+import kotlin.math.abs
+
+private val SkyBlue = Color(0xFF38BDF8)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecentActivityScreen(
     viewModel: RecentActivityViewModel,
     onNavigateBack: () -> Unit,
-    onNavigateToMonth: (monthKey: String) -> Unit = {}
+    onNavigateToMonth: (String) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
         containerColor = DarkBackground,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground),
+                windowInsets = WindowInsets(0, 0, 0, 0),
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -52,283 +60,280 @@ fun RecentActivityScreen(
                     }
                 },
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Box(
                             modifier = Modifier
                                 .size(34.dp)
-                                .background(
-                                    Brush.linearGradient(listOf(Cyan500.copy(alpha = 0.3f), Emerald500.copy(alpha = 0.2f))),
-                                    CircleShape
-                                )
-                                .border(1.dp, Cyan400, CircleShape),
+                                .background(SkyBlue.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                                .border(1.dp, SkyBlue.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.History,
                                 contentDescription = null,
-                                tint = Cyan400,
+                                tint = SkyBlue,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Histórico Recente",
-                                    style = Typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Cyan500.copy(alpha = 0.15f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "${uiState.filteredItems.size} itens",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Cyan400,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
+                        Column {
                             Text(
-                                text = "Lançamentos por ordem de criação no sistema",
-                                fontSize = 11.sp,
+                                text = "Histórico de Atividades",
+                                style = Typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Auditoria cronológica de lançamentos e rateios",
+                                style = Typography.bodySmall,
                                 color = TextMuted,
+                                fontSize = 11.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
             )
         }
-    ) { innerPadding ->
-        Column(
+    ) { paddingValues ->
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(paddingValues),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Quick Metrics Ribbon (idêntico à Web)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MetricCard(
-                    title = "Total Geral",
-                    value = uiState.totalCount.toString(),
-                    color = TextPrimary,
-                    bgColor = DarkSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                MetricCard(
-                    title = "Últimos 7 dias",
-                    value = "+${uiState.last7DaysCount}",
-                    color = Cyan400,
-                    bgColor = Cyan500.copy(alpha = 0.1f),
-                    modifier = Modifier.weight(1f)
-                )
-                MetricCard(
-                    title = "Com Terceiros",
-                    value = uiState.withThirdPartyCount.toString(),
-                    color = Amber400,
-                    bgColor = Amber500.copy(alpha = 0.1f),
-                    modifier = Modifier.weight(1f)
-                )
-                MetricCard(
-                    title = "Amigos",
-                    value = uiState.friendsCount.toString(),
-                    color = Purple400,
-                    bgColor = Purple500.copy(alpha = 0.1f),
-                    modifier = Modifier.weight(1f)
+            // 1. Faixa de Métricas Rápidas (4 KPIs Compactos)
+            item {
+                ActivityMetricsRibbon(
+                    totalCount = uiState.totalCount,
+                    last7DaysCount = uiState.last7DaysCount,
+                    thirdPartyCount = uiState.withThirdPartyCount,
+                    friendsCount = uiState.friendsCount
                 )
             }
 
-            // Barra de Busca
-            OutlinedTextField(
-                value = uiState.searchQuery,
-                onValueChange = { viewModel.onSearchQueryChange(it) },
-                placeholder = {
-                    Text(
-                        text = "Buscar por descrição, terceiro, amigo, cartão...",
-                        color = TextMuted,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Buscar",
-                        tint = TextMuted,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (uiState.searchQuery.isNotBlank()) {
-                        IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
+            // 2. Barra de Busca CircleShape + Pílulas de Filtro CircleShape (Estilo Extrato)
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = uiState.searchQuery,
+                        onValueChange = { viewModel.onSearchQueryChange(it) },
+                        placeholder = {
+                            Text(
+                                text = "Buscar por descrição, categoria, cartão ou amigo...",
+                                color = TextMuted,
+                                fontSize = 13.sp
+                            )
+                        },
+                        leadingIcon = {
                             Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Limpar busca",
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Buscar",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (uiState.searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Limpar",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = CircleShape,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = SkyBlue,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ActivityFilter.entries.forEach { filter ->
+                            val selected = uiState.selectedFilter == filter
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (selected) SkyBlue.copy(alpha = 0.2f) else DarkSurface
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (selected) SkyBlue.copy(alpha = 0.5f) else DarkBorder,
+                                        CircleShape
+                                    )
+                                    .clickable { viewModel.onFilterChange(filter) }
+                                    .padding(horizontal = 13.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = filter.label,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selected) SkyBlue else TextSecondary,
+                                    style = LocalTextStyle.current.copy(
+                                        platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Lista Cronológica de Auditoria
+            if (uiState.filteredItems.isEmpty()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = DarkSurface,
+                        border = BorderStroke(1.dp, DarkBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 36.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
                                 tint = TextMuted,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(36.dp)
+                            )
+                            Text(
+                                text = "Nenhum registro encontrado",
+                                style = Typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Tente ajustar o termo de busca ou o filtro selecionado.",
+                                style = Typography.bodySmall,
+                                color = TextSecondary,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
-                },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Cyan400,
-                    unfocusedBorderColor = DarkBorder,
-                    focusedContainerColor = DarkSurface,
-                    unfocusedContainerColor = DarkSurface,
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary
-                )
-            )
-
-            // Chips de Filtro (Scroll Horizontal)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                ActivityFilter.entries.forEach { filter ->
-                    val isSelected = uiState.selectedFilter == filter
-                    val chipBg = when {
-                        isSelected && filter == ActivityFilter.ALL -> Cyan500
-                        isSelected && filter == ActivityFilter.THIRD_PARTY -> Amber500
-                        isSelected && filter == ActivityFilter.FRIENDS -> Purple500
-                        isSelected && filter == ActivityFilter.INCOME -> Emerald500
-                        isSelected && filter == ActivityFilter.EXPENSE -> Rose500
-                        isSelected -> DarkSurfaceVariant
-                        else -> DarkSurfaceVariant
-                    }
-                    val textColor = if (isSelected) DarkBackground else TextSecondary
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(chipBg)
-                            .border(1.dp, if (isSelected) chipBg else DarkBorder, RoundedCornerShape(12.dp))
-                            .clickable { viewModel.onFilterChange(filter) }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = filter.label,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = textColor
-                        )
-                    }
-                }
-            }
-
-            // Timeline List
-            if (uiState.filteredItems.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FilterList,
-                            contentDescription = null,
-                            tint = TextMuted,
-                            modifier = Modifier.size(40.dp)
-                        )
-                        Text(
-                            text = "Nenhuma atividade encontrada",
-                            style = Typography.titleMedium,
-                            color = TextSecondary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Tente ajustar os filtros ou o termo pesquisado.",
-                            fontSize = 12.sp,
-                            color = TextMuted
-                        )
-                    }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    itemsIndexed(
-                        items = uiState.filteredItems,
-                        key = { _, item -> item.id },
-                        contentType = { _, _ -> "activity_timeline_item" }
-                    ) { index, item ->
-                        TimelineActivityCard(
-                            item = item,
-                            isLast = index == uiState.filteredItems.lastIndex,
-                            onNavigateToMonth = {
-                                viewModel.selectMonth(item.competenceMonth)
-                                onNavigateToMonth(item.competenceMonth)
-                            }
-                        )
-                    }
+                item {
+                    Text(
+                        text = "LINHA DO TEMPO DE CADASTROS (${uiState.filteredItems.size})",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextMuted,
+                        letterSpacing = 0.8.sp,
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                    )
+                }
+
+                items(uiState.filteredItems, key = { it.id }) { item ->
+                    TimelineActivityCard(
+                        item = item,
+                        onOpenMonth = {
+                            viewModel.selectMonth(item.competenceMonth)
+                            onNavigateToMonth(item.competenceMonth)
+                        }
+                    )
                 }
             }
+
+            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
     }
 }
 
 @Composable
-private fun MetricCard(
-    title: String,
+private fun ActivityMetricsRibbon(
+    totalCount: Int,
+    last7DaysCount: Int,
+    thirdPartyCount: Int,
+    friendsCount: Int
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        MetricBox(
+            label = "Total",
+            value = totalCount.toString(),
+            color = SkyBlue,
+            modifier = Modifier.weight(1f)
+        )
+        MetricBox(
+            label = "Últ. 7 dias",
+            value = last7DaysCount.toString(),
+            color = Emerald400,
+            modifier = Modifier.weight(1f)
+        )
+        MetricBox(
+            label = "Terceiros",
+            value = thirdPartyCount.toString(),
+            color = Amber400,
+            modifier = Modifier.weight(1f)
+        )
+        MetricBox(
+            label = "Amigos",
+            value = friendsCount.toString(),
+            color = Cyan400,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun MetricBox(
+    label: String,
     value: String,
-    color: androidx.compose.ui.graphics.Color,
-    bgColor: androidx.compose.ui.graphics.Color,
+    color: Color,
     modifier: Modifier = Modifier
 ) {
-    Box(
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, DarkBorder),
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(bgColor)
-            .border(1.dp, color.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-            .padding(vertical = 8.dp, horizontal = 6.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = title,
-                fontSize = 9.sp,
-                color = TextMuted,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
             Text(
                 text = value,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = color,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = color
+            )
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -339,263 +344,245 @@ private fun MetricCard(
 @Composable
 private fun TimelineActivityCard(
     item: ActivityItemUi,
-    isLast: Boolean,
-    onNavigateToMonth: () -> Unit
+    onOpenMonth: () -> Unit
 ) {
-    val formattedAmount = remember(item.amount, item.isIncome) {
-        "${if (item.isIncome) "+" else ""}${FinanceEngine.formatCurrency(item.amount)}"
+    val categoryDetail = remember(item.category) { CategoryRegistry.get(item.category) }
+    val amountColor = when {
+        item.isIncome -> Emerald400
+        item.isRefund -> Cyan400
+        else -> TextPrimary
     }
-    val formattedImpact = remember(item.myImpact) {
-        "Sua cota no Saldo Livre: ${FinanceEngine.formatCurrency(item.myImpact)}"
-    }
+    val hasDiffImpact = abs(abs(item.amount) - abs(item.myImpact)) > 0.01
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        // Indicador de Timeline (Nó com Ícone e Linha Conectora)
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.width(36.dp)
-        ) {
-            val (icon, iconTint, badgeBg) = when {
-                item.isIncome -> Triple(Icons.Default.ArrowDownward, Emerald400, Emerald500.copy(alpha = 0.2f))
-                item.isRefund -> Triple(Icons.AutoMirrored.Filled.RotateLeft, Cyan400, Cyan500.copy(alpha = 0.2f))
-                else -> Triple(Icons.Default.ArrowUpward, Rose400, Rose500.copy(alpha = 0.2f))
-            }
-
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(badgeBg)
-                    .border(1.dp, iconTint.copy(alpha = 0.6f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-
-            if (!isLast) {
-                Box(
-                    modifier = Modifier
-                        .width(2.dp)
-                        .height(90.dp)
-                        .background(DarkBorder)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        // Conteúdo do Card
-        Card(
             modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(16.dp)),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            border = CardDefaults.outlinedCardBorder().copy(
-                brush = androidx.compose.ui.graphics.SolidColor(DarkBorder)
-            )
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+            // Linha 1: Ícone + Título + Categoria + Valor + Impacto Pessoal
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                // Top Header: Descrição e Valor
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = item.title,
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Text(
-                        text = formattedAmount,
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (item.isIncome) Emerald400 else if (item.isRefund) Cyan400 else Rose400,
-                        maxLines = 1
-                    )
-                }
-
-                // Linha de Badges (Categoria, Cartão, Amigo, Terceiro)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Badge Categoria
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(DarkSurfaceVariant)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .size(42.dp)
+                            .background(categoryDetail.color.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                            .border(1.dp, categoryDetail.color.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
                     ) {
+                        Icon(
+                            imageVector = categoryDetail.icon,
+                            contentDescription = null,
+                            tint = categoryDetail.color,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = item.title,
+                                style = Typography.bodyLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            item.installmentTag?.let { tag ->
+                                Box(
+                                    modifier = Modifier
+                                        .background(Purple500.copy(alpha = 0.16f), CircleShape)
+                                        .border(1.dp, Purple500.copy(alpha = 0.4f), CircleShape)
+                                        .padding(horizontal = 7.dp, vertical = 1.5.dp)
+                                ) {
+                                    Text(
+                                        text = tag,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Purple400,
+                                        style = LocalTextStyle.current.copy(
+                                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = item.description,
-                            fontSize = 10.sp,
+                            text = buildString {
+                                append(item.description)
+                                append(" • ")
+                                append(item.cardName?.let { "Cartão $it" } ?: item.paymentMethodLabel)
+                            },
+                            fontSize = 11.sp,
                             color = TextSecondary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-
-                    // Badge Cartão ou Método
-                    item.cardName?.let { cName ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Purple500.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "💳 $cName",
-                                fontSize = 10.sp,
-                                color = Purple400,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    } ?: run {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(DarkSurfaceVariant)
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = item.paymentMethodLabel,
-                                fontSize = 10.sp,
-                                color = TextMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    // Badge Amigo ou Terceiro
-                    item.friendName?.let { fName ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Purple500.copy(alpha = 0.2f))
-                                .border(1.dp, Purple400.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "🧑‍🤝‍🧑 $fName${if (item.friendSharePct != null) " (${item.friendSharePct.toInt()}%)" else ""}",
-                                fontSize = 10.sp,
-                                color = Purple400,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    item.thirdPartyName?.let { tpName ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Amber500.copy(alpha = 0.15f))
-                                .border(1.dp, Amber400.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "🏷️ $tpName",
-                                fontSize = 10.sp,
-                                color = Amber400,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
                 }
 
-                // Impacto pessoal se houver divisão
-                if (item.myImpact != item.amount && item.myImpact > 0) {
+                Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = formattedImpact,
-                        fontSize = 11.sp,
-                        color = Emerald400,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "${if (item.isIncome) "+" else ""}${FinanceEngine.formatCurrency(item.amount)}",
+                        style = Typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = amountColor
                     )
+                    if (hasDiffImpact && !item.isIncome) {
+                        Text(
+                            text = "Meu impacto: ${FinanceEngine.formatCurrency(item.myImpact)}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (item.myImpact == 0.0) Emerald400 else Cyan400
+                        )
+                    }
                 }
+            }
 
-                HorizontalDivider(color = DarkBorder.copy(alpha = 0.5f))
-
-                // Footer Row: Tempo Relativo, Competência e Status
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            // Linha 2: Duplo Badge de Datas (Data de Cadastro vs Data de Vencimento/Competência) + Rateios
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Badge 1: Data/Hora do Cadastro (Auditoria)
+                Box(
+                    modifier = Modifier
+                        .background(SkyBlue.copy(alpha = 0.12f), CircleShape)
+                        .border(1.dp, SkyBlue.copy(alpha = 0.35f), CircleShape)
+                        .padding(horizontal = 8.dp, vertical = 2.5.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Schedule,
                             contentDescription = null,
-                            tint = TextMuted,
-                            modifier = Modifier.size(12.dp)
+                            tint = SkyBlue,
+                            modifier = Modifier.size(11.dp)
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = item.formattedDate,
+                            text = "Cadastrado: ${item.formattedDate}",
                             fontSize = 10.sp,
-                            color = TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.Bold,
+                            color = SkyBlue,
+                            style = LocalTextStyle.current.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            )
                         )
                     }
+                }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Badge 2: Vencimento e Mês de Competência
+                Box(
+                    modifier = Modifier
+                        .background(DarkBackground.copy(alpha = 0.65f), CircleShape)
+                        .border(1.dp, DarkBorder, CircleShape)
+                        .padding(horizontal = 8.dp, vertical = 2.5.dp)
+                ) {
+                    Text(
+                        text = "Venc: ${FinanceEngine.formatFullDate(item.dueDate)} • ${FinanceEngine.formatMonthLabel(item.competenceMonth)}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary,
+                        style = LocalTextStyle.current.copy(
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        )
+                    )
+                }
+
+                // Badge de Terceiro ou Amigo se existir
+                item.thirdPartyName?.takeIf { it.isNotBlank() }?.let { third ->
+                    Box(
+                        modifier = Modifier
+                            .background(Amber500.copy(alpha = 0.14f), CircleShape)
+                            .border(1.dp, Amber500.copy(alpha = 0.35f), CircleShape)
+                            .padding(horizontal = 8.dp, vertical = 2.5.dp)
                     ) {
-                        // Atalho para competência
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(DarkSurfaceVariant)
-                                .clickable { onNavigateToMonth() }
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = FinanceEngine.formatMonthLabel(item.competenceMonth),
-                                fontSize = 10.sp,
-                                color = Cyan400,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                        Text(
+                            text = "Terceiro: $third",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Amber400,
+                            style = LocalTextStyle.current.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
                             )
-                        }
-
-                        StatusBadge(status = item.status)
+                        )
                     }
+                }
+
+                item.friendName?.takeIf { it.isNotBlank() }?.let { friend ->
+                    Box(
+                        modifier = Modifier
+                            .background(Cyan500.copy(alpha = 0.14f), CircleShape)
+                            .border(1.dp, Cyan500.copy(alpha = 0.35f), CircleShape)
+                            .padding(horizontal = 8.dp, vertical = 2.5.dp)
+                    ) {
+                        Text(
+                            text = "Amigo: $friend (${(item.friendSharePct ?: 50.0).toInt()}%)",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Cyan400,
+                            style = LocalTextStyle.current.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            )
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(color = DarkBorder.copy(alpha = 0.55f))
+
+            // Linha 3: StatusBadge + Botão "Ver no Mês"
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatusBadge(status = item.status)
+
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onOpenMonth)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Ver em ${FinanceEngine.formatMonthLabel(item.competenceMonth)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SkyBlue
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = null,
+                        tint = SkyBlue,
+                        modifier = Modifier.size(13.dp)
+                    )
                 }
             }
         }
