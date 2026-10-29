@@ -29,12 +29,16 @@ dist-ssr
 *.sln
 *.sw?
 
-# Android
+# Android & Security Secrets
 .gradle/
 build/
 android/app/build/
 android/.gradle/
 local.properties
+android/local.properties
 *.apk
 *.aab
+*.jks
+*.keystore
 google-services.json
+!google-services.json.example

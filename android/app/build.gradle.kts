@@ -1,7 +1,25 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.gms.google-services")
+}
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun resolveSecret(key: String, injectedProperty: String? = null): String {
+    return (injectedProperty?.let { project.findProperty(it)?.toString() })
+        ?.takeIf { it.isNotBlank() }
+        ?: project.findProperty(key)?.toString()?.takeIf { it.isNotBlank() }
+        ?: localProperties.getProperty(key)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(key)?.takeIf { it.isNotBlank() }
+        ?: ""
 }
 
 android {
@@ -20,12 +38,35 @@ android {
             useSupportLibrary = true
         }
 
-        buildConfigField("String", "GEMINI_API_KEY", "\"${project.findProperty("GEMINI_API_KEY") ?: ""}\"")
+        val geminiApiKey = resolveSecret("GEMINI_API_KEY")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystorePath = resolveSecret("KEYSTORE_FILE", "android.injected.signing.store.file")
+            val keystorePassword = resolveSecret("KEYSTORE_PASSWORD", "android.injected.signing.store.password")
+            val keyAliasValue = resolveSecret("KEY_ALIAS", "android.injected.signing.key.alias")
+            val keyPasswordValue = resolveSecret("KEY_PASSWORD", "android.injected.signing.key.password")
+
+            if (keystorePath.isNotBlank() && file(keystorePath).exists()) {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                keyAlias = keyAliasValue
+                keyPassword = keyPasswordValue
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            val releaseSigning = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigning.storeFile?.exists() == true) {
+                releaseSigning
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

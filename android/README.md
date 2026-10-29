@@ -127,3 +127,45 @@ Para conectar ao seu projeto real do Firebase:
    - `Terceiro Externo`: gera item em "A Receber" com opção de dar baixa rápida com 1 toque.
 5. **Copiloto IA Gemini**:
    Entende comandos como *"Gastei 45 no almoço hoje"* e faz o lançamento automático, recalculando instantaneamente todos os KPIs.
+
+---
+
+## ⚙️ CI/CD: Compilação Assinada & Distribuição Automática (GitHub Actions)
+
+O repositório conta com a esteira automatizada [`.github/workflows/android-release.yml`](../.github/workflows/android-release.yml), acionada a cada `push` na branch `main` (restrita a alterações em `android/**`) ou manualmente via **Workflow Dispatch** (`workflow_dispatch`).
+
+### Passos Manuais Obrigatórios de Configuração (DevOps & Cyber Security)
+
+Antes de acionar o pipeline pela primeira vez, execute os 3 passos manuais abaixo:
+
+1. **Configurar o Firebase App Distribution:**
+   - Acesse o [Console do Firebase](https://console.firebase.google.com/) → **Release & Monitor** → **App Distribution** e clique em **Get Started** para ativar o serviço.
+   - Na aba **Testers & Groups**, crie o grupo obrigatório chamado **`qa-team`** e adicione os e-mails dos testadores.
+
+2. **Baixar a Service Account Key (JSON) do Google Cloud:**
+   - Acesse o [Google Cloud Console](https://console.cloud.google.com/iam-admin/serviceaccounts) vinculado ao seu projeto Firebase.
+   - Crie ou selecione uma Service Account com o papel **Firebase App Distribution Admin** (`roles/firebaseappdistro.admin`).
+   - Gere uma nova chave no formato **JSON** e salve o arquivo localmente de forma segura (nunca versione este arquivo no Git).
+
+3. **Cadastrar os Secrets no GitHub:**
+   - No repositório do GitHub, acesse **Settings → Secrets and variables → Actions → New repository secret** e cadastre os seguintes Secrets obrigatórios:
+
+| GitHub Secret | Obrigatório | Descrição / Como Obter |
+| :--- | :---: | :--- |
+| `FIREBASE_APP_ID` | Sim | ID do Aplicativo Android nas Configurações do Projeto no Firebase (ex: `1:1234567890:android:abcdef123456`). |
+| `FIREBASE_CREDENTIALS_JSON` | Sim | Conteúdo completo (JSON bruto) da Service Account Key baixada do Google Cloud. |
+| `KEYSTORE_BASE64` | Sim | Seu arquivo `.jks` ou `.keystore` codificado em Base64 (`base64 -w 0 keystore.jks` no Linux/macOS ou `[Convert]::ToBase64String([IO.File]::ReadAllBytes("keystore.jks"))` no PowerShell). |
+| `KEYSTORE_PASSWORD` | Sim | Senha do arquivo Keystore (`android.injected.signing.store.password`). |
+| `KEY_ALIAS` | Sim | Alias da chave de assinatura dentro do Keystore (`android.injected.signing.key.alias`). |
+| `KEY_PASSWORD` | Sim | Senha da chave específica (`android.injected.signing.key.password`). |
+| `GOOGLE_SERVICES_JSON` | Opcional / Recomendado | Conteúdo JSON do `google-services.json` de produção (caso não exista no runner, utiliza o `google-services.json.example` como fallback). |
+
+### O que o Workflow `android-release.yml` Executa:
+1. **Ambiente & Cache**: Provisiona `ubuntu-latest`, configura o **JDK 17** (`temurin`) e ativa o cache nativo do Gradle.
+2. **Assinatura Segura em Memória/Runner**: Decodifica `secrets.KEYSTORE_BASE64` diretamente para `android/app/keystore.jks` e concede permissão de execução ao `./gradlew`.
+3. **Compilação Injetada (`assembleRelease`)**: Compila o APK de Release injetando as credenciais via `-Pandroid.injected.signing.*`.
+4. **Artefato & Distribuição**:
+   - Salva o `app-release.apk` nos **Artifacts** do GitHub Actions (`actions/upload-artifact@v4`).
+   - Publica automaticamente o `app-release.apk` no **Firebase App Distribution** para o grupo **`qa-team`** via `wzieba/Firebase-Distribution-Github-Action@v1`.
+
+
