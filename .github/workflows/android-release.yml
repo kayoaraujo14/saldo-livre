@@ -49,7 +49,7 @@ jobs:
 
       - name: Build Signed Release APK
         working-directory: ./android
-        run: ./gradlew assembleRelease -Pandroid.injected.signing.store.file=keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/android/app/keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4

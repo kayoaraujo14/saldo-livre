@@ -73,12 +73,12 @@ jobs:
       - name: Build Signed Release APK & App Bundle (AAB)
         working-directory: ./android
         env:
-          KEYSTORE_FILE: keystore.jks
+          KEYSTORE_FILE: ${{ github.workspace }}/android/app/keystore.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ./gradlew assembleRelease bundleRelease --stacktrace
+        run: ./gradlew assembleRelease bundleRelease -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/android/app/keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }} --stacktrace
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
