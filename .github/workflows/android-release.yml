@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - 'android/**'
+      - '.github/workflows/android-release.yml'
   workflow_dispatch:
 
 jobs:
@@ -14,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: android
+        working-directory: ./android
 
     steps:
       - name: Checkout Repository
@@ -28,22 +29,26 @@ jobs:
           cache: 'gradle'
 
       - name: Prepare google-services.json
+        working-directory: ./android
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           if [ -n "$GOOGLE_SERVICES_JSON" ]; then
-            echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
-          elif [ ! -f "app/google-services.json" ]; then
-            cp app/google-services.json.example app/google-services.json
+            echo "$GOOGLE_SERVICES_JSON" > "$GITHUB_WORKSPACE/android/app/google-services.json"
+          elif [ ! -f "$GITHUB_WORKSPACE/android/app/google-services.json" ]; then
+            cp "$GITHUB_WORKSPACE/android/app/google-services.json.example" "$GITHUB_WORKSPACE/android/app/google-services.json"
           fi
 
       - name: Decode Signing Keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/keystore.jks
+        working-directory: ./android
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$GITHUB_WORKSPACE/android/app/keystore.jks"
 
       - name: Grant Execute Permission to Gradlew
+        working-directory: ./android
         run: chmod +x ./gradlew
 
       - name: Build Signed Release APK
+        working-directory: ./android
         run: ./gradlew assembleRelease -Pandroid.injected.signing.store.file=keystore.jks -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
       - name: Upload Release APK Artifact

@@ -40,5 +40,6 @@ android/local.properties
 *.aab
 *.jks
 *.keystore
+*keystore*.txt
 google-services.json
 !google-services.json.example
