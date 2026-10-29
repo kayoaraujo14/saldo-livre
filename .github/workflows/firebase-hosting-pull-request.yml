@@ -5,6 +5,9 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'web/**'
+      - '.github/workflows/firebase-hosting-*.yml'
 
 jobs:
   build_and_preview:
