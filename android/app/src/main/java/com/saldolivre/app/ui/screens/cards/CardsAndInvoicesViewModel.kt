@@ -125,24 +125,25 @@ class CardsAndInvoicesViewModel(
                     val isOwner = card.ownerUid == user.uid
                     val isShared = card.sharedWithUsers.isNotEmpty() || card.sharedWithUids.isNotEmpty()
 
+                    val matchingInv = invoices.find { it.card.id == card.id }
+
+                    // Visão idêntica à do titular: todos os lançamentos do cartão (exceto reservas privadas)
                     val cardTxs = transactions.filter { tx ->
                         tx.competenceMonth == month &&
                         tx.cardId == card.id &&
-                        tx.visibleToUids.contains(user.uid)
+                        tx.reserveCardId == null
                     }.sortedByDescending { it.dueDate }
 
-                    val invoiceTotal = FinanceEngine.round2(
+                    val invoiceTotal = matchingInv?.total ?: FinanceEngine.round2(
                         cardTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.effectiveAmount } -
                         cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
                     ).coerceAtLeast(0.0)
 
-                    val matchingInv = invoices.find { it.card.id == card.id }
                     val futureTotal = matchingInv?.futureInstallmentsTotal ?: run {
                         val futureTxs = transactions.filter { tx ->
                             tx.competenceMonth > month &&
                             tx.cardId == card.id &&
-                            tx.reserveCardId == null &&
-                            tx.visibleToUids.contains(user.uid)
+                            tx.reserveCardId == null
                         }
                         val futureExpenses = futureTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
                         val futureCredits = futureTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }

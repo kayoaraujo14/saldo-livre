@@ -126,7 +126,6 @@ export function TransactionTable({
   const [activeTab, setActiveTab] = useState<TabFilter>('all')
   const [search, setSearch] = useState('')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
-  const [consolidateInvoices, setConsolidateInvoices] = useState(true)
   const [columnFilters, setColumnFilters] = useState<ColumnFilters>(INITIAL_COLUMN_FILTERS)
   const [categorySearchQuery, setCategorySearchQuery] = useState('')
   const [personSearchQuery, setPersonSearchQuery] = useState('')
@@ -146,9 +145,9 @@ export function TransactionTable({
       cards,
       currentUid,
       month,
-      consolidateInvoices,
+      true,
     )
-  }, [monthTransactions, transactions, cards, currentUid, month, consolidateInvoices])
+  }, [monthTransactions, transactions, cards, currentUid, month])
 
   // Unique options and counts for Excel popovers
   const availableCategories = useMemo(() => {
@@ -679,26 +678,6 @@ export function TransactionTable({
                 className="h-8 pl-8 text-xs bg-slate-950/70 border-slate-800 focus-visible:ring-emerald-500/40"
               />
             </div>
-
-            {/* Toggle de Faturas Consolidadas no Extrato */}
-            <button
-              type="button"
-              onClick={() => setConsolidateInvoices((prev) => !prev)}
-              className={`h-8 px-2.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border cursor-pointer shrink-0 ${
-                consolidateInvoices
-                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40 shadow-xs hover:bg-sky-500/30'
-                  : 'bg-slate-950/70 text-slate-400 border-slate-800 hover:text-slate-200'
-              }`}
-              title={
-                consolidateInvoices
-                  ? 'Faturas consolidadas ativadas: Exibe 1 único lançamento consolidado por cartão no vencimento. Clique para ver compras individuais.'
-                  : 'Exibindo compras individuais no extrato. Clique para consolidar em 1 lançamento por fatura.'
-              }
-            >
-              <CreditCard className="size-3.5" />
-              <span className="hidden sm:inline">Faturas Consolidadas</span>
-              <span className="sm:hidden">Faturas</span>
-            </button>
 
             {onToggleExpand && (
               <Button
@@ -1875,12 +1854,6 @@ export function TransactionTable({
                               </button>
                             </div>
 
-                            {/* Detalhes de Rateio e Terceiros */}
-                            {invMeta.othersShare > 0 && (
-                              <p className="text-[10px] text-slate-400 mt-0.5">
-                                Sua parte: <strong className="text-emerald-400">{formatBRL(invMeta.myShare)}</strong> · Outros: <strong className="text-amber-400">{formatBRL(invMeta.othersShare)}</strong> (Total fatura: {formatBRL(invMeta.totalInvoiceAmount)})
-                              </p>
-                            )}
                             {!isOwner && (
                               <p className="text-[10px] text-indigo-300 mt-0.5">
                                 Cartão compartilhado por <strong>{invMeta.card.ownerName}</strong>
@@ -1901,25 +1874,20 @@ export function TransactionTable({
                       <td className="py-2.5 px-3 align-middle text-xs">
                         {isOwner ? (
                           invMeta.othersShare > 0 ? (
-                            <span className="text-[10px] font-medium text-amber-300">Rateado com Terceiros</span>
+                            <span className="text-[10px] font-medium text-amber-300">Rateado</span>
                           ) : (
-                            <span className="text-[10px] font-medium text-slate-300">100% Meu</span>
+                            <span className="text-[10px] font-medium text-slate-300">Titular</span>
                           )
                         ) : (
-                          <span className="text-[10px] font-medium text-indigo-300">Minha Cota</span>
+                          <span className="text-[10px] font-medium text-indigo-300">Compartilhado</span>
                         )}
                       </td>
 
-                      {/* 6. Valor (Minha parte!) */}
+                      {/* 6. Valor da Fatura */}
                       <td className="py-2.5 px-3 align-middle text-right">
                         <div className="font-mono font-bold text-xs text-white">
                           {formatBRL(tx.totalAmount)}
                         </div>
-                        {invMeta.othersShare > 0 && (
-                          <div className="text-[9px] text-slate-500 font-mono">
-                            total: {formatBRL(invMeta.totalInvoiceAmount)}
-                          </div>
-                        )}
                       </td>
 
                       {/* 7. Ações */}

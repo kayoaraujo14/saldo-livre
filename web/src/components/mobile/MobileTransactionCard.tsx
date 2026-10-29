@@ -90,9 +90,6 @@ export function MobileTransactionCard({
           <p className="text-xs font-bold text-white font-mono">
             {formatBRL(effAmount)}
           </p>
-          <span className="text-[9px] text-emerald-400 font-medium">
-            sua parte
-          </span>
         </div>
       </div>
     )

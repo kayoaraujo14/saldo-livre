@@ -116,6 +116,15 @@ function mk(a: MkArgs): Transaction {
   })
   if (a.reimbursed) split.allocations = split.allocations.map((x) => ({ ...x, reimbursed: true }))
   const isEstimatedRow = a.estimated !== undefined
+  const cardObj = a.card ? DEMO_CARDS.find((c) => c.id === a.card) : undefined
+  const visible = a.reserveCard
+    ? [a.by.uid]
+    : Array.from(
+        new Set([
+          ...split.visibleToUids,
+          ...(cardObj ? [cardObj.ownerUid, ...(cardObj.sharedWithUids || [])] : []),
+        ]),
+      )
   return {
     id: `tx_demo_${++seq}`,
     createdByUid: a.by.uid,
@@ -131,7 +140,7 @@ function mk(a: MkArgs): Transaction {
     totalAmount: a.total,
     dueDate: dateInMonth(a.month, a.day),
     competenceMonth: a.month,
-    visibleToUids: a.reserveCard ? [a.by.uid] : split.visibleToUids,
+    visibleToUids: visible,
     userImpact: split.userImpact,
     allocations: split.allocations,
     recurringBillId: a.rb ?? null,

@@ -101,13 +101,7 @@ fun TransactionsScreen(
                     )
                 },
                 actions = {
-                    IconButton(onClick = { viewModel.toggleConsolidateInvoices() }) {
-                        Icon(
-                            imageVector = Icons.Default.CreditCard,
-                            contentDescription = if (uiState.consolidateInvoices) "Faturas consolidadas ativadas" else "Lançamentos individuais de cartão",
-                            tint = if (uiState.consolidateInvoices) Cyan400 else TextSecondary
-                        )
-                    }
+
                     IconButton(onClick = onNavigateToAddTransaction) {
                         Icon(
                             imageVector = Icons.Default.Add,

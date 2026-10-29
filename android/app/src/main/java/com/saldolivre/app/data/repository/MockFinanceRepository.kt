@@ -840,6 +840,7 @@ class MockFinanceRepository(
     private fun buildInitialTransactions(): List<Transaction> {
         val currentMonth = FinanceEngine.currentMonthKey()
 
+        val demoCards = buildDemoCards()
         val list = mutableListOf<Transaction>()
 
         // Helper
@@ -899,7 +900,10 @@ class MockFinanceRepository(
                     totalAmount = total,
                     dueDate = dueDate,
                     competenceMonth = month,
-                    visibleToUids = if (reserveCardId != null) listOf(byUid) else split.visibleToUids,
+                    visibleToUids = if (reserveCardId != null) listOf(byUid) else {
+                        val demoCard = demoCards.find { it.id == cardId }
+                        (split.visibleToUids + listOfNotNull(demoCard?.ownerUid) + (demoCard?.sharedWithUids ?: emptyList())).distinct()
+                    },
                     userImpact = split.userImpact,
                     allocations = allocs,
                     reserveCardId = reserveCardId,

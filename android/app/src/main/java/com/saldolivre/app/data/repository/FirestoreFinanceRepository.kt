@@ -681,8 +681,11 @@ class FirestoreFinanceRepository(
             val batch = firestore.batch()
             var count = 0
             for (doc in snap.documents) {
+                // As regras só permitem alterar lançamentos criados pelo próprio usuário
+                val creator = doc.getString("createdByUid")?.takeIf { it.isNotBlank() } ?: doc.getString("paidByUid")
+                if (creator != uid) continue
                 val cur = (doc.get("visibleToUids") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
-                val merged = (cur + card.sharedWithUids).distinct()
+                val merged = (cur + uid + card.sharedWithUids).distinct()
                 if (merged.size != cur.size) {
                     batch.update(doc.reference, "visibleToUids", merged)
                     count++

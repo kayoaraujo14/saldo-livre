@@ -494,8 +494,12 @@ export async function fsSaveCard(card: Card) {
         const batch = writeBatch(db)
         let count = 0
         for (const docSnap of snap.docs) {
-          const curVisible = Array.isArray(docSnap.data().visibleToUids) ? docSnap.data().visibleToUids : []
-          const merged = Array.from(new Set([...curVisible, ...payload.sharedWithUids]))
+          const d = docSnap.data()
+          // As regras só permitem alterar lançamentos criados pelo próprio usuário
+          const createdBy = d.createdByUid || d.paidByUid
+          if (createdBy !== payload.ownerUid) continue
+          const curVisible = Array.isArray(d.visibleToUids) ? d.visibleToUids : []
+          const merged = Array.from(new Set([...curVisible, payload.ownerUid, ...payload.sharedWithUids]))
           if (merged.length !== curVisible.length) {
             batch.update(docSnap.ref, { visibleToUids: merged })
             count++

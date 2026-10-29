@@ -232,7 +232,7 @@ fun CardInvoicesScreen(
                             KpiTile("Em aberto", FinanceEngine.formatCurrency(uiState.totalOpen), Amber400, Modifier.weight(1f))
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            KpiTile("Minha parte", FinanceEngine.formatCurrency(uiState.totalMine), Emerald400, Modifier.weight(1f))
+                            KpiTile("Total pago", FinanceEngine.formatCurrency((uiState.totalAmount - uiState.totalOpen).coerceAtLeast(0.0)), Emerald400, Modifier.weight(1f))
                             KpiTile(
                                 label = "Próximo vencimento",
                                 value = uiState.nextDue?.let { FinanceEngine.formatShortDate(it.dueDate) } ?: "—",

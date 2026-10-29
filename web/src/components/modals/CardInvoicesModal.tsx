@@ -163,11 +163,11 @@ export function CardInvoicesModal({
   const totals = useMemo(() => {
     const total = invoices.reduce((s, i) => s + i.total, 0)
     const open = invoices.reduce((s, i) => s + i.openAmount, 0)
-    const mine = invoices.reduce((s, i) => s + i.myShare, 0)
+    const paid = invoices.reduce((s, i) => s + i.paidAmount, 0)
     const nextDue = invoices
       .filter((i) => i.openAmount > 0)
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]
-    return { total, open, mine, nextDue }
+    return { total, open, paid, nextDue }
   }, [invoices])
 
   const hideKpis = Boolean(
@@ -318,7 +318,7 @@ export function CardInvoicesModal({
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
                 <Kpi icon={<Wallet className="size-4 text-cyan-400" />} label="Total das faturas" value={formatBRL(totals.total)} />
                 <Kpi icon={<Lock className="size-4 text-amber-400" />} label="Em aberto" value={formatBRL(totals.open)} tone="text-amber-300" />
-                <Kpi icon={<Users className="size-4 text-emerald-400" />} label="Minha parte" value={formatBRL(totals.mine)} tone="text-emerald-300" />
+                <Kpi icon={<CheckCircle2 className="size-4 text-emerald-400" />} label="Total pago" value={formatBRL(totals.paid)} tone="text-emerald-300" />
                 <Kpi
                   icon={<CalendarClock className="size-4 text-rose-400" />}
                   label="Próximo vencimento"
@@ -470,7 +470,7 @@ export function CardInvoicesModal({
                             <div>
                               <span className="font-semibold block text-white">Cartão de {selected.card.ownerName}</span>
                               <span className="text-[11px] text-indigo-300">
-                                Sua parte nesta fatura: <strong>{formatBRL(selected.myShare)}</strong>
+                                Apenas o titular pode quitar esta fatura no banco
                               </span>
                             </div>
                             <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-900/60 text-indigo-200 border border-indigo-700">

@@ -1040,7 +1040,7 @@ private fun InvoiceSummaryCard(
                             color = Color.White
                         )
                         Text(
-                            text = "Sua parte nesta fatura: ${FinanceEngine.formatCurrency(invoice.myShare)} (Apenas o titular pode quitar no banco)",
+                            text = "Apenas o titular pode quitar esta fatura no banco",
                             fontSize = 11.sp,
                             color = Color(0xFFA5B4FC)
                         )

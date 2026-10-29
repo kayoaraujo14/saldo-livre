@@ -69,7 +69,7 @@ class CardsViewModel(
                     val cardTxs = transactions.filter { tx ->
                         tx.competenceMonth == month &&
                         tx.cardId == card.id &&
-                        tx.visibleToUids.contains(user.uid)
+                        tx.reserveCardId == null
                     }.sortedByDescending { it.dueDate }
 
                     val invoiceTotal = FinanceEngine.round2(
@@ -81,8 +81,7 @@ class CardsViewModel(
                     val futureTxs = transactions.filter { tx ->
                         tx.competenceMonth > month &&
                         tx.cardId == card.id &&
-                        tx.reserveCardId == null &&
-                        tx.visibleToUids.contains(user.uid)
+                        tx.reserveCardId == null
                     }
                     val futureExpenses = futureTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
                     val futureCredits = futureTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }

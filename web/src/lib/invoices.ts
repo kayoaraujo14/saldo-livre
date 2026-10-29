@@ -486,9 +486,7 @@ export function createConsolidatedInvoiceTx(
   const myShare = invoice.myShare
   const status = invoice.status === 'paid' ? 'paid' : (invoice.status === 'open' ? 'estimated' : 'pending')
 
-  const desc = isOwner
-    ? (myShare === 0 && invoice.total > 0 ? `Fatura ${card.cardName} (100% Terceiros)` : `Fatura ${card.cardName}`)
-    : `Fatura ${card.cardName} (Minha parte)`
+  const desc = `Fatura ${card.cardName}`
 
   const meta: ConsolidatedInvoiceMeta = {
     isConsolidatedInvoice: true,

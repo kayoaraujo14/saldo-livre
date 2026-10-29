@@ -83,12 +83,7 @@ class TransactionsViewModel(
                     it.competenceMonth == month && it.visibleToUids.contains(user.uid)
                 }.sortedByDescending { it.dueDate }
 
-                val shouldConsolidate = _uiState.value.consolidateInvoices
-                val effectiveTxs = if (shouldConsolidate) {
-                    InvoiceEngine.consolidateMonthTransactions(rawMonthTxs, allTxs, cards, user.uid, month, true)
-                } else {
-                    rawMonthTxs
-                }
+                val effectiveTxs = InvoiceEngine.consolidateMonthTransactions(rawMonthTxs, allTxs, cards, user.uid, month, true)
 
                 val income = rawMonthTxs.filter { it.type == TransactionType.INCOME }.sumOf {
                     FinanceEngine.impactFor(it, user.uid, allTxs)
@@ -327,25 +322,6 @@ class TransactionsViewModel(
         }
     }
 
-    fun toggleConsolidateInvoices() {
-        _uiState.update { current ->
-            val next = !current.consolidateInvoices
-            val effective = if (next) {
-                InvoiceEngine.consolidateMonthTransactions(
-                    current.rawMonthTransactions,
-                    current.allTransactions,
-                    current.cards,
-                    current.currentUser.uid,
-                    current.selectedMonth,
-                    true
-                )
-            } else {
-                current.rawMonthTransactions
-            }
-            current.copy(consolidateInvoices = next, transactions = effective)
-        }
-        applyFilters()
-    }
 
     private fun applyFilters() {
         val state = _uiState.value

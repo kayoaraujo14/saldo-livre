@@ -485,11 +485,7 @@ object InvoiceEngine {
             TransactionStatus.PENDING
         }
 
-        val desc = if (isOwner) {
-            if (myShare == 0.0 && invoice.total > 0.0) "Fatura ${card.cardName} (100% Terceiros)" else "Fatura ${card.cardName}"
-        } else {
-            "Fatura ${card.cardName} (Minha parte)"
-        }
+        val desc = "Fatura ${card.cardName}"
 
         val meta = ConsolidatedInvoiceMeta(
             card = card,

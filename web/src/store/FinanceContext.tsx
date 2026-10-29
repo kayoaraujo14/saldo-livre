@@ -1180,6 +1180,19 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           previous: t.allocations,
         })
 
+        const cardForGroup =
+          (input.paymentMethod ?? t.paymentMethod) === 'credit_card'
+            ? cards.find((c) => c.id === (input.cardId ?? t.cardId))
+            : null
+        const effectiveVisible = t.reserveCardId
+          ? [t.createdByUid]
+          : Array.from(
+              new Set([
+                ...split.visibleToUids,
+                ...(cardForGroup ? [cardForGroup.ownerUid, ...(cardForGroup.sharedWithUids || [])] : []),
+              ]),
+            )
+
         const patch: Partial<Transaction> = {
           description: newDesc,
           category: input.category ?? t.category,
@@ -1194,7 +1207,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           totalAmount: curAmount,
           allocations: split.allocations,
           userImpact: split.userImpact,
-          visibleToUids: split.visibleToUids,
+          visibleToUids: effectiveVisible,
           assignedFriendUid: assignedFriend?.uid ?? null,
           assignedFriendName: assignedFriend?.name ?? null,
           friendSharePct,
@@ -1222,6 +1235,33 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     },
     [mode, commitDemo, me, partnerParty, cards, currentUid, friends],
   )
+
+  // Titular: garante que todos os lançamentos criados por ele em cartões compartilhados
+  // sejam visíveis aos convidados (para que vejam o valor TOTAL da fatura, igual ao titular)
+  const syncedCardTxRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (mode !== 'firebase' || !currentUid || !isTxLoaded) return
+    const updates: { id: string; patch: Partial<Transaction> }[] = []
+    for (const c of cards) {
+      if (c.ownerUid !== currentUid) continue
+      const guests = c.sharedWithUids || []
+      if (guests.length === 0) continue
+      for (const t of transactions) {
+        if (t.cardId !== c.id || t.reserveCardId) continue
+        const creator = t.createdByUid || t.paidByUid
+        if (creator !== currentUid) continue
+        const vis = t.visibleToUids || []
+        if (guests.every((g) => vis.includes(g))) continue
+        const sig = `${t.id}:${guests.join(',')}`
+        if (syncedCardTxRef.current.has(sig)) continue
+        syncedCardTxRef.current.add(sig)
+        updates.push({ id: t.id, patch: { visibleToUids: Array.from(new Set([...vis, currentUid, ...guests])) } })
+      }
+    }
+    if (updates.length > 0) {
+      fb.fsUpdateTransactionsBatch(updates).catch((e) => console.warn('Falha ao sincronizar visibilidade de cartão compartilhado:', e))
+    }
+  }, [mode, currentUid, isTxLoaded, cards, transactions])
 
   // Auto-repara qualquer grupo de parcelas cujas datas foram acidentalmente colapsadas no mesmo mês
   useEffect(() => {
@@ -1326,7 +1366,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         recurringBillId: candidate.id,
         allocations: split.allocations,
         userImpact: split.userImpact,
-        visibleToUids: split.visibleToUids,
+        visibleToUids: Array.from(
+          new Set([
+            ...split.visibleToUids,
+            ...(linkedCard ? [linkedCard.ownerUid, ...(linkedCard.sharedWithUids || [])] : []),
+          ]),
+        ),
         createdAt: Date.now(),
       }
       await addTransaction(newTx)
@@ -1372,7 +1417,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           recurringBillId: candidate.id,
           allocations: split.allocations,
           userImpact: split.userImpact,
-          visibleToUids: split.visibleToUids,
+          visibleToUids: Array.from(
+            new Set([
+              ...split.visibleToUids,
+              ...(linkedCard ? [linkedCard.ownerUid, ...(linkedCard.sharedWithUids || [])] : []),
+            ]),
+          ),
           createdAt: Date.now(),
         })
       }
@@ -1420,7 +1470,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         recurringBillId: bill.id,
         allocations: split.allocations,
         userImpact: split.userImpact,
-        visibleToUids: split.visibleToUids,
+        visibleToUids: Array.from(
+          new Set([
+            ...split.visibleToUids,
+            ...(linkedCard ? [linkedCard.ownerUid, ...(linkedCard.sharedWithUids || [])] : []),
+          ]),
+        ),
         createdAt: Date.now(),
       })
       markRecurringResolved(bill.id, month)
@@ -1510,10 +1565,19 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       })
 
       // Qualquer alteração na divisão com amigo submete novamente ao aceite
+      const linkedCard = tx.cardId ? cards.find((c) => c.id === tx.cardId) : null
+      const effectiveVisible = tx.reserveCardId
+        ? [tx.createdByUid]
+        : Array.from(
+            new Set([
+              ...split.visibleToUids,
+              ...(linkedCard ? [linkedCard.ownerUid, ...(linkedCard.sharedWithUids || [])] : []),
+            ]),
+          )
       await updateTransaction(tx.id, {
         allocations: split.allocations,
         userImpact: split.userImpact,
-        visibleToUids: split.visibleToUids,
+        visibleToUids: effectiveVisible,
         assignedFriendUid: assignedFriend?.uid ?? null,
         assignedFriendName: assignedFriend?.name ?? null,
         friendSharePct: pct,
@@ -1521,7 +1585,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         respondedAt: null,
       })
     },
-    [me, partnerParty, updateTransaction],
+    [me, partnerParty, cards, updateTransaction],
   )
 
   const changeAmount = useCallback(
@@ -1691,16 +1755,30 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const saveCard = useCallback(
     async (card: Card) => {
       const sharedWithUsers = Array.isArray(card.sharedWithUsers) ? card.sharedWithUsers : []
+      const sharedWithUids = sharedWithUsers.map((u) => u.uid)
       const normalized: Card = {
         ...card,
         sharedWithUsers,
-        sharedWithUids: sharedWithUsers.map((u) => u.uid),
+        sharedWithUids,
       }
       if (mode === 'demo') {
         commitDemo((s) => {
           const exists = s.cards.some((c) => c.id === card.id)
           const withId = exists ? normalized : { ...normalized, id: card.id.startsWith('new_') ? makeId('card') : card.id }
-          return { ...s, cards: exists ? s.cards.map((c) => (c.id === card.id ? withId : c)) : [...s.cards, withId] }
+          const updatedTxs = s.transactions.map((t) => {
+            if (t.cardId === withId.id && !t.reserveCardId) {
+              return {
+                ...t,
+                visibleToUids: Array.from(new Set([...(t.visibleToUids || []), withId.ownerUid, ...sharedWithUids])),
+              }
+            }
+            return t
+          })
+          return {
+            ...s,
+            cards: exists ? s.cards.map((c) => (c.id === card.id ? withId : c)) : [...s.cards, withId],
+            transactions: updatedTxs,
+          }
         })
         return
       }

@@ -152,12 +152,7 @@ fun TransactionItem(
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
-                Text(
-                    text = if (isOwner) "Minha cota" else "Sua parte",
-                    fontSize = 10.sp,
-                    color = Emerald400,
-                    fontWeight = FontWeight.Medium
-                )
+
             }
         }
         return
