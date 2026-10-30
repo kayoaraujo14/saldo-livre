@@ -1,4 +1,3 @@
-import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useFinance } from '@/store/FinanceContext'
 import { formatBRL, monthLabel, shiftMonth } from '@/lib/utils'
@@ -27,11 +26,11 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-12 gap-2 sm:gap-2.5">
       {/* 1. HERO COMPACT: Saldo Livre Real (3 cols on desktop, 2 cols on mobile) */}
-      <Card
-        className={`col-span-2 lg:col-span-3 glass-card relative overflow-hidden transition-all duration-300 border p-2.5 sm:p-3 flex flex-col justify-between ${
+      <div
+        className={`col-span-2 lg:col-span-3 kpi-hero rounded-2xl relative overflow-hidden transition-all duration-300 p-2.5 sm:p-3 flex flex-col justify-between ${
           isPositiveBalance
-            ? 'bg-gradient-to-br from-emerald-950/60 via-slate-900/90 to-slate-900 border-emerald-500/30 hover:border-emerald-500/50 shadow-lg shadow-emerald-950/20'
-            : 'bg-gradient-to-br from-rose-950/60 via-slate-900/90 to-slate-900 border-rose-500/30 hover:border-rose-500/50 shadow-lg shadow-rose-950/20'
+            ? 'bg-gradient-to-br from-emerald-950/60 to-slate-900 shadow-[0_0_32px_-8px_rgba(16,185,129,0.35)] hover:shadow-[0_0_40px_-6px_rgba(16,185,129,0.5)]'
+            : 'bg-gradient-to-br from-rose-950/60 to-slate-900 shadow-[0_0_32px_-8px_rgba(244,63,94,0.35)] hover:shadow-[0_0_40px_-6px_rgba(244,63,94,0.5)]'
         }`}
       >
         <div className="flex items-center justify-between gap-1 mb-1">
@@ -39,8 +38,8 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
             <div
               className={`p-1.5 rounded-lg ${
                 isPositiveBalance
-                  ? 'bg-emerald-500/15 text-emerald-300'
-                  : 'bg-rose-500/15 text-rose-300'
+                  ? 'bg-emerald-500/10 text-emerald-300'
+                  : 'bg-rose-500/10 text-rose-300'
               }`}
             >
               <Wallet className="size-3.5" />
@@ -54,8 +53,8 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
             variant="outline"
             className={`text-[9px] px-1.5 py-0 font-mono border-0 ${
               incomeRemainingPct > 0
-                ? 'bg-emerald-500/15 text-emerald-300'
-                : 'bg-rose-500/15 text-rose-300'
+                ? 'bg-emerald-500/10 text-emerald-300'
+                : 'bg-rose-500/10 text-rose-300'
             }`}
           >
             {incomeRemainingPct > 0 ? `+${incomeRemainingPct}%` : `${incomeRemainingPct}%`}
@@ -98,17 +97,17 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           </button>
         ) : null}
 
-        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 border-t border-white/5 min-w-0 gap-1">
+        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 min-w-0 gap-1">
           <span className="truncate min-w-0 text-slate-400">Rec: <strong className="text-slate-300 font-semibold">{formatBRL(summary.income)}</strong></span>
           <span className="truncate min-w-0 text-slate-400">Pago: <strong className="text-slate-300 font-semibold">{formatBRL(summary.paid)}</strong></span>
         </div>
-      </Card>
+      </div>
 
       {/* 2. Limite Diário Seguro (2 cols desktop, 1 col mobile) */}
-      <Card className="col-span-1 lg:col-span-2 glass-card border-white/5 hover:border-white/10 transition-colors p-2.5 sm:p-3 flex flex-col justify-between">
+      <div className="col-span-1 lg:col-span-2 kpi-tile rounded-2xl transition-colors p-2.5 sm:p-3 flex flex-col justify-between">
         <div className="flex items-center justify-between gap-1 mb-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <div className="p-1.5 rounded-lg bg-cyan-500/15 text-cyan-300 shrink-0">
+            <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-300 shrink-0">
               <TrendingUp className="size-3.5" />
             </div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
@@ -127,7 +126,7 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           <span className="text-[10px] text-slate-400 font-normal">/dia</span>
         </div>
 
-        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 border-t border-white/5">
+        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5">
           <span className="truncate text-slate-400">
             {summary.monthState === 'past'
               ? 'Encerrado'
@@ -135,20 +134,20 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           </span>
           <span className="text-[9px] text-slate-400 hidden sm:inline">ritmo</span>
         </div>
-      </Card>
+      </div>
 
       {/* 3. Comprometido (2 cols desktop, 1 col mobile) */}
-      <Card className="col-span-1 lg:col-span-2 glass-card border-white/5 hover:border-white/10 transition-colors p-2.5 sm:p-3 flex flex-col justify-between">
+      <div className="col-span-1 lg:col-span-2 kpi-tile rounded-2xl transition-colors p-2.5 sm:p-3 flex flex-col justify-between">
         <div className="flex items-center justify-between gap-1 mb-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-300 shrink-0">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-300 shrink-0">
               <Clock className="size-3.5" />
             </div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
               A Pagar
             </span>
           </div>
-          <Badge variant="outline" className="text-[9px] bg-amber-500/15 text-amber-300 border-0 py-0 px-1.5 hidden sm:inline shrink-0">
+          <Badge variant="outline" className="text-[9px] bg-amber-500/10 text-amber-300 border-0 py-0 px-1.5 hidden sm:inline shrink-0">
             Fatura
           </Badge>
         </div>
@@ -159,24 +158,24 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           </span>
         </div>
 
-        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 border-t border-white/5 min-w-0 gap-1">
+        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 min-w-0 gap-1">
           <span className="truncate min-w-0 text-slate-400">Est: <strong className="text-slate-300 font-semibold">{formatBRL(summary.committedEstimated)}</strong></span>
           <span className="truncate min-w-0 text-slate-400 hidden sm:inline">Real: <strong className="text-slate-300 font-semibold">{formatBRL(summary.committedPending)}</strong></span>
         </div>
-      </Card>
+      </div>
 
       {/* 4. Já Pago no Mês (2 cols desktop, 1 col mobile) */}
-      <Card className="col-span-1 lg:col-span-2 glass-card border-white/5 hover:border-white/10 transition-colors p-2.5 sm:p-3 flex flex-col justify-between">
+      <div className="col-span-1 lg:col-span-2 kpi-tile rounded-2xl transition-colors p-2.5 sm:p-3 flex flex-col justify-between">
         <div className="flex items-center justify-between gap-1 mb-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <div className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-300 shrink-0">
+            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 shrink-0">
               <CheckCircle2 className="size-3.5" />
             </div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
               Já Pago
             </span>
           </div>
-          <Badge variant="outline" className="text-[9px] bg-emerald-500/15 text-emerald-300 border-0 py-0 px-1.5 hidden sm:inline shrink-0">
+          <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-300 border-0 py-0 px-1.5 hidden sm:inline shrink-0">
             Quitado
           </Badge>
         </div>
@@ -187,22 +186,22 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           </span>
         </div>
 
-        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 border-t border-white/5 min-w-0 gap-1">
+        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 min-w-0 gap-1">
           <span className="truncate min-w-0 text-emerald-400 font-semibold">100% baixado</span>
           <span className="text-slate-400 hidden sm:inline shrink-0">no mês</span>
         </div>
-      </Card>
+      </div>
 
       {/* 5. A Receber de Terceiros e Amigos (3 cols desktop, 1 col mobile) */}
-      <Card
+      <div
         onClick={onOpenReceivables}
-        className={`col-span-1 lg:col-span-3 glass-card border-white/5 hover:border-white/10 transition-colors p-2.5 sm:p-3 flex flex-col justify-between cursor-pointer group ${
+        className={`col-span-1 lg:col-span-3 kpi-tile rounded-2xl transition-colors p-2.5 sm:p-3 flex flex-col justify-between cursor-pointer group ${
           summary.receivableTotal > 0 ? 'hover:bg-purple-950/20' : ''
         }`}
       >
         <div className="flex items-center justify-between gap-1 mb-1">
           <div className="flex items-center gap-1.5 min-w-0">
-            <div className="p-1.5 rounded-lg bg-purple-500/15 text-purple-300 shrink-0">
+            <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-300 shrink-0">
               <HandCoins className="size-3.5" />
             </div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
@@ -220,7 +219,7 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           </span>
         </div>
 
-        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 border-t border-white/5 min-w-0 gap-1">
+        <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-0.5 min-w-0 gap-1">
           <div className="flex items-center gap-1.5 truncate min-w-0 flex-1">
             {summary.receivableFromPartner > 0 && (
               <span className="truncate text-slate-400">Parceiro: <strong className="text-slate-300 font-semibold">{formatBRL(summary.receivableFromPartner)}</strong></span>
@@ -232,7 +231,7 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           </div>
           <ArrowRight className="size-3 text-purple-400 group-hover:translate-x-0.5 transition-transform shrink-0 ml-auto" />
         </div>
-      </Card>
+      </div>
     </div>
   )
 }

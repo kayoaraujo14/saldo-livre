@@ -684,12 +684,13 @@ export function TransactionTable({
                 variant="ghost"
                 size="icon-sm"
                 onClick={onToggleExpand}
-                className={`size-8 text-slate-400 hover:text-white cursor-pointer hidden lg:flex rounded-lg border shrink-0 items-center justify-center transition-all ${
+                className={`size-8 text-slate-400 hover:text-white cursor-pointer hidden lg:flex rounded-full border shrink-0 items-center justify-center transition-all ${
                   isExpanded
                     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25 shadow-xs'
                     : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60'
                 }`}
-                title={isExpanded ? 'Restaurar divisão da tela' : 'Maximizar tabela (tela cheia)'}
+                title={isExpanded ? 'Restaurar (ESC)' : 'Expandir'}
+                aria-label={isExpanded ? 'Restaurar visualização' : 'Expandir em tela cheia'}
               >
                 {isExpanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
               </Button>
@@ -1874,12 +1875,12 @@ export function TransactionTable({
                       <td className="py-2.5 px-3 align-middle text-xs">
                         {isOwner ? (
                           invMeta.othersShare > 0 ? (
-                            <span className="text-[10px] font-medium text-amber-300">Rateado</span>
+                            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300">🤝 Rateado</span>
                           ) : (
-                            <span className="text-[10px] font-medium text-slate-300">Titular</span>
+                            <span className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/80 px-2 py-0.5 text-[10px] font-semibold text-slate-200">👤 100% Meu</span>
                           )
                         ) : (
-                          <span className="text-[10px] font-medium text-indigo-300">Compartilhado</span>
+                          <span className="inline-flex items-center rounded-full border border-indigo-500/40 bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">🔄 Compartilhado</span>
                         )}
                       </td>
 
@@ -2251,7 +2252,7 @@ export function TransactionTable({
                       {tx.type === 'income' ? (
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <Badge variant="outline" className="text-[10px] py-0.5 px-2 bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
+                            <Badge variant="outline" className="text-[10px] py-0.5 px-2 rounded-full bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
                               💰 {tx.category ? `${tx.category}${tx.subcategory ? ` › ${tx.subcategory}` : ''}` : (tx.subcategory ? `Entrada › ${tx.subcategory}` : 'Receita Pessoal')}
                             </Badge>
                             {thirdParty && (
@@ -2262,7 +2263,7 @@ export function TransactionTable({
                           </div>
                           {card && (
                             <span
-                              className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-1.5 py-0.5 rounded bg-slate-900/60 border border-white/[0.06] w-fit shadow-2xs"
+                              className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-2 py-0.5 rounded-full bg-slate-900/60 border border-white/[0.06] w-fit shadow-2xs"
                               title={`Cartão vinculado: ${card.cardName}`}
                             >
                               <CreditCard className="size-2.5 text-slate-400" />
@@ -2296,7 +2297,7 @@ export function TransactionTable({
                                         {txPersons.map((p, idx) => (
                                           <span
                                             key={idx}
-                                            className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 border border-slate-700/80 text-slate-200 font-medium inline-flex items-center gap-1 shadow-2xs"
+                                            className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-800/90 border border-slate-700/80 text-slate-200 font-medium inline-flex items-center gap-1 shadow-2xs"
                                             title={`${p.name}: ${formatBRL(p.amount)}`}
                                           >
                                             <span className="text-slate-400 truncate max-w-[65px]">
@@ -2324,7 +2325,7 @@ export function TransactionTable({
                                     return (
                                       <Badge
                                         variant="outline"
-                                        className="text-[10px] py-0.5 px-2 bg-amber-500/15 text-amber-200 border-amber-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
+                                        className="text-[10px] py-0.5 px-2 rounded-full bg-amber-500/15 text-amber-200 border-amber-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
                                         title={`Despesa de Terceiro: ${tpName}`}
                                       >
                                         <span>🏷️ Terceiro: <strong className="text-white font-bold">{tpName}</strong></span>
@@ -2343,7 +2344,7 @@ export function TransactionTable({
                                     return (
                                       <Badge
                                         variant="outline"
-                                        className="text-[10px] py-0.5 px-2 bg-violet-500/15 text-violet-200 border-violet-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
+                                        className="text-[10px] py-0.5 px-2 rounded-full bg-violet-500/15 text-violet-200 border-violet-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
                                         title={`Despesa de Amigo: ${fName}`}
                                       >
                                         <span>🤝 Amigo: <strong className="text-white font-bold">{fName}</strong> ({friendPctOf(tx)}%)</span>
@@ -2357,7 +2358,7 @@ export function TransactionTable({
                                     return (
                                       <Badge
                                         variant="outline"
-                                        className="text-[10px] py-0.5 px-2 bg-indigo-500/15 text-indigo-200 border-indigo-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
+                                        className="text-[10px] py-0.5 px-2 rounded-full bg-indigo-500/15 text-indigo-200 border-indigo-500/40 font-semibold gap-1 inline-flex items-center shadow-2xs"
                                         title={`100% Parceiro: ${pName}`}
                                       >
                                         <span>🔄 100% <strong className="text-white font-bold">{pName}</strong></span>
@@ -2367,7 +2368,7 @@ export function TransactionTable({
 
                                   // Case E: 100% Meu (default fallback - high contrast)
                                   return (
-                                    <span className="text-[11px] text-slate-200 font-medium flex items-center gap-1 px-1">
+                                    <span className="inline-flex items-center gap-1 w-fit text-[10px] font-semibold text-slate-200 bg-slate-800/80 border border-slate-600/60 rounded-full px-2 py-0.5 shadow-2xs">
                                       👤 100% Meu
                                     </span>
                                   )
@@ -2396,7 +2397,7 @@ export function TransactionTable({
                           {card && (
                             <div className="flex items-center gap-1 px-1 mt-0.5">
                               <span
-                                className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-1.5 py-0.5 rounded bg-slate-900/80 border border-white/[0.06] hover:border-slate-700 transition-colors shadow-2xs"
+                                className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-2 py-0.5 rounded-full bg-slate-900/80 border border-white/[0.06] hover:border-slate-700 transition-colors shadow-2xs"
                                 title={`Cartão vinculado: ${card.cardName} (${card.ownerName})`}
                               >
                                 <CreditCard className="size-2.5 text-slate-400" />

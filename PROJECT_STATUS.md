@@ -82,6 +82,21 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-10-30] Polimento Web — Etapas 1 e 2 concluídas:**
+  - Etapa 1: `Header.tsx` sticky `top-0 z-40` com glassmorphism (`bg-slate-950/80 backdrop-blur-md border-b border-white/5`). `KpiGrid.tsx`: Hero Card com gradiente `from-emerald-950/60 to-slate-900` e brilho luminoso (sem borda/fundo opaco; novas classes `.kpi-hero`/`.kpi-tile` em `index.css`, pois `.glass-card` não-layered sobrescrevia os utilitários Tailwind); cards menores sem bordas rígidas nem divisórias internas, ícones com fundo translúcido a 10%.
+  - Etapa 2: modo expandido (Tabela/Chat) agora ocupa 100% da largura e da altura abaixo do `Header` (layout flex `100dvh`, sem `fixed` com offset hardcoded), ocultando KPIs, banners e painel vizinho. Botão `Maximize2`/`Minimize2` padronizado (somente ícone, `aria-label`) em `TransactionTable.tsx` e `GeminiChat.tsx`; `ESC` restaura a visão padrão; áreas internas mantêm `flex-1 overflow-y-auto`.
+  - Build: `npm run build` OK.
+  - Etapa 2 concluída; Etapa 3 abaixo.
+- **[2026-10-30] Etapa 3 - Filtros Avançados Web (Concluída):**
+  - `TransactionTable.tsx`: cabeçalho Divisão/Responsável com ícone de funil (`Filter`) e dropdown dinâmico (opções "Meu"/rateados/terceiros extraídas das transações carregadas); badges de divisão em pílula (`rounded-full`) em todas as linhas (Meu, Terceiro, Amigo, Parceiro, Receita, Fatura) sem células vazias; rodapé fixo reativo (Entradas/Despesas/Saldo e total por pessoa) recalculado apenas sobre os itens filtrados.
+  - Build: `npm run build` OK.
+- **[2026-10-30] Etapa 4 - Limpeza do Chat & Polimento Web (Concluído):**
+  - Chat limpo (sem chips de sugestões acima/abaixo do input) e botão expandir/restaurar circular padronizado. Polimento Web finalizado: Filtros estilo Excel, Tela Cheia Inteligente (Header sempre visível) e UI de badges em pílula.
+  - Build: `npm run build` OK.
+- **[2026-10-30] Correção de Layout & Filtros (Web):**
+  - Expansão (Tabela/Chat) mantém o `Header` visível e interativo (KPIs e painel vizinho ocultos, altura restante abaixo do cabeçalho, `ESC` restaura). Botão expandir/restaurar do chat padronizado com o da tabela (ícone circular `rounded-full`, `title="Restaurar (ESC)"`). Chat sem chips de "Sugestões inteligentes". Badges de divisão e chip do cartão em pílula; filtro de funil dinâmico e rodapé analítico reativo (Entradas, Despesas, Saldo e itens exibidos).
+  - Build: `npm run build` OK.
+
 - **[2026-10-29] Encerramento da Fundação da Infraestrutura Base (100% Concluída):**
   - Revisão final e consolidação dos 6 pilares estruturais no `PROJECT_STATUS.md`: Arquitetura Monorepo, Paridade 100% do Motor Financeiro, Copiloto Gemini, Modo Demo Offline, UI/UX Responsiva ("Premium & Smart") e CI/CD Web/Android configurado.
 - **[2026-10-29] Esteira de Release Android (`android-release.yml`) & Guia DevOps (`qa-team`):**

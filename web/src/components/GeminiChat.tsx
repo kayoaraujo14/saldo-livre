@@ -1163,16 +1163,15 @@ Atenção crítica:
             <button
               type="button"
               onClick={onToggleExpand}
-              className={`size-8 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white hidden lg:flex items-center justify-center transition-colors cursor-pointer shrink-0 ${
-                isExpanded ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : ''
+              className={`size-8 rounded-full border text-slate-400 hover:text-white hidden lg:flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                isExpanded
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+                  : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 hover:bg-slate-800/60'
               }`}
-              title={isExpanded ? 'Restaurar visualização (ESC)' : 'Modo Tela Cheia (100%)'}
+              title={isExpanded ? 'Restaurar (ESC)' : 'Expandir'}
+              aria-label={isExpanded ? 'Restaurar visualização' : 'Expandir em tela cheia'}
             >
-              {isExpanded ? (
-                <Minimize2 className="size-3.5 text-emerald-400" />
-              ) : (
-                <Maximize2 className="size-3.5" />
-              )}
+              {isExpanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
             </button>
           )}
         </div>

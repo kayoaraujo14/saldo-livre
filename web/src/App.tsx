@@ -100,6 +100,8 @@ function MainDashboard() {
     setQuickRefundTx(tx)
   }
 
+  const isExpandedView = desktopView !== 'chat_focus'
+
   const totalPendingNotifications = pendingChargeGroups.length + pendingFriendRequests.length
   const currentUid = me?.uid ?? ''
 
@@ -110,7 +112,7 @@ function MainDashboard() {
   }, [monthTransactions, transactions, cards, currentUid, month])
 
   return (
-    <div className="flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden">
+    <div className={`flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden ${isExpandedView ? 'lg:h-[100dvh] lg:overflow-hidden' : ''}`}>
       {/* 1. Header (Sticky & Native Safe-Top Padded) */}
       <Header
         onOpenNewTx={handleOpenNewTx}
@@ -128,7 +130,7 @@ function MainDashboard() {
       />
 
       {/* 2. Main Content Area */}
-      <main className="flex-1 max-w-[1720px] w-full mx-auto px-3 sm:px-6 py-3.5 sm:py-4 space-y-4">
+      <main className={`flex-1 min-h-0 max-w-[1720px] w-full mx-auto px-3 sm:px-6 py-3.5 sm:py-4 ${isExpandedView ? 'lg:flex lg:flex-col' : 'space-y-4'}`}>
         {/* Top Notification Banner if there are pending actions */}
         {totalPendingNotifications > 0 && desktopView === 'chat_focus' && (
           <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-violet-500/15 to-transparent border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in slide-in-from-top-1">
@@ -158,14 +160,16 @@ function MainDashboard() {
         )}
 
         {/* Banner de Lançamento Automático / Próximos Vencimentos (Desktop) */}
-        <div className="hidden lg:block">
-          <AutoLaunchNoticeBanner onGoToTransactions={() => setDesktopView('table_full')} />
-        </div>
+        {!isExpandedView && (
+          <div className="hidden lg:block">
+            <AutoLaunchNoticeBanner onGoToTransactions={() => setDesktopView('table_full')} />
+          </div>
+        )}
 
         {/* ============================================================== */}
         {/* DESKTOP LAYOUT (Screen >= 1024px / lg)                          */}
         {/* ============================================================== */}
-        <div className="hidden lg:block space-y-3">
+        <div className={isExpandedView ? 'hidden lg:flex lg:flex-col flex-1 min-h-0' : 'hidden lg:block space-y-3'}>
           {/* KPI Dashboard (Compact Metric Ribbon) - Oculto no modo expandido */}
           {desktopView === 'chat_focus' && (
             <KpiGrid
@@ -174,12 +178,18 @@ function MainDashboard() {
           )}
 
           {/* Flexible Main Workspace Grid (Height optimized with compact KPIs) */}
-          <div className="grid grid-cols-12 gap-3.5 h-[calc(100vh-160px)] max-h-[calc(100vh-160px)] min-h-[540px]">
+          <div
+            className={
+              isExpandedView
+                ? 'grid grid-cols-12 flex-1 min-h-0'
+                : 'grid grid-cols-12 gap-3.5 h-[calc(100vh-160px)] max-h-[calc(100vh-160px)] min-h-[540px]'
+            }
+          >
             {/* Left Panel: Financial Table */}
             <section
               className={`${
                 desktopView === 'table_full'
-                  ? 'fixed top-[61px] sm:top-[65px] inset-x-0 bottom-0 z-30 w-full bg-[#090d16] p-3 sm:px-6 sm:pb-3 sm:pt-2 flex flex-col animate-in fade-in duration-200'
+                  ? 'col-span-12 h-full min-h-0 flex flex-col animate-in fade-in duration-200'
                   : desktopView === 'chat_full'
                     ? 'hidden'
                     : 'col-span-5 xl:col-span-5 h-full min-h-0 flex flex-col transition-all duration-200'
@@ -203,7 +213,7 @@ function MainDashboard() {
             <section
               className={`${
                 desktopView === 'chat_full'
-                  ? 'fixed top-[61px] sm:top-[65px] inset-x-0 bottom-0 z-30 w-full bg-[#090d16] p-3 sm:px-6 sm:pb-3 sm:pt-2 flex flex-col animate-in fade-in duration-200'
+                  ? 'col-span-12 h-full min-h-0 flex flex-col animate-in fade-in duration-200'
                   : desktopView === 'table_full'
                     ? 'hidden'
                     : 'col-span-7 xl:col-span-7 h-full min-h-0 flex flex-col transition-all duration-200'
