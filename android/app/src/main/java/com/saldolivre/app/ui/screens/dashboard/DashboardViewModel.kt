@@ -4,19 +4,53 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
+import com.saldolivre.app.data.engine.InvoiceStatus
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.RecurringBill
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
+import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.roundToInt
 
 data class AutoLaunchNotice(
     val count: Int,
     val bills: List<Transaction>
+)
+
+data class IncomeConsumptionState(
+    val percentage: Int = 0,
+    val paid: Double = 0.0,
+    val income: Double = 0.0
+)
+
+data class Radar7DaysState(
+    val totalAmount: Double = 0.0,
+    val count: Int = 0,
+    val urgencyBadge: String = "Tudo em dia",
+    val subtitle: String = "Nenhuma conta nos próx. 7 dias",
+    val isUrgent: Boolean = false
+)
+
+data class DailyGaugeState(
+    val spentToday: Double = 0.0,
+    val dailyLimit: Double? = null,
+    val difference: Double = 0.0,
+    val isEconomy: Boolean = true,
+    val performanceText: String = ""
+)
+
+data class InvestmentHealthState(
+    val totalInvested: Double = 0.0,
+    val incomePercentage: Int = 0,
+    val targetPercentage: Int = 20,
+    val isTargetReached: Boolean = false,
+    val progressRatio: Float = 0.0f
 )
 
 data class DashboardUiState(
@@ -28,6 +62,10 @@ data class DashboardUiState(
     val allTransactions: List<Transaction> = emptyList(),
     val recurringBills: List<RecurringBill> = emptyList(),
     val pendingRecurringLaunches: List<FinanceEngine.PendingRecurringCandidate> = emptyList(),
+    val incomeConsumption: IncomeConsumptionState = IncomeConsumptionState(),
+    val radar7Days: Radar7DaysState = Radar7DaysState(),
+    val dailyGauge: DailyGaugeState = DailyGaugeState(),
+    val investmentHealth: InvestmentHealthState = InvestmentHealthState(),
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
     val closureDialogDismissed: Boolean = false,
@@ -84,6 +122,138 @@ class DashboardViewModel(
                     )
                 } else emptyList()
 
+                // 1. Consumo da Renda
+                val consumptionPct = if (summary.income > 0.0) {
+                    ((summary.paid / summary.income) * 100.0).roundToInt()
+                } else 0
+                val incomeConsumption = IncomeConsumptionState(
+                    percentage = consumptionPct,
+                    paid = summary.paid,
+                    income = summary.income
+                )
+
+                // 2. Radar 7 Dias
+                val today = java.time.LocalDate.now()
+                val nextWeekDate = today.plusDays(7)
+                val nextWeekStr = String.format(Locale.US, "%04d-%02d-%02d", nextWeekDate.year, nextWeekDate.monthValue, nextWeekDate.dayOfMonth)
+
+                val upcomingNonCardTxs = allTxs.filter { tx ->
+                    tx.type == TransactionType.EXPENSE &&
+                    !tx.isRefund &&
+                    tx.status != TransactionStatus.PAID &&
+                    (tx.cardId.isNullOrBlank() || tx.reserveCardId != null) &&
+                    tx.dueDate >= todayStr && tx.dueDate <= nextWeekStr &&
+                    tx.visibleToUids.contains(user.uid)
+                }
+                var radarTotal = upcomingNonCardTxs.sumOf { tx ->
+                    FinanceEngine.impactFor(tx, user.uid, allTxs)
+                }
+                var radarCount = upcomingNonCardTxs.size
+                var minDaysToDue: Long? = upcomingNonCardTxs.mapNotNull { tx ->
+                    try {
+                        val d = java.time.LocalDate.parse(tx.dueDate)
+                        java.time.temporal.ChronoUnit.DAYS.between(today, d)
+                    } catch (_: Exception) { null }
+                }.minOrNull()
+
+                val candidateMonths = listOf(month, FinanceEngine.shiftMonth(month, 1)).distinct()
+                val userCards = cards.filter { it.ownerUid == user.uid || it.sharedWithUids.contains(user.uid) }
+                for (m in candidateMonths) {
+                    for (card in userCards) {
+                        val (_, invDueDate) = InvoiceEngine.invoiceDates(card, m)
+                        if (invDueDate in todayStr..nextWeekStr) {
+                            val inv = InvoiceEngine.buildInvoice(card, m, allTxs, user.uid)
+                            if (inv.status != InvoiceStatus.PAID && inv.status != InvoiceStatus.EMPTY && inv.openAmount > 0.0) {
+                                val amountOwed = if (card.ownerUid == user.uid) inv.openAmount else inv.myShare
+                                if (amountOwed > 0.0) {
+                                    radarTotal += amountOwed
+                                    radarCount += 1
+                                    try {
+                                        val d = java.time.LocalDate.parse(invDueDate)
+                                        val diffDays = java.time.temporal.ChronoUnit.DAYS.between(today, d)
+                                        minDaysToDue = minOf(minDaysToDue ?: diffDays, diffDays)
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        }
+                    }
+                }
+                radarTotal = FinanceEngine.round2(radarTotal)
+
+                val urgencyBadge = when {
+                    radarCount == 0 -> "Tudo em dia"
+                    minDaysToDue != null && minDaysToDue <= 1L -> "Vence em breve!"
+                    else -> "$radarCount a vencer"
+                }
+                val isUrgent = radarCount > 0 && minDaysToDue != null && minDaysToDue <= 1L
+                val radarSubtitle = when {
+                    radarCount == 0 -> "Nenhuma conta nos próx. 7 dias"
+                    minDaysToDue == 0L -> "Atenção: vence hoje"
+                    minDaysToDue == 1L -> "Atenção: vence amanhã"
+                    else -> "$radarCount conta${if (radarCount > 1) "s" else ""} a pagar"
+                }
+                val radar7Days = Radar7DaysState(
+                    totalAmount = radarTotal,
+                    count = radarCount,
+                    urgencyBadge = urgencyBadge,
+                    subtitle = radarSubtitle,
+                    isUrgent = isUrgent
+                )
+
+                // 3. Termômetro Diário
+                val todaySpent = allTxs.filter { tx ->
+                    if (tx.type != TransactionType.EXPENSE || tx.isRefund) {
+                        false
+                    } else {
+                        val createdDateStr = try {
+                            val instant = java.time.Instant.ofEpochMilli(tx.createdAt)
+                            val zdt = instant.atZone(java.time.ZoneId.systemDefault())
+                            String.format(Locale.US, "%04d-%02d-%02d", zdt.year, zdt.monthValue, zdt.dayOfMonth)
+                        } catch (_: Exception) { "" }
+                        val isToday = tx.dueDate == todayStr || createdDateStr == todayStr
+                        isToday && tx.visibleToUids.contains(user.uid)
+                    }
+                }.sumOf { tx ->
+                    FinanceEngine.impactFor(tx, user.uid, allTxs)
+                }.let { FinanceEngine.round2(it) }
+
+                val dailyLimit = summary.dailyLimit
+                val (isEconomy, diff, performanceText) = if (dailyLimit != null && dailyLimit > 0.0) {
+                    val d = FinanceEngine.round2(dailyLimit - todaySpent)
+                    if (d >= 0.0) {
+                        Triple(true, d, "Economia de ${FinanceEngine.formatCurrency(d)} hoje")
+                    } else {
+                        val excess = FinanceEngine.round2(Math.abs(d))
+                        Triple(false, excess, "Passou ${FinanceEngine.formatCurrency(excess)}")
+                    }
+                } else if (summary.monthState == "past") {
+                    Triple(true, 0.0, "Mês encerrado")
+                } else {
+                    Triple(true, 0.0, "${FinanceEngine.formatCurrency(todaySpent)} hoje")
+                }
+                val dailyGauge = DailyGaugeState(
+                    spentToday = todaySpent,
+                    dailyLimit = dailyLimit,
+                    difference = diff,
+                    isEconomy = isEconomy,
+                    performanceText = performanceText
+                )
+
+                // 4. Saúde de Investimentos
+                val invested = summary.totalInvested
+                val investIncomePct = if (summary.income > 0.0) {
+                    ((invested / summary.income) * 100.0).roundToInt()
+                } else 0
+                val isTargetReached = investIncomePct >= 20
+                val progressRatio = (investIncomePct / 20.0f).coerceIn(0.0f, 1.0f)
+                val investmentHealth = InvestmentHealthState(
+                    totalInvested = invested,
+                    incomePercentage = investIncomePct,
+                    targetPercentage = 20,
+                    isTargetReached = isTargetReached,
+                    progressRatio = progressRatio
+                )
+
                 DashboardUiState(
                     currentUser = user,
                     allUsers = repository.allUsers,
@@ -93,6 +263,10 @@ class DashboardViewModel(
                     allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
                     recurringBills = bills,
                     pendingRecurringLaunches = pending,
+                    incomeConsumption = incomeConsumption,
+                    radar7Days = radar7Days,
+                    dailyGauge = dailyGauge,
+                    investmentHealth = investmentHealth,
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
                     closureDialogDismissed = _uiState.value.closureDialogDismissed,

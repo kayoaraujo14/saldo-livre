@@ -38,18 +38,20 @@ private val DailyLimitBannerShape = RoundedCornerShape(12.dp)
 private val IncomePillShape = RoundedCornerShape(8.dp)
 private val PositiveHeroBrush = Brush.verticalGradient(
     colors = listOf(
-        Color(0xFF064E3B).copy(alpha = 0.50f),
+        Color(0xFF042F2E).copy(alpha = 0.55f),
+        Color(0xFF064E3B).copy(alpha = 0.20f),
         DarkSurface
     )
 )
 private val NegativeHeroBrush = Brush.verticalGradient(
     colors = listOf(
         Color(0xFF4C0519).copy(alpha = 0.45f),
+        Color(0xFF2E020D).copy(alpha = 0.20f),
         DarkSurface
     )
 )
-private val PositiveHeroBorder = Emerald500.copy(alpha = 0.4f)
-private val NegativeHeroBorder = Rose500.copy(alpha = 0.4f)
+private val PositiveHeroBorder = Emerald500.copy(alpha = 0.25f)
+private val NegativeHeroBorder = Rose500.copy(alpha = 0.25f)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,13 +75,6 @@ fun DashboardScreen(
     val formattedDailyLimit = remember(summary.dailyLimit) {
         summary.dailyLimit?.let { "${FinanceEngine.formatCurrency(it)} /dia" } ?: "—"
     }
-    val formattedCommitted = remember(summary.committed) { FinanceEngine.formatCurrency(summary.committed) }
-    val formattedCommittedEst = remember(summary.committedEstimated) {
-        "Prev: ${FinanceEngine.formatCurrency(summary.committedEstimated)}"
-    }
-    val formattedPaid = remember(summary.paid) { FinanceEngine.formatCurrency(summary.paid) }
-    val formattedReceivable = remember(summary.receivableTotal) { FinanceEngine.formatCurrency(summary.receivableTotal) }
-    val formattedInvested = remember(summary.totalInvested) { FinanceEngine.formatCurrency(summary.totalInvested) }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -165,7 +160,7 @@ fun DashboardScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = HeroBannerShape,
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                     colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = BorderStroke(
                         width = 1.dp,
@@ -201,7 +196,8 @@ fun DashboardScreen(
 
                                 Box(
                                     modifier = Modifier
-                                        .background(DarkSurfaceVariant, IncomePillShape)
+                                        .background(Color.White.copy(alpha = 0.05f), IncomePillShape)
+                                        .border(1.dp, Color.White.copy(alpha = 0.08f), IncomePillShape)
                                         .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
                                     Text(
@@ -251,15 +247,15 @@ fun DashboardScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            // Daily Safe Limit Banner
+                            // Daily Safe Limit Banner (integrated in card footer)
                             val dailyLimit = summary.dailyLimit
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(DailyLimitBannerShape)
-                                    .background(DarkSurfaceVariant.copy(alpha = 0.7f))
-                                    .border(1.dp, DarkBorder, DailyLimitBannerShape)
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    .background(Color.White.copy(alpha = 0.04f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.06f), DailyLimitBannerShape)
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -272,20 +268,37 @@ fun DashboardScreen(
                                             .weight(1f)
                                             .padding(end = 8.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Shield,
-                                            contentDescription = null,
-                                            tint = Cyan400,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "Disponível por Dia:",
-                                            style = Typography.bodyMedium,
-                                            color = TextSecondary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .background(Cyan500.copy(alpha = 0.12f), RoundedCornerShape(8.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Shield,
+                                                contentDescription = null,
+                                                tint = Cyan400,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Disponível por Dia",
+                                                style = Typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = TextSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = if (summary.monthState == "past") "Mês encerrado" else "Restam ${summary.daysRemaining} dias no ritmo",
+                                                fontSize = 11.sp,
+                                                color = TextMuted,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
 
                                     Text(
@@ -306,10 +319,10 @@ fun DashboardScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(DailyLimitBannerShape)
-                                        .background(DarkSurfaceVariant.copy(alpha = 0.5f))
-                                        .border(1.dp, Amber500.copy(alpha = 0.35f), DailyLimitBannerShape)
+                                        .background(Amber500.copy(alpha = 0.08f))
+                                        .border(1.dp, Amber500.copy(alpha = 0.20f), DailyLimitBannerShape)
                                         .clickable { showUndoClosureDialog = true }
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                        .padding(horizontal = 14.dp, vertical = 8.dp)
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -354,8 +367,19 @@ fun DashboardScreen(
                 }
             }
 
-            // 3. Grid 2x2 de KPIs Essenciais
+            // 3. Grid 2x2 de Indicadores Dinâmicos
             item(key = "kpi_grid", contentType = "kpi_grid") {
+                val consumption = uiState.incomeConsumption
+                val radar = uiState.radar7Days
+                val dailyGauge = uiState.dailyGauge
+                val investment = uiState.investmentHealth
+
+                val consumptionColor = when {
+                    consumption.percentage > 100 -> Rose400
+                    consumption.percentage > 80 -> Amber400
+                    else -> Emerald400
+                }
+
                 Column(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -363,21 +387,49 @@ fun DashboardScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        // KPI 1: Consumo da Renda
                         KpiCard(
-                            title = "Comprometido",
-                            value = formattedCommitted,
-                            icon = Icons.Default.Schedule,
-                            accentColor = Amber500,
-                            subtitle = formattedCommittedEst,
+                            title = "Consumo da Renda",
+                            value = "${consumption.percentage}% Consumido",
+                            icon = Icons.Default.PieChart,
+                            accentColor = consumptionColor,
+                            subtitle = "${FinanceEngine.formatCurrency(consumption.paid)} de ${FinanceEngine.formatCurrency(consumption.income)}",
                             modifier = Modifier.weight(1f)
-                        )
+                        ) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(consumptionColor.copy(alpha = 0.15f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(fraction = (consumption.percentage / 100f).coerceIn(0f, 1f))
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(consumptionColor)
+                                )
+                            }
+                        }
+
+                        // KPI 2: Radar 7 Dias
+                        val radarAccent = when {
+                            radar.isUrgent -> Rose400
+                            radar.totalAmount > 0.0 -> Amber400
+                            else -> Emerald400
+                        }
                         KpiCard(
-                            title = "Já Pago",
-                            value = formattedPaid,
-                            icon = Icons.Default.CheckCircle,
-                            accentColor = Emerald500,
-                            subtitle = "Liquidado no mês",
-                            modifier = Modifier.weight(1f)
+                            title = "Radar 7 Dias",
+                            value = FinanceEngine.formatCurrency(radar.totalAmount),
+                            icon = Icons.Default.AccessTime,
+                            accentColor = radarAccent,
+                            badgeText = radar.urgencyBadge,
+                            badgeColor = radarAccent,
+                            subtitle = radar.subtitle,
+                            modifier = Modifier.weight(1f),
+                            onClick = onNavigateToTransactions
                         )
                     }
 
@@ -385,24 +437,62 @@ fun DashboardScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        // KPI 3: Termômetro Diário
+                        val gaugeAccent = if (dailyGauge.isEconomy) Emerald400 else Amber400
                         KpiCard(
-                            title = "A Receber",
-                            value = formattedReceivable,
-                            icon = Icons.Default.Group,
-                            accentColor = Purple500,
-                            subtitle = "Cartão / Terceiros",
-                            modifier = Modifier.weight(1f),
-                            onClick = onNavigateToReceivables
+                            title = "Termômetro Diário",
+                            value = dailyGauge.performanceText,
+                            icon = Icons.Default.Speed,
+                            accentColor = gaugeAccent,
+                            badgeText = if (dailyGauge.dailyLimit != null && dailyGauge.dailyLimit > 0.0) {
+                                if (dailyGauge.isEconomy) "Econômico" else "Acima da cota"
+                            } else null,
+                            badgeColor = gaugeAccent,
+                            subtitle = if (dailyGauge.dailyLimit != null && dailyGauge.dailyLimit > 0.0) {
+                                "Gasto hoje: ${FinanceEngine.formatCurrency(dailyGauge.spentToday)}"
+                            } else if (summary.monthState == "past") {
+                                "Mês consolidado"
+                            } else {
+                                "Sem cota diária"
+                            },
+                            modifier = Modifier.weight(1f)
                         )
+
+                        // KPI 4: Saúde de Investimentos
+                        val investAccent = if (investment.isTargetReached) Emerald400 else Cyan400
                         KpiCard(
                             title = "Investimentos",
-                            value = formattedInvested,
+                            value = "${investment.incomePercentage}% da Renda",
                             icon = Icons.AutoMirrored.Filled.TrendingUp,
-                            accentColor = Cyan500,
-                            subtitle = "Aportes do mês",
+                            accentColor = investAccent,
+                            badgeText = if (investment.isTargetReached) "Meta OK" else "Meta: 20%",
+                            badgeColor = investAccent,
+                            subtitle = "${FinanceEngine.formatCurrency(investment.totalInvested)} aportado",
                             modifier = Modifier.weight(1f),
                             onClick = onNavigateToInvestments
-                        )
+                        ) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    progress = { investment.progressRatio },
+                                    modifier = Modifier.size(16.dp),
+                                    color = investAccent,
+                                    trackColor = Color.White.copy(alpha = 0.12f),
+                                    strokeWidth = 2.5.dp
+                                )
+                                Text(
+                                    text = "Regra 50/30/20 (Meta 20%)",
+                                    fontSize = 10.sp,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
                     }
                 }
             }
