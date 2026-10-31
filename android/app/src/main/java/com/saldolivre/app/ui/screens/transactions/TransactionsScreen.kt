@@ -29,11 +29,13 @@ import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.ui.components.DeleteInstallmentDialog
+import com.saldolivre.app.ui.components.EmptyState
 import com.saldolivre.app.ui.components.InvoiceDateGroup
 import com.saldolivre.app.ui.components.InvoiceDateGroupHeader
 import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.ui.components.TransactionItem
+import com.saldolivre.app.ui.components.TransactionsSkeleton
 import com.saldolivre.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,12 +115,19 @@ fun TransactionsScreen(
             )
         }
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp)
-        ) {
+        if (uiState.isLoading) {
+            TransactionsSkeleton(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 16.dp)
+            ) {
             // Seletor de Mês no topo do Extrato
             MonthSelector(
                 selectedMonth = uiState.selectedMonth,
@@ -313,18 +322,17 @@ fun TransactionsScreen(
 
             // Lista de Lançamentos (Espaço máximo de tela aproveitado)
             if (isListEmpty) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 40.dp),
-                    contentAlignment = Alignment.TopCenter
-                ) {
-                    Text(
-                        text = "Nenhuma transação encontrada para este filtro.",
-                        color = TextMuted,
-                        style = Typography.bodyMedium
-                    )
-                }
+                EmptyState(
+                    icon = Icons.Default.ReceiptLong,
+                    title = if (uiState.isFiltered) "Nenhum resultado filtrado" else "Nenhum lançamento no extrato",
+                    description = if (uiState.isFiltered) "Tente ajustar ou limpar seus filtros ativos para visualizar os lançamentos." else "Você ainda não possui transações registradas neste mês.",
+                    buttonText = if (uiState.isFiltered) "Limpar Filtros" else "Novo Lançamento",
+                    buttonIcon = if (uiState.isFiltered) Icons.Default.Close else Icons.Default.Add,
+                    onButtonClick = {
+                        if (uiState.isFiltered) viewModel.clearAllFilters()
+                        else onNavigateToAddTransaction()
+                    }
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -510,6 +518,7 @@ fun TransactionsScreen(
                     }
                 }
             }
+        }
         }
     }
 

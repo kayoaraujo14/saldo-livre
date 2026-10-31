@@ -27,14 +27,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
+import com.saldolivre.app.ui.components.SelectionChip
 import com.saldolivre.app.ui.theme.*
 import java.util.Locale
 import kotlin.math.abs
@@ -57,6 +62,14 @@ fun TransactionFormScreen(
     onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        // Auto-focus no campo de valor ao abrir a tela e exibe teclado numérico
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
 
     LaunchedEffect(state.isSaved) {
         if (state.isSaved) {
@@ -339,7 +352,10 @@ fun TransactionFormScreen(
                             value = state.amountText,
                             onValueChange = { viewModel.onAmountChange(it) },
                             placeholder = { Text(text = "0,00", fontSize = 28.sp, color = TextMuted) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Next
+                            ),
                             textStyle = Typography.headlineLarge.copy(
                                 color = if (state.isEstorno) Cyan400 else if (state.type == TransactionType.INCOME) Emerald400 else TextPrimary
                             ),
@@ -350,7 +366,9 @@ fun TransactionFormScreen(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent
                             ),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester)
                         )
                     }
                 }
@@ -418,8 +436,6 @@ fun TransactionFormScreen(
                     base
                 }
             }
-            var expandedCategoryDropdown by remember { mutableStateOf(false) }
-            var expandedSubcategoryDropdown by remember { mutableStateOf(false) }
 
             val categoriesToShow = remember(state.type, state.category, state.isEstorno) {
                 val list = if (state.type == TransactionType.INCOME) {
@@ -474,206 +490,76 @@ fun TransactionFormScreen(
                     }
                 }
 
-                // Menu Suspenso: Categoria Principal
-                ExposedDropdownMenuBox(
-                    expanded = expandedCategoryDropdown,
-                    onExpandedChange = { expandedCategoryDropdown = it },
-                    modifier = Modifier.fillMaxWidth()
+                // Seleção Rápida de Categoria Principal via Chips de Rolagem Horizontal
+                Text(
+                    text = if (state.type == TransactionType.INCOME) "Selecione a Categoria de Receita" else "Selecione a Categoria de Despesa",
+                    style = Typography.labelMedium,
+                    color = TextSecondary
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
-                        value = state.category,
-                        onValueChange = {},
-                        readOnly = true,
-                        singleLine = true,
-                        label = {
-                            Text(
-                                if (state.type == TransactionType.INCOME) "Categoria de Receita" else "Categoria de Despesa",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = currentCategoryDetail.icon,
-                                contentDescription = null,
-                                tint = currentCategoryDetail.color,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategoryDropdown)
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = currentCategoryDetail.color,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedContainerColor = DarkBackground,
-                            unfocusedContainerColor = DarkBackground,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            focusedLabelColor = currentCategoryDetail.color,
-                            unfocusedLabelColor = TextSecondary,
-                            focusedTrailingIconColor = currentCategoryDetail.color,
-                            unfocusedTrailingIconColor = TextSecondary
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor()
-                    )
-
-                    ExposedDropdownMenu(
-                        expanded = expandedCategoryDropdown,
-                        onDismissRequest = { expandedCategoryDropdown = false },
-                        modifier = Modifier.background(DarkSurface)
-                    ) {
-                        categoriesToShow.forEach { cat ->
-                            val isSelected = state.category == cat.name
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        text = cat.name,
-                                        color = if (isSelected) cat.color else TextPrimary,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = cat.icon,
-                                        contentDescription = null,
-                                        tint = cat.color,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                },
-                                trailingIcon = if (isSelected) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = cat.color,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                } else null,
-                                onClick = {
-                                    viewModel.onCategoryChange(cat.name)
-                                    expandedCategoryDropdown = false
-                                },
-                                modifier = Modifier.background(
-                                    if (isSelected) cat.color.copy(alpha = 0.12f) else Color.Transparent
-                                )
-                            )
-                        }
+                    categoriesToShow.forEach { cat ->
+                        SelectionChip(
+                            label = cat.name,
+                            selected = state.category == cat.name,
+                            onClick = { viewModel.onCategoryChange(cat.name) },
+                            icon = cat.icon,
+                            accentColor = cat.color
+                        )
                     }
                 }
 
-                // Menu Suspenso: Subcategoria
+                // Seleção Rápida de Subcategoria via Chips de Rolagem Horizontal
                 if (subcategoriesList.isNotEmpty()) {
-                    ExposedDropdownMenuBox(
-                        expanded = expandedSubcategoryDropdown,
-                        onExpandedChange = { expandedSubcategoryDropdown = it },
-                        modifier = Modifier.fillMaxWidth()
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Subcategoria (${state.category})",
+                        style = Typography.labelMedium,
+                        color = TextSecondary
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedTextField(
-                            value = state.subcategory ?: "Selecione uma subcategoria",
-                            onValueChange = {},
-                            readOnly = true,
-                            singleLine = true,
-                            label = {
-                                Text(
-                                    "Subcategoria (${state.category})",
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            },
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedSubcategoryDropdown)
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Cyan400,
-                                unfocusedBorderColor = DarkBorder,
-                                focusedContainerColor = DarkBackground,
-                                unfocusedContainerColor = DarkBackground,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary,
-                                focusedLabelColor = Cyan400,
-                                unfocusedLabelColor = TextSecondary,
-                                focusedTrailingIconColor = Cyan400,
-                                unfocusedTrailingIconColor = TextSecondary
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor()
-                        )
-
-                        ExposedDropdownMenu(
-                            expanded = expandedSubcategoryDropdown,
-                            onDismissRequest = { expandedSubcategoryDropdown = false },
-                            modifier = Modifier.background(DarkSurface)
-                        ) {
-                            subcategoriesList.forEach { sub ->
-                                val isSelected = state.subcategory == sub
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = sub,
-                                            color = if (isSelected) Cyan400 else TextPrimary,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    },
-                                    trailingIcon = if (isSelected) {
-                                        {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = Cyan400,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    } else null,
-                                    onClick = {
-                                        viewModel.onSubcategoryChange(sub)
-                                        expandedSubcategoryDropdown = false
-                                    },
-                                    modifier = Modifier.background(
-                                        if (isSelected) Cyan400.copy(alpha = 0.12f) else Color.Transparent
-                                    )
-                                )
-                            }
+                        subcategoriesList.forEach { sub ->
+                            SelectionChip(
+                                label = sub,
+                                selected = state.subcategory == sub,
+                                onClick = {
+                                    if (state.subcategory == sub) viewModel.onSubcategoryChange(null)
+                                    else viewModel.onSubcategoryChange(sub)
+                                },
+                                accentColor = Cyan400
+                            )
                         }
                     }
                 }
             }
 
-            // Payment Method
+            // Payment Method via SelectionChips
             Text(text = "Forma de Pagamento", style = Typography.titleMedium, color = TextPrimary)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 PaymentMethod.entries.forEach { method ->
-                    val isSelected = state.paymentMethod == method
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isSelected) Emerald500.copy(alpha = 0.2f) else DarkSurface)
-                            .border(1.dp, if (isSelected) Emerald500 else DarkBorder, RoundedCornerShape(10.dp))
-                            .clickable { viewModel.onPaymentMethodChange(method) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            text = method.label,
-                            fontSize = 12.sp,
-                            color = if (isSelected) Emerald400 else TextSecondary,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
+                    SelectionChip(
+                        label = method.label,
+                        selected = state.paymentMethod == method,
+                        onClick = { viewModel.onPaymentMethodChange(method) },
+                        accentColor = Emerald400
+                    )
                 }
             }
 

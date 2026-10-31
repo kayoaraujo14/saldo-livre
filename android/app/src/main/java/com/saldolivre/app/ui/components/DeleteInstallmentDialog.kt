@@ -18,6 +18,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +59,7 @@ fun DeleteInstallmentDialog(
     val baseDesc = FinanceEngine.stripInstallmentSuffix(transaction.description)
     val installmentBadgeText = if (totalCount == 1) "1 parcela" else "$totalCount parcelas"
     val deleteAllButtonTitle = if (totalCount == 1) "Excluir parcela" else "Excluir TODAS as $totalCount parcelas"
+    val haptic = LocalHapticFeedback.current
 
     Dialog(onDismissRequest = onDismissRequest) {
         Surface(
@@ -246,7 +249,10 @@ fun DeleteInstallmentDialog(
                         .clip(RoundedCornerShape(14.dp))
                         .background(Rose500.copy(alpha = 0.1f))
                         .border(1.dp, Rose500.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
-                        .clickable { onDeleteAll(groupId) }
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDeleteAll(groupId)
+                        }
                         .padding(14.dp)
                 ) {
                     Row(
@@ -302,7 +308,10 @@ fun DeleteInstallmentDialog(
                         .clip(RoundedCornerShape(14.dp))
                         .background(DarkBackground)
                         .border(1.dp, DarkBorder, RoundedCornerShape(14.dp))
-                        .clickable { onDeleteSingle(transaction) }
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDeleteSingle(transaction)
+                        }
                         .padding(14.dp)
                 ) {
                     Row(

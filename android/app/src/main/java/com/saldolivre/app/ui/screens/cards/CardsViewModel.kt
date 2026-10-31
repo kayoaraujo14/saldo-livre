@@ -49,6 +49,7 @@ class CardsViewModel(
 
     private val _uiState = MutableStateFlow(CardsUiState())
     val uiState: StateFlow<CardsUiState> = _uiState.asStateFlow()
+    private var initialMonthRouted = false
 
     init {
         viewModelScope.launch {
@@ -58,6 +59,33 @@ class CardsViewModel(
                 repository.getCards(),
                 repository.getTransactions()
             ) { user, month, cards, transactions ->
+                // Roteamento Inteligente: Se a fatura do mês atual estiver quitada (PAID), avança para a próxima aberta
+                if (!initialMonthRouted && cards.isNotEmpty()) {
+                    initialMonthRouted = true
+                    val currentMonthKey = FinanceEngine.currentMonthKey()
+                    val primaryCard = cards.firstOrNull { it.ownerUid == user.uid } ?: cards.firstOrNull()
+                    if (primaryCard != null) {
+                        val currentMonthTxs = transactions.filter {
+                            it.cardId == primaryCard.id && it.competenceMonth == currentMonthKey && it.reserveCardId == null && it.type == TransactionType.EXPENSE
+                        }
+                        val isCurrentPaid = currentMonthTxs.isNotEmpty() && currentMonthTxs.all { it.status == TransactionStatus.PAID }
+                        if (isCurrentPaid) {
+                            var checkMonth = FinanceEngine.shiftMonth(currentMonthKey, 1)
+                            for (step in 1..12) {
+                                val candidateTxs = transactions.filter {
+                                    it.cardId == primaryCard.id && it.competenceMonth == checkMonth && it.reserveCardId == null && it.type == TransactionType.EXPENSE
+                                }
+                                val hasUnpaid = candidateTxs.any { it.status != TransactionStatus.PAID }
+                                if (hasUnpaid) {
+                                    repository.setSelectedMonth(checkMonth)
+                                    break
+                                }
+                                checkMonth = FinanceEngine.shiftMonth(checkMonth, 1)
+                            }
+                        }
+                    }
+                }
+
                 val partner = repository.allUsers.find { it.uid != user.uid }
                 val currentDay = LocalDate.now().dayOfMonth
 

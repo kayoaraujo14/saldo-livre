@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.components
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,14 +10,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,9 +48,11 @@ fun TransactionItem(
     currentUserId: String? = null,
     allTransactions: List<Transaction> = emptyList(),
     showDate: Boolean = false,
+    initiallyExpanded: Boolean = false,
     onClick: (() -> Unit)? = null,
     onStatusClick: (() -> Unit)? = null
 ) {
+    var isExpanded by remember { mutableStateOf(initiallyExpanded) }
     if (transaction.id.startsWith("invoice_")) {
         val meta = transaction.invoiceMeta
         val isPaid = transaction.status == TransactionStatus.PAID
@@ -223,16 +229,20 @@ fun TransactionItem(
         FinanceEngine.formatShortDate(transaction.dueDate)
     }
 
-    Row(
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(TransactionItemShape)
             .background(DarkSurface)
             .border(1.dp, itemBorderColor, TransactionItemShape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
         // 1. Ícone da Categoria Circular Translúcido
         Box(
             modifier = Modifier
@@ -384,20 +394,109 @@ fun TransactionItem(
                 )
             }
 
-            Box(
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .clip(CircleShape)
-                    .background(stColor.copy(alpha = 0.14f))
-                    .then(if (onStatusClick != null) Modifier.clickable(onClick = onStatusClick) else Modifier)
-                    .padding(horizontal = 6.dp, vertical = 1.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(top = 2.dp)
             ) {
-                Text(
-                    text = transaction.status.label,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = stColor
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(stColor.copy(alpha = 0.14f))
+                        .then(if (onStatusClick != null) Modifier.clickable(onClick = onStatusClick) else Modifier)
+                        .padding(horizontal = 6.dp, vertical = 1.dp)
+                ) {
+                    Text(
+                        text = transaction.status.label,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = stColor
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable { isExpanded = !isExpanded }
+                        .padding(2.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = "Expandir detalhes",
+                        tint = TextMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+
+        // Detalhes extras com expansão animada e suave via AnimatedVisibility
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandVertically(animationSpec = tween(250)) + fadeIn(animationSpec = tween(250)),
+            exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(animationSpec = tween(200))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .background(DarkBackground.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                    .border(1.dp, DarkBorder.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = "Data de vencimento:", fontSize = 11.sp, color = TextMuted)
+                    Text(
+                        text = transaction.dueDate.ifBlank { "Sem data definida" },
+                        fontSize = 11.sp,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                transaction.paymentMethod?.let { pm ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = "Forma de pagamento:", fontSize = 11.sp, color = TextMuted)
+                        Text(
+                            text = pm.label,
+                            fontSize = 11.sp,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                if (isSplit) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(text = "Valor Total da Transação:", fontSize = 11.sp, color = TextMuted)
+                        Text(
+                            text = FinanceEngine.formatCurrency(transaction.effectiveAmount),
+                            fontSize = 11.sp,
+                            color = Amber400,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (!transaction.notes.isNullOrBlank()) {
+                    Text(
+                        text = "Observações: ${transaction.notes}",
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        fontStyle = FontStyle.Italic
+                    )
+                }
             }
         }
     }

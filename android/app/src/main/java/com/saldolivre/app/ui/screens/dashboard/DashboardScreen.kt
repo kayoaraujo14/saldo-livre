@@ -26,15 +26,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.Transaction
+import com.saldolivre.app.ui.components.DashboardSkeleton
 import com.saldolivre.app.ui.components.DeleteInstallmentDialog
+import com.saldolivre.app.ui.components.EmptyState
 import com.saldolivre.app.ui.components.KpiCard
 import com.saldolivre.app.ui.components.MonthSelector
+import com.saldolivre.app.ui.components.NumberTickerText
 import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.ui.components.TransactionItem
 import com.saldolivre.app.ui.theme.*
+import kotlin.math.roundToInt
 
 private val HeroBannerShape = RoundedCornerShape(20.dp)
-private val DailyLimitBannerShape = RoundedCornerShape(12.dp)
 private val IncomePillShape = RoundedCornerShape(8.dp)
 private val PositiveHeroBrush = Brush.verticalGradient(
     colors = listOf(
@@ -71,10 +74,6 @@ fun DashboardScreen(
     val summary = uiState.summary
 
     val formattedIncome = remember(summary.income) { FinanceEngine.formatCurrency(summary.income) }
-    val formattedFreeBalance = remember(summary.freeBalance) { FinanceEngine.formatCurrency(summary.freeBalance) }
-    val formattedDailyLimit = remember(summary.dailyLimit) {
-        summary.dailyLimit?.let { "${FinanceEngine.formatCurrency(it)} /dia" } ?: "—"
-    }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -124,13 +123,20 @@ fun DashboardScreen(
             )
         }
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        if (uiState.isLoading) {
+            DashboardSkeleton(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
             // 1. Seletor de Mês
             item(key = "month_selector", contentType = "month_selector") {
                 MonthSelector(
@@ -156,6 +162,10 @@ fun DashboardScreen(
             // 2. Hero KPI Card: Saldo Livre Real & Limite Diário Seguro
             item(key = "hero_free_balance", contentType = "hero_free_balance") {
                 val isNegative = summary.freeBalance < 0
+                val incomeRemainingPct = if (summary.income > 0.0) {
+                    ((summary.freeBalance / summary.income) * 100.0).roundToInt()
+                } else 0
+                val pctSign = if (incomeRemainingPct > 0) "+$incomeRemainingPct%" else "$incomeRemainingPct%"
 
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -171,193 +181,142 @@ fun DashboardScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(if (isNegative) NegativeHeroBrush else PositiveHeroBrush)
-                            .padding(20.dp)
+                            .padding(16.dp)
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth()
                         ) {
+                            // Top Row: Ícone + Título e Badge de % Livre
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "SALDO LIVRE REAL",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp,
-                                    color = if (isNegative) Rose400 else Emerald400,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
                                         .weight(1f)
                                         .padding(end = 8.dp)
-                                )
-
-                                Box(
-                                    modifier = Modifier
-                                        .background(Color.White.copy(alpha = 0.05f), IncomePillShape)
-                                        .border(1.dp, Color.White.copy(alpha = 0.08f), IncomePillShape)
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .background(
+                                                (if (isNegative) Rose500 else Emerald500).copy(alpha = 0.15f),
+                                                RoundedCornerShape(8.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AccountBalanceWallet,
+                                            contentDescription = null,
+                                            tint = if (isNegative) Rose400 else Emerald400,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Receitas: $formattedIncome",
+                                        text = "SALDO LIVRE REAL",
                                         fontSize = 11.sp,
-                                        color = TextSecondary,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp,
+                                        color = Color.White.copy(alpha = 0.75f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
+
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            (if (isNegative) Rose500 else Emerald500).copy(alpha = 0.15f),
+                                            RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = "$pctSign livre",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isNegative) Rose400 else Emerald400
+                                    )
+                                }
                             }
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
 
+                            // Saldo em destaque com Number Ticker
+                            NumberTickerText(
+                                amount = summary.freeBalance,
+                                fontSize = 30.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (isNegative) Rose400 else Emerald400
+                            )
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Contexto de Receitas e Despesas (e sobra/déficit)
+                            val totalExpenses = summary.paid + summary.committed
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Bottom
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = formattedFreeBalance,
-                                    fontSize = 32.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (isNegative) Rose400 else Emerald400,
+                                    text = "Receitas: $formattedIncome • Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
 
                                 if (summary.carryoverAmount > 0.0) {
                                     Text(
-                                        text = "+ ${FinanceEngine.formatCurrency(summary.carryoverAmount)} sobra",
+                                        text = "• + ${FinanceEngine.formatCurrency(summary.carryoverAmount)} sobra",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Cyan400,
-                                        modifier = Modifier.padding(bottom = 6.dp)
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 } else if (summary.previousMonthDeficit > 0.0) {
                                     Text(
-                                        text = "- ${FinanceEngine.formatCurrency(summary.previousMonthDeficit)} déficit",
+                                        text = "• - ${FinanceEngine.formatCurrency(summary.previousMonthDeficit)} déficit",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Rose400,
-                                        modifier = Modifier.padding(bottom = 6.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // Daily Safe Limit Banner (integrated in card footer)
-                            val dailyLimit = summary.dailyLimit
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(DailyLimitBannerShape)
-                                    .background(Color.White.copy(alpha = 0.04f))
-                                    .border(1.dp, Color.White.copy(alpha = 0.06f), DailyLimitBannerShape)
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(end = 8.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .background(Cyan500.copy(alpha = 0.12f), RoundedCornerShape(8.dp)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Shield,
-                                                contentDescription = null,
-                                                tint = Cyan400,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Disponível por Dia",
-                                                style = Typography.labelMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = TextSecondary,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = if (summary.monthState == "past") "Mês encerrado" else "Restam ${summary.daysRemaining} dias no ritmo",
-                                                fontSize = 11.sp,
-                                                color = TextMuted,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = formattedDailyLimit,
-                                        style = Typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (dailyLimit != null && dailyLimit > 0) Cyan400 else Rose400,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
 
-                            // Colchão de Proteção (se houver reserva alocada para imprevistos)
+                            // Colchão de Proteção (se houver)
                             if (summary.cushionAmount > 0.0) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(DailyLimitBannerShape)
-                                        .background(Amber500.copy(alpha = 0.08f))
-                                        .border(1.dp, Amber500.copy(alpha = 0.20f), DailyLimitBannerShape)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Amber500.copy(alpha = 0.10f))
+                                        .border(1.dp, Amber500.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
                                         .clickable { showUndoClosureDialog = true }
-                                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(end = 8.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Shield,
-                                                contentDescription = null,
-                                                tint = Amber400,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "Colchão de Proteção:",
-                                                style = Typography.bodyMedium,
-                                                color = TextSecondary,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-
+                                        Icon(
+                                            imageVector = Icons.Default.Shield,
+                                            contentDescription = null,
+                                            tint = Amber400,
+                                            modifier = Modifier.size(13.dp)
+                                        )
                                         Text(
-                                            text = FinanceEngine.formatCurrency(summary.cushionAmount),
-                                            style = Typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Amber400,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            text = "Colchão: ${FinanceEngine.formatCurrency(summary.cushionAmount)}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Amber400
                                         )
                                     }
                                 }
@@ -371,7 +330,7 @@ fun DashboardScreen(
             item(key = "kpi_grid", contentType = "kpi_grid") {
                 val consumption = uiState.incomeConsumption
                 val radar = uiState.radar7Days
-                val dailyGauge = uiState.dailyGauge
+                val topCategory = uiState.topCategory
                 val investment = uiState.investmentHealth
 
                 val consumptionColor = when {
@@ -384,7 +343,7 @@ fun DashboardScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         // KPI 1: Consumo da Renda
@@ -393,10 +352,11 @@ fun DashboardScreen(
                             value = "${consumption.percentage}% Consumido",
                             icon = Icons.Default.PieChart,
                             accentColor = consumptionColor,
-                            subtitle = "${FinanceEngine.formatCurrency(consumption.paid)} de ${FinanceEngine.formatCurrency(consumption.income)}",
-                            modifier = Modifier.weight(1f)
+                            badgeText = consumption.statusBadge,
+                            badgeColor = consumptionColor,
+                            subtitle = "${FinanceEngine.formatCurrency(consumption.paid)} pagos no mês",
+                            modifier = Modifier.weight(1f).fillMaxHeight()
                         ) {
-                            Spacer(modifier = Modifier.height(8.dp))
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -423,40 +383,51 @@ fun DashboardScreen(
                         KpiCard(
                             title = "Radar 7 Dias",
                             value = FinanceEngine.formatCurrency(radar.totalAmount),
+                            numericValue = radar.totalAmount,
                             icon = Icons.Default.AccessTime,
                             accentColor = radarAccent,
                             badgeText = radar.urgencyBadge,
                             badgeColor = radarAccent,
-                            subtitle = radar.subtitle,
-                            modifier = Modifier.weight(1f),
+                            subtitle = if (radar.count == 0) "Até ${radar.formattedEndDate} sem contas" else "Vencendo até ${radar.formattedEndDate}",
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             onClick = onNavigateToTransactions
-                        )
+                        ) {
+                            Text(
+                                text = if (radar.count == 0) "Próx. vencimento livre" else "${radar.count} conta${if (radar.count > 1) "s" else ""} a vencer",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = radarAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // KPI 3: Termômetro Diário
-                        val gaugeAccent = if (dailyGauge.isEconomy) Emerald400 else Amber400
+                        // KPI 3: Maior Gasto (Top Categoria)
                         KpiCard(
-                            title = "Termômetro Diário",
-                            value = dailyGauge.performanceText,
-                            icon = Icons.Default.Speed,
-                            accentColor = gaugeAccent,
-                            badgeText = if (dailyGauge.dailyLimit != null && dailyGauge.dailyLimit > 0.0) {
-                                if (dailyGauge.isEconomy) "Econômico" else "Acima da cota"
-                            } else null,
-                            badgeColor = gaugeAccent,
-                            subtitle = if (dailyGauge.dailyLimit != null && dailyGauge.dailyLimit > 0.0) {
-                                "Gasto hoje: ${FinanceEngine.formatCurrency(dailyGauge.spentToday)}"
-                            } else if (summary.monthState == "past") {
-                                "Mês consolidado"
-                            } else {
-                                "Sem cota diária"
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
+                            title = "Maior Gasto",
+                            value = FinanceEngine.formatCurrency(topCategory.amount),
+                            numericValue = topCategory.amount,
+                            icon = Icons.Default.ShoppingBag,
+                            accentColor = Purple400,
+                            badgeText = topCategory.badgeText,
+                            badgeColor = Purple400,
+                            subtitle = topCategory.subtitle,
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                        ) {
+                            Text(
+                                text = topCategory.categoryName,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Purple400,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
 
                         // KPI 4: Saúde de Investimentos
                         val investAccent = if (investment.isTargetReached) Emerald400 else Cyan400
@@ -465,16 +436,15 @@ fun DashboardScreen(
                             value = "${investment.incomePercentage}% da Renda",
                             icon = Icons.AutoMirrored.Filled.TrendingUp,
                             accentColor = investAccent,
-                            badgeText = if (investment.isTargetReached) "Meta OK" else "Meta: 20%",
+                            badgeText = investment.badgeText,
                             badgeColor = investAccent,
-                            subtitle = "${FinanceEngine.formatCurrency(investment.totalInvested)} aportado",
-                            modifier = Modifier.weight(1f),
+                            subtitle = "${FinanceEngine.formatCurrency(investment.totalInvested)} aportados no mês",
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             onClick = onNavigateToInvestments
                         ) {
-                            Spacer(modifier = Modifier.height(8.dp))
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 CircularProgressIndicator(
                                     progress = { investment.progressRatio },
@@ -484,12 +454,11 @@ fun DashboardScreen(
                                     strokeWidth = 2.5.dp
                                 )
                                 Text(
-                                    text = "Regra 50/30/20 (Meta 20%)",
+                                    text = "Regra 50/30/20",
                                     fontSize = 10.sp,
                                     color = TextSecondary,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
@@ -755,18 +724,14 @@ fun DashboardScreen(
             // 5. Lista de Lançamentos Recentes
             if (uiState.recentTransactions.isEmpty()) {
                 item(key = "recent_empty", contentType = "recent_empty") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "Nenhum lançamento registrado neste mês.",
-                            color = TextMuted,
-                            style = Typography.bodyMedium
-                        )
-                    }
+                    EmptyState(
+                        icon = Icons.Default.ReceiptLong,
+                        title = "Nenhum lançamento no mês",
+                        description = "Nenhum gasto ou receita registrado neste mês. Cadastre uma despesa para acompanhar seu saldo livre.",
+                        buttonText = "Ver Transações",
+                        buttonIcon = Icons.Default.ArrowForward,
+                        onButtonClick = onNavigateToTransactions
+                    )
                 }
             } else {
                 items(
@@ -797,6 +762,7 @@ fun DashboardScreen(
             item(key = "bottom_spacer", contentType = "bottom_spacer") {
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        }
         }
     }
 

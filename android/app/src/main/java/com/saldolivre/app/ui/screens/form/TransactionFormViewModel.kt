@@ -289,7 +289,7 @@ class TransactionFormViewModel(
         _state.update { it.copy(category = cat, subcategory = resolvedSubcat, isEstorno = isEstorno) }
     }
 
-    fun onSubcategoryChange(subcat: String) {
+    fun onSubcategoryChange(subcat: String?) {
         _state.update { it.copy(subcategory = subcat) }
     }
 

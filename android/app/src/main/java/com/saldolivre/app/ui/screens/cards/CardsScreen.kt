@@ -411,6 +411,17 @@ private fun CardItemView(
                 .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(22.dp))
                 .padding(18.dp)
         ) {
+            // Marca d'água sutil ao fundo
+            Icon(
+                imageVector = Icons.Default.CreditCard,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.05f),
+                modifier = Modifier
+                    .size(160.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 24.dp, y = 24.dp)
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -430,12 +441,21 @@ private fun CardItemView(
                             .weight(1f)
                             .padding(end = 8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CreditCard,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.9f),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.White.copy(alpha = 0.12f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.CreditCard,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.95f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         Text(
                             text = card.cardName,
                             style = Typography.titleMedium,

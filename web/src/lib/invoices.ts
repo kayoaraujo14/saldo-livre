@@ -7,7 +7,7 @@
  */
 import type { Card, Transaction } from '@/types'
 import { clampPct, effectiveAmount } from './finance'
-import { daysInMonth, round2, shiftMonth, todayKey } from './utils'
+import { daysInMonth, formatBRL, round2, shiftMonth, todayKey } from './utils'
 
 export type InvoiceStatus = 'empty' | 'open' | 'closed' | 'overdue' | 'paid'
 
@@ -23,6 +23,34 @@ export interface InvoiceParticipantShare {
   pct: number
   isMe: boolean
 }
+
+export type PredictiveInvoiceAlert =
+  | {
+    kind: 'anomaly'
+    category: string
+    pctIncrease: number
+    currentAmount: number
+    previousAvgAmount: number
+    headline: string
+    detail: string
+  }
+  | {
+    kind: 'new_subscription'
+    serviceName: string
+    amount: number
+    headline: string
+    detail: string
+  }
+  | {
+    kind: 'projection'
+    projectedTotal: number
+    dailyAverage: number
+    daysPassed: number
+    daysTotal: number
+    daysRemaining: number
+    headline: string
+    detail: string
+  }
 
 export interface CardInvoice {
   card: Card
@@ -69,6 +97,8 @@ export interface CardInvoice {
   bestPurchaseHint: string
   /** Progresso temporal do ciclo da fatura (0% a 100%) */
   cycleProgressPct: number
+  /** Motor de alerta preditivo calculado */
+  predictiveAlert?: PredictiveInvoiceAlert | null
 }
 
 export const INVOICE_STATUS_META: Record<InvoiceStatus, { label: string; tone: string; dot: string }> = {
@@ -530,13 +560,13 @@ export function createConsolidatedInvoiceTx(
       },
       ...(isOwner && invoice.othersShare > 0
         ? [
-            {
-              type: 'EXTERNAL' as const,
-              name: 'Terceiros / Amigos',
-              amount: invoice.othersShare,
-              reimbursed: false,
-            },
-          ]
+          {
+            type: 'EXTERNAL' as const,
+            name: 'Terceiros / Amigos',
+            amount: invoice.othersShare,
+            reimbursed: false,
+          },
+        ]
         : []),
     ],
     invoiceMeta: meta,
@@ -588,4 +618,129 @@ export function consolidateMonthTransactions(
   }
 
   return [...nonCardTxs, ...invoiceTxs]
+}
+
+/**
+ * Motor de Alertas Preditivos:
+ * Calcula dinamicamente um dos 3 insights preditivos para a fatura:
+ * 1. Alerta de Anomalia (aumento significativo em categorias de gastos vs histórico)
+ * 2. Nova Assinatura detectada no ciclo atual (serviço recorrente inédito no cartão)
+ * 3. Projeção estimada de fechamento (baseada na velocidade de gasto diário e dias restantes)
+ */
+export function computePredictiveAlert(
+  invoice: CardInvoice,
+  all: Transaction[],
+  history: CardInvoice[],
+  today: string = todayKey()
+): PredictiveInvoiceAlert {
+  const card = invoice.card
+  const monthKey = invoice.monthKey
+
+  // 1. Detectar anomalia de gastos em relação aos ciclos anteriores
+  const pastInvoices = history.filter((it) => it.monthKey < monthKey && it.grossExpenses > 0)
+  if (pastInvoices.length > 0) {
+    const anomalies: { category: string; pct: number; pastAvg: number }[] = []
+    for (const catSlice of invoice.byCategory) {
+      if (catSlice.amount < 40) continue
+      const pastAmounts = pastInvoices
+        .map((past) => past.byCategory.find((c) => c.category.toLowerCase() === catSlice.category.toLowerCase())?.amount ?? 0)
+        .filter((a) => a > 0)
+      const pastAvg = pastAmounts.length > 0 ? pastAmounts.reduce((s, v) => s + v, 0) / pastAmounts.length : 0
+      if (pastAvg >= 25 && catSlice.amount > pastAvg) {
+        const pct = Math.round(((catSlice.amount - pastAvg) / pastAvg) * 100)
+        if (pct >= 25) {
+          anomalies.push({ category: catSlice.category, pct, pastAvg })
+        }
+      }
+    }
+    anomalies.sort((a, b) => b.pct - a.pct)
+    const topAnomaly = anomalies[0]
+    if (topAnomaly) {
+      const { category, pct, pastAvg } = topAnomaly
+      const currentAmount = invoice.byCategory.find((c) => c.category.toLowerCase() === category.toLowerCase())?.amount ?? 0
+      return {
+        kind: 'anomaly',
+        category,
+        pctIncrease: pct,
+        currentAmount,
+        previousAvgAmount: round2(pastAvg),
+        headline: `Seus gastos em ${category} subiram +${pct}%`,
+        detail: `Neste ciclo foram ${formatBRL(currentAmount)} vs média de ${formatBRL(pastAvg)} dos ciclos anteriores.`,
+      }
+    }
+  }
+
+  // 2. Detectar novas assinaturas / serviços recorrentes detectados pela primeira vez
+  const knownServices = [
+    'netflix', 'spotify', 'amazon', 'prime', 'disney', 'hbo', 'max',
+    'youtube', 'icloud', 'apple', 'chatgpt', 'openai', 'deezer',
+    'crunchyroll', 'globo', 'globoplay', 'gympass', 'totalpass',
+    'smart fit', 'alura', 'uber one', 'meli+', 'star+'
+  ]
+  const expenses = invoice.items.filter((t) => t.type === 'expense')
+  const newSub = expenses.find((tx) => {
+    const descLower = tx.description.toLowerCase()
+    const isCandidate =
+      knownServices.some((s) => descLower.includes(s)) ||
+      Boolean(tx.recurringBillId) ||
+      tx.category.toLowerCase().includes('assinatura') ||
+      tx.category.toLowerCase().includes('streaming')
+
+    if (!isCandidate) return false
+
+    // Verifica se essa descrição já apareceu em faturas passadas deste cartão
+    const existedInPast = all.some((pastTx) => {
+      if (pastTx.cardId !== card.id) return false
+      if (pastTx.competenceMonth >= monthKey) return false
+      if (pastTx.type !== 'expense') return false
+      const pastLower = pastTx.description.toLowerCase()
+      return pastLower.includes(descLower) || descLower.includes(pastLower)
+    })
+    return !existedInPast
+  })
+  if (newSub) {
+    const subAmount = effectiveAmount(newSub)
+    return {
+      kind: 'new_subscription',
+      serviceName: newSub.description,
+      amount: subAmount,
+      headline: `Nova assinatura detectada: ${newSub.description}`,
+      detail: `Detectamos uma nova cobrança recorrente de ${formatBRL(subAmount)} neste ciclo.`,
+    }
+  }
+
+  // 3. Projeção estimada de fechamento (baseada no gasto médio diário)
+  const closingMonth = card.dueDay < card.closingDay ? shiftMonth(monthKey, -1) : monthKey
+  const prevClosingMonth = shiftMonth(closingMonth, -1)
+  const prevClosingDate = clampDay(prevClosingMonth, card.closingDay)
+  const cycleTotalDays = Math.max(1, diffDays(prevClosingDate, invoice.closingDate))
+  const cyclePassedDays = Math.min(cycleTotalDays, Math.max(1, diffDays(prevClosingDate, today)))
+  const daysRemaining = Math.max(0, cycleTotalDays - cyclePassedDays)
+
+  const dailyAvg = invoice.total > 0 ? round2(invoice.total / cyclePassedDays) : 0
+  const projected = daysRemaining > 0 && dailyAvg > 0 ? round2(invoice.total + dailyAvg * daysRemaining) : invoice.total
+
+  let headline = ''
+  let detail = ''
+  if (invoice.total <= 0) {
+    headline = 'Fatura sem lançamentos'
+    detail = 'Nenhum gasto registrado neste ciclo até o momento.'
+  } else if (daysRemaining > 0) {
+    headline = `Fechamento estimado: ${formatBRL(projected)}`
+    detail = `Média de ${formatBRL(dailyAvg)}/dia (${cyclePassedDays} de ${cycleTotalDays} dias corridos · restam ${daysRemaining} dias).`
+  } else {
+    headline = `Fatura fechada: ${formatBRL(invoice.total)}`
+    detail = `Média diária final de ${formatBRL(dailyAvg)}/dia durante o ciclo de ${cycleTotalDays} dias.`
+  }
+
+  return {
+    kind: 'projection',
+    projectedTotal: projected,
+    dailyAverage: dailyAvg,
+    daysPassed: cyclePassedDays,
+    daysTotal: cycleTotalDays,
+    daysRemaining,
+    headline,
+    detail,
+  }
 }

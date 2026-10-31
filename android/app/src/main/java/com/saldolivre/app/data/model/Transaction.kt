@@ -166,6 +166,7 @@ data class Transaction(
     val allocations: List<Allocation> = emptyList(),
     val recurringBillId: String? = null,
     val reserveCardId: String? = null,
+    val notes: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
 
     // Compartilhamento com Amigos & Aceite Prévio
@@ -186,6 +187,9 @@ data class Transaction(
 ) {
     val effectiveAmount: Double
         get() = actualAmount ?: estimatedAmount ?: totalAmount
+
+    val isRecurring: Boolean
+        get() = !recurringBillId.isNullOrBlank()
 
     val isInstallment: Boolean
         get() = !installmentGroupId.isNullOrBlank() || (installmentNumber != null && installmentsTotal != null)

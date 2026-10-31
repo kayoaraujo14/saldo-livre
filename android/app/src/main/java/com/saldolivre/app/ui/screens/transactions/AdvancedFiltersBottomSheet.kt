@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.transactions
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,12 +50,19 @@ fun AdvancedFiltersBottomSheet(
         containerColor = DarkSurface,
         dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted.copy(alpha = 0.5f)) }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp)
+        AnimatedVisibility(
+            visible = true,
+            enter = fadeIn(tween(300)) + slideInVertically(
+                initialOffsetY = { it / 6 },
+                animationSpec = tween(300)
+            )
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp)
+            ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -260,6 +269,7 @@ fun AdvancedFiltersBottomSheet(
                     fontSize = 14.sp
                 )
             }
+        }
         }
     }
 }

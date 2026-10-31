@@ -126,14 +126,19 @@ fun GeminiChatScreen(
     }
 
     var isInitialScrollDone by remember { mutableStateOf(false) }
+    val lastMessageText = uiState.messages.lastOrNull()?.text
+    val messagesCount = uiState.messages.size
+    val isTyping = uiState.isTyping
 
-    LaunchedEffect(uiState.messages.size) {
+    // Smooth Scroll automático para o final da tela durante o streaming contínuo das mensagens da IA
+    LaunchedEffect(messagesCount, lastMessageText, isTyping) {
         if (uiState.messages.isNotEmpty()) {
+            val targetIndex = uiState.messages.size - 1
             if (!isInitialScrollDone) {
-                listState.scrollToItem(uiState.messages.size - 1)
+                listState.scrollToItem(targetIndex)
                 isInitialScrollDone = true
             } else {
-                listState.animateScrollToItem(uiState.messages.size - 1)
+                listState.animateScrollToItem(targetIndex)
             }
         }
     }
@@ -1237,15 +1242,21 @@ fun MarkdownTableCard(
                         val isRight = isRightAlignedCol.getOrElse(colIdx) { false }
                         val align = if (isRight) TextAlign.End else TextAlign.Start
 
+                        val isMoney = cleanCell.contains("R$") || (isRight && cleanCell.any { it.isDigit() })
+                        val isNegativeMoney = cleanCell.startsWith("-") || cleanCell.contains("-R$") || cleanCell.contains("- R$")
+
                         val cellColor = when {
                             isTotalRow -> Emerald400
-                            cleanCell.startsWith("R$") || cleanCell.endsWith("%") -> TextPrimary
-                            else -> TextPrimary.copy(alpha = 0.92f)
+                            isNegativeMoney -> Rose400
+                            isMoney -> Emerald400
+                            cleanCell.endsWith("%") -> Cyan400
+                            else -> TextPrimary.copy(alpha = 0.95f)
                         }
 
                         val cellWeight = when {
                             isTotalRow -> FontWeight.Bold
-                            rawCell.contains("**") -> FontWeight.SemiBold
+                            isMoney -> FontWeight.Bold
+                            rawCell.contains("**") -> FontWeight.Bold
                             else -> FontWeight.Normal
                         }
 
@@ -1304,9 +1315,9 @@ private fun parseSmartMarkdownText(rawText: String, isUser: Boolean): AnnotatedS
         l
     }
 
-    // Expressão regular com grupos ordenados por especificidade
+    // Expressão regular com grupos ordenados por especificidade (incluindo valores monetários com negrito garantido)
     val pattern = Regex(
-        """(\*\*\*([^\*\n]+?)\*\*\*)|(\*\*([^\*\n]+?)\*\*)|(\*([^\*\n]+?)\*)|(__([^_\n]+?)__)|(_([^_\n]+?)_)|(`([^`\n]+?)`)"""
+        """(\*\*\*([^\*\n]+?)\*\*\*)|(\*\*([^\*\n]+?)\*\*)|(\*([^\*\n]+?)\*)|(__([^_\n]+?)__)|(_([^_\n]+?)_)|(`([^`\n]+?)`)|((?:[\+\-]\s*)?R\$\s*[\d]+(?:[.,]\d+)*)"""
     )
 
     return buildAnnotatedString {
@@ -1388,6 +1399,20 @@ private fun parseSmartMarkdownText(rawText: String, isUser: Boolean): AnnotatedS
                         )
                     ) {
                         append(" ${match.groups[12]!!.value} ")
+                    }
+                }
+                // Valores monetários (R$) em destaque com negrito garantido (grupo 13)
+                match.groups[13] != null -> {
+                    val moneyText = match.groups[13]!!.value
+                    val isNegative = moneyText.contains("-")
+                    val moneyColor = if (isUser) Color.White else if (isNegative) Rose400 else Emerald400
+                    withStyle(
+                        SpanStyle(
+                            fontWeight = FontWeight.Bold,
+                            color = moneyColor
+                        )
+                    ) {
+                        append(moneyText)
                     }
                 }
             }

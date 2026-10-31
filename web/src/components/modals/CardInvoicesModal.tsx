@@ -7,6 +7,7 @@ import { effectiveAmount, canUserEditTransaction } from '@/lib/finance'
 import {
   buildCardInvoice,
   buildInvoiceHistory,
+  computePredictiveAlert,
   dueCountdownLabel,
   INVOICE_STATUS_META,
   participantAmountIn,
@@ -30,6 +31,7 @@ import {
   Search,
   Sparkles,
   TrendingDown,
+  TrendingUp,
   Users,
   Wallet,
   Zap,
@@ -122,21 +124,42 @@ export function CardInvoicesModal({
   const [viewMonth, setViewMonth] = useState(initialMonth || month)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(initialCardId || null)
   const [selectedParticipantName, setSelectedParticipantName] = useState<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [confirmPay, setConfirmPay] = useState(false)
   const [paying, setPaying] = useState(false)
-  const [itemFilter, setItemFilter] = useState<'all' | 'third_party' | 'open' | 'paid' | 'installments'>('all')
+  const [itemFilter, setItemFilter] = useState<'all' | 'mine' | 'third_party' | 'open' | 'paid' | 'installments'>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Sincroniza com o mês global ou inicial sempre que o modal é aberto
+  // Sincroniza e aplica roteamento inteligente para a fatura aberta quando o mês atual estiver quitado
   useEffect(() => {
     if (open) {
-      setViewMonth(initialMonth || month)
+      let targetMonth = initialMonth || month
+      const cardId = initialCardId || selectedCardId || cards[0]?.id
+      const currentCard = cards.find((c) => c.id === cardId) || cards[0]
+
+      // Roteamento inteligente: se a competência atual estiver quitada, avança para a próxima aberta
+      if (currentCard && !initialMonth) {
+        const currentInv = buildCardInvoice(currentCard, month, transactions, uid)
+        if (currentInv.status === 'paid') {
+          for (let step = 1; step <= 12; step++) {
+            const candidateMonth = shiftMonth(month, step)
+            const candidateInv = buildCardInvoice(currentCard, candidateMonth, transactions, uid)
+            if (candidateInv.status !== 'paid' && (candidateInv.openAmount > 0 || candidateInv.total > 0)) {
+              targetMonth = candidateMonth
+              break
+            }
+          }
+        }
+      }
+
+      setViewMonth(targetMonth)
       if (initialCardId) setSelectedCardId(initialCardId)
       setConfirmPay(false)
       setSearchQuery('')
       setSelectedParticipantName(null)
+      setSelectedCategory(null)
     }
-  }, [open, month, initialCardId, initialMonth])
+  }, [open, month, initialCardId, initialMonth, cards, transactions, uid])
 
   const invoices = useMemo(
     () => cards.map((c) => buildCardInvoice(c, viewMonth, transactions, uid)),
@@ -160,6 +183,11 @@ export function CardInvoicesModal({
   )
   const historyMax = Math.max(1, ...history.map((h) => h.total))
 
+  const predictiveAlert = useMemo(() => {
+    if (!selected) return null
+    return computePredictiveAlert(selected, transactions, history)
+  }, [selected, transactions, history])
+
   const totals = useMemo(() => {
     const total = invoices.reduce((s, i) => s + i.total, 0)
     const open = invoices.reduce((s, i) => s + i.openAmount, 0)
@@ -172,8 +200,8 @@ export function CardInvoicesModal({
 
   const hideKpis = Boolean(
     selected &&
-      (invoices.length <= 1 ||
-        (Math.abs(totals.open - selected.openAmount) < 0.01 && Math.abs(totals.total - selected.total) < 0.01)),
+    (invoices.length <= 1 ||
+      (Math.abs(totals.open - selected.openAmount) < 0.01 && Math.abs(totals.total - selected.total) < 0.01)),
   )
 
   const activeCategorySlices = useMemo(() => {
@@ -199,7 +227,22 @@ export function CardInvoicesModal({
       }
     }
 
-    if (itemFilter === 'third_party') {
+    if (selectedCategory) {
+      const catLow = selectedCategory.toLowerCase()
+      list = list.filter(
+        (t) => t.category.toLowerCase() === catLow || (t.subcategory && t.subcategory.toLowerCase() === catLow)
+      )
+    }
+
+    if (itemFilter === 'mine') {
+      list = list.filter(
+        (t) =>
+          !t.assignedFriendName &&
+          !t.externalName &&
+          (!t.allocations || t.allocations.length <= 1) &&
+          (!t.splitType || t.splitType === 'mine')
+      )
+    } else if (itemFilter === 'third_party') {
       list = list.filter((t) => Boolean(t.assignedFriendName || t.externalName || (t.allocations && t.allocations.length > 0)))
     } else if (itemFilter === 'open') {
       list = list.filter((t) => t.status !== 'paid')
@@ -219,7 +262,7 @@ export function CardInvoicesModal({
       )
     }
     return list
-  }, [selected, selectedParticipantName, itemFilter, searchQuery, uid])
+  }, [selected, selectedParticipantName, selectedCategory, itemFilter, searchQuery, uid])
 
   const groupedInvoiceItems = useMemo(() => {
     const groups: { dateKey: string; items: Transaction[]; total: number }[] = []
@@ -278,6 +321,7 @@ export function CardInvoicesModal({
             onClick={() => {
               setViewMonth((m) => shiftMonth(m, -1))
               setSelectedParticipantName(null)
+              setSelectedCategory(null)
             }}
             className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Fatura anterior"
@@ -293,6 +337,7 @@ export function CardInvoicesModal({
             onClick={() => {
               setViewMonth((m) => shiftMonth(m, 1))
               setSelectedParticipantName(null)
+              setSelectedCategory(null)
             }}
             className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Próxima fatura"
@@ -349,13 +394,24 @@ export function CardInvoicesModal({
                       onClick={() => {
                         setSelectedCardId(inv.card.id)
                         setSelectedParticipantName(null)
+                        setSelectedCategory(null)
                         setConfirmPay(false)
+                        // Se a fatura atual deste cartão estiver paga no viewMonth, avança para fatura aberta
+                        if (inv.status === 'paid') {
+                          for (let step = 1; step <= 12; step++) {
+                            const candidateMonth = shiftMonth(month, step)
+                            const candidateInv = buildCardInvoice(inv.card, candidateMonth, transactions, uid)
+                            if (candidateInv.status !== 'paid' && (candidateInv.openAmount > 0 || candidateInv.total > 0)) {
+                              setViewMonth(candidateMonth)
+                              break
+                            }
+                          }
+                        }
                       }}
-                      className={`snap-start shrink-0 w-[220px] text-left rounded-2xl p-3.5 border transition-all cursor-pointer ${
-                        active
+                      className={`snap-start shrink-0 w-[220px] text-left rounded-2xl p-3.5 border transition-all cursor-pointer ${active
                           ? `ring-2 ${t.ring} border-white/20 bg-gradient-to-br ${t.gradient} to-slate-950 scale-[1.01] shadow-lg`
                           : 'border-white/[0.08] bg-slate-900/40 opacity-75 hover:opacity-100 hover:border-white/20'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-bold text-white truncate">{formattedName}</span>
@@ -379,6 +435,9 @@ export function CardInvoicesModal({
                   <section
                     className={`relative rounded-3xl p-5 border border-white/15 bg-gradient-to-br ${theme.bgCard} text-white shadow-2xl overflow-hidden`}
                   >
+                    {/* Marca d'água vetorial minimalista ao fundo */}
+                    <CreditCard className="absolute -right-6 -bottom-6 size-44 text-white/[0.04] pointer-events-none rotate-12" />
+
                     {/* Linhas de fundo decorativas */}
                     <div className="absolute -top-12 -right-12 size-40 rounded-full bg-white/5 blur-2xl pointer-events-none" />
                     <div className="absolute -bottom-12 -left-12 size-40 rounded-full bg-white/5 blur-2xl pointer-events-none" />
@@ -401,11 +460,14 @@ export function CardInvoicesModal({
                         </p>
                       </div>
 
-                      {/* Chip metálico simulado */}
+                      {/* Badge Contactless em Glassmorphism (substituição do chip amarelo/emoji) */}
                       <div className="flex flex-col items-end gap-1.5">
-                        <div className="size-9 rounded-lg bg-gradient-to-tr from-amber-300 via-amber-400 to-amber-200 border border-amber-500/50 shadow-inner flex flex-col justify-between p-1.5 opacity-90">
-                          <div className="h-0.5 w-full bg-amber-600/60 rounded" />
-                          <div className="h-0.5 w-full bg-amber-600/60 rounded" />
+                        <div className="size-9 rounded-xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white/90 shadow-inner">
+                          <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M8.5 16.5a5 5 0 0 1 0-9" />
+                            <path d="M12 19a9 9 0 0 0 0-14" />
+                            <path d="M15.5 21.5a13 13 0 0 0 0-19" />
+                          </svg>
                         </div>
                         <StatusPill inv={selected} />
                       </div>
@@ -441,24 +503,18 @@ export function CardInvoicesModal({
                     {selected.limit != null && (
                       <div className="space-y-1 mt-3 relative z-10">
                         <div className="flex justify-between text-[11px] text-white/80">
-                          <span>Uso do limite ({selected.limitUsagePct}%)</span>
+                          <span>Limite utilizado ({selected.limitUsagePct}%)</span>
                           <span className={selected.availableLimit != null && selected.availableLimit <= 0 ? 'text-rose-300 font-bold' : ''}>
                             Disponível: {formatBRL(selected.availableLimit ?? Math.max(0, selected.limit - selected.total))}
                           </span>
                         </div>
                         <div className="h-1.5 rounded-full bg-black/40 overflow-hidden">
                           <div
-                            className={`h-full transition-all ${
-                              (selected.limitUsagePct ?? 0) >= 90 ? 'bg-rose-400' : (selected.limitUsagePct ?? 0) >= 70 ? 'bg-amber-400' : 'bg-cyan-400'
-                            }`}
+                            className={`h-full transition-all ${(selected.limitUsagePct ?? 0) >= 90 ? 'bg-rose-400' : (selected.limitUsagePct ?? 0) >= 70 ? 'bg-amber-400' : 'bg-cyan-400'
+                              }`}
                             style={{ width: `${selected.limitUsagePct ?? 0}%` }}
                           />
                         </div>
-                        {selected.futureInstallmentsTotal > 0 && (
-                          <p className="text-[10px] text-white/70">
-                            Inclui {formatBRL(selected.futureInstallmentsTotal)} em faturas futuras
-                          </p>
-                        )}
                       </div>
                     )}
 
@@ -516,38 +572,99 @@ export function CardInvoicesModal({
                     )}
                   </section>
 
-                  {/* Card Inteligente: Melhor Dia de Compra & Ciclo */}
-                  <section className="rounded-2xl p-4 border border-white/[0.08] bg-slate-900/50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <Sparkles className="size-3.5 text-amber-400" /> Inteligência de Compra
-                      </h4>
-                      {selected.isBestPurchaseTime ? (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
-                          <Zap className="size-3" /> Melhor Época Ativa!
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-semibold text-slate-400">
-                          Dia {selected.bestPurchaseDay}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed">
-                      {selected.bestPurchaseHint}
-                    </p>
-                    <div className="space-y-1 pt-1 border-t border-white/[0.06]">
-                      <div className="flex justify-between text-[11px] text-slate-400">
-                        <span>Progresso do ciclo da fatura</span>
-                        <span className="text-slate-200 font-semibold">{selected.cycleProgressPct}%</span>
+                  {/* Motor de Alertas Preditivos (Insights Inteligentes) */}
+                  {predictiveAlert && (
+                    <section className="rounded-2xl p-4 border border-white/[0.08] bg-slate-900/60 space-y-3 relative overflow-hidden backdrop-blur-md">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          {predictiveAlert.kind === 'anomaly' && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                              <TrendingUp className="size-3 text-amber-400" /> Alerta de Anomalia
+                            </span>
+                          )}
+                          {predictiveAlert.kind === 'new_subscription' && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
+                              <Sparkles className="size-3 text-cyan-400" /> Nova Assinatura
+                            </span>
+                          )}
+                          {predictiveAlert.kind === 'projection' && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                              <TrendingUp className="size-3 text-emerald-400" /> Projeção Preditiva
+                            </span>
+                          )}
+                        </div>
+
+                        {selected.isBestPurchaseTime ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                            <Zap className="size-3" /> Melhor Época Ativa!
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-semibold text-slate-400">
+                            Melhor compra: Dia {selected.bestPurchaseDay}
+                          </span>
+                        )}
                       </div>
-                      <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-sky-500 to-indigo-500 rounded-full transition-all"
-                          style={{ width: `${selected.cycleProgressPct}%` }}
-                        />
+
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-white tracking-tight">{predictiveAlert.headline}</h4>
+                        <p className="text-xs text-slate-300 leading-relaxed">{predictiveAlert.detail}</p>
                       </div>
-                    </div>
-                  </section>
+
+                      {/* Métricas contextuais da variação preditiva */}
+                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-white/[0.06]">
+                        {predictiveAlert.kind === 'anomaly' && (
+                          <>
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05]">
+                              <p className="text-[10px] text-slate-400">Média anterior</p>
+                              <p className="text-xs font-bold text-slate-200">{formatBRL(predictiveAlert.previousAvgAmount)}</p>
+                            </div>
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05]">
+                              <p className="text-[10px] text-amber-400/90 font-medium">Gasto no ciclo</p>
+                              <p className="text-xs font-bold text-amber-300">{formatBRL(predictiveAlert.currentAmount)}</p>
+                            </div>
+                          </>
+                        )}
+                        {predictiveAlert.kind === 'new_subscription' && (
+                          <>
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05]">
+                              <p className="text-[10px] text-slate-400">Serviço</p>
+                              <p className="text-xs font-bold text-cyan-300 truncate">{predictiveAlert.serviceName}</p>
+                            </div>
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05]">
+                              <p className="text-[10px] text-slate-400">Valor recorrente</p>
+                              <p className="text-xs font-bold text-white">{formatBRL(predictiveAlert.amount)}</p>
+                            </div>
+                          </>
+                        )}
+                        {predictiveAlert.kind === 'projection' && (
+                          <>
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05]">
+                              <p className="text-[10px] text-slate-400">Ritmo diário</p>
+                              <p className="text-xs font-bold text-emerald-300">{formatBRL(predictiveAlert.dailyAverage)}/dia</p>
+                            </div>
+                            <div className="p-2 rounded-xl bg-slate-950/60 border border-white/[0.05]">
+                              <p className="text-[10px] text-slate-400">Dias restantes</p>
+                              <p className="text-xs font-bold text-white">{predictiveAlert.daysRemaining} dias</p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Progresso do ciclo de compras */}
+                      <div className="space-y-1 pt-1">
+                        <div className="flex justify-between text-[11px] text-slate-400">
+                          <span>Progresso do ciclo ({selected.cycleProgressPct}%)</span>
+                          <span className="text-slate-300 text-[10px]">{selected.bestPurchaseHint}</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-500 via-sky-500 to-indigo-500 rounded-full transition-all"
+                            style={{ width: `${selected.cycleProgressPct}%` }}
+                          />
+                        </div>
+                      </div>
+                    </section>
+                  )}
 
                   {/* Card Inteligente: Divisão da Fatura (Quem Divide Comigo) */}
                   {selected.splitBreakdown.length > 0 && (
@@ -568,11 +685,10 @@ export function CardInvoicesModal({
                               key={part.name}
                               type="button"
                               onClick={() => setSelectedParticipantName(isSelected ? null : part.name)}
-                              className={`w-full text-left p-2.5 rounded-xl transition-all cursor-pointer space-y-1.5 border ${
-                                isSelected
+                              className={`w-full text-left p-2.5 rounded-xl transition-all cursor-pointer space-y-1.5 border ${isSelected
                                   ? 'bg-emerald-950/50 border-emerald-500/60 ring-2 ring-emerald-500/30 shadow-md'
                                   : 'bg-slate-950/60 border-white/[0.05] hover:border-white/20 hover:bg-slate-900/60'
-                              }`}
+                                }`}
                             >
                               <div className="flex items-center justify-between text-xs">
                                 <div className="flex items-center gap-1.5 min-w-0">
@@ -653,9 +769,8 @@ export function CardInvoicesModal({
                               {formatBRL(h.total, true)}
                             </span>
                             <div
-                              className={`w-full rounded-t-md transition-all ${
-                                isCurrent ? theme.bar : h.monthKey > viewMonth ? 'bg-slate-700/60 border border-dashed border-slate-500' : 'bg-slate-600/70 group-hover:bg-slate-500'
-                              }`}
+                              className={`w-full rounded-t-md transition-all ${isCurrent ? theme.bar : h.monthKey > viewMonth ? 'bg-slate-700/60 border border-dashed border-slate-500' : 'bg-slate-600/70 group-hover:bg-slate-500'
+                                }`}
                               style={{ height: `${Math.max(pct, h.total > 0 ? 4 : 1)}%` }}
                             />
                             <span className={`text-[10px] capitalize ${isCurrent ? 'text-white font-bold' : 'text-slate-500'}`}>
@@ -668,7 +783,7 @@ export function CardInvoicesModal({
                     <p className="text-[10px] text-slate-500">Barras tracejadas = faturas futuras já comprometidas por compras parceladas.</p>
                   </section>
 
-                  {/* Categorias (dinâmicas por participante) */}
+                  {/* Categorias (dinâmicas e interativas) */}
                   {activeCategorySlices.length > 0 && (
                     <section className="rounded-2xl p-4 border border-white/[0.08] bg-slate-900/40 space-y-2.5">
                       <div className="flex items-center justify-between">
@@ -678,32 +793,66 @@ export function CardInvoicesModal({
                             {selectedParticipantName ? `Gastos de ${selectedParticipantName}` : 'Para onde foi o dinheiro'}
                           </span>
                         </h4>
-                        {selectedParticipantName && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedParticipantName(null)}
-                            className="text-[10px] text-cyan-400 hover:underline cursor-pointer"
-                          >
-                            Ver geral
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {selectedCategory && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCategory(null)}
+                              className="text-[10px] text-emerald-400 hover:text-white underline cursor-pointer"
+                            >
+                              Limpar categoria ✕
+                            </button>
+                          )}
+                          {selectedParticipantName && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedParticipantName(null)}
+                              className="text-[10px] text-cyan-400 hover:underline cursor-pointer"
+                            >
+                              Ver geral
+                            </button>
+                          )}
+                        </div>
                       </div>
-                      {activeCategorySlices.slice(0, 6).map((c) => {
-                        const color = CATEGORY_GROUPS[c.category as Category]?.color ?? '#64748b'
-                        return (
-                          <div key={c.category} className="space-y-1">
-                            <div className="flex justify-between text-[11px]">
-                              <span className="text-slate-300">{c.category}</span>
-                              <span className="text-slate-400 tabular-nums">
-                                {formatBRL(c.amount)} · {c.pct}%
-                              </span>
-                            </div>
-                            <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                              <div className="h-full rounded-full" style={{ width: `${c.pct}%`, backgroundColor: color }} />
-                            </div>
-                          </div>
-                        )
-                      })}
+                      <div className="space-y-1.5">
+                        {activeCategorySlices.slice(0, 8).map((c) => {
+                          const color = CATEGORY_GROUPS[c.category as Category]?.color ?? '#64748b'
+                          const isSelected = selectedCategory?.toLowerCase() === c.category.toLowerCase()
+                          return (
+                            <button
+                              key={c.category}
+                              type="button"
+                              onClick={() => setSelectedCategory((prev) => (prev?.toLowerCase() === c.category.toLowerCase() ? null : c.category))}
+                              className={`w-full text-left p-2 rounded-xl transition-all cursor-pointer space-y-1 border ${isSelected
+                                  ? 'bg-emerald-500/15 border-emerald-500/50 ring-1 ring-emerald-500/30 shadow-md'
+                                  : 'bg-slate-950/40 border-white/[0.05] hover:border-white/20 hover:bg-slate-900/60'
+                                }`}
+                            >
+                              <div className="flex justify-between text-[11px]">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`font-semibold truncate ${isSelected ? 'text-emerald-300' : 'text-slate-200'}`}>
+                                    {c.category}
+                                  </span>
+                                  {isSelected && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 shrink-0">
+                                      Ativo ✕
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-slate-400 tabular-nums font-medium shrink-0 ml-2">
+                                  {formatBRL(c.amount)} · {c.pct}%
+                                </span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div
+                                  className="h-full rounded-full transition-all"
+                                  style={{ width: `${c.pct}%`, backgroundColor: isSelected ? '#10b981' : color }}
+                                />
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
                     </section>
                   )}
                 </div>
@@ -721,6 +870,7 @@ export function CardInvoicesModal({
                       {(
                         [
                           ['all', 'Todos'],
+                          ['mine', '100% Meu'],
                           ['third_party', 'Terceiros'],
                           ['open', 'Em aberto'],
                           ['paid', 'Pagos'],
@@ -731,9 +881,8 @@ export function CardInvoicesModal({
                           key={key}
                           type="button"
                           onClick={() => setItemFilter(key)}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap ${
-                            itemFilter === key ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                          }`}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer transition-colors whitespace-nowrap ${itemFilter === key ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                            }`}
                         >
                           {label}
                         </button>
@@ -758,6 +907,23 @@ export function CardInvoicesModal({
                     </div>
                   )}
 
+                  {/* Banner de filtro ativo por categoria */}
+                  {selectedCategory && (
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-xs text-emerald-200 animate-in fade-in">
+                      <span className="flex items-center gap-1.5 truncate">
+                        <span>Filtrando por categoria:</span>
+                        <strong className="text-white font-semibold truncate">{selectedCategory}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCategory(null)}
+                        className="text-[11px] text-emerald-400 hover:text-white underline cursor-pointer ml-2 shrink-0 font-medium"
+                      >
+                        Limpar categoria ✕
+                      </button>
+                    </div>
+                  )}
+
                   {/* Campo de Busca Rápida */}
                   <div className="relative">
                     <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -772,12 +938,13 @@ export function CardInvoicesModal({
                   {visibleItems.length === 0 ? (
                     <div className="py-16 text-center space-y-2">
                       <p className="text-xs text-slate-400 font-medium">Nenhum lançamento encontrado para este filtro.</p>
-                      {(searchQuery || selectedParticipantName || itemFilter !== 'all') && (
+                      {(searchQuery || selectedParticipantName || selectedCategory || itemFilter !== 'all') && (
                         <button
                           type="button"
                           onClick={() => {
                             setSearchQuery('')
                             setSelectedParticipantName(null)
+                            setSelectedCategory(null)
                             setItemFilter('all')
                           }}
                           className="text-[11px] text-cyan-400 hover:underline cursor-pointer"

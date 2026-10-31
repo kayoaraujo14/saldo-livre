@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.CardInvoice
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
+import com.saldolivre.app.data.engine.InvoiceStatus
+import com.saldolivre.app.data.engine.PredictiveInvoiceAlert
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +18,7 @@ import kotlinx.coroutines.launch
 
 enum class InvoiceItemFilter(val label: String) {
     ALL("Todos"),
+    MINE("100% Meu"),
     THIRD_PARTY("Terceiros"),
     OPEN("Em aberto"),
     PAID("Pagos"),
@@ -33,6 +36,8 @@ data class CardInvoicesUiState(
     val totalMine: Double = 0.0,
     val nextDue: CardInvoice? = null,
     val itemFilter: InvoiceItemFilter = InvoiceItemFilter.ALL,
+    val selectedCategory: String? = null,
+    val predictiveAlert: PredictiveInvoiceAlert? = null,
     val selectedParticipantName: String? = null,
     val searchQuery: String = "",
     val showPayConfirm: Boolean = false,
@@ -47,6 +52,7 @@ class CardInvoicesViewModel(
     private val repository: FinanceRepository
 ) : ViewModel() {
 
+    private var initialMonthRouted = false
     private val viewMonth = MutableStateFlow(repository.selectedMonth.value)
     private val selectedCardId = MutableStateFlow<String?>(null)
 
@@ -62,15 +68,51 @@ class CardInvoicesViewModel(
                 viewMonth,
                 selectedCardId
             ) { user, cards, transactions, month, selId ->
-                val invoices = cards.map { InvoiceEngine.buildInvoice(it, month, transactions, user.uid) }
+                // Roteamento inteligente na inicialização
+                if (!initialMonthRouted && cards.isNotEmpty()) {
+                    initialMonthRouted = true
+                    val currentMonthKey = FinanceEngine.currentMonthKey()
+                    val primaryCard = cards.firstOrNull { it.ownerUid == user.uid } ?: cards.firstOrNull()
+                    if (primaryCard != null) {
+                        val currentMonthInvoice = InvoiceEngine.buildInvoice(primaryCard, currentMonthKey, transactions, user.uid)
+                        if (currentMonthInvoice.status == InvoiceStatus.PAID) {
+                            var checkMonth = FinanceEngine.shiftMonth(currentMonthKey, 1)
+                            var targetOpenMonth: String? = null
+                            for (step in 1..12) {
+                                val candidateInv = InvoiceEngine.buildInvoice(primaryCard, checkMonth, transactions, user.uid)
+                                if (candidateInv.status != InvoiceStatus.PAID && candidateInv.openAmount > 0) {
+                                    targetOpenMonth = checkMonth
+                                    break
+                                }
+                                checkMonth = FinanceEngine.shiftMonth(checkMonth, 1)
+                            }
+                            if (targetOpenMonth != null && targetOpenMonth != month) {
+                                viewMonth.value = targetOpenMonth
+                                return@combine _uiState.value
+                            }
+                        }
+                    }
+                }
 
-                val resolvedId = selId?.takeIf { id -> invoices.any { it.card.id == id } }
-                    ?: (invoices.firstOrNull { it.itemsCount > 0 } ?: invoices.firstOrNull())?.card?.id
+                val rawInvoices = cards.map { InvoiceEngine.buildInvoice(it, month, transactions, user.uid) }
 
-                val selected = invoices.find { it.card.id == resolvedId }
+                val resolvedId = selId?.takeIf { id -> rawInvoices.any { it.card.id == id } }
+                    ?: (rawInvoices.firstOrNull { it.itemsCount > 0 } ?: rawInvoices.firstOrNull())?.card?.id
+
+                val selected = rawInvoices.find { it.card.id == resolvedId }
                 val history = selected?.let {
                     InvoiceEngine.buildHistory(it.card, month, transactions, user.uid)
                 } ?: emptyList()
+
+                val predictiveAlert = selected?.let {
+                    InvoiceEngine.computePredictiveAlert(it, transactions, history)
+                }
+
+                val invoices = rawInvoices.map { inv ->
+                    if (inv.card.id == resolvedId && predictiveAlert != null) {
+                        inv.copy(predictiveAlert = predictiveAlert)
+                    } else inv
+                }
 
                 _uiState.value.copy(
                     viewMonth = month,
@@ -78,6 +120,7 @@ class CardInvoicesViewModel(
                     invoices = invoices,
                     selectedCardId = resolvedId,
                     history = history,
+                    predictiveAlert = predictiveAlert,
                     totalAmount = FinanceEngine.round2(invoices.sumOf { it.total }),
                     totalOpen = FinanceEngine.round2(invoices.sumOf { it.openAmount }),
                     totalMine = FinanceEngine.round2(invoices.sumOf { it.myShare }),
@@ -93,14 +136,25 @@ class CardInvoicesViewModel(
 
     fun goToMonth(monthKey: String) {
         viewMonth.value = monthKey
-        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null) }
+        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null, selectedCategory = null) }
     }
 
     private fun changeMonth(delta: Int) = goToMonth(FinanceEngine.shiftMonth(viewMonth.value, delta))
 
     fun selectCard(cardId: String) {
         selectedCardId.value = cardId
-        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null) }
+        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null, selectedCategory = null) }
+    }
+
+    fun toggleCategoryFilter(category: String) {
+        _uiState.update { current ->
+            val next = if (current.selectedCategory.equals(category, ignoreCase = true)) null else category
+            current.copy(selectedCategory = next)
+        }
+    }
+
+    fun clearCategoryFilter() {
+        _uiState.update { it.copy(selectedCategory = null) }
     }
 
     fun toggleParticipantFilter(name: String) {

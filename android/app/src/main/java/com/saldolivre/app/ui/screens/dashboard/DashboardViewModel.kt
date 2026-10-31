@@ -26,23 +26,24 @@ data class AutoLaunchNotice(
 data class IncomeConsumptionState(
     val percentage: Int = 0,
     val paid: Double = 0.0,
-    val income: Double = 0.0
+    val income: Double = 0.0,
+    val statusBadge: String = "No Limite"
 )
 
 data class Radar7DaysState(
     val totalAmount: Double = 0.0,
     val count: Int = 0,
-    val urgencyBadge: String = "Tudo em dia",
-    val subtitle: String = "Nenhuma conta nos próx. 7 dias",
+    val urgencyBadge: String = "Sem pendências",
+    val formattedEndDate: String = "",
     val isUrgent: Boolean = false
 )
 
-data class DailyGaugeState(
-    val spentToday: Double = 0.0,
-    val dailyLimit: Double? = null,
-    val difference: Double = 0.0,
-    val isEconomy: Boolean = true,
-    val performanceText: String = ""
+data class TopCategoryState(
+    val categoryName: String = "Sem despesas",
+    val amount: Double = 0.0,
+    val percentageOfTotal: Int = 0,
+    val badgeText: String = "Sem gastos",
+    val subtitle: String = "Nenhum gasto registrado"
 )
 
 data class InvestmentHealthState(
@@ -50,7 +51,8 @@ data class InvestmentHealthState(
     val incomePercentage: Int = 0,
     val targetPercentage: Int = 20,
     val isTargetReached: Boolean = false,
-    val progressRatio: Float = 0.0f
+    val progressRatio: Float = 0.0f,
+    val badgeText: String = "Pendente"
 )
 
 data class DashboardUiState(
@@ -64,7 +66,7 @@ data class DashboardUiState(
     val pendingRecurringLaunches: List<FinanceEngine.PendingRecurringCandidate> = emptyList(),
     val incomeConsumption: IncomeConsumptionState = IncomeConsumptionState(),
     val radar7Days: Radar7DaysState = Radar7DaysState(),
-    val dailyGauge: DailyGaugeState = DailyGaugeState(),
+    val topCategory: TopCategoryState = TopCategoryState(),
     val investmentHealth: InvestmentHealthState = InvestmentHealthState(),
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
@@ -122,20 +124,27 @@ class DashboardViewModel(
                     )
                 } else emptyList()
 
-                // 1. Consumo da Renda
+                // 1. Consumo da Renda (Sem repetição do valor da renda já presente no Hero Card)
                 val consumptionPct = if (summary.income > 0.0) {
                     ((summary.paid / summary.income) * 100.0).roundToInt()
                 } else 0
+                val consumptionBadge = when {
+                    consumptionPct > 100 -> "Alerta"
+                    consumptionPct > 80 -> "Atenção"
+                    else -> "No Limite"
+                }
                 val incomeConsumption = IncomeConsumptionState(
                     percentage = consumptionPct,
                     paid = summary.paid,
-                    income = summary.income
+                    income = summary.income,
+                    statusBadge = consumptionBadge
                 )
 
-                // 2. Radar 7 Dias
+                // 2. Radar 7 Dias (Sem repetições triplas de 'sem contas')
                 val today = java.time.LocalDate.now()
                 val nextWeekDate = today.plusDays(7)
                 val nextWeekStr = String.format(Locale.US, "%04d-%02d-%02d", nextWeekDate.year, nextWeekDate.monthValue, nextWeekDate.dayOfMonth)
+                val formattedEndDate = String.format(Locale.US, "%02d/%02d", nextWeekDate.dayOfMonth, nextWeekDate.monthValue)
 
                 val upcomingNonCardTxs = allTxs.filter { tx ->
                     tx.type == TransactionType.EXPENSE &&
@@ -181,77 +190,60 @@ class DashboardViewModel(
                 radarTotal = FinanceEngine.round2(radarTotal)
 
                 val urgencyBadge = when {
-                    radarCount == 0 -> "Tudo em dia"
+                    radarCount == 0 -> "Sem pendências"
                     minDaysToDue != null && minDaysToDue <= 1L -> "Vence em breve!"
                     else -> "$radarCount a vencer"
                 }
                 val isUrgent = radarCount > 0 && minDaysToDue != null && minDaysToDue <= 1L
-                val radarSubtitle = when {
-                    radarCount == 0 -> "Nenhuma conta nos próx. 7 dias"
-                    minDaysToDue == 0L -> "Atenção: vence hoje"
-                    minDaysToDue == 1L -> "Atenção: vence amanhã"
-                    else -> "$radarCount conta${if (radarCount > 1) "s" else ""} a pagar"
-                }
                 val radar7Days = Radar7DaysState(
                     totalAmount = radarTotal,
                     count = radarCount,
                     urgencyBadge = urgencyBadge,
-                    subtitle = radarSubtitle,
+                    formattedEndDate = formattedEndDate,
                     isUrgent = isUrgent
                 )
 
-                // 3. Termômetro Diário
-                val todaySpent = allTxs.filter { tx ->
-                    if (tx.type != TransactionType.EXPENSE || tx.isRefund) {
-                        false
-                    } else {
-                        val createdDateStr = try {
-                            val instant = java.time.Instant.ofEpochMilli(tx.createdAt)
-                            val zdt = instant.atZone(java.time.ZoneId.systemDefault())
-                            String.format(Locale.US, "%04d-%02d-%02d", zdt.year, zdt.monthValue, zdt.dayOfMonth)
-                        } catch (_: Exception) { "" }
-                        val isToday = tx.dueDate == todayStr || createdDateStr == todayStr
-                        isToday && tx.visibleToUids.contains(user.uid)
-                    }
-                }.sumOf { tx ->
-                    FinanceEngine.impactFor(tx, user.uid, allTxs)
-                }.let { FinanceEngine.round2(it) }
-
-                val dailyLimit = summary.dailyLimit
-                val (isEconomy, diff, performanceText) = if (dailyLimit != null && dailyLimit > 0.0) {
-                    val d = FinanceEngine.round2(dailyLimit - todaySpent)
-                    if (d >= 0.0) {
-                        Triple(true, d, "Economia de ${FinanceEngine.formatCurrency(d)} hoje")
-                    } else {
-                        val excess = FinanceEngine.round2(Math.abs(d))
-                        Triple(false, excess, "Passou ${FinanceEngine.formatCurrency(excess)}")
-                    }
-                } else if (summary.monthState == "past") {
-                    Triple(true, 0.0, "Mês encerrado")
+                // 3. Maior Gasto (Top Categoria do Mês - Substitui o Termômetro Diário)
+                val totalExpenses = summary.byCategory.sumOf { it.amount }
+                val topCatExpense = summary.byCategory.firstOrNull { it.amount > 0.0 }
+                val topCategory = if (topCatExpense != null && totalExpenses > 0.0) {
+                    val catPct = ((topCatExpense.amount / totalExpenses) * 100.0).roundToInt()
+                    TopCategoryState(
+                        categoryName = topCatExpense.category,
+                        amount = topCatExpense.amount,
+                        percentageOfTotal = catPct,
+                        badgeText = "$catPct% do total",
+                        subtitle = "Principal despesa do mês"
+                    )
                 } else {
-                    Triple(true, 0.0, "${FinanceEngine.formatCurrency(todaySpent)} hoje")
+                    TopCategoryState(
+                        categoryName = "Sem despesas",
+                        amount = 0.0,
+                        percentageOfTotal = 0,
+                        badgeText = "Sem gastos",
+                        subtitle = "Nenhum gasto registrado"
+                    )
                 }
-                val dailyGauge = DailyGaugeState(
-                    spentToday = todaySpent,
-                    dailyLimit = dailyLimit,
-                    difference = diff,
-                    isEconomy = isEconomy,
-                    performanceText = performanceText
-                )
 
-                // 4. Saúde de Investimentos
+                // 4. Saúde de Investimentos (Sem repetições de Meta: 20% vs 0% vs R$ 0)
                 val invested = summary.totalInvested
                 val investIncomePct = if (summary.income > 0.0) {
                     ((invested / summary.income) * 100.0).roundToInt()
                 } else 0
                 val isTargetReached = investIncomePct >= 20
                 val progressRatio = (investIncomePct / 20.0f).coerceIn(0.0f, 1.0f)
+                val investBadge = when {
+                    invested <= 0.0 -> "Pendente"
+                    isTargetReached -> "Meta OK"
+                    else -> "$investIncomePct% / 20%"
+                }
                 val investmentHealth = InvestmentHealthState(
                     totalInvested = invested,
                     incomePercentage = investIncomePct,
                     targetPercentage = 20,
                     isTargetReached = isTargetReached,
-                    progressRatio = progressRatio
+                    progressRatio = progressRatio,
+                    badgeText = investBadge
                 )
 
                 DashboardUiState(
@@ -265,7 +257,7 @@ class DashboardViewModel(
                     pendingRecurringLaunches = pending,
                     incomeConsumption = incomeConsumption,
                     radar7Days = radar7Days,
-                    dailyGauge = dailyGauge,
+                    topCategory = topCategory,
                     investmentHealth = investmentHealth,
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,

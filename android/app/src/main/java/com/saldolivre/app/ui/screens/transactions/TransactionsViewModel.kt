@@ -60,14 +60,15 @@ data class TransactionsUiState(
     val previousMonthDeficit: Double = 0.0,
     val cushionAmount: Double = 0.0,
     val pendingCount: Int = 0,
-    val paidCount: Int = 0
+    val paidCount: Int = 0,
+    val isLoading: Boolean = false
 )
 
 class TransactionsViewModel(
     private val repository: FinanceRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(TransactionsUiState())
+    private val _uiState = MutableStateFlow(TransactionsUiState(isLoading = true))
     val uiState: StateFlow<TransactionsUiState> = _uiState.asStateFlow()
 
     init {
@@ -160,7 +161,8 @@ class TransactionsViewModel(
                         previousMonthDeficit = summary.previousMonthDeficit,
                         cushionAmount = summary.cushionAmount,
                         pendingCount = pendingCount,
-                        paidCount = paidCount
+                        paidCount = paidCount,
+                        isLoading = false
                     )
                 }
                 applyFilters()

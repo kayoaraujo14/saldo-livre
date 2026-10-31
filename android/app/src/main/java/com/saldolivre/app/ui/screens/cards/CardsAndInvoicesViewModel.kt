@@ -6,6 +6,7 @@ import com.saldolivre.app.data.engine.CardInvoice
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.engine.InvoiceStatus
+import com.saldolivre.app.data.engine.PredictiveInvoiceAlert
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.ui.screens.friends.FriendItem
 import com.saldolivre.app.data.model.FriendshipStatus
@@ -37,6 +38,8 @@ data class CardsAndInvoicesUiState(
     val totalCommittedAmount: Double = 0.0,
     val nextDueInvoice: CardInvoice? = null,
     val itemFilter: InvoiceItemFilter = InvoiceItemFilter.ALL,
+    val selectedCategory: String? = null,
+    val predictiveAlert: PredictiveInvoiceAlert? = null,
     val selectedParticipantName: String? = null,
     val searchQuery: String = "",
     val showPayConfirm: Boolean = false,
@@ -57,6 +60,7 @@ class CardsAndInvoicesViewModel(
     private val repository: FinanceRepository
 ) : ViewModel() {
 
+    private var initialMonthRouted = false
     private val viewMonth = MutableStateFlow(repository.selectedMonth.value)
     private val selectedCardId = MutableStateFlow<String?>(null)
 
@@ -95,6 +99,32 @@ class CardsAndInvoicesViewModel(
                         .thenBy { it.cardName.lowercase() }
                 )
 
+                // Roteamento Inteligente: Se a fatura do mês atual estiver quitada (PAID), avança para a próxima aberta
+                if (!initialMonthRouted && sortedCards.isNotEmpty()) {
+                    initialMonthRouted = true
+                    val currentMonthKey = FinanceEngine.currentMonthKey()
+                    val primaryCard = sortedCards.firstOrNull { it.ownerUid == user.uid } ?: sortedCards.firstOrNull()
+                    if (primaryCard != null) {
+                        val currentMonthInvoice = InvoiceEngine.buildInvoice(primaryCard, currentMonthKey, transactions, user.uid)
+                        if (currentMonthInvoice.status == InvoiceStatus.PAID) {
+                            var checkMonth = FinanceEngine.shiftMonth(currentMonthKey, 1)
+                            var targetOpenMonth: String? = null
+                            for (step in 1..12) {
+                                val candidateInv = InvoiceEngine.buildInvoice(primaryCard, checkMonth, transactions, user.uid)
+                                if (candidateInv.status != InvoiceStatus.PAID && candidateInv.openAmount > 0) {
+                                    targetOpenMonth = checkMonth
+                                    break
+                                }
+                                checkMonth = FinanceEngine.shiftMonth(checkMonth, 1)
+                            }
+                            if (targetOpenMonth != null && targetOpenMonth != month) {
+                                viewMonth.value = targetOpenMonth
+                                return@combine
+                            }
+                        }
+                    }
+                }
+
                 // Sincroniza visibilidade de transações para cartões compartilhados próprios
                 for (c in cards) {
                     if (c.ownerUid == user.uid && c.sharedWithUids.isNotEmpty()) {
@@ -103,17 +133,27 @@ class CardsAndInvoicesViewModel(
                 }
 
                 // 1. Invoices computation via InvoiceEngine
-                val invoices = sortedCards.map { card ->
+                val rawInvoices = sortedCards.map { card ->
                     InvoiceEngine.buildInvoice(card, month, transactions, user.uid)
                 }
 
-                val resolvedId = selId?.takeIf { id -> invoices.any { it.card.id == id } }
-                    ?: (invoices.firstOrNull { it.itemsCount > 0 } ?: invoices.firstOrNull())?.card?.id
+                val resolvedId = selId?.takeIf { id -> rawInvoices.any { it.card.id == id } }
+                    ?: (rawInvoices.firstOrNull { it.itemsCount > 0 } ?: rawInvoices.firstOrNull())?.card?.id
 
-                val selected = invoices.find { it.card.id == resolvedId }
+                val selected = rawInvoices.find { it.card.id == resolvedId }
                 val history = selected?.let {
                     InvoiceEngine.buildHistory(it.card, month, transactions, user.uid)
                 } ?: emptyList()
+
+                val predictiveAlert = selected?.let {
+                    InvoiceEngine.computePredictiveAlert(it, transactions, history)
+                }
+
+                val invoices = rawInvoices.map { inv ->
+                    if (inv.card.id == resolvedId && predictiveAlert != null) {
+                        inv.copy(predictiveAlert = predictiveAlert)
+                    } else inv
+                }
 
                 val totalInvoices = FinanceEngine.round2(invoices.sumOf { it.total })
                 val totalOpen = FinanceEngine.round2(invoices.sumOf { it.openAmount })
@@ -188,6 +228,7 @@ class CardsAndInvoicesViewModel(
                         invoices = invoices,
                         selectedCardId = resolvedId,
                         history = history,
+                        predictiveAlert = predictiveAlert,
                         totalInvoicesAmount = totalInvoices,
                         totalOpenAmount = totalOpen,
                         totalMineAmount = totalMine,
@@ -209,7 +250,7 @@ class CardsAndInvoicesViewModel(
 
     fun selectCardAndGoToInvoices(cardId: String) {
         selectedCardId.value = cardId
-        _uiState.update { it.copy(selectedTabIndex = 0, showPayConfirm = false, selectedParticipantName = null) }
+        _uiState.update { it.copy(selectedTabIndex = 0, showPayConfirm = false, selectedParticipantName = null, selectedCategory = null) }
     }
 
     fun previousMonth() = changeMonth(-1)
@@ -217,14 +258,25 @@ class CardsAndInvoicesViewModel(
 
     fun goToMonth(monthKey: String) {
         viewMonth.value = monthKey
-        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null) }
+        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null, selectedCategory = null) }
     }
 
     private fun changeMonth(delta: Int) = goToMonth(FinanceEngine.shiftMonth(viewMonth.value, delta))
 
     fun selectCard(cardId: String) {
         selectedCardId.value = cardId
-        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null) }
+        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null, selectedCategory = null) }
+    }
+
+    fun toggleCategoryFilter(category: String) {
+        _uiState.update { current ->
+            val next = if (current.selectedCategory.equals(category, ignoreCase = true)) null else category
+            current.copy(selectedCategory = next)
+        }
+    }
+
+    fun clearCategoryFilter() {
+        _uiState.update { it.copy(selectedCategory = null) }
     }
 
     fun toggleParticipantFilter(name: String) {

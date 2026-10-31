@@ -448,11 +448,10 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
 
                   {lookupFeedback && (
                     <div
-                      className={`p-2 rounded-lg text-[11px] flex items-center gap-1.5 animate-in fade-in ${
-                        lookupFeedback.success
+                      className={`p-2 rounded-lg text-[11px] flex items-center gap-1.5 animate-in fade-in ${lookupFeedback.success
                           ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/60'
                           : 'bg-rose-950/40 text-rose-300 border border-rose-800/60'
-                      }`}
+                        }`}
                     >
                       {lookupFeedback.success ? (
                         <Check className="size-3.5 text-emerald-400 shrink-0" />
@@ -473,9 +472,8 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
                       key={c}
                       type="button"
                       onClick={() => setColor(c)}
-                      className={`size-8 rounded-full border-2 transition-transform cursor-pointer ${
-                        color === c ? 'scale-110 border-white ring-2 ring-emerald-500/40 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'
-                      }`}
+                      className={`size-8 rounded-full border-2 transition-transform cursor-pointer ${color === c ? 'scale-110 border-white ring-2 ring-emerald-500/40 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'
+                        }`}
                       style={{
                         backgroundColor:
                           c === 'violet'
@@ -521,9 +519,10 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
                 return (
                   <div
                     key={card.id}
-                    className="p-4 rounded-2xl border border-white/[0.06] bg-slate-950/70 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md"
+                    className="relative overflow-hidden p-4 rounded-2xl border border-white/[0.06] bg-slate-950/70 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md"
                   >
-                    <div className="space-y-2">
+                    <CreditCard className="absolute -right-4 -bottom-4 size-28 text-white/[0.03] pointer-events-none rotate-12" />
+                    <div className="space-y-2 relative z-10">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-slate-100 text-sm">{card.cardName}</span>
                         {isOwner ? (

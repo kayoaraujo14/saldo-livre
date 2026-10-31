@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -43,6 +45,7 @@ fun MonthClosureDialog(
     val closedMonthLabel = remember(closedMonthKey) { FinanceEngine.formatMonthLabel(closedMonthKey) }
     val targetMonthLabel = remember(targetMonthKey) { FinanceEngine.formatMonthLabel(targetMonthKey) }
     val formattedTotal = remember(totalSurplus) { FinanceEngine.formatCurrency(totalSurplus) }
+    val haptic = LocalHapticFeedback.current
 
     // States for custom distribution inputs
     var carryoverInput by remember { mutableStateOf("") }
@@ -285,6 +288,7 @@ fun MonthClosureDialog(
                 Button(
                     onClick = {
                         if (isExact) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onConfirm(carryoverVal, investedVal, cushionVal)
                         }
                     },

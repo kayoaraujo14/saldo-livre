@@ -36,6 +36,7 @@ import com.saldolivre.app.data.engine.InvoiceCategorySlice
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.engine.InvoiceStatus
+import com.saldolivre.app.data.engine.PredictiveInvoiceAlert
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.ui.components.InvoiceDateGroup
@@ -112,6 +113,7 @@ fun CardsAndInvoicesScreen(
     val visibleInvoiceItems = remember(
         selectedInvoice,
         uiState.itemFilter,
+        uiState.selectedCategory,
         uiState.searchQuery,
         uiState.selectedParticipantName,
         uiState.currentUser.uid
@@ -126,8 +128,17 @@ fun CardsAndInvoicesScreen(
                 }
             }
         }
-        val filtered = when (uiState.itemFilter) {
+        var filtered = when (uiState.itemFilter) {
             InvoiceItemFilter.ALL -> items
+            InvoiceItemFilter.MINE -> items.filter { tx ->
+                tx.splitType == SplitType.MINE || (
+                    tx.splitType == null &&
+                    tx.assignedFriendUid.isNullOrBlank() &&
+                    tx.assignedFriendName.isNullOrBlank() &&
+                    tx.allocations.none { it.type == "EXTERNAL" } &&
+                    !tx.category.contains("Terceiro", ignoreCase = true)
+                )
+            }
             InvoiceItemFilter.THIRD_PARTY -> items.filter { tx ->
                 tx.splitType == SplitType.EXTERNAL ||
                 !tx.assignedFriendUid.isNullOrBlank() ||
@@ -139,6 +150,11 @@ fun CardsAndInvoicesScreen(
             InvoiceItemFilter.PAID -> items.filter { it.status == TransactionStatus.PAID }
             InvoiceItemFilter.INSTALLMENTS -> items.filter { (it.installmentsTotal ?: 1) > 1 }
         }
+
+        if (uiState.selectedCategory != null) {
+            filtered = filtered.filter { it.category.equals(uiState.selectedCategory, ignoreCase = true) }
+        }
+
         if (uiState.searchQuery.isBlank()) filtered
         else filtered.filter {
             it.description.contains(uiState.searchQuery, ignoreCase = true) ||
@@ -499,9 +515,12 @@ private fun InvoicesTabContent(
                 )
             }
 
-            // 4.2 Inteligência da Fatura (Melhor época, ciclo, futuro comprometido)
+            // 4.2 Inteligência da Fatura (Insights Preditivos: Projeção, Anomalia, Nova Assinatura)
             item(key = "inv_insights_${selectedInvoice.card.id}") {
-                SmartInsightsCard(invoice = selectedInvoice)
+                SmartInsightsCard(
+                    invoice = selectedInvoice,
+                    alert = uiState.predictiveAlert ?: selectedInvoice.predictiveAlert
+                )
             }
 
             // 4.3 Divisão da Fatura (Rateio com parceiro e terceiros)
@@ -525,11 +544,14 @@ private fun InvoicesTabContent(
                 )
             }
 
-            // 4.5 Distribuição por Categorias
+            // 4.5 Distribuição por Categorias (Interativo com Filtro Combinado)
             if (categorySlices.isNotEmpty()) {
                 item(key = "inv_categories_${selectedInvoice.card.id}") {
                     CategoryBreakdown(
                         categories = categorySlices,
+                        selectedCategory = uiState.selectedCategory,
+                        onToggleCategory = viewModel::toggleCategoryFilter,
+                        onClearCategory = viewModel::clearCategoryFilter,
                         selectedParticipantName = uiState.selectedParticipantName,
                         onClearParticipant = viewModel::clearParticipantFilter
                     )
@@ -541,6 +563,8 @@ private fun InvoicesTabContent(
                 ItemsHeader(
                     count = visibleItems.size,
                     filter = uiState.itemFilter,
+                    selectedCategory = uiState.selectedCategory,
+                    onClearCategory = viewModel::clearCategoryFilter,
                     searchQuery = uiState.searchQuery,
                     onFilter = viewModel::setFilter,
                     onSearchChange = viewModel::setSearchQuery
@@ -813,7 +837,7 @@ private fun InvoiceSummaryCard(
     val gradientColors = cardDarkGradient(invoice.card.color)
     val paidProgress by animateFloatAsState(invoice.paidRatio, label = "paidProgress")
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .shadow(
@@ -825,103 +849,118 @@ private fun InvoiceSummaryCard(
             .clip(RoundedCornerShape(22.dp))
             .background(Brush.linearGradient(gradientColors))
             .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(22.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Top row: Titular + Chip metálico simulado + Status + Botão Editar
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        invoice.card.cardName.uppercase(),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White.copy(alpha = 0.85f),
-                        letterSpacing = 1.sp
-                    )
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.12f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            invoice.card.ownerName.ifBlank { "Titular" },
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White.copy(alpha = 0.9f)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    FinanceEngine.formatCurrency(invoice.total),
-                    fontSize = 30.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White
-                )
-                Text(
-                    InvoiceEngine.countdownLabel(invoice),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (invoice.status == InvoiceStatus.OVERDUE) Rose400 else Color.White.copy(alpha = 0.9f)
-                )
-            }
+        // Marca d'água sutil ao fundo (estética minimalista premium em dark mode)
+        Icon(
+            imageVector = Icons.Default.CreditCard,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.05f),
+            modifier = Modifier
+                .size(170.dp)
+                .align(Alignment.BottomEnd)
+                .offset(x = 24.dp, y = 24.dp)
+        )
 
-            // Ações & Chip
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (isOwner) {
-                        IconButton(
-                            onClick = onEditCard,
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Editar Cartão",
-                                tint = Color.White.copy(alpha = 0.8f),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    } else {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFF312E81).copy(alpha = 0.7f),
-                            border = BorderStroke(1.dp, Color(0xFF818CF8).copy(alpha = 0.4f))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Top row: Titular + Ícone Glassmorphism + Status + Botão Editar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            invoice.card.cardName.uppercase(),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White.copy(alpha = 0.85f),
+                            letterSpacing = 1.sp
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.12f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "👁️ Somente Leitura",
+                                invoice.card.ownerName.ifBlank { "Titular" },
                                 fontSize = 9.sp,
-                                color = Color(0xFFA5B4FC),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.9f)
                             )
                         }
                     }
-                    Box(
-                        modifier = Modifier
-                            .size(width = 36.dp, height = 28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Brush.linearGradient(listOf(Color(0xFFFDE68A), Color(0xFFD97706))))
-                            .border(1.dp, Color(0xFFB45309), RoundedCornerShape(6.dp))
-                            .padding(4.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.SpaceBetween
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        FinanceEngine.formatCurrency(invoice.total),
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                    Text(
+                        InvoiceEngine.countdownLabel(invoice),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (invoice.status == InvoiceStatus.OVERDUE) Rose400 else Color.White.copy(alpha = 0.9f)
+                    )
+                }
+
+                // Ações & Ícone Glassmorphism
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (isOwner) {
+                            IconButton(
+                                onClick = onEditCard,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Editar Cartão",
+                                    tint = Color.White.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF312E81).copy(alpha = 0.7f),
+                                border = BorderStroke(1.dp, Color(0xFF818CF8).copy(alpha = 0.4f))
+                            ) {
+                                Text(
+                                    text = "👁️ Somente Leitura",
+                                    fontSize = 9.sp,
+                                    color = Color(0xFFA5B4FC),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        // Ícone vetorial limpo nativo com glassmorphism (elimina emoji/caixa amarela)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color.White.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            modifier = Modifier.size(34.dp)
                         ) {
-                            Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF92400E).copy(alpha = 0.7f)))
-                            Box(Modifier.fillMaxWidth().height(2.dp).background(Color(0xFF92400E).copy(alpha = 0.7f)))
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Contactless,
+                                    contentDescription = "Contactless",
+                                    tint = Color.White.copy(alpha = 0.92f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
+                    StatusPill(invoice.status)
                 }
-                StatusPill(invoice.status)
             }
-        }
 
         // Fechamento e Vencimento
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1065,9 +1104,33 @@ private fun InvoiceSummaryCard(
         }
     }
 }
+}
 
 @Composable
-private fun SmartInsightsCard(invoice: CardInvoice) {
+private fun SmartInsightsCard(
+    invoice: CardInvoice,
+    alert: PredictiveInvoiceAlert? = invoice.predictiveAlert
+) {
+    val headerIcon = when (alert) {
+        is PredictiveInvoiceAlert.Anomaly -> Icons.Default.TrendingUp
+        is PredictiveInvoiceAlert.NewSubscription -> Icons.Default.AutoAwesome
+        is PredictiveInvoiceAlert.Projection -> Icons.Default.QueryStats
+        null -> Icons.Default.Bolt
+    }
+    val headerTint = when (alert) {
+        is PredictiveInvoiceAlert.Anomaly -> Amber400
+        is PredictiveInvoiceAlert.NewSubscription -> Purple400
+        is PredictiveInvoiceAlert.Projection -> Cyan400
+        null -> Amber400
+    }
+    val badgeText = when (alert) {
+        is PredictiveInvoiceAlert.Anomaly -> "ALERTA DE ANOMALIA"
+        is PredictiveInvoiceAlert.NewSubscription -> "NOVA ASSINATURA"
+        is PredictiveInvoiceAlert.Projection -> "PROJEÇÃO DE FECHAMENTO"
+        null -> if (invoice.isBestPurchaseTime) "MELHOR ÉPOCA" else "INTELIGÊNCIA"
+    }
+    val badgeColor = headerTint
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1077,31 +1140,44 @@ private fun SmartInsightsCard(invoice: CardInvoice) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Header com ícone dinâmico e badge preditivo
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Icon(Icons.Default.Bolt, contentDescription = null, tint = Amber400, modifier = Modifier.size(18.dp))
+                Icon(headerIcon, contentDescription = null, tint = headerTint, modifier = Modifier.size(18.dp))
                 Text("Inteligência da Fatura", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             }
-            if (invoice.isBestPurchaseTime) {
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Amber400.copy(alpha = 0.15f))
-                        .border(1.dp, Amber400.copy(alpha = 0.4f), CircleShape)
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Text("Melhor Época Ativa!", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Amber400)
-                }
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(badgeColor.copy(alpha = 0.15f))
+                    .border(1.dp, badgeColor.copy(alpha = 0.4f), CircleShape)
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(badgeText, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, color = badgeColor)
             }
         }
 
-        Text(invoice.bestPurchaseHint, fontSize = 12.sp, color = TextSecondary, lineHeight = 17.sp)
+        // Título e detalhe preditivo dinâmico (sem textos redundantes de limite)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                alert?.headline ?: invoice.bestPurchaseHint,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                alert?.detail ?: (if (invoice.isBestPurchaseTime) "Suas compras caem no próximo ciclo." else "Acompanhamento inteligente de consumo."),
+                fontSize = 12.sp,
+                color = TextSecondary,
+                lineHeight = 17.sp
+            )
+        }
 
-        // Barra de progresso do ciclo
+        // Barra de progresso do ciclo da fatura
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Progresso do ciclo da fatura", fontSize = 10.sp, color = TextMuted)
@@ -1119,7 +1195,7 @@ private fun SmartInsightsCard(invoice: CardInvoice) {
             )
         }
 
-        // Blocos de futuro comprometido e maior compra
+        // Blocos de futuro comprometido e métrica preditiva do alerta
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(
                 modifier = Modifier
@@ -1146,22 +1222,74 @@ private fun SmartInsightsCard(invoice: CardInvoice) {
                     .padding(10.dp)
             ) {
                 Column {
-                    Text("MAIOR COMPRA", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Rose400)
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        invoice.topExpense?.let { FinanceEngine.formatCurrency(it.effectiveAmount) } ?: "—",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = TextPrimary,
-                        maxLines = 1
-                    )
-                    Text(
-                        invoice.topExpense?.description ?: "Sem despesas",
-                        fontSize = 10.sp,
-                        color = TextMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    when (alert) {
+                        is PredictiveInvoiceAlert.Projection -> {
+                            Text("RITMO MÉDIO DIÁRIO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Emerald400)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                "${FinanceEngine.formatCurrency(alert.dailyAverage)}/dia",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                if (alert.daysRemaining > 0) "Restam ${alert.daysRemaining} dias" else "Ciclo encerrado",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                maxLines = 1
+                            )
+                        }
+                        is PredictiveInvoiceAlert.Anomaly -> {
+                            Text("MÉDIA HISTÓRICA", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Amber400)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                FinanceEngine.formatCurrency(alert.previousAvgAmount),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                "Gastos médios anteriores",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                maxLines = 1
+                            )
+                        }
+                        is PredictiveInvoiceAlert.NewSubscription -> {
+                            Text("VALOR DA RECORRÊNCIA", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Purple400)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                FinanceEngine.formatCurrency(alert.amount),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                "Novo débito mensal",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                maxLines = 1
+                            )
+                        }
+                        null -> {
+                            Text("MAIOR COMPRA", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Rose400)
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                invoice.topExpense?.let { FinanceEngine.formatCurrency(it.effectiveAmount) } ?: "—",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = TextPrimary,
+                                maxLines = 1
+                            )
+                            Text(
+                                invoice.topExpense?.description ?: "Sem despesas",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1313,6 +1441,9 @@ private fun HistoryChart(
 @Composable
 private fun CategoryBreakdown(
     categories: List<InvoiceCategorySlice>,
+    selectedCategory: String? = null,
+    onToggleCategory: (String) -> Unit = {},
+    onClearCategory: (() -> Unit)? = null,
     selectedParticipantName: String? = null,
     onClearParticipant: (() -> Unit)? = null
 ) {
@@ -1346,10 +1477,61 @@ private fun CategoryBreakdown(
                 }
             }
 
+            if (selectedCategory != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = Emerald500.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.FilterAlt, contentDescription = null, tint = Emerald400, modifier = Modifier.size(14.dp))
+                            Text(
+                                "Filtro ativo: $selectedCategory",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Emerald400
+                            )
+                        }
+                        if (onClearCategory != null) {
+                            TextButton(
+                                onClick = onClearCategory,
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.height(24.dp)
+                            ) {
+                                Text("Limpar", fontSize = 11.sp, color = Emerald400, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
             displayCategories.forEach { slice ->
                 val catDetail = CategoryRegistry.get(slice.category)
                 val color = catDetail.color
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val isSelected = slice.category.equals(selectedCategory, ignoreCase = true)
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (isSelected) Emerald500.copy(alpha = 0.15f) else Color.Transparent)
+                        .border(
+                            width = if (isSelected) 1.dp else 0.dp,
+                            color = if (isSelected) Emerald400.copy(alpha = 0.5f) else Color.Transparent,
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onToggleCategory(slice.category) }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1362,33 +1544,43 @@ private fun CategoryBreakdown(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(22.dp)
+                                    .size(24.dp)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(color.copy(alpha = 0.16f)),
+                                    .background(if (isSelected) Emerald400.copy(alpha = 0.25f) else color.copy(alpha = 0.16f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     catDetail.icon,
                                     contentDescription = null,
-                                    tint = color,
+                                    tint = if (isSelected) Emerald400 else color,
                                     modifier = Modifier.size(13.dp)
                                 )
                             }
                             Text(
                                 slice.category,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = TextPrimary,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Emerald400 else TextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Text(
-                            "${FinanceEngine.formatCurrency(slice.amount)} · ${slice.pct}%",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextSecondary
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "${FinanceEngine.formatCurrency(slice.amount)} · ${slice.pct}%",
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                color = if (isSelected) Emerald400 else TextSecondary
+                            )
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Ativo",
+                                    tint = Emerald400,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
                     }
                     LinearProgressIndicator(
                         progress = { slice.pct / 100f },
@@ -1396,8 +1588,8 @@ private fun CategoryBreakdown(
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(CircleShape),
-                        color = color,
-                        trackColor = color.copy(alpha = 0.14f),
+                        color = if (isSelected) Emerald400 else color,
+                        trackColor = if (isSelected) Emerald400.copy(alpha = 0.2f) else color.copy(alpha = 0.14f),
                         strokeCap = StrokeCap.Round
                     )
                 }
@@ -1423,6 +1615,8 @@ private fun CategoryBreakdown(
 private fun ItemsHeader(
     count: Int,
     filter: InvoiceItemFilter,
+    selectedCategory: String? = null,
+    onClearCategory: (() -> Unit)? = null,
     searchQuery: String,
     onFilter: (InvoiceItemFilter) -> Unit,
     onSearchChange: (String) -> Unit
@@ -1433,12 +1627,35 @@ private fun ItemsHeader(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "Lançamentos da fatura ($count)",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Lançamentos da fatura ($count)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                if (selectedCategory != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Emerald500.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.4f)),
+                        modifier = Modifier.clickable { onClearCategory?.invoke() }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "$selectedCategory ✕",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Emerald400
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Filtros por chip (Formato pílula CircleShape com fundos translúcidos suaves)
@@ -1831,6 +2048,17 @@ private fun CardItemView(
                 .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(22.dp))
                 .padding(18.dp)
         ) {
+            // Marca d'água sutil ao fundo
+            Icon(
+                imageVector = Icons.Default.CreditCard,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.05f),
+                modifier = Modifier
+                    .size(160.dp)
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 24.dp, y = 24.dp)
+            )
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1850,12 +2078,21 @@ private fun CardItemView(
                             .weight(1f)
                             .padding(end = 8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CreditCard,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.9f),
-                            modifier = Modifier.size(24.dp)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color.White.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.CreditCard,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.95f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         Text(
                             text = card.cardName,
                             style = Typography.titleMedium,

@@ -59,6 +59,41 @@ data class InvoiceParticipantShare(
 )
 
 @Immutable
+sealed class PredictiveInvoiceAlert {
+    abstract val headline: String
+    abstract val detail: String
+
+    @Immutable
+    data class Projection(
+        val projectedTotal: Double,
+        val dailyAverage: Double,
+        val daysPassed: Int,
+        val daysTotal: Int,
+        val daysRemaining: Int,
+        override val headline: String,
+        override val detail: String
+    ) : PredictiveInvoiceAlert()
+
+    @Immutable
+    data class Anomaly(
+        val category: String,
+        val pctIncrease: Int,
+        val currentAmount: Double,
+        val previousAvgAmount: Double,
+        override val headline: String,
+        override val detail: String
+    ) : PredictiveInvoiceAlert()
+
+    @Immutable
+    data class NewSubscription(
+        val serviceName: String,
+        val amount: Double,
+        override val headline: String,
+        override val detail: String
+    ) : PredictiveInvoiceAlert()
+}
+
+@Immutable
 data class CardInvoice(
     val card: Card,
     val monthKey: String,
@@ -88,7 +123,8 @@ data class CardInvoice(
     val bestPurchaseHint: String = "",
     val cycleProgressPct: Int = 0,
     val availableLimit: Double? = null,
-    val totalCommitted: Double = 0.0
+    val totalCommitted: Double = 0.0,
+    val predictiveAlert: PredictiveInvoiceAlert? = null
 ) {
     val itemsCount: Int get() = items.size
     val unpaidExpenses: List<Transaction>
@@ -584,5 +620,131 @@ object InvoiceEngine {
         }
 
         return (nonCardTxs + invoiceTxs).sortedByDescending { it.dueDate }
+    }
+
+    /**
+     * Motor de Alertas Preditivos:
+     * Calcula dinamicamente um dos 3 insights preditivos para a fatura:
+     * 1. Alerta de Anomalia (aumento significativo em categorias de gastos vs histórico)
+     * 2. Nova Assinatura detectada no ciclo atual (serviço recorrente inédito no cartão)
+     * 3. Projeção estimada de fechamento (baseada na velocidade de gasto diário e dias restantes)
+     */
+    fun computePredictiveAlert(
+        invoice: CardInvoice,
+        all: List<Transaction>,
+        history: List<CardInvoice>,
+        today: String = FinanceEngine.todayKey()
+    ): PredictiveInvoiceAlert {
+        val card = invoice.card
+        val monthKey = invoice.monthKey
+
+        // 1. Detectar anomalia de gastos em relação aos ciclos anteriores
+        val pastInvoices = history.filter { it.monthKey < monthKey && it.grossExpenses > 0 }
+        if (pastInvoices.isNotEmpty()) {
+            val anomalies = invoice.byCategory.mapNotNull { catSlice ->
+                if (catSlice.amount < 40.0) return@mapNotNull null
+                val pastAmounts = pastInvoices.map { past ->
+                    past.byCategory.find { it.category.equals(catSlice.category, ignoreCase = true) }?.amount ?: 0.0
+                }
+                val pastAvg = if (pastAmounts.isNotEmpty()) pastAmounts.average() else 0.0
+                if (pastAvg >= 25.0 && catSlice.amount > pastAvg) {
+                    val pct = (((catSlice.amount - pastAvg) / pastAvg) * 100).roundToInt()
+                    if (pct >= 25) {
+                        Triple(catSlice.category, pct, pastAvg)
+                    } else null
+                } else null
+            }.sortedByDescending { it.second }
+
+            val topAnomaly = anomalies.firstOrNull()
+            if (topAnomaly != null) {
+                val (cat, pct, pastAvg) = topAnomaly
+                val currentAmount = invoice.byCategory.find { it.category.equals(cat, ignoreCase = true) }?.amount ?: 0.0
+                return PredictiveInvoiceAlert.Anomaly(
+                    category = cat,
+                    pctIncrease = pct,
+                    currentAmount = currentAmount,
+                    previousAvgAmount = FinanceEngine.round2(pastAvg),
+                    headline = "Seus gastos em $cat subiram +$pct%",
+                    detail = "Neste ciclo foram ${FinanceEngine.formatCurrency(currentAmount)} vs média de ${FinanceEngine.formatCurrency(pastAvg)} dos ciclos anteriores."
+                )
+            }
+        }
+
+        // 2. Detectar novas assinaturas / serviços recorrentes detectados pela primeira vez
+        val knownServices = listOf(
+            "netflix", "spotify", "amazon", "prime", "disney", "hbo", "max",
+            "youtube", "icloud", "apple", "chatgpt", "openai", "deezer",
+            "crunchyroll", "globo", "globoplay", "gympass", "totalpass",
+            "smart fit", "alura", "uber one", "meli+", "star+"
+        )
+        val expenses = invoice.items.filter { it.type == TransactionType.EXPENSE }
+        val newSub = expenses.firstOrNull { tx ->
+            val descLower = tx.description.lowercase()
+            val isCandidate = knownServices.any { descLower.contains(it) } ||
+                tx.isRecurring ||
+                tx.category.contains("Assinatura", ignoreCase = true) ||
+                tx.category.contains("Streaming", ignoreCase = true)
+
+            if (!isCandidate) return@firstOrNull false
+
+            // Verifica se essa descrição já apareceu em faturas passadas deste cartão
+            val existedInPast = all.any { pastTx ->
+                pastTx.cardId == card.id &&
+                pastTx.competenceMonth < monthKey &&
+                pastTx.type == TransactionType.EXPENSE &&
+                (pastTx.description.lowercase().contains(descLower) || descLower.contains(pastTx.description.lowercase()))
+            }
+            !existedInPast
+        }
+        if (newSub != null) {
+            return PredictiveInvoiceAlert.NewSubscription(
+                serviceName = newSub.description,
+                amount = newSub.effectiveAmount,
+                headline = "Nova assinatura detectada: ${newSub.description}",
+                detail = "Detectamos uma nova cobrança recorrente de ${FinanceEngine.formatCurrency(newSub.effectiveAmount)} neste ciclo."
+            )
+        }
+
+        // 3. Projeção estimada de fechamento (baseada no gasto médio diário)
+        val closingMonth = if (card.dueDay < card.closingDay) FinanceEngine.shiftMonth(monthKey, -1) else monthKey
+        val prevClosingMonth = FinanceEngine.shiftMonth(closingMonth, -1)
+        val prevClosingDate = clampDay(prevClosingMonth, card.closingDay)
+        val cycleTotalDays = max(1, diffDays(prevClosingDate, invoice.closingDate))
+        val cyclePassedDays = max(1, diffDays(prevClosingDate, today)).coerceAtMost(cycleTotalDays)
+        val daysRemaining = max(0, cycleTotalDays - cyclePassedDays)
+
+        val dailyAvg = if (invoice.total > 0) FinanceEngine.round2(invoice.total / cyclePassedDays) else 0.0
+        val projected = if (daysRemaining > 0 && dailyAvg > 0) {
+            FinanceEngine.round2(invoice.total + (dailyAvg * daysRemaining))
+        } else {
+            invoice.total
+        }
+
+        val (headline, detail) = if (invoice.total <= 0) {
+            Pair(
+                "Fatura sem lançamentos",
+                "Nenhum gasto registrado neste ciclo até o momento."
+            )
+        } else if (daysRemaining > 0) {
+            Pair(
+                "Fechamento estimado: ${FinanceEngine.formatCurrency(projected)}",
+                "Média de ${FinanceEngine.formatCurrency(dailyAvg)}/dia (${cyclePassedDays} de ${cycleTotalDays} dias corridos · restam ${daysRemaining} dias)."
+            )
+        } else {
+            Pair(
+                "Fatura fechada: ${FinanceEngine.formatCurrency(invoice.total)}",
+                "Média diária final de ${FinanceEngine.formatCurrency(dailyAvg)}/dia durante o ciclo de ${cycleTotalDays} dias."
+            )
+        }
+
+        return PredictiveInvoiceAlert.Projection(
+            projectedTotal = projected,
+            dailyAverage = dailyAvg,
+            daysPassed = cyclePassedDays,
+            daysTotal = cycleTotalDays,
+            daysRemaining = daysRemaining,
+            headline = headline,
+            detail = detail
+        )
     }
 }
