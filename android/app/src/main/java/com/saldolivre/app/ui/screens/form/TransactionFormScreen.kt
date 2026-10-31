@@ -452,6 +452,9 @@ fun TransactionFormScreen(
                 }
             }
 
+            var categoryExpanded by remember { mutableStateOf(false) }
+            var subcategoryExpanded by remember { mutableStateOf(false) }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -490,55 +493,191 @@ fun TransactionFormScreen(
                     }
                 }
 
-                // Seleção Rápida de Categoria Principal via Chips de Rolagem Horizontal
-                Text(
-                    text = if (state.type == TransactionType.INCOME) "Selecione a Categoria de Receita" else "Selecione a Categoria de Despesa",
-                    style = Typography.labelMedium,
-                    color = TextSecondary
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Lista Suspensa (Dropdown) de Categoria Principal
+                ExposedDropdownMenuBox(
+                    expanded = categoryExpanded,
+                    onExpandedChange = { categoryExpanded = !categoryExpanded }
                 ) {
-                    categoriesToShow.forEach { cat ->
-                        SelectionChip(
-                            label = cat.name,
-                            selected = state.category == cat.name,
-                            onClick = { viewModel.onCategoryChange(cat.name) },
-                            icon = cat.icon,
-                            accentColor = cat.color
-                        )
+                    OutlinedTextField(
+                        value = state.category,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = {
+                            Text(
+                                if (state.type == TransactionType.INCOME) "Categoria de Receita"
+                                else "Categoria Principal"
+                            )
+                        },
+                        leadingIcon = {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(currentCategoryDetail.color.copy(alpha = 0.18f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = currentCategoryDetail.icon,
+                                    contentDescription = null,
+                                    tint = currentCategoryDetail.color,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Emerald500,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedContainerColor = DarkBackground,
+                            unfocusedContainerColor = DarkBackground,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
+                    )
+
+                    ExposedDropdownMenu(
+                        expanded = categoryExpanded,
+                        onDismissRequest = { categoryExpanded = false },
+                        modifier = Modifier.background(DarkSurface)
+                    ) {
+                        categoriesToShow.forEach { cat ->
+                            val isSelected = state.category == cat.name
+                            DropdownMenuItem(
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .background(cat.color.copy(alpha = 0.18f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = cat.icon,
+                                            contentDescription = null,
+                                            tint = cat.color,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                },
+                                text = {
+                                    Column {
+                                        Text(
+                                            text = cat.name,
+                                            color = if (isSelected) cat.color else TextPrimary,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                        if (cat.description.isNotBlank()) {
+                                            Text(
+                                                text = cat.description,
+                                                fontSize = 11.sp,
+                                                color = TextSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                },
+                                trailingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = cat.color,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    viewModel.onCategoryChange(cat.name)
+                                    categoryExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
 
-                // Seleção Rápida de Subcategoria via Chips de Rolagem Horizontal
+                // Lista Suspensa (Dropdown) de Subcategoria
                 if (subcategoriesList.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Subcategoria (${state.category})",
-                        style = Typography.labelMedium,
-                        color = TextSecondary
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    ExposedDropdownMenuBox(
+                        expanded = subcategoryExpanded,
+                        onExpandedChange = { subcategoryExpanded = !subcategoryExpanded }
                     ) {
-                        subcategoriesList.forEach { sub ->
-                            SelectionChip(
-                                label = sub,
-                                selected = state.subcategory == sub,
-                                onClick = {
-                                    if (state.subcategory == sub) viewModel.onSubcategoryChange(null)
-                                    else viewModel.onSubcategoryChange(sub)
+                        OutlinedTextField(
+                            value = state.subcategory ?: "Sem subcategoria",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Subcategoria (${state.category})") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subcategoryExpanded) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Emerald500,
+                                unfocusedBorderColor = DarkBorder,
+                                focusedContainerColor = DarkBackground,
+                                unfocusedContainerColor = DarkBackground,
+                                focusedTextColor = if (state.subcategory != null) TextPrimary else TextSecondary,
+                                unfocusedTextColor = if (state.subcategory != null) TextPrimary else TextSecondary
+                            ),
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth()
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = subcategoryExpanded,
+                            onDismissRequest = { subcategoryExpanded = false },
+                            modifier = Modifier.background(DarkSurface)
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Nenhuma subcategoria (opcional)",
+                                        color = if (state.subcategory == null) Cyan400 else TextSecondary,
+                                        fontWeight = if (state.subcategory == null) FontWeight.Bold else FontWeight.Normal
+                                    )
                                 },
-                                accentColor = Cyan400
+                                trailingIcon = if (state.subcategory == null) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Cyan400,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    viewModel.onSubcategoryChange(null)
+                                    subcategoryExpanded = false
+                                }
                             )
+                            subcategoriesList.forEach { sub ->
+                                val isSelected = state.subcategory == sub
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = sub,
+                                            color = if (isSelected) Cyan400 else TextPrimary,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    trailingIcon = if (isSelected) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Cyan400,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    } else null,
+                                    onClick = {
+                                        viewModel.onSubcategoryChange(sub)
+                                        subcategoryExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
