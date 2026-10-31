@@ -106,7 +106,7 @@ fun TransactionDetailDialog(
                 val isFriend = (friendUid != null && alloc.uid == friendUid) ||
                         (!friendName.isNullOrBlank() && alloc.name.equals(friendName, ignoreCase = true))
                 val isCurrentUser = (!resolvedUserId.isNullOrBlank() && alloc.uid == resolvedUserId) ||
-                        (!currentUser?.displayName.isNullOrBlank() && alloc.name.equals(currentUser.displayName, ignoreCase = true))
+                        (!currentUser?.displayName.isNullOrBlank() && alloc.name.equals(currentUser?.displayName, ignoreCase = true))
                 val isPayer = (!payerUid.isNullOrBlank() && alloc.uid == payerUid) ||
                         (!isFriend && list.isEmpty())
                 val pct = if (total > 0.0) FinanceEngine.round2((Math.abs(alloc.amount) / total) * 100.0).toInt() else 0

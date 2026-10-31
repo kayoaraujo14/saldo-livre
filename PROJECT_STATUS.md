@@ -82,6 +82,10 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-10-30] Fix de Compilação Release (Android):**
+  - **Null Safety em `TransactionDetailDialog`:** corrigida chamada não segura `currentUser.displayName` para `currentUser?.displayName` na verificação de participantes do rateio, resolvendo erro do compilador Kotlin (`Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type UserProfile?`) na pipeline de Release.
+  - Build: `./gradlew :app:compileReleaseKotlin` OK.
+
 - **[2026-10-30] Paridade Web — Inteligência & UX da Tela de Faturas (Replicado do Android):**
   - **Roteamento Inteligente para Fatura Aberta:** na abertura do `CardInvoicesModal` ou ao alternar de cartão, se a fatura do mês atual estiver quitada (`status === 'paid'`), o seletor avança automaticamente para a próxima competência que tiver saldo em aberto (`openAmount > 0`), direcionando a atenção do usuário ao saldo a pagar.
   - **Filtros Combinados por Categoria ("Para onde foi o dinheiro"):** barras de categorias interativas com feedback visual esmeralda ativo (`bg-emerald-500/15`, borda suave e tag de ativação), operando em conjunto com busca, abas de filtro (adicionada a aba "100% Meu") e participante ativo. Banner com botão para limpeza rápida no topo dos lançamentos.
