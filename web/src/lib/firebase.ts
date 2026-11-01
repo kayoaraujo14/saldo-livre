@@ -846,8 +846,15 @@ export async function fsDeleteMonthClosure(uid: string, closedMonth: string) {
   if (!isFirebaseConfigured || !uid || uid === 'guest') return
   try {
     const { db } = ensure()
-    const ref = doc(db, COLLECTIONS.users, uid, COLLECTIONS.monthClosures, closedMonth)
-    await deleteDoc(ref)
+    const id1 = closedMonth
+    const id2 = "cls_" + closedMonth + "_" + uid
+    await Promise.allSettled([
+      deleteDoc(doc(db, COLLECTIONS.users, uid, COLLECTIONS.monthClosures, id1)),
+      deleteDoc(doc(db, COLLECTIONS.users, uid, COLLECTIONS.monthClosures, id2)),
+    ])
+    const colRef = collection(db, COLLECTIONS.users, uid, COLLECTIONS.monthClosures)
+    const snap = await getDocs(query(colRef, where('closedMonth', '==', closedMonth)))
+    await Promise.allSettled(snap.docs.map((d) => deleteDoc(d.ref)))
   } catch (err) {
     console.warn('Erro ao excluir fechamento no Firestore:', err)
   }

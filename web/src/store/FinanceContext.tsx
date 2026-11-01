@@ -256,6 +256,9 @@ interface FinanceContextValue {
   monthClosures: MonthClosure[]
   saveMonthClosure: (closure: MonthClosure) => Promise<void>
   deleteMonthClosure: (closedMonth: string) => Promise<void>
+  closureModalOpen: boolean
+  setClosureModalOpen: (open: boolean) => void
+  openMonthClosureModal: () => void
   // Rede de Amigos (Feature 2)
   friendships: Friendship[]
 
@@ -774,6 +777,20 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     return computeSummary(transactions, currentUid, month, monthClosures, cards)
   }, [transactions, currentUid, month, monthClosures, cards])
 
+  const [closureModalOpen, setClosureModalOpen] = useState(false)
+  const [closureDismissed, setClosureDismissed] = useState(false)
+
+  const openMonthClosureModal = useCallback(() => {
+    setClosureDismissed(false)
+    setClosureModalOpen(true)
+  }, [])
+
+  useEffect(() => {
+    if (summary?.pendingClosureSurplus && summary.pendingClosureSurplus > 0 && !closureDismissed) {
+      setClosureModalOpen(true)
+    }
+  }, [summary?.pendingClosureSurplus, closureDismissed])
+
   const saveMonthClosure = useCallback(
     async (closure: MonthClosure) => {
       if (mode === 'demo') {
@@ -818,44 +835,103 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
             updatedTxs = [investTx, ...updatedTxs]
           }
 
-          return { ...s, monthClosures: updatedClosures, transactions: updatedTxs }
+          let updatedUsers = s.users
+          if (closure.investedAmount > 0) {
+            const subName = closure.investmentSubcategory || 'Reserva de Emergência'
+            updatedUsers = s.users.map((u) => {
+              if (u.uid === closure.uid) {
+                const currentBalances = { ...(u.investmentAssetBalances || {}) }
+                const existing = currentBalances[subName] || 0
+                currentBalances[subName] = round2(existing + closure.investedAmount)
+                return { ...u, investmentAssetBalances: currentBalances }
+              }
+              return u
+            })
+          }
+
+          return { ...s, monthClosures: updatedClosures, transactions: updatedTxs, users: updatedUsers }
         })
+        setClosureModalOpen(false)
         return
       }
 
       if (currentUid) {
         await fb.fsSaveMonthClosure(currentUid, closure)
+        if (closure.investedAmount > 0 && profile) {
+          const subName = closure.investmentSubcategory || 'Reserva de Emergência'
+          const currentBalances = { ...(profile.investmentAssetBalances || {}) }
+          const existing = currentBalances[subName] || 0
+          currentBalances[subName] = round2(existing + closure.investedAmount)
+          await fb.fsUpdateUserProfile(currentUid, { investmentAssetBalances: currentBalances })
+        }
+        setClosureModalOpen(false)
       }
     },
-    [mode, commitDemo, currentUid, partnerParty, friends],
+    [mode, commitDemo, currentUid, partnerParty, friends, profile],
   )
 
   const deleteMonthClosure = useCallback(
     async (closedMonth: string) => {
       if (mode === 'demo') {
-        commitDemo((s) => ({
-          ...s,
-          monthClosures: (s.monthClosures || []).filter(
-            (c) => !(c.closedMonth === closedMonth && c.uid === currentUid),
-          ),
-          transactions: (s.transactions || []).filter(
-            (t) => !(t.competenceMonth === closedMonth && t.category === 'Investimentos' && t.description.includes('Aporte Sobra')),
-          ),
-        }))
+        commitDemo((s) => {
+          const relatedTxs = (s.transactions || []).filter(
+            (t) => t.competenceMonth === closedMonth && t.category === 'Investimentos' && t.description.includes('Aporte Sobra')
+          )
+          let updatedUsers = s.users
+          if (relatedTxs.length > 0) {
+            updatedUsers = s.users.map((u) => {
+              if (u.uid === currentUid) {
+                const currentBalances = { ...(u.investmentAssetBalances || {}) }
+                for (const rel of relatedTxs) {
+                  const subName = rel.subcategory || 'Reserva de Emergência'
+                  const existing = currentBalances[subName] || 0
+                  currentBalances[subName] = Math.max(0, round2(existing - rel.totalAmount))
+                }
+                return { ...u, investmentAssetBalances: currentBalances }
+              }
+              return u
+            })
+          }
+          return {
+            ...s,
+            monthClosures: (s.monthClosures || []).filter(
+              (c) => !(c.closedMonth === closedMonth && c.uid === currentUid),
+            ),
+            transactions: (s.transactions || []).filter(
+              (t) => !(t.competenceMonth === closedMonth && t.category === 'Investimentos' && t.description.includes('Aporte Sobra')),
+            ),
+            users: updatedUsers,
+          }
+        })
+        setClosureDismissed(false)
+        setClosureModalOpen(true)
         return
       }
 
       if (currentUid) {
         await fb.fsDeleteMonthClosure(currentUid, closedMonth)
-        const related = transactions.find(
+        const relatedTxs = transactions.filter(
           (t) => t.competenceMonth === closedMonth && t.category === 'Investimentos' && t.description.includes('Aporte Sobra')
         )
-        if (related) {
-          await fb.fsDeleteTransaction(related.id)
+        if (relatedTxs.length > 0 && profile) {
+          const currentBalances = { ...(profile.investmentAssetBalances || {}) }
+          for (const related of relatedTxs) {
+            await fb.fsDeleteTransaction(related.id)
+            const subName = related.subcategory || 'Reserva de Emergência'
+            const existing = currentBalances[subName] || 0
+            currentBalances[subName] = Math.max(0, round2(existing - related.totalAmount))
+          }
+          await fb.fsUpdateUserProfile(currentUid, { investmentAssetBalances: currentBalances })
+        } else {
+          for (const related of relatedTxs) {
+            await fb.fsDeleteTransaction(related.id)
+          }
         }
+        setClosureDismissed(false)
+        setClosureModalOpen(true)
       }
     },
-    [mode, commitDemo, currentUid, transactions],
+    [mode, commitDemo, currentUid, transactions, profile],
   )
 
   // ---------------- Ações de sessão ----------------
@@ -1878,9 +1954,6 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
             setPendingBatchTransactions(txs)
           },
           lookupUserByEmail,
-    monthClosures,
-    saveMonthClosure,
-    deleteMonthClosure,
           addTransaction,
           addMany,
           updateTransaction,
@@ -2034,6 +2107,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     monthClosures,
     saveMonthClosure,
     deleteMonthClosure,
+    closureModalOpen,
+    setClosureModalOpen,
+    openMonthClosureModal,
     friendships,
     friends,
     pendingFriendRequests,

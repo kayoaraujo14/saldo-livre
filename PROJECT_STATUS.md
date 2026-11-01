@@ -106,6 +106,12 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
   - **Persistência de Usuário e Caixinhas no Firestore:** adicionados métodos `saveUserProfile`, `updateInvestmentAssetBalances` e `updateInvestmentMonthlyTarget` no `FinanceRepository`, `FirestoreFinanceRepository` e `MockFinanceRepository`, integrando leitura/escrita em `/users/{uid}`.
   - **Validação:** `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
 
+- **[2026-11-01] Fix de Desfazimento e Exclusão do Fechamento de Mês (Web & Android):**
+  - **Causa Raiz 1 (ID Incompatível no Firestore):** ao salvar a closure, o documento era persistido sob o ID `cls_${closedMonth}_${uid}`; ao deletar, os repositórios tentavam remover apenas por `closedMonth`. Corrigido em `web/src/lib/firebase.ts` e `FirestoreFinanceRepository.kt` com estratégia defensiva tripla (deleta `closedMonth`, `cls_${closedMonth}_${uid}` e executa query por campo `closedMonth == closedMonth`), garantindo remoção definitiva do Firestore.
+  - **Causa Raiz 2 (Lançamento Duplicado no Android):** removida a criação duplicada de transação em `confirmMonthClosure` do `DashboardViewModel.kt` (o repositório já orquestra a criação do aporte comemorativo). No método `undoMonthClosure`, todas as transações associadas ao fechamento são expurgadas atomicamente e o saldo das caixinhas é restaurado no perfil do usuário.
+  - **Causa Raiz 3 (Reabertura Imediata do Pop-up):** ao desfazer o fechamento, as flags locais e de contexto (`closureDismissed` / `closureDialogDismissed`) agora são resetadas para `false`, e o pop-up de fechamento (`MonthClosureModal` na Web e `MonthClosureDialog` no Android) é reaberto imediatamente na tela para que o usuário possa redefinir o destino da sobra sem recarregar a aplicação.
+  - **Validação:** Vitest verde (27 testes), `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
+
 - **[2026-11-01] Correção do Saldo Remanescente na Projeção Futura (Web & Android):**
   - **Motor de Projeção Atualizado (`projectFutureMonths`):** atualizadas as assinaturas em `web/src/lib/finance.ts` e `FinanceEngine.kt` para receber a lista de fechamentos de mês (`closures: MonthClosure[]`).
   - **Cômputo do Saldo Remanescente & Déficit:** cada mês da projeção agora busca fechamentos anteriores explícitos (`c.closedMonth === prevMonthKey || c.targetMonth === monthKey`) e computa `carryoverAmount = prevClosure.carryoverToNextMonth`. No mês inicial, herda também eventuais déficits não cobertos (`previousMonthDeficit`).

@@ -392,7 +392,7 @@ class DashboardViewModel(
     }
 
     fun openClosureDialog() {
-        _uiState.update { it.copy(showClosureDialog = true) }
+        _uiState.update { it.copy(showClosureDialog = true, closureDialogDismissed = false) }
     }
 
     fun dismissClosureDialog() {
@@ -426,34 +426,7 @@ class DashboardViewModel(
             try {
                 repository.saveMonthClosure(closure)
 
-                if (invested > 0.0 && invTxId != null) {
-                    val closedMonthLabel = FinanceEngine.formatMonthLabel(closedMonth)
-                    val lastDay = FinanceEngine.daysInMonth(closedMonth)
-                    val investDate = "$closedMonth-${lastDay.toString().padStart(2, '0')}"
-
-                    val tx = Transaction(
-                        id = invTxId,
-                        createdByUid = uid,
-                        paidByUid = uid,
-                        description = "Aporte Sobra $closedMonthLabel",
-                        category = "Investimentos",
-                        subcategory = subName,
-                        type = TransactionType.EXPENSE,
-                        paymentMethod = PaymentMethod.DEBIT,
-                        status = TransactionStatus.PAID,
-                        actualAmount = invested,
-                        totalAmount = invested,
-                        dueDate = investDate,
-                        competenceMonth = closedMonth,
-                        visibleToUids = listOf(uid),
-                        allocations = listOf(
-                            Allocation(type = "PLATFORM_USER", uid = uid, name = user.displayName, amount = invested, reimbursed = true)
-                        ),
-                        userImpact = mapOf(uid to invested),
-                        splitType = SplitType.MINE
-                    )
-                    repository.addTransaction(tx)
-
+                if (invested > 0.0) {
                     val currentBalances = user.investmentAssetBalances.toMutableMap()
                     val existing = currentBalances[subName] ?: 0.0
                     currentBalances[subName] = FinanceEngine.round2(existing + invested)
@@ -475,22 +448,31 @@ class DashboardViewModel(
                 val user = _uiState.value.currentUser
                 repository.deleteMonthClosure(closedMonth)
 
-                // Deleta transação de aporte comemorativo se houver
+                // Deleta TODAS as transações de aporte comemorativo vinculadas a esse fechamento
                 val allTxs = repository.getTransactions().first()
-                val relatedTx = allTxs.find {
+                val relatedTxs = allTxs.filter {
                     it.competenceMonth == closedMonth &&
                     it.category == "Investimentos" &&
                     it.description.contains("Aporte Sobra", ignoreCase = true)
                 }
-                if (relatedTx != null) {
+                val currentBalances = user.investmentAssetBalances.toMutableMap()
+                for (relatedTx in relatedTxs) {
                     repository.deleteTransaction(relatedTx.id)
-
                     val subName = relatedTx.subcategory ?: "Reserva de Emergência"
-                    val currentBalances = user.investmentAssetBalances.toMutableMap()
                     val existing = currentBalances[subName] ?: 0.0
                     currentBalances[subName] = max(0.0, FinanceEngine.round2(existing - relatedTx.totalAmount))
+                }
+                if (relatedTxs.isNotEmpty()) {
                     val updatedUser = user.copy(investmentAssetBalances = currentBalances)
                     repository.saveUserProfile(updatedUser)
+                }
+
+                // Reabre imediatamente o popup para permitir novo lançamento
+                _uiState.update {
+                    it.copy(
+                        closureDialogDismissed = false,
+                        showClosureDialog = true
+                    )
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao desfazer fechamento de mês", e)

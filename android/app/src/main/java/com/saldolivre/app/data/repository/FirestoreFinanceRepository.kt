@@ -311,14 +311,16 @@ class FirestoreFinanceRepository(
                 val user = _currentUser.value
                 val lastDay = FinanceEngine.daysInMonth(closure.closedMonth)
                 val investDate = FinanceEngine.dateInMonth(closure.closedMonth, lastDay)
+                val subName = closure.investmentSubcategory?.ifBlank { "Reserva de Emergência" } ?: "Reserva de Emergência"
+                val txId = closure.investmentTransactionId?.ifBlank { null } ?: ("tx_invest_" + java.util.UUID.randomUUID().toString().take(8))
                 val investTx = Transaction(
-                    id = "",
+                    id = txId,
                     createdByUid = currentUid,
                     paidByUid = currentUid,
                     visibleToUids = listOf(currentUid),
                     description = "Aporte Sobra ${FinanceEngine.formatMonthLabel(closure.closedMonth)}",
                     category = "Investimentos",
-                    subcategory = "Reserva de Emergência",
+                    subcategory = subName,
                     type = TransactionType.EXPENSE,
                     paymentMethod = PaymentMethod.DEBIT,
                     status = TransactionStatus.PAID,
@@ -351,12 +353,32 @@ class FirestoreFinanceRepository(
         val currentUid = auth.currentUser?.uid ?: _currentUser.value.uid
         if (currentUid.isBlank()) return
         try {
-            firestore.collection("users")
+            val userClosuresCol = firestore.collection("users")
                 .document(currentUid)
                 .collection("month_closures")
-                .document(closedMonth)
-                .delete()
+
+            // 1. Tenta deletar por closedMonth direto
+            try {
+                userClosuresCol.document(closedMonth).delete().await()
+            } catch (_: Exception) {}
+
+            // 2. Tenta deletar por cls_${closedMonth}_$currentUid
+            val idWithPrefix = "cls_${closedMonth}_$currentUid"
+            try {
+                userClosuresCol.document(idWithPrefix).delete().await()
+            } catch (_: Exception) {}
+
+            // 3. Query por closedMonth para garantir exclusão completa
+            val querySnap = userClosuresCol
+                .whereEqualTo("closedMonth", closedMonth)
+                .get()
                 .await()
+
+            for (doc in querySnap.documents) {
+                try {
+                    doc.reference.delete().await()
+                } catch (_: Exception) {}
+            }
         } catch (e: Exception) {
             android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir fechamento de mês", e)
         }

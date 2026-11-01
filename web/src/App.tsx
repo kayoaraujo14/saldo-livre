@@ -42,6 +42,9 @@ function MainDashboard() {
     cycleStatus,
     deleteTransaction,
     summary,
+    closureModalOpen,
+    setClosureModalOpen,
+    openMonthClosureModal,
   } = useFinance()
 
   const [cardsModalOpen, setCardsModalOpen] = useState(false)
@@ -55,15 +58,7 @@ function MainDashboard() {
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
   const [invoicesModalOpen, setInvoicesModalOpen] = useState(false)
   const [invoicesInitialCardId, setInvoicesInitialCardId] = useState<string | null>(null)
-  const [closureModalOpen, setClosureModalOpen] = useState(false)
-  const [closureDismissed, setClosureDismissed] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
-
-  useEffect(() => {
-    if (summary?.pendingClosureSurplus && summary.pendingClosureSurplus > 0 && !closureDismissed) {
-      setClosureModalOpen(true)
-    }
-  }, [summary?.pendingClosureSurplus, closureDismissed])
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
   const [mobileTab, setMobileTab] = useState<MobileTab>('home')
@@ -175,7 +170,7 @@ function MainDashboard() {
             </div>
             <Button
               size="sm"
-              onClick={() => setClosureModalOpen(true)}
+              onClick={openMonthClosureModal}
               className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold h-7 text-xs px-3 self-end sm:self-auto cursor-pointer rounded-lg shadow-sm"
             >
               <Sparkles className="size-3 mr-1" />
@@ -408,10 +403,7 @@ function MainDashboard() {
       />
       <MonthClosureModal
         open={closureModalOpen}
-        onOpenChange={(open) => {
-          setClosureModalOpen(open)
-          if (!open) setClosureDismissed(true)
-        }}
+        onOpenChange={setClosureModalOpen}
       />
     </div>
   )
