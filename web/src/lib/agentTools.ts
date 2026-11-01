@@ -2283,6 +2283,7 @@ async function relatorio(env: AgentEnv, args?: Record<string, unknown>): Promise
     startMonthKey: targetMonth,
     count,
     cards,
+    closures,
   })
   const projectedTarget = projections12[0] || null
 

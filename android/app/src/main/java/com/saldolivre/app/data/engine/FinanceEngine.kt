@@ -1188,24 +1188,24 @@ object FinanceEngine {
         var pendingClosureMonth: String? = null
         var prevClosureObj: MonthClosure? = null
 
-        // Mês futuro NUNCA antecipa sobra nem herda provisoriamente
-        if (monthState != "future") {
-            val prevMonthKey = shiftMonth(monthKey, -1)
-            val prevClosure = closures.firstOrNull { it.closedMonth == prevMonthKey && it.uid == uid }
+        val prevMonthKey = shiftMonth(monthKey, -1)
+        val prevClosure = closures.firstOrNull { 
+            (it.closedMonth == prevMonthKey || it.targetMonth == monthKey) && it.uid == uid 
+        }
 
-            if (prevClosure != null) {
-                prevClosureObj = prevClosure
-                // Já houve fechamento formal do mês imediatamente anterior
-                carryoverAmount = round2(prevClosure.carryoverToNextMonth)
-                cushionAmount = round2(prevClosure.cushionAmount)
-            } else {
-                // Cadeia contínua de saldo acumulado:
-                // Itera mês a mês desde o primeiro registro no passado até o mês anterior imediato
-                val pastMonths = all
-                    .filter { it.visibleToUids.contains(uid) && it.competenceMonth < monthKey }
-                    .map { it.competenceMonth }
-                    .distinct()
-                    .sorted()
+        if (prevClosure != null) {
+            prevClosureObj = prevClosure
+            // Já houve fechamento formal do mês imediatamente anterior
+            carryoverAmount = round2(prevClosure.carryoverToNextMonth)
+            cushionAmount = round2(prevClosure.cushionAmount)
+        } else if (monthState != "future") {
+            // Cadeia contínua de saldo acumulado:
+            // Itera mês a mês desde o primeiro registro no passado até o mês anterior imediato
+            val pastMonths = all
+                .filter { it.visibleToUids.contains(uid) && it.competenceMonth < monthKey }
+                .map { it.competenceMonth }
+                .distinct()
+                .sorted()
 
                 if (pastMonths.isNotEmpty()) {
                     val startMonth = pastMonths.first()
@@ -1238,7 +1238,6 @@ object FinanceEngine {
                     }
                 }
             }
-        }
 
         // Total acumulado investido no histórico (aportes - resgates)
         var totalInvestedAccumulated = 0.0
@@ -1796,15 +1795,54 @@ object FinanceEngine {
         uid: String,
         startMonthKey: String,
         count: Int = 12,
-        cards: List<Card> = emptyList()
+        cards: List<Card> = emptyList(),
+        closures: List<MonthClosure> = emptyList()
     ): List<FutureMonthProjection> {
         val projections = mutableListOf<FutureMonthProjection>()
         val cardsMap = cards.associateBy { it.id }
 
         for (i in 0 until count) {
             val monthKey = shiftMonth(startMonthKey, i)
+            val prevMonthKey = shiftMonth(monthKey, -1)
             val label = formatMonthLabel(monthKey)
             val dim = daysInMonth(monthKey)
+
+            var carryoverAmount = 0.0
+            var previousMonthDeficit = 0.0
+
+            val prevClosure = closures.firstOrNull {
+                (it.closedMonth == prevMonthKey || it.targetMonth == monthKey) && it.uid == uid
+            }
+
+            if (prevClosure != null) {
+                carryoverAmount = round2(prevClosure.carryoverToNextMonth)
+            } else if (i == 0) {
+                val pastMonths = all
+                    .filter { it.visibleToUids.contains(uid) && it.competenceMonth < monthKey }
+                    .map { it.competenceMonth }
+                    .distinct()
+                    .sorted()
+
+                if (pastMonths.isNotEmpty()) {
+                    var runningBalance = 0.0
+                    var currentIter = pastMonths.first()
+                    while (currentIter <= prevMonthKey) {
+                        val closure = closures.firstOrNull {
+                            (it.closedMonth == currentIter || it.targetMonth == shiftMonth(currentIter, 1)) && it.uid == uid
+                        }
+                        val raw = computeMonthRawBalance(all, uid, currentIter)
+                        if (closure != null) {
+                            runningBalance = closure.carryoverToNextMonth
+                        } else {
+                            runningBalance += raw
+                        }
+                        currentIter = shiftMonth(currentIter, 1)
+                    }
+                    if (runningBalance < 0.0) {
+                        previousMonthDeficit = round2(kotlin.math.abs(runningBalance))
+                    }
+                }
+            }
 
             val monthTxs = all.filter {
                 it.competenceMonth == monthKey && it.visibleToUids.contains(uid) && it.reserveCardId == null
@@ -2015,6 +2053,28 @@ object FinanceEngine {
                 }
             }
 
+            if (carryoverAmount > 0.0) {
+                incomeCount++
+                items.add(
+                    ProjectedMonthItem(
+                        id = "proj_carryover_$monthKey",
+                        description = "Sobra Injetada do Mês Anterior",
+                        amount = carryoverAmount,
+                        myImpact = carryoverAmount,
+                        category = "Saldo Remanescente",
+                        subcategory = "Fechamento de Mês",
+                        dueDate = dateInMonth(monthKey, 1),
+                        type = TransactionType.INCOME,
+                        paymentMethod = PaymentMethod.PIX,
+                        cardId = null,
+                        cardName = null,
+                        origin = "income",
+                        status = "paid",
+                        isRecurringProjection = false
+                    )
+                )
+            }
+
             val isGenerated = ungeneratedCount == 0 && (profile == null || profile.monthlyIncome <= 0 || hasSalary)
 
             projectedIncome = round2(projectedIncome)
@@ -2022,7 +2082,8 @@ object FinanceEngine {
             invoiceExpense = round2(invoiceExpense)
             fixedBillsExpense = round2(fixedBillsExpense)
             variableAccountExpense = round2(variableAccountExpense)
-            val projectedFreeBalance = round2(projectedIncome - projectedExpense)
+            val projectedAvailable = round2(projectedIncome + carryoverAmount - previousMonthDeficit)
+            val projectedFreeBalance = round2(projectedAvailable - projectedExpense)
             val projectedDailyLimit = if (dim > 0) round2(projectedFreeBalance / dim.toDouble()) else null
 
             val byCategory = catMap.entries
@@ -2047,6 +2108,8 @@ object FinanceEngine {
                     daysInMonth = dim,
                     projectedIncome = projectedIncome,
                     projectedExpense = projectedExpense,
+                    carryoverAmount = carryoverAmount,
+                    previousMonthDeficit = previousMonthDeficit,
                     projectedFreeBalance = projectedFreeBalance,
                     projectedDailyLimit = projectedDailyLimit,
                     isGenerated = isGenerated,

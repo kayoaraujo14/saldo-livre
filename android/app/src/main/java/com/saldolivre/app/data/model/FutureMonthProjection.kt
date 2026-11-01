@@ -36,6 +36,8 @@ data class FutureMonthProjection(
     val daysInMonth: Int = 30,
     val projectedIncome: Double = 0.0,
     val projectedExpense: Double = 0.0,
+    val carryoverAmount: Double = 0.0,
+    val previousMonthDeficit: Double = 0.0,
     val projectedFreeBalance: Double = 0.0,
     val projectedDailyLimit: Double? = null,
     val isGenerated: Boolean = false,

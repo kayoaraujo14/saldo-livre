@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { friendPctOf, projectFutureMonths } from '../finance'
-import type { Card, RecurringBill, Transaction, UserProfile } from '@/types'
+import type { Card, MonthClosure, RecurringBill, Transaction, UserProfile } from '@/types'
 
 describe('friendPctOf', () => {
   it('returns 100 if tx is falsy', () => {
@@ -179,5 +179,40 @@ describe('projectFutureMonths (12-month projection, channels, categories & items
     expect(nov.items?.some((i) => i.description === 'Netflix' && i.origin === 'invoice' && i.isRecurringProjection)).toBe(true)
     expect(nov.items?.some((i) => i.description === 'Aluguel' && i.origin === 'fixed_bill' && i.isRecurringProjection)).toBe(true)
     expect(nov.items?.some((i) => i.description === 'Padaria no Pix' && i.origin === 'debit_pix')).toBe(true)
+  })
+
+  it('considers carryoverAmount from closures in projectedFreeBalance and items list', () => {
+    const closures: MonthClosure[] = [
+      {
+        id: 'closure_2026_10',
+        uid: 'u1',
+        closedMonth: '2026-10',
+        targetMonth: '2026-11',
+        totalSurplus: 450,
+        carryoverToNextMonth: 450,
+        investedAmount: 0,
+        closedAt: Date.now(),
+      },
+    ]
+
+    const result = projectFutureMonths({
+      all: transactions,
+      bills: recurringBills,
+      profile: me,
+      uid: 'u1',
+      startMonthKey: '2026-11',
+      count: 3,
+      cards,
+      closures,
+    })
+
+    const nov = result[0]
+    expect(nov.monthKey).toBe('2026-11')
+    expect(nov.carryoverAmount).toBe(450)
+    expect(nov.projectedIncome).toBe(5000)
+    expect(nov.projectedExpense).toBe(2035.9)
+    // 5000 (income) + 450 (carryover) - 2035.9 (expense) = 3414.1
+    expect(nov.projectedFreeBalance).toBe(3414.1)
+    expect(nov.items?.some((i) => i.id === 'proj_carryover_2026-11' && i.amount === 450)).toBe(true)
   })
 })

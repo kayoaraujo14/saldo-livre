@@ -27,7 +27,7 @@ interface FutureProjectionModalProps {
 }
 
 export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: FutureProjectionModalProps) {
-  const { transactions, recurring, profile, me, month, cards } = useFinance()
+  const { transactions, recurring, profile, me, month, cards, monthClosures } = useFinance()
   const [horizonCount, setHorizonCount] = useState<6 | 12>(12)
   const [expandedMonthKey, setExpandedMonthKey] = useState<string | null>(null)
   const [detailTab, setDetailTab] = useState<'items' | 'categories'>('items')
@@ -44,14 +44,15 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
       startMonthKey: currentKey,
       count: horizonCount,
       cards,
+      closures: monthClosures,
     })
-  }, [transactions, recurring, profile, me, currentKey, horizonCount, cards])
+  }, [transactions, recurring, profile, me, currentKey, horizonCount, cards, monthClosures])
 
   const summaryMetrics = useMemo(() => {
     if (projections.length === 0) {
       return { totalIncome: 0, totalExpense: 0, avgFreeBalance: 0, totalInvoices: 0, totalFixed: 0 }
     }
-    const totalIncome = projections.reduce((s, p) => s + p.projectedIncome, 0)
+    const totalIncome = projections.reduce((s, p) => s + p.projectedIncome + (p.carryoverAmount || 0), 0)
     const totalExpense = projections.reduce((s, p) => s + p.projectedExpense, 0)
     const totalFree = projections.reduce((s, p) => s + p.projectedFreeBalance, 0)
     const totalInvoices = projections.reduce((s, p) => s + (p.invoiceExpense || 0), 0)
@@ -169,9 +170,10 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
               const isCurrent = p.monthKey === currentKey
               const isPositive = p.projectedFreeBalance >= 0
               const isExpanded = expandedMonthKey === p.monthKey
+              const totalAvailable = p.projectedIncome + (p.carryoverAmount || 0)
               const retentionPct =
-                p.projectedIncome > 0
-                  ? Math.max(0, Math.min(100, Math.round((p.projectedFreeBalance / p.projectedIncome) * 100)))
+                totalAvailable > 0
+                  ? Math.max(0, Math.min(100, Math.round((p.projectedFreeBalance / totalAvailable) * 100)))
                   : 0
 
               const invAmt = p.invoiceExpense || 0
@@ -238,6 +240,32 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                         <span className="text-[10px] text-slate-500 mt-0.5">{p.expenseCount} item(ns)</span>
                       </div>
                     </div>
+
+                    {/* Sobra Remanescente do Mês Anterior Injetada */}
+                    {Boolean(p.carryoverAmount && p.carryoverAmount > 0) && (
+                      <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-500/25 text-xs">
+                        <span className="text-[11px] text-emerald-300 font-medium flex items-center gap-1.5">
+                          <Sparkles className="size-3 text-emerald-400" />
+                          <span>Sobra do mês anterior injetada</span>
+                        </span>
+                        <span className="font-mono font-bold text-emerald-300 text-xs">
+                          +{formatBRL(p.carryoverAmount!)}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Déficit Herdado do Mês Anterior */}
+                    {Boolean(p.previousMonthDeficit && p.previousMonthDeficit > 0) && (
+                      <div className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-rose-950/40 border border-rose-500/25 text-xs">
+                        <span className="text-[11px] text-rose-300 font-medium flex items-center gap-1.5">
+                          <TrendingDown className="size-3 text-rose-400" />
+                          <span>Déficit herdado do mês anterior</span>
+                        </span>
+                        <span className="font-mono font-bold text-rose-300 text-xs">
+                          −{formatBRL(p.previousMonthDeficit!)}
+                        </span>
+                      </div>
+                    )}
 
                     {/* Decomposição por Origem: Faturas vs Contas Fixas vs Débito/Pix */}
                     <div className="grid grid-cols-3 gap-1.5 text-[11px]">

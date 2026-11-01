@@ -290,8 +290,9 @@ private fun MonthProjectionCard(
     val isPositive = projection.projectedFreeBalance >= 0.0
     val balanceColor = if (isPositive) Emerald400 else Rose400
 
-    val retentionRatio = if (projection.projectedIncome > 0) {
-        min(1f, max(0f, (projection.projectedFreeBalance / projection.projectedIncome).toFloat()))
+    val totalAvailable = projection.projectedIncome + projection.carryoverAmount
+    val retentionRatio = if (totalAvailable > 0) {
+        min(1f, max(0f, (projection.projectedFreeBalance / totalAvailable).toFloat()))
     } else 0f
 
     Surface(
@@ -459,6 +460,73 @@ private fun MonthProjectionCard(
                         contentDescription = null,
                         tint = Rose400,
                         modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            // Indicador de Sobra Remanescente do Mês Anterior ou Déficit Herdado
+            if (projection.carryoverAmount > 0.0) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Emerald500.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .border(1.dp, Emerald500.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = Emerald400,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Sobra do mês anterior injetada",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Emerald400
+                        )
+                    }
+                    Text(
+                        text = "+${FinanceEngine.formatCurrency(projection.carryoverAmount)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Emerald400
+                    )
+                }
+            } else if (projection.previousMonthDeficit > 0.0) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Rose500.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .border(1.dp, Rose500.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.TrendingDown,
+                            contentDescription = null,
+                            tint = Rose400,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Déficit herdado do mês anterior",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Rose400
+                        )
+                    }
+                    Text(
+                        text = "-${FinanceEngine.formatCurrency(projection.previousMonthDeficit)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Rose400
                     )
                 }
             }

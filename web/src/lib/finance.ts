@@ -1035,24 +1035,25 @@ export function computeSummary(
   let pendingClosureMonth: string | null = null
   let prevClosureObj: MonthClosure | null = null
 
-  if (state !== 'future') {
-    const prevMonthKey = shiftMonth(monthKey, -1)
-    const prevClosure = (closures || []).find((c) => c.closedMonth === prevMonthKey && c.uid === uid)
+  const prevMonthKey = shiftMonth(monthKey, -1)
+  const prevClosure = (closures || []).find(
+    (c) => (c.closedMonth === prevMonthKey || c.targetMonth === monthKey) && c.uid === uid,
+  )
 
-    if (prevClosure) {
-      prevClosureObj = prevClosure
-      carryoverAmount = round2(prevClosure.carryoverToNextMonth || 0)
-      cushionAmount = round2(prevClosure.cushionAmount || 0)
-    } else {
-      const pastMonths = Array.from(
-        new Set(
-          (all || [])
-            .filter((t) => (t.visibleToUids || []).includes(uid) && t.competenceMonth < monthKey)
-            .map((t) => t.competenceMonth)
-        )
-      ).sort()
+  if (prevClosure) {
+    prevClosureObj = prevClosure
+    carryoverAmount = round2(prevClosure.carryoverToNextMonth || 0)
+    cushionAmount = round2(prevClosure.cushionAmount || 0)
+  } else if (state !== 'future') {
+    const pastMonths = Array.from(
+      new Set(
+        (all || [])
+          .filter((t) => (t.visibleToUids || []).includes(uid) && t.competenceMonth < monthKey)
+          .map((t) => t.competenceMonth)
+      )
+    ).sort()
 
-      if (pastMonths.length > 0) {
+    if (pastMonths.length > 0) {
         const startMonth = pastMonths[0]
         const endMonth = prevMonthKey
         let runningBalance = 0
@@ -1080,7 +1081,6 @@ export function computeSummary(
         }
       }
     }
-  }
 
   const effectiveAvailable = income + carryoverAmount - previousMonthDeficit
   const freeBalance = round2(effectiveAvailable - (paid + committed))
@@ -1588,15 +1588,59 @@ export function projectFutureMonths(args: {
   startMonthKey: string
   count?: number
   cards?: Card[]
+  closures?: MonthClosure[]
 }): FutureMonthProjection[] {
-  const { all, bills, profile, uid, startMonthKey, count = 12, cards = [] } = args
+  const { all, bills, profile, uid, startMonthKey, count = 12, cards = [], closures = [] } = args
   const projections: FutureMonthProjection[] = []
   const cardsMap = new Map(cards.map((c) => [c.id, c]))
 
   for (let i = 0; i < count; i++) {
     const monthKey = shiftMonth(startMonthKey, i)
+    const prevMonthKey = shiftMonth(monthKey, -1)
     const label = monthLabel(monthKey)
     const dim = daysInMonth(monthKey)
+
+    let carryoverAmount = 0
+    let previousMonthDeficit = 0
+
+    // Verifica se houve fechamento prévio com injeção de sobra no saldo livre
+    const prevClosure = closures.find(
+      (c) => (c.closedMonth === prevMonthKey || c.targetMonth === monthKey) && c.uid === uid,
+    )
+
+    if (prevClosure) {
+      carryoverAmount = round2(prevClosure.carryoverToNextMonth || 0)
+    } else if (i === 0) {
+      // Se não há fechamento explícito do mês anterior e estamos no primeiro mês da projeção,
+      // calcula eventual déficit herdado de meses anteriores
+      const pastMonths = Array.from(
+        new Set(
+          (all || [])
+            .filter((t) => (t.visibleToUids || []).includes(uid) && t.competenceMonth < monthKey)
+            .map((t) => t.competenceMonth),
+        ),
+      ).sort()
+
+      if (pastMonths.length > 0) {
+        let runningBalance = 0
+        let currentIter = pastMonths[0]
+        while (currentIter <= prevMonthKey) {
+          const closure = closures.find(
+            (c) => (c.closedMonth === currentIter || c.targetMonth === shiftMonth(currentIter, 1)) && c.uid === uid,
+          )
+          const raw = computeMonthRawBalance(all, uid, currentIter)
+          if (closure) {
+            runningBalance = closure.carryoverToNextMonth
+          } else {
+            runningBalance = runningBalance + raw
+          }
+          currentIter = shiftMonth(currentIter, 1)
+        }
+        if (runningBalance < 0) {
+          previousMonthDeficit = round2(Math.abs(runningBalance))
+        }
+      }
+    }
 
     // Check existing transactions for that month visible to uid
     const monthTxs = (all || []).filter(
@@ -1804,6 +1848,26 @@ export function projectFutureMonths(args: {
       }
     }
 
+    if (carryoverAmount > 0) {
+      incomeCount++
+      items.push({
+        id: `proj_carryover_${monthKey}`,
+        description: 'Sobra Injetada do Mês Anterior',
+        amount: carryoverAmount,
+        myImpact: carryoverAmount,
+        category: 'Saldo Remanescente',
+        subcategory: 'Fechamento de Mês',
+        dueDate: dateInMonth(monthKey, 1),
+        type: 'income',
+        paymentMethod: 'pix',
+        cardId: null,
+        cardName: null,
+        origin: 'income',
+        status: 'paid',
+        isRecurringProjection: false,
+      })
+    }
+
     const isGenerated = ungeneratedCount === 0 && (!profile || profile.monthlyIncome <= 0 || hasSalary)
 
     projectedIncome = round2(projectedIncome)
@@ -1811,7 +1875,8 @@ export function projectFutureMonths(args: {
     invoiceExpense = round2(invoiceExpense)
     fixedBillsExpense = round2(fixedBillsExpense)
     variableAccountExpense = round2(variableAccountExpense)
-    const projectedFreeBalance = round2(projectedIncome - projectedExpense)
+    const projectedAvailable = round2(projectedIncome + carryoverAmount - previousMonthDeficit)
+    const projectedFreeBalance = round2(projectedAvailable - projectedExpense)
     const projectedDailyLimit = dim > 0 ? round2(projectedFreeBalance / dim) : null
 
     const byCategory: ProjectedCategoryItem[] = [...catMap.entries()]
@@ -1833,6 +1898,8 @@ export function projectFutureMonths(args: {
       daysInMonth: dim,
       projectedIncome,
       projectedExpense,
+      carryoverAmount,
+      previousMonthDeficit,
       projectedFreeBalance,
       projectedDailyLimit,
       isGenerated,

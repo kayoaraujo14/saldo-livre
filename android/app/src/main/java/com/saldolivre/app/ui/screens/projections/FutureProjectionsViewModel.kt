@@ -31,11 +31,14 @@ class FutureProjectionsViewModel(
     init {
         viewModelScope.launch {
             combine(
-                repository.currentUser,
-                repository.selectedMonth,
+                combine(repository.currentUser, repository.selectedMonth) { u, m -> Pair(u, m) },
                 repository.getTransactions(),
-                repository.getRecurringBills()
-            ) { user, selectedMonth, transactions, recurringBills ->
+                repository.getRecurringBills(),
+                repository.getMonthClosures(),
+                repository.getCards()
+            ) { userMonth, transactions, recurringBills, closures, cards ->
+                val user = userMonth.first
+                val selectedMonth = userMonth.second
                 val curMonth = FinanceEngine.currentMonthKey()
 
                 val projectionsList = FinanceEngine.projectFutureMonths(
@@ -44,14 +47,16 @@ class FutureProjectionsViewModel(
                     profile = user,
                     uid = user.uid,
                     startMonthKey = curMonth,
-                    count = 6
+                    count = 6,
+                    cards = cards,
+                    closures = closures
                 )
 
                 val avgFree = if (projectionsList.isNotEmpty()) {
                     FinanceEngine.round2(projectionsList.sumOf { it.projectedFreeBalance } / projectionsList.size)
                 } else 0.0
 
-                val totIncome = FinanceEngine.round2(projectionsList.sumOf { it.projectedIncome })
+                val totIncome = FinanceEngine.round2(projectionsList.sumOf { it.projectedIncome + it.carryoverAmount })
                 val totExpense = FinanceEngine.round2(projectionsList.sumOf { it.projectedExpense })
 
                 FutureProjectionsUiState(

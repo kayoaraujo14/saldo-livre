@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md — Fonte da Verdade & Índice Arquitetural (`Saldo Livre`)
 
-> **Última Atualização:** 2026-10-29
+> **Última Atualização:** 2026-11-01
 > **Status da Fundação:** 🟢 **100% CONCLUÍDA E ESTABILIZADA**
 > **Propósito:** Índice central de arquitetura, mapeamento de paridade Web/Mobile, segurança e histórico de micro-commits para otimização máxima de contexto e tokens.
 
@@ -105,6 +105,14 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
   - **Paridade Web & Mobile:** implementação de `MonthClosureModal.tsx` na Web com banner de notificação suave e paridade total com o `MonthClosureDialog.kt` do Android.
   - **Persistência de Usuário e Caixinhas no Firestore:** adicionados métodos `saveUserProfile`, `updateInvestmentAssetBalances` e `updateInvestmentMonthlyTarget` no `FinanceRepository`, `FirestoreFinanceRepository` e `MockFinanceRepository`, integrando leitura/escrita em `/users/{uid}`.
   - **Validação:** `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
+
+- **[2026-11-01] Correção do Saldo Remanescente na Projeção Futura (Web & Android):**
+  - **Motor de Projeção Atualizado (`projectFutureMonths`):** atualizadas as assinaturas em `web/src/lib/finance.ts` e `FinanceEngine.kt` para receber a lista de fechamentos de mês (`closures: MonthClosure[]`).
+  - **Cômputo do Saldo Remanescente & Déficit:** cada mês da projeção agora busca fechamentos anteriores explícitos (`c.closedMonth === prevMonthKey || c.targetMonth === monthKey`) e computa `carryoverAmount = prevClosure.carryoverToNextMonth`. No mês inicial, herda também eventuais déficits não cobertos (`previousMonthDeficit`).
+  - **Fórmula de Projeção:** `projectedAvailable = projectedIncome + carryoverAmount - previousMonthDeficit` e `projectedFreeBalance = projectedAvailable - projectedExpense`, garantindo que sobras injetadas no saldo livre reflitam com precisão de 100% no saldo projetado.
+  - **Transparência Visual no Raio-X e Cards:** adicionados itens nominativos `Sobra Injetada do Mês Anterior` na lista de itens do mês e banners visuais dedicados no card do mês projetado (`FutureProjectionModal.tsx` e `FutureProjectionsScreen.kt`).
+  - **Ajuste em AI Tools & ViewModels:** `FutureProjectionsViewModel.kt` no Android agora combina `repository.getMonthClosures()` e `cards`, e os motores de ferramentas do Copiloto IA (`agentTools.ts` e `AndroidAgentToolsEngine.kt`) repassam os fechamentos mensais às projeções.
+  - **Testes & Builds:** 27 testes unitários do Vitest verdes na Web, `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK no Android.
 
 - **[2026-11-01] Fase 1 — Paridade do Motor Financeiro, Investimentos Líquidos e Fechamento de Mês:**
   - **Fórmula do Saldo Livre Corrigida:** removida a subtração indevida do Colchão de Segurança (`cushionAmount`) da fórmula de `effectiveAvailable` em `web/src/lib/finance.ts` e `FinanceEngine.kt`. O Saldo Livre reflete fielmente `income + carryoverAmount - previousMonthDeficit - (paid + committed)`.

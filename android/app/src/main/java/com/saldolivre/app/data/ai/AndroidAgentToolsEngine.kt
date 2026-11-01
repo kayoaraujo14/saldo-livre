@@ -2423,6 +2423,7 @@ class AndroidAgentToolsEngine(
         val all = repository.getTransactions().first()
         val bills = repository.getRecurringBills().first()
         val cards = repository.getCards().first()
+        val closures = repository.getMonthClosures().first()
         val user = repository.currentUser.value
         val defaultMonth = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
         val targetMonth = parseMonthKey(month, defaultMonth) ?: defaultMonth
@@ -2431,7 +2432,7 @@ class AndroidAgentToolsEngine(
         val profile = repository.allUsers.find { it.uid == user.uid }
         val safeCount = monthsCount.coerceIn(1, 12)
 
-        val summary = FinanceEngine.computeSummary(all, user.uid, targetMonth)
+        val summary = FinanceEngine.computeSummary(all, user.uid, targetMonth, cards, closures)
         val projections = FinanceEngine.projectFutureMonths(
             all = all,
             bills = bills,
@@ -2439,7 +2440,8 @@ class AndroidAgentToolsEngine(
             uid = user.uid,
             startMonthKey = targetMonth,
             count = safeCount,
-            cards = cards
+            cards = cards,
+            closures = closures
         )
         val proj = projections.firstOrNull()
 

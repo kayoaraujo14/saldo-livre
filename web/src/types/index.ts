@@ -948,6 +948,8 @@ export interface FutureMonthProjection {
   label: string // Outubro 2026
   projectedIncome: number
   projectedExpense: number
+  carryoverAmount?: number
+  previousMonthDeficit?: number
   projectedFreeBalance: number
   daysInMonth: number
   projectedDailyLimit: number | null
