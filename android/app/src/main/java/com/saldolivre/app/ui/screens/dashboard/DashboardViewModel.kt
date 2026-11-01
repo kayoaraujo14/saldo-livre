@@ -16,7 +16,12 @@ import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.UUID
+import kotlin.math.max
 import kotlin.math.roundToInt
+import com.saldolivre.app.data.model.Allocation
+import com.saldolivre.app.data.model.PaymentMethod
+import com.saldolivre.app.data.model.SplitType
 
 data class AutoLaunchNotice(
     val count: Int,
@@ -394,25 +399,68 @@ class DashboardViewModel(
         _uiState.update { it.copy(showClosureDialog = false, closureDialogDismissed = true) }
     }
 
-    fun confirmMonthClosure(carryover: Double, invested: Double, cushion: Double) {
+    fun confirmMonthClosure(carryover: Double, invested: Double, subcategory: String? = null) {
         val summary = _uiState.value.summary
         val closedMonth = summary.pendingClosureMonth ?: return
         val targetMonth = _uiState.value.selectedMonth
-        val surplus = summary.pendingClosureSurplus ?: (carryover + invested + cushion)
-        val uid = _uiState.value.currentUser.uid
+        val surplus = summary.pendingClosureSurplus ?: (carryover + invested)
+        val user = _uiState.value.currentUser
+        val uid = user.uid
+
+        val subName = subcategory?.ifBlank { "Reserva de Emergência" } ?: "Reserva de Emergência"
+        val invTxId = if (invested > 0.0) "inv_cls_" + UUID.randomUUID().toString().take(8) else null
 
         val closure = com.saldolivre.app.data.model.MonthClosure(
+            id = "cls_${closedMonth}_$uid",
             uid = uid,
             closedMonth = closedMonth,
             targetMonth = targetMonth,
             totalSurplus = surplus,
             carryoverToNextMonth = carryover,
             investedAmount = invested,
-            cushionAmount = cushion
+            cushionAmount = 0.0,
+            investmentSubcategory = if (invested > 0.0) subName else null,
+            investmentTransactionId = invTxId
         )
         viewModelScope.launch {
             try {
                 repository.saveMonthClosure(closure)
+
+                if (invested > 0.0 && invTxId != null) {
+                    val closedMonthLabel = FinanceEngine.formatMonthLabel(closedMonth)
+                    val lastDay = FinanceEngine.daysInMonth(closedMonth)
+                    val investDate = "$closedMonth-${lastDay.toString().padStart(2, '0')}"
+
+                    val tx = Transaction(
+                        id = invTxId,
+                        createdByUid = uid,
+                        paidByUid = uid,
+                        description = "Aporte Sobra $closedMonthLabel",
+                        category = "Investimentos",
+                        subcategory = subName,
+                        type = TransactionType.EXPENSE,
+                        paymentMethod = PaymentMethod.DEBIT,
+                        status = TransactionStatus.PAID,
+                        actualAmount = invested,
+                        totalAmount = invested,
+                        dueDate = investDate,
+                        competenceMonth = closedMonth,
+                        visibleToUids = listOf(uid),
+                        allocations = listOf(
+                            Allocation(type = "PLATFORM_USER", uid = uid, name = user.displayName, amount = invested, reimbursed = true)
+                        ),
+                        userImpact = mapOf(uid to invested),
+                        splitType = SplitType.MINE
+                    )
+                    repository.addTransaction(tx)
+
+                    val currentBalances = user.investmentAssetBalances.toMutableMap()
+                    val existing = currentBalances[subName] ?: 0.0
+                    currentBalances[subName] = FinanceEngine.round2(existing + invested)
+                    val updatedUser = user.copy(investmentAssetBalances = currentBalances)
+                    repository.saveUserProfile(updatedUser)
+                }
+
                 _uiState.update { it.copy(showClosureDialog = false) }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao salvar fechamento de mês", e)
@@ -424,7 +472,26 @@ class DashboardViewModel(
     fun undoMonthClosure(closedMonth: String) {
         viewModelScope.launch {
             try {
+                val user = _uiState.value.currentUser
                 repository.deleteMonthClosure(closedMonth)
+
+                // Deleta transação de aporte comemorativo se houver
+                val allTxs = repository.getTransactions().first()
+                val relatedTx = allTxs.find {
+                    it.competenceMonth == closedMonth &&
+                    it.category == "Investimentos" &&
+                    it.description.contains("Aporte Sobra", ignoreCase = true)
+                }
+                if (relatedTx != null) {
+                    repository.deleteTransaction(relatedTx.id)
+
+                    val subName = relatedTx.subcategory ?: "Reserva de Emergência"
+                    val currentBalances = user.investmentAssetBalances.toMutableMap()
+                    val existing = currentBalances[subName] ?: 0.0
+                    currentBalances[subName] = max(0.0, FinanceEngine.round2(existing - relatedTx.totalAmount))
+                    val updatedUser = user.copy(investmentAssetBalances = currentBalances)
+                    repository.saveUserProfile(updatedUser)
+                }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao desfazer fechamento de mês", e)
             }

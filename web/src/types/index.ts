@@ -49,11 +49,30 @@ export const LEGACY_CATEGORIES = [
   'Receita',
 ] as const
 
+export const ACTIVE_CATEGORIES = [
+  ...EXPENSE_CATEGORIES,
+  ...INCOME_CATEGORIES,
+] as const
+
 export const CATEGORIES = [
   ...EXPENSE_CATEGORIES,
   ...INCOME_CATEGORIES,
   ...LEGACY_CATEGORIES,
 ] as const
+
+export function normalizeCategory(cat: string): Category {
+  switch (cat) {
+    case 'Lazer': return 'Lazer & Entretenimento'
+    case 'Assinaturas': return 'Assinaturas & Serviços'
+    case 'Compras': return 'Compras & Estilo de Vida'
+    case 'Educação': return 'Educação & Desenvolvimento'
+    case 'Financiamentos & Empréstimos': return 'Financiamentos & Dívidas'
+    case 'Receita': return 'Outras Receitas'
+    case 'Cartão Terceiros': return 'Outros'
+    case 'Estorno': return 'Outros'
+    default: return cat as Category
+  }
+}
 
 export type Category = (typeof CATEGORIES)[number]
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
@@ -672,6 +691,8 @@ export interface UserProfile {
   photoURL: string | null
   monthlyIncome: number
   resolvedRecurring?: Record<string, string[]>
+  investmentMonthlyTarget?: number
+  investmentAssetBalances?: Record<string, number>
 }
 
 export interface SharedUser {
@@ -858,7 +879,8 @@ export interface MonthClosure {
   totalSurplus: number
   carryoverToNextMonth: number
   investedAmount: number
-  cushionAmount: number
+  cushionAmount?: number
+  investmentSubcategory?: string | null
   investmentTransactionId?: string | null
   closedAt: number
 }
@@ -877,6 +899,7 @@ export interface MonthSummary {
   pendingClosureSurplus?: number | null
   pendingClosureMonth?: string | null
   closure?: MonthClosure | null
+  previousMonthClosure?: MonthClosure | null
   daysRemaining: number
   daysInMonth: number
   dailyLimit: number | null

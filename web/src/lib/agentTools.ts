@@ -706,9 +706,17 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
         ? 'credit_card'
         : undefined
 
+  const availableCards = env.getCards()
+  const isCardInvoice = origemDoc === 'fatura_cartao' || defaultMetodo === 'credit_card'
+  const resolvedDefaultCartao = defaultCartao || (
+    isCardInvoice
+      ? (availableCards.find((c) => c.ownerUid === env.me.uid)?.cardName || availableCards[0]?.cardName)
+      : undefined
+  )
+
   const isBankStatement =
     origemDoc === 'extrato_conta' ||
-    (!defaultCartao && (
+    (!isCardInvoice && !resolvedDefaultCartao && (
       transacoesRaw.some((t) => t.tipo === 'income' || INCOME_KEYWORDS_REGEX.test(String(t.descricao || '')))
     ))
 
@@ -896,7 +904,7 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     const resolvedStatus = resolvedMetodo === 'credit_card' ? (item.status || 'pending') : 'paid'
 
     // Cartão só existe se o método for cartão de crédito E não for extrato bancário
-    const resolvedCartao = (!isBankStatement && resolvedMetodo === 'credit_card') ? (item.cartao || defaultCartao) : undefined
+    const resolvedCartao = (!isBankStatement && resolvedMetodo === 'credit_card') ? (item.cartao || resolvedDefaultCartao) : undefined
 
     const merged = {
       ...item,

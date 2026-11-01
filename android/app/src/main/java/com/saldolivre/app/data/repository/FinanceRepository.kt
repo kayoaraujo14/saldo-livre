@@ -52,4 +52,8 @@ interface FinanceRepository {
     fun getActivityLogs(): Flow<List<ActivityLog>>
     suspend fun logActivity(log: ActivityLog)
     suspend fun clearActivityLogs()
+
+    suspend fun saveUserProfile(profile: UserProfile)
+    suspend fun updateInvestmentAssetBalances(balances: Map<String, Double>)
+    suspend fun updateInvestmentMonthlyTarget(target: Double)
 }

@@ -136,7 +136,11 @@ class InvestmentsViewModel(
                     allInvTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.effectiveAmount }
                 )
 
-                val savedTarget = prefs?.getFloat("target_${user.uid}", 1000f)?.toDouble() ?: 1000.0
+                val savedTarget = if (user.investmentMonthlyTarget > 0.0) {
+                    user.investmentMonthlyTarget
+                } else {
+                    prefs?.getFloat("target_${user.uid}", 1000f)?.toDouble() ?: 1000.0
+                }
 
                 // Build assets list
                 val assets = ASSET_DEFINITIONS.map { (subName, bucketType, color) ->
@@ -153,8 +157,9 @@ class InvestmentsViewModel(
                     )
 
                     // Stored manual balance if edited, otherwise defaults to invested amount
+                    val cloudBalance = user.investmentAssetBalances[subName]
                     val storedBalance = prefs?.getString("balance_${user.uid}_$subName", null)?.toDoubleOrNull()
-                    val curBalance = storedBalance ?: subInvestedAllTime
+                    val curBalance = cloudBalance ?: storedBalance ?: subInvestedAllTime
 
                     InvestmentAsset(
                         subcategory = subName,
@@ -263,6 +268,13 @@ class InvestmentsViewModel(
         val uid = _uiState.value.currentUser.uid
         prefs?.edit()?.putFloat("target_$uid", target.toFloat())?.apply()
         _uiState.update { it.copy(monthlyTarget = target, isEditingTarget = false, feedbackMessage = "Meta mensal atualizada!") }
+        viewModelScope.launch {
+            try {
+                repository.updateInvestmentMonthlyTarget(target)
+            } catch (e: Exception) {
+                android.util.Log.e("InvestmentsViewModel", "Erro ao atualizar meta de investimento", e)
+            }
+        }
     }
 
     fun openAddAporte(asset: InvestmentAsset? = null) {
@@ -304,10 +316,16 @@ class InvestmentsViewModel(
             repository.addTransaction(tx)
 
             // Update current balance by adding the contribution
-            val currentStored = prefs?.getString("balance_${user.uid}_$subcat", null)?.toDoubleOrNull()
-            val existing = _uiState.value.assets.find { it.subcategory == subcat }?.currentBalance ?: 0.0
-            val newBal = (currentStored ?: existing) + amount
+            val currentBalances = user.investmentAssetBalances.toMutableMap()
+            val existing = currentBalances[subcat] ?: (_uiState.value.assets.find { it.subcategory == subcat }?.currentBalance ?: 0.0)
+            val newBal = FinanceEngine.round2(existing + amount)
+            currentBalances[subcat] = newBal
             prefs?.edit()?.putString("balance_${user.uid}_$subcat", newBal.toString())?.apply()
+            try {
+                repository.updateInvestmentAssetBalances(currentBalances)
+            } catch (e: Exception) {
+                android.util.Log.e("InvestmentsViewModel", "Erro ao atualizar saldo de investimento", e)
+            }
 
             closeAddAporte()
             _uiState.update { it.copy(feedbackMessage = "Aporte de ${FinanceEngine.formatCurrency(amount)} registrado com sucesso!") }
@@ -353,9 +371,16 @@ class InvestmentsViewModel(
             repository.addTransaction(tx)
 
             // Deduct from current balance
-            val existing = _uiState.value.assets.find { it.subcategory == subcat }?.currentBalance ?: 0.0
-            val newBal = max(0.0, existing - amount)
+            val currentBalances = user.investmentAssetBalances.toMutableMap()
+            val existing = currentBalances[subcat] ?: (_uiState.value.assets.find { it.subcategory == subcat }?.currentBalance ?: 0.0)
+            val newBal = max(0.0, FinanceEngine.round2(existing - amount))
+            currentBalances[subcat] = newBal
             prefs?.edit()?.putString("balance_${user.uid}_$subcat", newBal.toString())?.apply()
+            try {
+                repository.updateInvestmentAssetBalances(currentBalances)
+            } catch (e: Exception) {
+                android.util.Log.e("InvestmentsViewModel", "Erro ao atualizar saldo de investimento", e)
+            }
 
             closeResgate()
             _uiState.update { it.copy(feedbackMessage = "Resgate de ${FinanceEngine.formatCurrency(amount)} concluído!") }
@@ -372,8 +397,19 @@ class InvestmentsViewModel(
 
     fun submitEditBalance(subcat: String, newBalance: Double) {
         val user = _uiState.value.currentUser
-        val valid = max(0.0, newBalance)
+        val valid = max(0.0, FinanceEngine.round2(newBalance))
         prefs?.edit()?.putString("balance_${user.uid}_$subcat", valid.toString())?.apply()
+
+        val currentBalances = user.investmentAssetBalances.toMutableMap()
+        currentBalances[subcat] = valid
+
+        viewModelScope.launch {
+            try {
+                repository.updateInvestmentAssetBalances(currentBalances)
+            } catch (e: Exception) {
+                android.util.Log.e("InvestmentsViewModel", "Erro ao atualizar saldo no Firestore", e)
+            }
+        }
 
         _uiState.update { current ->
             val updatedAssets = current.assets.map {

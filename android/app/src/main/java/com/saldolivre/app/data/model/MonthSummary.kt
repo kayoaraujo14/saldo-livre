@@ -46,6 +46,7 @@ data class MonthSummary(
     val receivableFromFriends: Double = 0.0,
     val payableToOthers: Double = 0.0,
     val totalInvested: Double = 0.0,
+    val totalInvestedAccumulated: Double = 0.0,
     val byCategory: List<CategoryExpense> = emptyList(),
     val byInvestmentSubcategory: List<InvestmentSubcat> = emptyList(),
     val receivables: List<ReceivableItem> = emptyList(),
@@ -55,5 +56,6 @@ data class MonthSummary(
     val rawFreeBalance: Double = 0.0,
     val pendingClosureSurplus: Double? = null,
     val pendingClosureMonth: String? = null,
-    val closure: MonthClosure? = null
+    val closure: MonthClosure? = null,
+    val previousMonthClosure: MonthClosure? = null
 )

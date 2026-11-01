@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
-import { effectiveAmount, canUserEditTransaction } from '@/lib/finance'
+import { effectiveAmount } from '@/lib/finance'
 import {
   buildCardInvoice,
   buildInvoiceHistory,
@@ -42,7 +42,6 @@ interface CardInvoicesModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onEditTx?: (tx: Transaction) => void
-  onRefundTx?: (tx: Transaction) => void
   initialCardId?: string | null
   initialMonth?: string | null
 }
@@ -114,7 +113,6 @@ export function CardInvoicesModal({
   open,
   onOpenChange,
   onEditTx,
-  onRefundTx,
   initialCardId,
   initialMonth,
 }: CardInvoicesModalProps) {
@@ -1052,18 +1050,6 @@ export function CardInvoicesModal({
                                         </div>
                                       </div>
                                     </button>
-                                    {onRefundTx && tx.type === 'expense' && !isCredit && canUserEditTransaction(tx, uid) && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          onRefundTx(tx)
-                                        }}
-                                        className="opacity-70 group-hover:opacity-100 p-2 rounded-lg text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/60 transition-all cursor-pointer shrink-0"
-                                        title="Registrar estorno desta compra"
-                                      >
-                                        <RotateCcw className="size-3.5" />
-                                      </button>
-                                    )}
                                   </li>
                                 )
                               })}

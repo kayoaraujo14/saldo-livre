@@ -815,7 +815,7 @@ export async function fsSaveMonthClosure(uid: string, closure: MonthClosure) {
         visibleToUids: [uid],
         description: `Aporte Sobra ${monthLabel(closure.closedMonth)}`,
         category: 'Investimentos',
-        subcategory: 'Reserva de Emergência',
+        subcategory: closure.investmentSubcategory || 'Reserva de Emergência',
         type: 'expense',
         paymentMethod: 'debit',
         status: 'paid',

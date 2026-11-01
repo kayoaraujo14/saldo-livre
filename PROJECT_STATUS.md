@@ -82,6 +82,36 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-01] Fase 5 — Limpeza de Código e Categorias Legadas:**
+  - **Categorias Obsoletas Removidas das Listas Ativas:** remoção definitiva de categorias legadas e duplicadas (`Cartão Terceiros`, `Estorno`, `Receita`, `Lazer`, `Assinaturas`, `Compras`, `Educação`, `Financiamentos & Empréstimos`) dos seletores e novos formulários (`ACTIVE_CATEGORIES`), substituídas pela taxonomia oficial.
+  - **Mapeamento e Normalização Segura:** implementada função `normalizeCategory` na Web e no Android (`CategoryRegistry.get`) para garantir que transações históricas persistidas com nomes antigos sejam mapeadas dinamicamente sem quebrar a UI nem disparar erros.
+  - **Remoção de Componentes Legados de Estorno:** exclusão de `QuickRefundModal.tsx` e `QuickRefundDialog.kt`, substituídos pela mecânica oficial de edição e registro de valor negativo na categoria de origem.
+  - **Validação:** `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
+
+- **[2026-11-01] Fase 4 — Correção do Lançamento de Faturas em Lote via Chat (Imagem e Texto):**
+  - **Resolução Automática de Cartão:** corrigido bug em `AndroidAgentToolsEngine.kt` e `agentTools.ts` onde compras em lote recebiam `cardId = null` e caíam no extrato solto da conta corrente. Agora, ao identificar fatura de cartão de crédito (seja por imagem, texto ou parâmetro `origemDocumento: "fatura_cartao"`), o sistema resolve dinamicamente o cartão (`cardId`), atribui `paymentMethod = CREDIT_CARD`, define status `PENDING` e calcula as datas de vencimento e mês de competência pelo ciclo de corte do cartão (`calculateCardInvoiceDates`).
+  - **Proteção Contra Falsa Conversão em Débito:** corrigida condição na Web onde estornos ou palavras de receita na fatura acidentalmente forçavam a flag `isBankStatement` e convertiam as compras em débito em conta corrente.
+  - **Prompt de IA Blindado:** reforço no prompt do sistema do Gemini para garantir que compras de fatura usem `origemDocumento: "fatura_cartao"` e `metodoPagamentoPadrao: "credit_card"`.
+  - **Validação:** `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
+
+- **[2026-11-01] Fase 3 — Refatoração da Feature de Investimentos (Sincronização Cloud, Aportes, Resgates e Caixinhas):**
+  - **Sincronização Cloud Firestore:** migração de saldos de caixinhas (`investmentAssetBalances`) e da meta mensal (`investmentMonthlyTarget`) de `SharedPreferences`/`localStorage` para o documento do usuário em `/users/{uid}`, garantindo persistência multiplataforma em tempo real.
+  - **Paridade Web & Mobile:** implementação completa em `InvestmentsModal.tsx` com separação em buckets (Caixinhas & Reservas Seguras vs Investimentos de Risco & Renda Variável), ações rápidas de **Novo Aporte**, **Resgate** e **Ajuste de Saldo Real**, apuração automática de lucro/rendimento e histórico detalhado.
+  - **Validação:** `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
+
+- **[2026-11-01] Fase 2 — UI/UX do Dashboard & Fechamento de Mês com 1 Clique (Desfazer Atômico):**
+  - **Nova Experiência de Sobra do Mês Anterior (Opção 2):** simplificação radical do fechamento de mês para duas decisões claras: **Deixar na Conta Corrente (Saldo Livre)** ou **Guardar em Investimentos / Reserva** (com seletor da caixinha de destino e opção de divisão personalizada).
+  - **Desfazer com 1 Clique Desbloqueado:** remoção da restrição que só exibia o botão de desfazer quando havia colchão (`cushionAmount > 0`). Agora o badge de fechamento do mês anterior é renderizado permanentemente no Dashboard (`KpiGrid.tsx` na Web e `DashboardScreen.kt` no Android) e permite desfazer o fechamento a qualquer momento com apenas 1 clique, revertendo atomicamente os aportes comemorativos e os saldos das caixinhas.
+  - **Paridade Web & Mobile:** implementação de `MonthClosureModal.tsx` na Web com banner de notificação suave e paridade total com o `MonthClosureDialog.kt` do Android.
+  - **Persistência de Usuário e Caixinhas no Firestore:** adicionados métodos `saveUserProfile`, `updateInvestmentAssetBalances` e `updateInvestmentMonthlyTarget` no `FinanceRepository`, `FirestoreFinanceRepository` e `MockFinanceRepository`, integrando leitura/escrita em `/users/{uid}`.
+  - **Validação:** `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
+
+- **[2026-11-01] Fase 1 — Paridade do Motor Financeiro, Investimentos Líquidos e Fechamento de Mês:**
+  - **Fórmula do Saldo Livre Corrigida:** removida a subtração indevida do Colchão de Segurança (`cushionAmount`) da fórmula de `effectiveAvailable` em `web/src/lib/finance.ts` e `FinanceEngine.kt`. O Saldo Livre reflete fielmente `income + carryoverAmount - previousMonthDeficit - (paid + committed)`.
+  - **Cálculo Líquido de Investimentos (Aportes & Resgates):** corrigido o cálculo de `totalInvested` (mensal) e `totalInvestedAccumulated` (histórico acumulado). Resgates de investimentos (`type: 'income'` em `Investimentos` ou `Rendimentos & Investimentos › Resgates de Aplicação`) agora abatem corretamente o montante investido e alimentam a liquidez da conta corrente.
+  - **Modelos de Perfil e Fechamento Atualizados:** adicionados `investmentMonthlyTarget` e `investmentAssetBalances` em `UserProfile` (Web e Android) e `investmentSubcategory` em `MonthClosure`, preparando a persistência das caixinhas e a destinação de sobras diretamente no Firestore.
+  - **Paridade de Compilação:** `npm run build` (TypeScript e Vite) OK e `./gradlew.bat compileDebugKotlin` OK.
+
 - **[2026-10-30] Fix de Compilação Release (Android):**
   - **Null Safety em `TransactionDetailDialog`:** corrigida chamada não segura `currentUser.displayName` para `currentUser?.displayName` na verificação de participantes do rateio, resolvendo erro do compilador Kotlin (`Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type UserProfile?`) na pipeline de Release.
   - Build: `./gradlew :app:compileReleaseKotlin` OK.

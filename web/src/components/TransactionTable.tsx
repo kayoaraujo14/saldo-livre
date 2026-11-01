@@ -92,7 +92,6 @@ const INITIAL_COLUMN_FILTERS: ColumnFilters = {
 
 interface TransactionTableProps {
   onEditTx: (tx: Transaction) => void
-  onRefundTx?: (tx: Transaction) => void
   onToggleExpand?: () => void
   isExpanded?: boolean
   onOpenInvoices?: (cardId?: string) => void
@@ -100,7 +99,6 @@ interface TransactionTableProps {
 
 export function TransactionTable({
   onEditTx,
-  onRefundTx,
   onToggleExpand,
   isExpanded,
   onOpenInvoices,
@@ -1101,7 +1099,6 @@ export function TransactionTable({
                           onEditTx(targetTx)
                         }
                       }}
-                      onRefund={onRefundTx}
                       onDelete={(targetTx) => {
                         if (targetTx.installmentGroupId) {
                           setDeleteGroupTx(targetTx)
@@ -2570,16 +2567,7 @@ export function TransactionTable({
                         </div>
                       ) : (
                         <div className="flex items-center justify-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
-                          {onRefundTx && tx.type === 'expense' && !isRefund && (
-                            <button
-                              type="button"
-                              onClick={() => onRefundTx(tx)}
-                              className="p-1 rounded text-cyan-400 hover:text-cyan-200 hover:bg-cyan-950/40 transition-colors cursor-pointer"
-                              title="Cadastrar estorno rateado deste lançamento"
-                            >
-                              <RotateCcw className="size-3.5" />
-                            </button>
-                          )}
+
                           <button
                             type="button"
                             onClick={() => onEditTx(tx)}

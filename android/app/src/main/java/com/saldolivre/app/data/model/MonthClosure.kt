@@ -11,7 +11,8 @@ data class MonthClosure(
     val totalSurplus: Double = 0.0,
     val carryoverToNextMonth: Double = 0.0, // Montante adicionado ao Saldo Livre do mês seguinte
     val investedAmount: Double = 0.0, // Montante convertido em investimento
-    val cushionAmount: Double = 0.0, // Montante retido como Colchão de Imprevistos
+    val cushionAmount: Double = 0.0, // Montante retido como Colchão de Imprevistos (legado)
+    val investmentSubcategory: String? = null, // Caixinha/Meta que recebeu o aporte
     val investmentTransactionId: String? = null,
     val closedAt: Long = System.currentTimeMillis()
 )

@@ -568,6 +568,18 @@ class MockFinanceRepository(
         prefs?.edit()?.putString("demo_income_${current.uid}", income.toString())?.apply()
     }
 
+    override suspend fun saveUserProfile(profile: UserProfile) {
+        _currentUser.value = profile
+    }
+
+    override suspend fun updateInvestmentAssetBalances(balances: Map<String, Double>) {
+        _currentUser.value = _currentUser.value.copy(investmentAssetBalances = balances)
+    }
+
+    override suspend fun updateInvestmentMonthlyTarget(target: Double) {
+        _currentUser.value = _currentUser.value.copy(investmentMonthlyTarget = target)
+    }
+
     override suspend fun saveCard(card: Card) {
         val user = _currentUser.value
         val newId = if (card.id.isBlank() || card.id.startsWith("new_")) "card_" + UUID.randomUUID().toString().take(8) else card.id

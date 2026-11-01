@@ -1480,13 +1480,27 @@ Atenção para datas:
 - "date": Data em que a compra/transação foi REALIZADA (YYYY-MM-DD). Se o usuário disser "ontem", use a data de ontem; se "hoje", use a data de hoje. NUNCA coloque a data de vencimento da fatura no campo "date"!
 - "competenceMonth": Mês da fatura que será comprometido (YYYY-MM).
 
-2. Cadastrar em Lote (Múltiplos Lançamentos):
+2. Cadastrar em Lote (Múltiplos Lançamentos / Imagem de Fatura ou Extrato):
+Quando o usuário enviar uma imagem, extrato, fatura ou lista de compras para lançar:
+- Se for FATURA DE CARTÃO DE CRÉDITO (compras no cartão, fatura Nubank/Itaú/Inter, etc.):
+  * Defina OBRIGATORIAMENTE `"origemDocumento": "fatura_cartao"`
+  * Defina OBRIGATORIAMENTE `"metodoPagamentoPadrao": "credit_card"`
+  * Se o usuário citar o cartão ou se for identificado na imagem/contexto, informe `"cartaoPadrao": "NomeDoCartao"`
+  * Em cada transação de despesa, coloque `"paymentMethod": "credit_card"`. Isso garante que as compras entrem diretamente na Fatura do Cartão e NÃO soltas no extrato da conta corrente!
+- Se for EXTRATO BANCÁRIO DE CONTA CORRENTE (Pix, transferências, boletos, salário):
+  * Defina `"origemDocumento": "extrato_conta"`
+  * Defina `"metodoPagamentoPadrao": "pix"` (ou "debit")
+
+Exemplo de Lote de Fatura de Cartão:
 ```json
 {
   "action": "BATCH_TRANSACTIONS",
+  "origemDocumento": "fatura_cartao",
+  "metodoPagamentoPadrao": "credit_card",
+  "cartaoPadrao": "Nubank",
   "transactions": [
-    { "description": "iFood", "amount": 45.0, "type": "expense", "category": "Alimentação", "subcategory": "Delivery & Lanches", "paymentMethod": "credit_card", "date": "2026-10-05", "competenceMonth": "2026-11" },
-    { "description": "Salário", "amount": 5000.0, "type": "income", "category": "Salário & Remuneração", "subcategory": "Salário Principal", "paymentMethod": "pix", "date": "2026-10-05", "competenceMonth": "2026-10" }
+    { "description": "iFood", "amount": 45.0, "type": "expense", "category": "Alimentação", "subcategory": "Delivery & Lanches", "paymentMethod": "credit_card", "date": "2026-10-05" },
+    { "description": "Supermercado Carrefour", "amount": 182.50, "type": "expense", "category": "Alimentação", "subcategory": "Supermercado", "paymentMethod": "credit_card", "date": "2026-10-06" }
   ]
 }
 ```

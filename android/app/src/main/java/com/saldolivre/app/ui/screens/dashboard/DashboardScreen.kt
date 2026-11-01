@@ -291,14 +291,22 @@ fun DashboardScreen(
                                 }
                             }
 
-                            // Colchão de Proteção (se houver)
-                            if (summary.cushionAmount > 0.0) {
+                            // Badge permanente de Fechamento do Mês Anterior (Permite Desfazer a qualquer momento)
+                            val prevClosure = summary.previousMonthClosure
+                            val hasPrevClosure = prevClosure != null || summary.carryoverAmount > 0.0 || summary.cushionAmount > 0.0
+                            if (hasPrevClosure) {
+                                val prevM = prevClosure?.closedMonth ?: summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
+                                val prevMLabel = FinanceEngine.formatMonthLabel(prevM)
+                                val carryText = if (summary.carryoverAmount > 0.0) "+${FinanceEngine.formatCurrency(summary.carryoverAmount)} na Conta" else null
+                                val investText = if ((prevClosure?.investedAmount ?: 0.0) > 0.0) "${FinanceEngine.formatCurrency(prevClosure!!.investedAmount)} Guardado" else null
+                                val badgeText = listOfNotNull(carryText, investText).joinToString(" • ").ifBlank { "Fechado" }
+
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(Amber500.copy(alpha = 0.10f))
-                                        .border(1.dp, Amber500.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                                        .background(Cyan400.copy(alpha = 0.10f))
+                                        .border(1.dp, Cyan400.copy(alpha = 0.30f), RoundedCornerShape(8.dp))
                                         .clickable { showUndoClosureDialog = true }
                                         .padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
@@ -307,16 +315,16 @@ fun DashboardScreen(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Shield,
+                                            imageVector = Icons.Default.RotateLeft,
                                             contentDescription = null,
-                                            tint = Amber400,
+                                            tint = Cyan400,
                                             modifier = Modifier.size(13.dp)
                                         )
                                         Text(
-                                            text = "Colchão: ${FinanceEngine.formatCurrency(summary.cushionAmount)}",
+                                            text = "Sobra $prevMLabel: $badgeText",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = Amber400
+                                            color = Cyan400
                                         )
                                     }
                                 }
@@ -862,8 +870,8 @@ fun DashboardScreen(
             closedMonthKey = closedMonth,
             targetMonthKey = uiState.selectedMonth,
             totalSurplus = summary.pendingClosureSurplus,
-            onConfirm = { carryover, invested, cushion ->
-                viewModel.confirmMonthClosure(carryover, invested, cushion)
+            onConfirm = { carryover, invested, subcategory ->
+                viewModel.confirmMonthClosure(carryover, invested, subcategory)
             },
             onDismiss = {
                 viewModel.dismissClosureDialog()
@@ -871,16 +879,20 @@ fun DashboardScreen(
         )
     }
 
-    // Dialog de Desfazer Fechamento de Mês (ao clicar no Colchão de Segurança)
+    // Dialog de Desfazer Fechamento de Mês
     if (showUndoClosureDialog) {
-        val prevMonth = summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
+        val prevClosure = summary.previousMonthClosure
+        val prevMonth = prevClosure?.closedMonth ?: summary.pendingClosureMonth ?: FinanceEngine.shiftMonth(uiState.selectedMonth, -1)
         val prevMonthLabel = FinanceEngine.formatMonthLabel(prevMonth)
+        val carryVal = prevClosure?.carryoverToNextMonth ?: summary.carryoverAmount
+        val investVal = prevClosure?.investedAmount ?: 0.0
+
         AlertDialog(
             onDismissRequest = { showUndoClosureDialog = false },
             containerColor = DarkSurface,
             title = {
                 Text(
-                    text = "Colchão de Proteção",
+                    text = "Fechamento de $prevMonthLabel",
                     style = Typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
@@ -888,20 +900,26 @@ fun DashboardScreen(
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (carryVal > 0.0) {
+                        Text(
+                            text = "• Saldo injetado na Conta: ${FinanceEngine.formatCurrency(carryVal)}",
+                            fontWeight = FontWeight.SemiBold,
+                            color = Cyan400
+                        )
+                    }
+                    if (investVal > 0.0) {
+                        val sub = prevClosure?.investmentSubcategory ?: "Reserva de Emergência"
+                        Text(
+                            text = "• Guardado em $sub: ${FinanceEngine.formatCurrency(investVal)}",
+                            fontWeight = FontWeight.SemiBold,
+                            color = Emerald400
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Valor reservado: ${FinanceEngine.formatCurrency(summary.cushionAmount)}",
-                        fontWeight = FontWeight.SemiBold,
-                        color = Amber400
-                    )
-                    Text(
-                        text = "Esse montante foi separado no fechamento de $prevMonthLabel para não ser consumido no dia a dia.",
-                        style = Typography.bodyMedium,
-                        color = TextSecondary
-                    )
-                    Text(
-                        text = "Deseja desfazer este fechamento? O valor voltará para o Saldo Livre Real.",
+                        text = "Deseja desfazer este fechamento? O mês de $prevMonthLabel será reaberto para você redistribuir a sobra ou ajustar lançamentos.",
                         style = Typography.bodySmall,
-                        color = TextMuted
+                        color = TextSecondary
                     )
                 }
             },
@@ -918,7 +936,7 @@ fun DashboardScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showUndoClosureDialog = false }) {
-                    Text(text = "Manter", color = TextSecondary)
+                    Text(text = "Manter Fechamento", color = TextSecondary)
                 }
             }
         )

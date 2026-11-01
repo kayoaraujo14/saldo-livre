@@ -6,5 +6,7 @@ data class UserProfile(
     val displayName: String = "",
     val photoURL: String? = null,
     val monthlyIncome: Double = 0.0,
-    val resolvedRecurring: Map<String, List<String>> = emptyMap()
+    val resolvedRecurring: Map<String, List<String>> = emptyMap(),
+    val investmentMonthlyTarget: Double = 1000.0,
+    val investmentAssetBalances: Map<String, Double> = emptyMap()
 )

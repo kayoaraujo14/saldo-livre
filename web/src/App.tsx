@@ -10,21 +10,22 @@ import { RecurringBillsModal } from '@/components/modals/RecurringBillsModal'
 import { ReceivablesModal } from '@/components/modals/ReceivablesModal'
 import { ApiKeyModal } from '@/components/modals/ApiKeyModal'
 import { TransactionModal } from '@/components/modals/TransactionModal'
-import { QuickRefundModal } from '@/components/modals/QuickRefundModal'
 import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal'
 import { FriendsModal } from '@/components/modals/FriendsModal'
 import { RecentActivityModal } from '@/components/modals/RecentActivityModal'
 import { InvestmentsModal } from '@/components/modals/InvestmentsModal'
 import { CardInvoicesModal } from '@/components/modals/CardInvoicesModal'
+import { MonthClosureModal } from '@/components/modals/MonthClosureModal'
 import { ScrollToTop } from '@/components/ui/ScrollToTop'
 import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
 import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
 import { AutoLaunchNoticeBanner } from '@/components/AutoLaunchNoticeBanner'
 import { Button } from '@/components/ui/button'
-import { Clock, ArrowRight, ReceiptText } from 'lucide-react'
+import { Clock, ArrowRight, ReceiptText, Sparkles } from 'lucide-react'
 import type { Transaction } from '@/types'
 import { consolidateMonthTransactions } from '@/lib/invoices'
+import { formatBRL, monthLabel } from '@/lib/utils'
 
 type DesktopViewMode = 'chat_focus' | 'chat_full' | 'table_full'
 
@@ -40,6 +41,7 @@ function MainDashboard() {
     me,
     cycleStatus,
     deleteTransaction,
+    summary,
   } = useFinance()
 
   const [cardsModalOpen, setCardsModalOpen] = useState(false)
@@ -53,8 +55,15 @@ function MainDashboard() {
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
   const [invoicesModalOpen, setInvoicesModalOpen] = useState(false)
   const [invoicesInitialCardId, setInvoicesInitialCardId] = useState<string | null>(null)
+  const [closureModalOpen, setClosureModalOpen] = useState(false)
+  const [closureDismissed, setClosureDismissed] = useState(false)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
-  const [quickRefundTx, setQuickRefundTx] = useState<Transaction | null>(null)
+
+  useEffect(() => {
+    if (summary?.pendingClosureSurplus && summary.pendingClosureSurplus > 0 && !closureDismissed) {
+      setClosureModalOpen(true)
+    }
+  }, [summary?.pendingClosureSurplus, closureDismissed])
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
   const [mobileTab, setMobileTab] = useState<MobileTab>('home')
@@ -94,10 +103,6 @@ function MainDashboard() {
     }
     setEditingTx(tx)
     setTxModalOpen(true)
-  }
-
-  const handleRefundTx = (tx: Transaction) => {
-    setQuickRefundTx(tx)
   }
 
   const isExpandedView = desktopView !== 'chat_focus'
@@ -159,6 +164,26 @@ function MainDashboard() {
           </div>
         )}
 
+        {/* Banner de Sobra Pendente do Mês Anterior */}
+        {summary?.pendingClosureSurplus && summary.pendingClosureSurplus > 0 && desktopView === 'chat_focus' && (
+          <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/15 to-transparent border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in slide-in-from-top-1">
+            <div className="flex items-center gap-2.5 text-emerald-200">
+              <span className="size-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+              <span>
+                Em <strong>{monthLabel(summary.pendingClosureMonth || '')}</strong> sobraram <strong>{formatBRL(summary.pendingClosureSurplus)}</strong>! Escolha se deseja manter na conta corrente ou guardar na sua caixinha.
+              </span>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setClosureModalOpen(true)}
+              className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold h-7 text-xs px-3 self-end sm:self-auto cursor-pointer rounded-lg shadow-sm"
+            >
+              <Sparkles className="size-3 mr-1" />
+              Destinar Sobra
+            </Button>
+          </div>
+        )}
+
         {/* Banner de Lançamento Automático / Próximos Vencimentos (Desktop) */}
         {!isExpandedView && (
           <div className="hidden lg:block">
@@ -197,7 +222,6 @@ function MainDashboard() {
             >
               <TransactionTable
                 onEditTx={handleEditTx}
-                onRefundTx={handleRefundTx}
                 onOpenInvoices={(cardId) => {
                   setInvoicesInitialCardId(cardId || null)
                   setInvoicesModalOpen(true)
@@ -277,7 +301,6 @@ function MainDashboard() {
                         allTransactions={monthTransactions}
                         cards={cards}
                         onEdit={handleEditTx}
-                        onRefund={handleRefundTx}
                         onDelete={(targetTx) => deleteTransaction(targetTx.id)}
                         onCycleStatus={cycleStatus}
                       />
@@ -293,7 +316,6 @@ function MainDashboard() {
             <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <TransactionTable
                 onEditTx={handleEditTx}
-                onRefundTx={handleRefundTx}
                 onOpenInvoices={(cardId) => {
                   setInvoicesInitialCardId(cardId || null)
                   setInvoicesModalOpen(true)
@@ -356,13 +378,6 @@ function MainDashboard() {
         }}
         editingTx={editingTx}
       />
-      <QuickRefundModal
-        open={Boolean(quickRefundTx)}
-        onOpenChange={(open) => {
-          if (!open) setQuickRefundTx(null)
-        }}
-        transaction={quickRefundTx}
-      />
       <FutureProjectionModal
         open={projectionModalOpen}
         onOpenChange={setProjectionModalOpen}
@@ -390,7 +405,13 @@ function MainDashboard() {
         }}
         initialCardId={invoicesInitialCardId}
         onEditTx={handleEditTx}
-        onRefundTx={handleRefundTx}
+      />
+      <MonthClosureModal
+        open={closureModalOpen}
+        onOpenChange={(open) => {
+          setClosureModalOpen(open)
+          if (!open) setClosureDismissed(true)
+        }}
       />
     </div>
   )

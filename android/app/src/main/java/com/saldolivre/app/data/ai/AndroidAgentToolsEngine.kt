@@ -581,6 +581,25 @@ class AndroidAgentToolsEngine(
         val defaultMonth = jsonObj.getStringOrNull("mesFaturaPadrao")
             ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
         val defaultPayMethod = jsonObj.getStringOrNull("metodoPagamentoPadrao") ?: "pix"
+        val cardParam = jsonObj.getStringOrNull("cartao")
+            ?: jsonObj.getStringOrNull("cartaoPadrao")
+            ?: jsonObj.getStringOrNull("cardName")
+            ?: jsonObj.getStringOrNull("cardId")
+        val origemDoc = jsonObj.getStringOrNull("origemDocumento") ?: jsonObj.getStringOrNull("documentOrigin")
+        val isFaturaDoc = origemDoc?.contains("fatura", ignoreCase = true) == true ||
+            defaultPayMethod.equals("credit_card", ignoreCase = true) ||
+            defaultPayMethod.equals("cartao_credito", ignoreCase = true)
+
+        val allCards = repository.getCards().first()
+        val defaultCard: Card? = if (!cardParam.isNullOrBlank()) {
+            allCards.find { it.id == cardParam || it.cardName.contains(cardParam, ignoreCase = true) }
+                ?: allCards.firstOrNull { it.ownerUid == user.uid }
+        } else if (isFaturaDoc) {
+            allCards.firstOrNull { it.ownerUid == user.uid } ?: allCards.firstOrNull()
+        } else {
+            null
+        }
+
         val createdList = mutableListOf<Transaction>()
         val pendingTxMaps = mutableListOf<Map<String, Any?>>()
         var totalExpenses = 0.0
@@ -640,13 +659,44 @@ class AndroidAgentToolsEngine(
             val finalCur = if (itemTot > 1) itemCur else (detectedBatchInst?.first ?: itemCur)
             val finalTot = if (itemTot > 1) itemTot else (detectedBatchInst?.second ?: itemTot)
 
+            val itemCardParam = item.getStringOrNull("cartao") ?: item.getStringOrNull("cardId")
+            val itemCard = if (!itemCardParam.isNullOrBlank()) {
+                allCards.find { it.id == itemCardParam || it.cardName.contains(itemCardParam, ignoreCase = true) }
+            } else defaultCard
+
+            val isCardPayment = (itemCard != null && !isIncome) ||
+                payMethodStr.equals("credit_card", ignoreCase = true) ||
+                payMethodStr.equals("cartao_credito", ignoreCase = true) ||
+                (isFaturaDoc && !isIncome)
+
+            val resolvedPayMethod = if (isIncome) {
+                PaymentMethod.PIX
+            } else if (isCardPayment) {
+                PaymentMethod.CREDIT_CARD
+            } else {
+                PaymentMethod.from(payMethodStr)
+            }
+
+            val targetCard = if (resolvedPayMethod == PaymentMethod.CREDIT_CARD) (itemCard ?: defaultCard) else null
+            val targetCardId = targetCard?.id
+
+            val (resolvedDueDate, resolvedComp) = if (targetCard != null) {
+                val dates = FinanceEngine.calculateCardInvoiceDates(dt, targetCard)
+                val compMonth = item.getStringOrNull("competenceMonth")
+                    ?: item.getStringOrNull("mesFatura")
+                    ?: dates.second
+                Pair(dates.first, compMonth)
+            } else {
+                Pair(dt, comp)
+            }
+
             if (finalTot > 1 && !isIncome) {
                 val cleanDesc = FinanceEngine.stripInstallmentSuffix(desc)
                 val groupId = "inst_" + UUID.randomUUID().toString().take(8)
                 for (i in 1..finalTot) {
                     val delta = i - finalCur
-                    val targetMonth = FinanceEngine.shiftMonth(comp, delta)
-                    val targetDueDate = shiftDateMonth(dt, delta)
+                    val targetMonth = FinanceEngine.shiftMonth(resolvedComp, delta)
+                    val targetDueDate = shiftDateMonth(resolvedDueDate, delta)
                     val isPast = i < finalCur
                     val tx = Transaction(
                         id = "tx_" + UUID.randomUUID().toString().take(8),
@@ -656,7 +706,8 @@ class AndroidAgentToolsEngine(
                         category = cat,
                         subcategory = subcat,
                         type = TransactionType.EXPENSE,
-                        paymentMethod = PaymentMethod.from(payMethodStr),
+                        paymentMethod = resolvedPayMethod,
+                        cardId = targetCardId,
                         status = if (isPast) TransactionStatus.PAID else TransactionStatus.PENDING,
                         actualAmount = amt,
                         totalAmount = amt,
@@ -681,12 +732,13 @@ class AndroidAgentToolsEngine(
                     category = cat,
                     subcategory = subcat,
                     type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
-                    paymentMethod = PaymentMethod.from(payMethodStr),
-                    status = if (isIncome) TransactionStatus.PAID else TransactionStatus.PENDING,
+                    paymentMethod = resolvedPayMethod,
+                    cardId = targetCardId,
+                    status = if (isIncome) TransactionStatus.PAID else if (resolvedPayMethod == PaymentMethod.CREDIT_CARD) TransactionStatus.PENDING else TransactionStatus.PAID,
                     actualAmount = amt,
                     totalAmount = amt,
-                    dueDate = dt,
-                    competenceMonth = comp,
+                    dueDate = resolvedDueDate,
+                    competenceMonth = resolvedComp,
                     visibleToUids = listOf(user.uid),
                     userImpact = mapOf(user.uid to amt),
                     allocations = listOf(Allocation(type = "PLATFORM_USER", uid = user.uid, name = user.displayName, amount = amt, reimbursed = true))

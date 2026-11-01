@@ -546,9 +546,9 @@ object CategoryRegistry {
         )
     )
 
-    val CATEGORIES: List<CategoryDetail> = EXPENSE_CATEGORIES + INCOME_CATEGORIES + LEGACY_CATEGORIES
+    val CATEGORIES: List<CategoryDetail> = EXPENSE_CATEGORIES + INCOME_CATEGORIES
 
-    private val categoryMap = CATEGORIES.associateBy { it.name }
+    private val categoryMap = (CATEGORIES + LEGACY_CATEGORIES).associateBy { it.name }
 
     fun get(name: String): CategoryDetail {
         categoryMap[name]?.let { return it }
@@ -557,7 +557,10 @@ object CategoryRegistry {
             "Assinaturas" -> get("Assinaturas & Serviços")
             "Compras" -> get("Compras & Estilo de Vida")
             "Educação" -> get("Educação & Desenvolvimento")
-            "Financiamentos & Empréstimos" -> get("Financiamentos & Dívidas")
+            "Financiamentos & Empréstimos" -> get("Empréstimos & Dívidas")
+            "Receita" -> get("Outras Receitas")
+            "Cartão Terceiros" -> get("Outros")
+            "Estorno" -> get("Outros")
             else -> CategoryDetail(
                 name = name,
                 color = Color(0xFF64748B),

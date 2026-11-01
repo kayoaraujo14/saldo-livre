@@ -1103,6 +1103,15 @@ object FinanceEngine {
                     val sub = tx.subcategory ?: "Outros Investimentos"
                     investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) + impact
                 }
+            } else if (tx.type == TransactionType.INCOME && impact > 0.0) {
+                // Abate resgates do total investido no mês
+                val isResgate = tx.category == "Investimentos" ||
+                    (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
+                if (isResgate) {
+                    totalInvested -= impact
+                    val sub = tx.subcategory ?: "Outros Investimentos"
+                    investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) - impact
+                }
             }
 
             // A Receber / A Pagar logic
@@ -1177,6 +1186,7 @@ object FinanceEngine {
         var cushionAmount = 0.0
         var pendingClosureSurplus: Double? = null
         var pendingClosureMonth: String? = null
+        var prevClosureObj: MonthClosure? = null
 
         // Mês futuro NUNCA antecipa sobra nem herda provisoriamente
         if (monthState != "future") {
@@ -1184,6 +1194,7 @@ object FinanceEngine {
             val prevClosure = closures.firstOrNull { it.closedMonth == prevMonthKey && it.uid == uid }
 
             if (prevClosure != null) {
+                prevClosureObj = prevClosure
                 // Já houve fechamento formal do mês imediatamente anterior
                 carryoverAmount = round2(prevClosure.carryoverToNextMonth)
                 cushionAmount = round2(prevClosure.cushionAmount)
@@ -1229,7 +1240,24 @@ object FinanceEngine {
             }
         }
 
-        val effectiveAvailable = income + carryoverAmount - previousMonthDeficit - cushionAmount
+        // Total acumulado investido no histórico (aportes - resgates)
+        var totalInvestedAccumulated = 0.0
+        for (tx in all) {
+            if (tx.visibleToUids.contains(uid)) {
+                val isAporte = tx.category == "Investimentos" && tx.type == TransactionType.EXPENSE
+                val isResgate = (tx.category == "Investimentos" && tx.type == TransactionType.INCOME) ||
+                    (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
+                val imp = impactFor(tx, uid, all)
+                if (isAporte && imp > 0.0) {
+                    totalInvestedAccumulated += imp
+                } else if (isResgate && imp > 0.0) {
+                    totalInvestedAccumulated -= imp
+                }
+            }
+        }
+        totalInvestedAccumulated = max(0.0, round2(totalInvestedAccumulated))
+
+        val effectiveAvailable = income + carryoverAmount - previousMonthDeficit
         val freeBalance = round2(effectiveAvailable - (paid + committed))
         val dailyLimit = if (daysRemaining > 0) round2(freeBalance / daysRemaining) else null
 
@@ -1262,6 +1290,7 @@ object FinanceEngine {
             pendingClosureSurplus = pendingClosureSurplus,
             pendingClosureMonth = pendingClosureMonth,
             closure = thisMonthClosure,
+            previousMonthClosure = prevClosureObj,
             daysRemaining = daysRemaining,
             daysInMonth = dim,
             dailyLimit = dailyLimit,
@@ -1272,6 +1301,7 @@ object FinanceEngine {
             receivableFromFriends = round2(receivableFromFriends),
             payableToOthers = round2(payableToOthers),
             totalInvested = round2(totalInvested),
+            totalInvestedAccumulated = totalInvestedAccumulated,
             byCategory = byCategory,
             byInvestmentSubcategory = byInvestSub,
             receivables = receivablesList

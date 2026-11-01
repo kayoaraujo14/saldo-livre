@@ -794,7 +794,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
               visibleToUids: [closure.uid],
               description: `Aporte Sobra ${monthLabel(closure.closedMonth)}`,
               category: 'Investimentos',
-              subcategory: 'Reserva de Emergência',
+              subcategory: closure.investmentSubcategory || 'Reserva de Emergência',
               type: 'expense',
               paymentMethod: 'debit',
               status: 'paid',
@@ -838,15 +838,24 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           monthClosures: (s.monthClosures || []).filter(
             (c) => !(c.closedMonth === closedMonth && c.uid === currentUid),
           ),
+          transactions: (s.transactions || []).filter(
+            (t) => !(t.competenceMonth === closedMonth && t.category === 'Investimentos' && t.description.includes('Aporte Sobra')),
+          ),
         }))
         return
       }
 
       if (currentUid) {
         await fb.fsDeleteMonthClosure(currentUid, closedMonth)
+        const related = transactions.find(
+          (t) => t.competenceMonth === closedMonth && t.category === 'Investimentos' && t.description.includes('Aporte Sobra')
+        )
+        if (related) {
+          await fb.fsDeleteTransaction(related.id)
+        }
       }
     },
-    [mode, commitDemo, currentUid, partnerParty, friends],
+    [mode, commitDemo, currentUid, transactions],
   )
 
   // ---------------- Ações de sessão ----------------

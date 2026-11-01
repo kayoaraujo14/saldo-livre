@@ -651,6 +651,42 @@ class FirestoreFinanceRepository(
         }
     }
 
+    override suspend fun saveUserProfile(profile: UserProfile) {
+        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
+        _currentUser.value = profile
+        if (uid.isNotBlank() && uid != "default_uid") {
+            firestore.collection("users").document(uid).set(
+                mapOf(
+                    "uid" to profile.uid,
+                    "email" to profile.email,
+                    "displayName" to profile.displayName,
+                    "photoURL" to profile.photoURL,
+                    "monthlyIncome" to profile.monthlyIncome,
+                    "investmentMonthlyTarget" to profile.investmentMonthlyTarget,
+                    "investmentAssetBalances" to profile.investmentAssetBalances,
+                    "resolvedRecurring" to profile.resolvedRecurring
+                ),
+                com.google.firebase.firestore.SetOptions.merge()
+            ).await()
+        }
+    }
+
+    override suspend fun updateInvestmentAssetBalances(balances: Map<String, Double>) {
+        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
+        _currentUser.value = _currentUser.value.copy(investmentAssetBalances = balances)
+        if (uid.isNotBlank() && uid != "default_uid") {
+            firestore.collection("users").document(uid).update("investmentAssetBalances", balances).await()
+        }
+    }
+
+    override suspend fun updateInvestmentMonthlyTarget(target: Double) {
+        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
+        _currentUser.value = _currentUser.value.copy(investmentMonthlyTarget = target)
+        if (uid.isNotBlank() && uid != "default_uid") {
+            firestore.collection("users").document(uid).update("investmentMonthlyTarget", target).await()
+        }
+    }
+
     override suspend fun saveCard(card: Card) {
         val uid = auth.currentUser?.uid ?: _currentUser.value.uid
         val cardId = if (card.id.isBlank() || card.id.startsWith("new_")) {
@@ -946,12 +982,22 @@ class FirestoreFinanceRepository(
                 resolvedMap[k.toString()] = list
             }
         }
+        val rawBalances = doc.get("investmentAssetBalances") as? Map<*, *>
+        val assetBalances = mutableMapOf<String, Double>()
+        rawBalances?.forEach { (k, v) ->
+            if (k != null) {
+                val num = (v as? Number)?.toDouble() ?: 0.0
+                assetBalances[k.toString()] = num
+            }
+        }
         return UserProfile(
             uid = doc.id,
             email = doc.getString("email") ?: "",
             displayName = doc.getString("displayName") ?: "Meu Perfil",
             photoURL = doc.getString("photoURL"),
             monthlyIncome = doc.getDouble("monthlyIncome") ?: 5000.0,
+            investmentMonthlyTarget = doc.getDouble("investmentMonthlyTarget") ?: 1000.0,
+            investmentAssetBalances = assetBalances,
             resolvedRecurring = resolvedMap
         )
     }

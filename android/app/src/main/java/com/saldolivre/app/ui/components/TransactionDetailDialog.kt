@@ -63,8 +63,6 @@ fun TransactionDetailDialog(
     onConfirmRefund: ((Transaction, Double) -> Unit)? = null,
     onDeleteRequest: () -> Unit
 ) {
-    var showQuickRefundDialog by remember { mutableStateOf(false) }
-
     val resolvedUserId = currentUserId ?: currentUser?.uid
     val myImpact = remember(transaction, resolvedUserId, allTransactions) {
         if (!resolvedUserId.isNullOrBlank()) {
@@ -582,72 +580,37 @@ fun TransactionDetailDialog(
                 }
             }
 
-            // 5. BOTÕES DE AÇÃO: Lado a Lado (Editar & Estornar)
+            // 5. BOTÃO DE AÇÃO: Editar Lançamento
             if (canEdit) {
-                val hasRefundAction = transaction.type == TransactionType.EXPENSE && !transaction.isRefund
-                Row(
+                Button(
+                    onClick = {
+                        val targetId = transaction.id
+                        onDismissRequest()
+                        onNavigateToEditTransaction(targetId)
+                    },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Emerald500.copy(alpha = 0.12f),
+                        contentColor = Emerald400
+                    ),
+                    contentPadding = PaddingValues(vertical = 11.dp)
                 ) {
-                    Button(
-                        onClick = {
-                            val targetId = transaction.id
-                            onDismissRequest()
-                            onNavigateToEditTransaction(targetId)
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Emerald500.copy(alpha = 0.12f),
-                            contentColor = Emerald400
-                        ),
-                        contentPadding = PaddingValues(vertical = 11.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp),
-                            tint = Emerald400
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Editar Lançamento",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = Emerald400,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    if (hasRefundAction) {
-                        Button(
-                            onClick = { showQuickRefundDialog = true },
-                            modifier = Modifier.weight(1f),
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color.White.copy(alpha = 0.06f),
-                                contentColor = Color.White
-                            ),
-                            contentPadding = PaddingValues(vertical = 11.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                modifier = Modifier.size(15.dp),
-                                tint = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Estornar Compra",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
-                                color = Color.White,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = Emerald400
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Editar Lançamento",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = Emerald400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             } else {
                 Box(
@@ -753,20 +716,6 @@ fun TransactionDetailDialog(
                 }
             }
         }
-    }
-
-    if (showQuickRefundDialog) {
-        QuickRefundDialog(
-            origTx = transaction,
-            currentUser = currentUser ?: UserProfile(uid = resolvedUserId ?: ""),
-            cardName = cardName,
-            onDismissRequest = { showQuickRefundDialog = false },
-            onConfirmRefund = { refundAmount ->
-                onConfirmRefund?.invoke(transaction, refundAmount)
-                showQuickRefundDialog = false
-                onDismissRequest()
-            }
-        )
     }
 }
 

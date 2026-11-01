@@ -11,7 +11,7 @@ import {
   PieChart,
   CalendarClock,
   ShoppingBag,
-  Shield,
+  RotateCcw,
 } from 'lucide-react'
 
 interface KpiGridProps {
@@ -216,21 +216,32 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
             ) : null}
           </div>
 
-          {/* Colchão de Proteção (se houver) */}
-          {summary.cushionAmount && summary.cushionAmount > 0 ? (
+          {/* Fechamento do Mês Anterior (Badge permanente para Desfazer a qualquer momento) */}
+          {summary.previousMonthClosure || (summary.carryoverAmount && summary.carryoverAmount > 0) ? (
             <button
               type="button"
               onClick={() => {
-                const prev = summary.pendingClosureMonth || shiftMonth(month, -1)
-                if (window.confirm(`Deseja desfazer o fechamento de ${monthLabel(prev)} e devolver ${formatBRL(summary.cushionAmount || 0)} ao Saldo Livre Real?`)) {
+                const prev = summary.previousMonthClosure?.closedMonth || summary.pendingClosureMonth || shiftMonth(month, -1)
+                const prevLabel = monthLabel(prev)
+                const carry = summary.previousMonthClosure?.carryoverToNextMonth ?? summary.carryoverAmount ?? 0
+                const invest = summary.previousMonthClosure?.investedAmount ?? 0
+                const sub = summary.previousMonthClosure?.investmentSubcategory || 'Investimentos'
+                const detail = [
+                  carry > 0 ? `+${formatBRL(carry)} na Conta` : '',
+                  invest > 0 ? `+${formatBRL(invest)} em ${sub}` : ''
+                ].filter(Boolean).join(' e ')
+
+                if (window.confirm(`Deseja desfazer o fechamento de ${prevLabel}${detail ? ` (${detail})` : ''} e reabrir o mês para edição?`)) {
                   deleteMonthClosure(prev)
                 }
               }}
               title="Clique para desfazer fechamento do mês anterior"
-              className="flex items-center gap-1 text-[10px] text-amber-400 hover:text-amber-300 transition-colors font-medium mt-1.5 text-left cursor-pointer"
+              className="flex items-center gap-1.5 text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors font-medium mt-1.5 text-left cursor-pointer group"
             >
-              <Shield className="size-3 shrink-0" />
-              <span className="underline decoration-dotted truncate">Colchão de Proteção: {formatBRL(summary.cushionAmount)}</span>
+              <RotateCcw className="size-3 shrink-0 group-hover:-rotate-45 transition-transform" />
+              <span className="underline decoration-dotted truncate">
+                Fechamento de {monthLabel(summary.previousMonthClosure?.closedMonth || shiftMonth(month, -1))}: {summary.carryoverAmount && summary.carryoverAmount > 0 ? `+${formatBRL(summary.carryoverAmount)} na conta` : 'Desfazer'}
+              </span>
             </button>
           ) : null}
         </div>

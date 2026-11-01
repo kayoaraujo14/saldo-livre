@@ -966,6 +966,16 @@ export function computeSummary(
           })
         }
       }
+    } else if (tx.type === 'income' && impact > 0) {
+      // Abate resgates de investimentos do total investido no mês
+      const isResgate =
+        tx.category === 'Investimentos' ||
+        (tx.category === 'Rendimentos & Investimentos' && Boolean(tx.subcategory && /resgate/i.test(tx.subcategory)))
+      if (isResgate) {
+        totalInvested -= impact
+        const subName = tx.subcategory || 'Outros Investimentos'
+        investSubcat.set(subName, (investSubcat.get(subName) ?? 0) - impact)
+      }
     }
 
     const rawAllocs = Array.isArray(tx.allocations)
@@ -996,14 +1006,23 @@ export function computeSummary(
     }
   }
 
-  // Total acumulado investido no histórico do usuário
+  // Total acumulado investido no histórico do usuário (aportes - resgates)
   let totalInvestedAccumulated = 0
   for (const tx of all || []) {
-    if (tx.category === 'Investimentos' && (tx.visibleToUids || []).includes(uid)) {
+    if ((tx.visibleToUids || []).includes(uid)) {
+      const isAporte = tx.category === 'Investimentos' && tx.type === 'expense'
+      const isResgate =
+        (tx.category === 'Investimentos' && tx.type === 'income') ||
+        (tx.category === 'Rendimentos & Investimentos' && Boolean(tx.subcategory && /resgate/i.test(tx.subcategory)))
       const imp = impactFor(tx, uid, all)
-      if (imp > 0) totalInvestedAccumulated += imp
+      if (isAporte && imp > 0) {
+        totalInvestedAccumulated += imp
+      } else if (isResgate && imp > 0) {
+        totalInvestedAccumulated -= imp
+      }
     }
   }
+  totalInvestedAccumulated = Math.max(0, round2(totalInvestedAccumulated))
 
   const committed = committedEstimated + committedPending
   const rawFreeBalance = round2(income - (paid + committed))
@@ -1014,14 +1033,16 @@ export function computeSummary(
   let cushionAmount = 0
   let pendingClosureSurplus: number | null = null
   let pendingClosureMonth: string | null = null
+  let prevClosureObj: MonthClosure | null = null
 
   if (state !== 'future') {
     const prevMonthKey = shiftMonth(monthKey, -1)
     const prevClosure = (closures || []).find((c) => c.closedMonth === prevMonthKey && c.uid === uid)
 
     if (prevClosure) {
-      carryoverAmount = round2(prevClosure.carryoverToNextMonth)
-      cushionAmount = round2(prevClosure.cushionAmount)
+      prevClosureObj = prevClosure
+      carryoverAmount = round2(prevClosure.carryoverToNextMonth || 0)
+      cushionAmount = round2(prevClosure.cushionAmount || 0)
     } else {
       const pastMonths = Array.from(
         new Set(
@@ -1061,7 +1082,7 @@ export function computeSummary(
     }
   }
 
-  const effectiveAvailable = income + carryoverAmount - previousMonthDeficit - cushionAmount
+  const effectiveAvailable = income + carryoverAmount - previousMonthDeficit
   const freeBalance = round2(effectiveAvailable - (paid + committed))
   const daysRemaining = getDaysRemaining(monthKey)
   const thisMonthClosure = (closures || []).find((c) => c.closedMonth === monthKey && c.uid === uid) || null
@@ -1080,6 +1101,7 @@ export function computeSummary(
     pendingClosureSurplus,
     pendingClosureMonth,
     closure: thisMonthClosure,
+    previousMonthClosure: prevClosureObj,
     daysRemaining,
     daysInMonth: daysInMonth(monthKey),
     dailyLimit: daysRemaining > 0 ? round2(freeBalance / daysRemaining) : null,
