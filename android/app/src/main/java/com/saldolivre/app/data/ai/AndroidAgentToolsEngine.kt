@@ -815,6 +815,9 @@ class AndroidAgentToolsEngine(
         transactionId: String? = null,
         targetIds: List<String>? = null,
         month: String? = null,
+        originDate: String? = null,
+        filterAmount: Double? = null,
+        editAllMatches: Boolean = false,
         newAmount: Double? = null,
         newDescription: String? = null,
         newCategory: String? = null,
@@ -843,12 +846,31 @@ class AndroidAgentToolsEngine(
         } else if (!transactionId.isNullOrBlank()) {
             all.filter { it.id == transactionId }
         } else if (effectiveTerms.isNotEmpty()) {
-            all.filter { t ->
-                if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
-                effectiveTerms.any { term ->
+            val selected = mutableListOf<Transaction>()
+            val selectedIds = mutableSetOf<String>()
+
+            for (term in effectiveTerms) {
+                val candidates = all.filter { t ->
+                    if (t.id in selectedIds) return@filter false
+                    if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
+                    if (!originDate.isNullOrBlank() && t.dueDate != originDate) return@filter false
+                    if (filterAmount != null && kotlin.math.abs(t.effectiveAmount - filterAmount) > 0.05) return@filter false
                     matchesSearch(t.description, term) || matchesSearch(t.category, term) || (t.subcategory != null && matchesSearch(t.subcategory, term))
                 }
+
+                if (editAllMatches) {
+                    selected.addAll(candidates)
+                    selectedIds.addAll(candidates.map { it.id })
+                } else {
+                    // Seleção cirúrgica: escolhe apenas o item mais recente correspondente a este termo específico
+                    val best = candidates.maxByOrNull { it.createdAt }
+                    if (best != null) {
+                        selected.add(best)
+                        selectedIds.add(best.id)
+                    }
+                }
             }
+            selected
         } else emptyList()
 
         if (targets.isEmpty()) {
@@ -964,6 +986,9 @@ class AndroidAgentToolsEngine(
                     "searchTerm" to searchTerm,
                     "searchTerms" to effectiveTerms,
                     "month" to month,
+                    "originDate" to originDate,
+                    "filterAmount" to filterAmount,
+                    "editAllMatches" to editAllMatches,
                     "newAmount" to newAmount,
                     "newDescription" to newDescription,
                     "newCategory" to newCategory,
@@ -1145,6 +1170,21 @@ class AndroidAgentToolsEngine(
             ?: jsonObj.getStringOrNull("dueDate")
             ?: jsonObj.getStringOrNull("dataVencimento")
         val newSplitTypeStr = jsonObj.getStringOrNull("newSplitType") ?: jsonObj.getStringOrNull("novoTipoDivisao")
+        val originDate = jsonObj.getStringOrNull("originDate")
+            ?: jsonObj.getStringOrNull("currentDate")
+            ?: jsonObj.getStringOrNull("dataOriginal")
+            ?: jsonObj.getStringOrNull("dataAtual")
+            ?: jsonObj.getStringOrNull("startDate")
+            ?: (jsonObj.getStringOrNull("date")?.takeIf { it != newDueDate })
+            ?: (jsonObj.getStringOrNull("data")?.takeIf { it != newDueDate })
+        val filterAmount = jsonObj.getDoubleOrNull("amount")
+            ?: jsonObj.getDoubleOrNull("valor")
+            ?: jsonObj.getDoubleOrNull("filterAmount")
+        val editAllMatches = jsonObj.getBooleanOrNull("editAll")
+            ?: jsonObj.getBooleanOrNull("editAllMatches")
+            ?: jsonObj.getBooleanOrNull("alterarTodos")
+            ?: jsonObj.getBooleanOrNull("allOccurrences")
+            ?: false
         val confirmed = jsonObj.getBooleanOrNull("confirmed")
             ?: jsonObj.getBooleanOrNull("__confirmed")
             ?: false
@@ -1174,7 +1214,18 @@ class AndroidAgentToolsEngine(
                 val matched = if (!itemId.isNullOrBlank()) {
                     all.filter { it.id == itemId }
                 } else if (!itemTerm.isNullOrBlank()) {
-                    all.filter { t -> matchesSearch(t.description, itemTerm) }
+                    val candidates = all.filter { t ->
+                        if (t.id in resolvedTargetIds) return@filter false
+                        if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
+                        if (!originDate.isNullOrBlank() && t.dueDate != originDate) return@filter false
+                        if (filterAmount != null && kotlin.math.abs(t.effectiveAmount - filterAmount) > 0.05) return@filter false
+                        matchesSearch(t.description, itemTerm) || matchesSearch(t.category, itemTerm) || (t.subcategory != null && matchesSearch(t.subcategory, itemTerm))
+                    }
+                    if (editAllMatches) {
+                        candidates
+                    } else {
+                        listOfNotNull(candidates.maxByOrNull { it.createdAt })
+                    }
                 } else emptyList()
                 resolvedTargetIds.addAll(matched.map { it.id })
             }
@@ -1182,6 +1233,9 @@ class AndroidAgentToolsEngine(
                 return executeEditTransaction(
                     targetIds = resolvedTargetIds.distinct(),
                     month = month,
+                    originDate = originDate,
+                    filterAmount = filterAmount,
+                    editAllMatches = editAllMatches,
                     newAmount = newAmount,
                     newDescription = newDescription,
                     newCategory = newCategory,
@@ -1211,6 +1265,9 @@ class AndroidAgentToolsEngine(
             transactionId = transactionId,
             targetIds = targetIds,
             month = month,
+            originDate = originDate,
+            filterAmount = filterAmount,
+            editAllMatches = editAllMatches,
             newAmount = newAmount,
             newDescription = newDescription,
             newCategory = newCategory,
@@ -1813,7 +1870,7 @@ class AndroidAgentToolsEngine(
             } else ""
 
             val typeBadge = if (t.type == TransactionType.INCOME) "🟢 Entrada" else "🔴 Despesa"
-            "• **${t.description}**: ${FinanceEngine.formatCurrency(t.effectiveAmount)}$splitNote • $typeBadge • ${t.category}$sub • ${t.status.label} (${FinanceEngine.formatShortDate(t.dueDate)}) • $methodOrCard$monthNote"
+            "• [ID: ${t.id}] **${t.description}**: ${FinanceEngine.formatCurrency(t.effectiveAmount)}$splitNote • $typeBadge • ${t.category}$sub • ${t.status.label} (${FinanceEngine.formatShortDate(t.dueDate)}) • $methodOrCard$monthNote"
         }
 
         val extraNote = if (filtered.size > 15) "\n*(e mais ${filtered.size - 15} lançamentos)*" else ""
@@ -2792,12 +2849,24 @@ class AndroidAgentToolsEngine(
                     else -> if (newSplitTypeStr != null) SplitType.MINE else null
                 }
 
+                val originDate = args["originDate"] as? String
+                    ?: args["currentDate"] as? String
+                    ?: args["dataOriginal"] as? String
+                    ?: (args["date"] as? String)?.takeIf { it != newDueDate }
+                    ?: (args["data"] as? String)?.takeIf { it != newDueDate }
+                val filterAmount = (args["filterAmount"] as? Number)?.toDouble() ?: (args["filterAmount"] as? String)?.toDoubleOrNull()
+                    ?: (args["amount"] as? Number)?.toDouble() ?: (args["amount"] as? String)?.toDoubleOrNull()
+                val editAllMatches = (args["editAllMatches"] as? Boolean) ?: (args["editAll"] as? Boolean) ?: false
+
                 executeEditTransaction(
                     searchTerm = term,
                     searchTerms = terms,
                     transactionId = id,
                     targetIds = targetIds,
                     month = month,
+                    originDate = originDate,
+                    filterAmount = filterAmount,
+                    editAllMatches = editAllMatches,
                     newAmount = newAmt,
                     newDescription = newDesc,
                     newCategory = newCat,

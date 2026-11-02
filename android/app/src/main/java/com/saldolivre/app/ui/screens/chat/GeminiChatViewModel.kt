@@ -1532,15 +1532,20 @@ Exemplo de Lote de Fatura de Cartão:
   "newDate": "2026-11-15"
 }
 ```
-- Para múltiplos lançamentos de uma vez (ex: "essas despesas foram feitas ontem", ajustar data ou categoria de vários itens recentes):
+- Para múltiplos lançamentos de uma vez (ex: "essas despesas foram feitas ontem", ajustar data ou categoria de vários itens recentes ou retornados em busca):
 ```json
 {
   "action": "EDIT_TRANSACTION",
+  "targetIds": ["id1", "id2", "id3"],
   "searchTerms": ["Uber", "Água de Coco Beira Mar", "BilheteÚnica"],
+  "originDate": "2026-11-02",
   "newDate": "2026-11-01"
 }
 ```
-*(Você pode passar "searchTerms": ["item1", "item2"], ou "searchTerm": "item1, item2, item3", ou passar uma lista em "transactions": [ { "searchTerm": "...", "newDate": "..." }, ... ]. Aceita "newDate" ou "newDueDate" no formato YYYY-MM-DD para alterar a data da compra/vencimento).*
+*(ATENÇÃO CRÍTICA PARA EDIÇÕES EM LOTE OU APÓS BUSCAS:
+- Se você acabou de localizar ou listar despesas para o usuário ou tem os IDs dos itens disponíveis no histórico/contexto, passe OBRIGATORIAMENTE `"targetIds": ["id1", "id2", ...]` com os IDs exatos dos itens a serem alterados.
+- Se não tiver os IDs exatos, passe SEMPRE `"originDate": "YYYY-MM-DD"` (a data original do item antes da alteração) e/ou `"month"` para garantir que apenas os lançamentos daquele dia/mês específico sejam editados, NUNCA afetando lançamentos antigos homônimos do histórico (ex: outros Ubers de meses anteriores).
+- O sistema faz seleção cirúrgica de 1 item por termo de busca por padrão. Só defina `"editAllMatches": true` se o usuário pedir explicitamente para alterar absolutamente todos os itens com aquele nome existentes no histórico todo).*
 
 4. Excluir Lançamento:
 ```json
@@ -2081,6 +2086,7 @@ INSTRUÇÃO PARA SUA RESPOSTA FINAL AO USUÁRIO:
   Formate como uma lista limpa com marcadores (bullet points •) e linhas bem organizadas, por exemplo:
   • **Oficina Della Pizza**: R$ 135,45 no total (Sua parte: **R$ 67,73** • 50% com Amigo)
     📅 19/10/2026 • Alimentação › Restaurante • Pendente (Cartão Nubank)
+  - Na sua resposta visível ao usuário, NUNCA exiba o identificador técnico "[ID: ...]", apresente os itens de forma amigável e limpa. Mas memorize internamente os IDs dos lançamentos retornados pelo motor para utilizá-los no parâmetro "targetIds" caso o usuário queira editar, corrigir ou excluir esses itens na sequência!
 - ATENÇÃO RIGOROSA A DESPESAS 100% PESSOAIS vs TERCEIROS:
   - Se o usuário pediu despesas 100% dele, enfatize que todos os itens listados são de responsabilidade exclusiva dele (sem divisões nem terceiros).
   - Se o usuário pediu despesas de um terceiro ou cartão cadastrado, referencie o terceiro/cartão explicitamente, detalhando quanto é a parte dele e o que deve ser ressarcido.
