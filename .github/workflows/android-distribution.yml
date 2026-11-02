@@ -13,10 +13,6 @@ jobs:
   build-and-distribute:
     name: Build, Test & Distribute Android (APK / AAB)
     runs-on: ubuntu-latest
-    env:
-      FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-      FIREBASE_CREDENTIALS_JSON: ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
-      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
     defaults:
       run:
         working-directory: ./android
@@ -24,6 +20,28 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Validate Distribution Secrets
+        id: check-secrets
+        env:
+          FB_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FB_CREDS: ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
+          PLAY_CREDS: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$FB_APP_ID" ] && [ -n "$FB_CREDS" ]; then
+            echo "has_firebase=true" >> "$GITHUB_OUTPUT"
+            echo "Secrets do Firebase App Distribution identificados."
+          else
+            echo "has_firebase=false" >> "$GITHUB_OUTPUT"
+            echo "Secrets do Firebase App Distribution ausentes. Etapa de distribuição será ignorada."
+          fi
+          if [ -n "$PLAY_CREDS" ]; then
+            echo "has_play=true" >> "$GITHUB_OUTPUT"
+            echo "Secrets da Google Play Store identificados."
+          else
+            echo "has_play=false" >> "$GITHUB_OUTPUT"
+            echo "Secret GOOGLE_PLAY_SERVICE_ACCOUNT_JSON ausente. Etapa da Play Store será ignorada."
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -99,7 +117,7 @@ jobs:
           if-no-files-found: error
 
       - name: Distribute APK to Firebase App Distribution
-        if: ${{ env.FIREBASE_APP_ID != '' && env.FIREBASE_CREDENTIALS_JSON != '' }}
+        if: ${{ steps.check-secrets.outputs.has_firebase == 'true' }}
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_APP_ID }}
@@ -110,7 +128,7 @@ jobs:
             Build automático da branch ${{ github.ref_name }} (Commit: ${{ github.sha }})
 
       - name: Upload AAB to Google Play Store (Internal Track)
-        if: ${{ env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        if: ${{ steps.check-secrets.outputs.has_play == 'true' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
