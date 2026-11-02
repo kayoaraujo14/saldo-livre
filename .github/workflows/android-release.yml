@@ -13,6 +13,9 @@ jobs:
   build-and-distribute:
     name: Build Signed APK & Distribute to QA
     runs-on: ubuntu-latest
+    env:
+      FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+      FIREBASE_CREDENTIALS_JSON: ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
     defaults:
       run:
         working-directory: ./android
@@ -58,6 +61,7 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
 
       - name: Distribute APK via Firebase App Distribution
+        if: ${{ env.FIREBASE_APP_ID != '' && env.FIREBASE_CREDENTIALS_JSON != '' }}
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_APP_ID }}

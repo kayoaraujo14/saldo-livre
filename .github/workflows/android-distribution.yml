@@ -13,6 +13,10 @@ jobs:
   build-and-distribute:
     name: Build, Test & Distribute Android (APK / AAB)
     runs-on: ubuntu-latest
+    env:
+      FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+      FIREBASE_CREDENTIALS_JSON: ${{ secrets.FIREBASE_CREDENTIALS_JSON }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
     defaults:
       run:
         working-directory: ./android
@@ -95,7 +99,7 @@ jobs:
           if-no-files-found: error
 
       - name: Distribute APK to Firebase App Distribution
-        if: ${{ secrets.FIREBASE_APP_ID != '' && secrets.FIREBASE_CREDENTIALS_JSON != '' }}
+        if: ${{ env.FIREBASE_APP_ID != '' && env.FIREBASE_CREDENTIALS_JSON != '' }}
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_APP_ID }}
@@ -106,7 +110,7 @@ jobs:
             Build automático da branch ${{ github.ref_name }} (Commit: ${{ github.sha }})
 
       - name: Upload AAB to Google Play Store (Internal Track)
-        if: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        if: ${{ env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON != '' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
