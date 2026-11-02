@@ -7,6 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonToken
+import java.io.StringReader
 import com.saldolivre.app.SaldoLivreApplication
 import com.saldolivre.app.data.ai.AndroidAgentToolsEngine
 import com.saldolivre.app.data.ai.AndroidSpeechManager
@@ -1334,6 +1338,10 @@ TOTAIS VALIDADOS CALCULADOS PELO SISTEMA (DETERMINÍSTICO):
 - Despesas/Saídas válidas: ${valid.count { !isIncome(it) }} itens somando R$ ${FinanceEngine.round2(totalExpense)}
 
 SE O USUÁRIO PERGUNTAR "quais foram as transações?", "enumere os itens" ou qualquer pergunta sobre as movimentações do extrato, responda EXCLUSIVAMENTE a partir da lista estruturada acima! É expressamente proibido inventar valores ou contrapartes!
+
+ATENÇÃO: Se o usuário pedir para corrigir ou alterar itens de um LOTE PENDENTE que AINDA NÃO FOI CONFIRMADO (ex: "o primeiro foi coco na beira mar", "mude o valor do segundo"):
+- Como o lote ainda não foi salvo no banco, NUNCA use EDIT_TRANSACTION!
+- Reemita a ação BATCH_TRANSACTIONS contendo todos os itens daquele lote já com as correções aplicadas para o usuário confirmar.
 """.trim()
         } else {
             "TRANSAÇÕES PENDENTES DE CONFIRMAÇÃO DO EXTRATO/LOTE: Nenhum lote pendente de confirmação no momento."
@@ -1505,7 +1513,8 @@ Exemplo de Lote de Fatura de Cartão:
 }
 ```
 
-3. Editar / Corrigir Lançamento Existente:
+3. Editar / Corrigir Lançamento Existente no Banco de Dados:
+- Para um lançamento individual:
 ```json
 {
   "action": "EDIT_TRANSACTION",
@@ -1520,9 +1529,18 @@ Exemplo de Lote de Fatura de Cartão:
   "newPaymentMethod": "debit",
   "newSplitType": "MINE",
   "newCompetenceMonth": "2026-11",
-  "newDueDate": "2026-11-15"
+  "newDate": "2026-11-15"
 }
 ```
+- Para múltiplos lançamentos de uma vez (ex: "essas despesas foram feitas ontem", ajustar data ou categoria de vários itens recentes):
+```json
+{
+  "action": "EDIT_TRANSACTION",
+  "searchTerms": ["Uber", "Água de Coco Beira Mar", "BilheteÚnica"],
+  "newDate": "2026-11-01"
+}
+```
+*(Você pode passar "searchTerms": ["item1", "item2"], ou "searchTerm": "item1, item2, item3", ou passar uma lista em "transactions": [ { "searchTerm": "...", "newDate": "..." }, ... ]. Aceita "newDate" ou "newDueDate" no formato YYYY-MM-DD para alterar a data da compra/vencimento).*
 
 4. Excluir Lançamento:
 ```json
@@ -1843,57 +1861,84 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
         val jsonContent: String
     )
 
+    private fun parseJsonObjectsFromText(text: String): List<JsonObject> {
+        val list = mutableListOf<JsonObject>()
+        try {
+            val reader = JsonReader(StringReader(text))
+            reader.isLenient = true
+            while (reader.peek() != JsonToken.END_DOCUMENT) {
+                val element = JsonParser.parseReader(reader)
+                if (element.isJsonObject) {
+                    list.add(element.asJsonObject)
+                } else if (element.isJsonArray) {
+                    for (item in element.asJsonArray) {
+                        if (item.isJsonObject) list.add(item.asJsonObject)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            try {
+                val actionPattern = Regex("""\{\s*"(?:action|toolName)"\s*:""")
+                val startIndices = actionPattern.findAll(text).map { it.range.first }.toList()
+                for (startIndex in startIndices) {
+                    var depth = 0
+                    var inString = false
+                    var escape = false
+                    var endIndex = -1
+                    for (i in startIndex until text.length) {
+                        val c = text[i]
+                        if (escape) { escape = false; continue }
+                        if (c == '\\') { escape = true; continue }
+                        if (c == '"') { inString = !inString; continue }
+                        if (!inString) {
+                            if (c == '{') depth++
+                            else if (c == '}') {
+                                depth--
+                                if (depth == 0) { endIndex = i + 1; break }
+                            }
+                        }
+                    }
+                    if (endIndex != -1) {
+                        val candidate = text.substring(startIndex, endIndex)
+                        val parsed = runCatching { gson.fromJson(candidate, JsonObject::class.java) }.getOrNull()
+                        if (parsed != null && (parsed.has("action") || parsed.has("toolName"))) {
+                            list.add(parsed)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return list
+    }
+
     private fun extractActionJsonBlocks(content: String): List<ExtractedJsonBlock> {
         val results = mutableListOf<ExtractedJsonBlock>()
 
         // 1. Procura blocos cercados por ```json ... ``` ou ``` ... ```
-        val fenceRegex = Regex("""```(?:json)?\s*(\{[\s\S]*?\})\s*```""", RegexOption.IGNORE_CASE)
+        val fenceRegex = Regex("""```(?:json)?\s*([\s\S]*?)\s*```""", RegexOption.IGNORE_CASE)
         for (match in fenceRegex.findAll(content)) {
-            val jsonCandidate = match.groupValues[1].trim()
-            if (jsonCandidate.contains("\"action\"") || jsonCandidate.contains("\"toolName\"")) {
-                results.add(ExtractedJsonBlock(match.value, jsonCandidate))
+            val rawBlock = match.groupValues[1].trim()
+            if (!rawBlock.contains("\"action\"") && !rawBlock.contains("\"toolName\"")) {
+                continue
+            }
+            val parsed = parseJsonObjectsFromText(rawBlock)
+            if (parsed.isNotEmpty()) {
+                for (obj in parsed) {
+                    if (obj.has("action") || obj.has("toolName")) {
+                        results.add(ExtractedJsonBlock(match.value, obj.toString()))
+                    }
+                }
+            } else {
+                results.add(ExtractedJsonBlock(match.value, rawBlock))
             }
         }
 
         // 2. Se não encontrou blocos com fences, procura blocos JSON crus contendo "action" ou "toolName"
         if (results.isEmpty()) {
-            val actionPattern = Regex("""\{\s*"(?:action|toolName)"\s*:""")
-            val startIndices = actionPattern.findAll(content).map { it.range.first }.toList()
-
-            for (startIndex in startIndices) {
-                var depth = 0
-                var inString = false
-                var escape = false
-                var endIndex = -1
-
-                for (i in startIndex until content.length) {
-                    val c = content[i]
-                    if (escape) {
-                        escape = false
-                        continue
-                    }
-                    if (c == '\\') {
-                        escape = true
-                        continue
-                    }
-                    if (c == '"') {
-                        inString = !inString
-                        continue
-                    }
-                    if (!inString) {
-                        if (c == '{') depth++
-                        else if (c == '}') {
-                            depth--
-                            if (depth == 0) {
-                                endIndex = i + 1
-                                break
-                            }
-                        }
-                    }
-                }
-
-                if (endIndex != -1) {
-                    val fullJson = content.substring(startIndex, endIndex)
+            val parsed = parseJsonObjectsFromText(content)
+            for (obj in parsed) {
+                if (obj.has("action") || obj.has("toolName")) {
+                    val fullJson = obj.toString()
                     results.add(ExtractedJsonBlock(fullJson, fullJson))
                 }
             }
@@ -1949,7 +1994,47 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
                 }
             }
 
-            val isPending = allActions.any { it.pendingAction != null }
+            // Se múltiplos cards de edição foram gerados para a mesma mensagem, consolida em um único card de lote
+            val pendingCards = allActions.filter { it.pendingAction != null }
+            val finalActionsList = if (pendingCards.size > 1 && pendingCards.all { it.pendingAction?.toolName == "EDIT_TRANSACTION" }) {
+                val combinedTargetIds = pendingCards.flatMap { card ->
+                    (card.pendingAction?.args?.get("targetIds") as? List<*>)?.mapNotNull { it?.toString() }
+                        ?: listOfNotNull(card.pendingAction?.args?.get("transactionId")?.toString())
+                }.distinct()
+                val firstPending = pendingCards.first()
+                val consolidatedAction = PendingAction(
+                    id = "act_" + UUID.randomUUID().toString().take(8),
+                    toolName = "EDIT_TRANSACTION",
+                    title = "Confirmar Edição (${pendingCards.size} itens)",
+                    description = pendingCards.joinToString(", ") { it.description.split("(").first().trim() },
+                    detail = firstPending.detail ?: "Alterações em lote",
+                    args = mapOf(
+                        "targetIds" to combinedTargetIds,
+                        "newDueDate" to firstPending.pendingAction?.args?.get("newDueDate"),
+                        "newCategory" to firstPending.pendingAction?.args?.get("newCategory"),
+                        "newSubcategory" to firstPending.pendingAction?.args?.get("newSubcategory"),
+                        "newAmount" to firstPending.pendingAction?.args?.get("newAmount"),
+                        "newStatus" to firstPending.pendingAction?.args?.get("newStatus"),
+                        "newPaymentMethod" to firstPending.pendingAction?.args?.get("newPaymentMethod"),
+                        "newCompetenceMonth" to firstPending.pendingAction?.args?.get("newCompetenceMonth"),
+                        "confirmed" to true
+                    ),
+                    status = PendingActionStatus.PENDING
+                )
+                listOf(
+                    ActionCardData(
+                        title = "Confirmar Edição (${pendingCards.size} itens)",
+                        description = pendingCards.joinToString(", ") { it.description.split("(").first().trim() },
+                        detail = firstPending.detail,
+                        newFreeBalance = firstPending.newFreeBalance,
+                        pendingAction = consolidatedAction
+                    )
+                ) + allActions.filter { it.pendingAction == null }
+            } else {
+                allActions
+            }
+
+            val isPending = finalActionsList.any { it.pendingAction != null }
             val claimsSaved = Regex("""cadastrad[oa] com sucesso|registrad[oa] com sucesso|salv[oa] com sucesso|atualizad[oa] com sucesso|editad[oa] com sucesso|excl[uú][ií]d[oa] com sucesso|removid[oa] com sucesso|apagad[oa] com sucesso""", RegexOption.IGNORE_CASE).containsMatchIn(cleanText)
 
             val isSearchOrQuery = extractedBlocks.any { block ->
@@ -2023,7 +2108,7 @@ INSTRUÇÃO PARA SUA RESPOSTA FINAL AO USUÁRIO:
                         if (cleaned.isNotBlank()) {
                             return AgentResponse(
                                 text = cleaned,
-                                actions = allActions.ifEmpty { null },
+                                actions = finalActionsList.ifEmpty { null },
                                 chartPayload = finalChart ?: lastChartPayload
                             )
                         }
@@ -2042,7 +2127,11 @@ INSTRUÇÃO PARA SUA RESPOSTA FINAL AO USUÁRIO:
                     fallbackText
                 }
             } else if (cleanText.isNotBlank()) {
-                cleanText
+                if (finalActionsList.isEmpty() && fallbackText.startsWith("⚠️")) {
+                    "$cleanText\n\n$fallbackText"
+                } else {
+                    cleanText
+                }
             } else if (fallbackText.isNotBlank()) {
                 fallbackText
             } else {
@@ -2051,7 +2140,7 @@ INSTRUÇÃO PARA SUA RESPOSTA FINAL AO USUÁRIO:
 
             return AgentResponse(
                 text = finalText,
-                actions = allActions.ifEmpty { null },
+                actions = finalActionsList.ifEmpty { null },
                 chartPayload = lastChartPayload
             )
         }
