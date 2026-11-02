@@ -1281,13 +1281,32 @@ class GeminiChatViewModel(
 
 
 
+        // Fluxo de caixa concreto da conta bancária vs Saldo Livre
+        val cashFlow = FinanceEngine.computeAccountCashFlow(
+            all = transactions,
+            uid = user.uid,
+            monthKey = selectedMonth,
+            summary = summary,
+            cards = cards
+        )
+
         // Bloco de dados financeiros (paridade com `summaryDesc` da Web)
         val summaryDescText = """
 DADOS FINANCEIROS REAIS DO USUÁRIO EM ${FinanceEngine.monthLabel(selectedMonth).uppercase()} ($selectedMonth):
-- Saldo Livre Real: R$ ${FinanceEngine.round2(summary.freeBalance)}
+
+DISPONIBILIDADE EM CONTA BANCÁRIA / CAIXA HOJE (VISÃO CONCRETA EXECUTADA ATÉ HOJE, ${FinanceEngine.todayKey()}):
+- Saldo / Sobra trazida de ${cashFlow.previousMonthLabel}: R$ ${FinanceEngine.round2(cashFlow.previousMonthsSurplus)}
+- Receitas Efetivamente Creditadas na Conta até Hoje: R$ ${FinanceEngine.round2(cashFlow.accountIncomesReceived)} (apenas entradas com vencimento/data <= hoje que já caíram na conta)
+- Despesas Efetivamente Debitadas da Conta até Hoje: R$ ${FinanceEngine.round2(cashFlow.totalOutflowSoFar)} (saídas debitadas da conta corrente/Pix/Débito e faturas quitadas até hoje)
+- 💰 SALDO CONCRETO EM CONTA BANCÁRIA HOJE: R$ ${FinanceEngine.round2(cashFlow.currentBankBalance)}
+- Receitas Previstas que AINDA VÃO ENTRAR no decorrer do mês: R$ ${FinanceEngine.round2(cashFlow.futureIncomesRemaining)} (salários e recebimentos com data futura)
+- Contas e Faturas que AINDA VÃO SAIR no decorrer do mês: R$ ${FinanceEngine.round2(cashFlow.futureCommittedRemaining)} (faturas de cartão em aberto e boletos pendentes)
+
+PLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE PROJETADO):
+- 🎯 Saldo Livre Real Projetado: R$ ${FinanceEngine.round2(summary.freeBalance)}
 - Limite Diário Seguro: $dailyLimitDesc
-- Total de Receitas: R$ ${FinanceEngine.round2(summary.income)}
-- Total Comprometido: R$ ${FinanceEngine.round2(summary.committed)} (Já Pago: R$ ${FinanceEngine.round2(summary.paid)}, A Pagar/Pendente: R$ ${FinanceEngine.round2(summary.committed - summary.paid)})
+- Total de Receitas do Mês: R$ ${FinanceEngine.round2(summary.income)}
+- Total Comprometido do Mês: R$ ${FinanceEngine.round2(summary.committed)} (Já Pago: R$ ${FinanceEngine.round2(summary.paid)}, A Pagar/Pendente: R$ ${FinanceEngine.round2(summary.committed - summary.paid)})
 - Valores a Receber: R$ ${FinanceEngine.round2(summary.receivableTotal)} (Parceiro: R$ ${FinanceEngine.round2(summary.receivableFromPartner)}, Amigos: R$ ${FinanceEngine.round2(summary.receivableFromFriends)}, Terceiros: R$ ${FinanceEngine.round2(summary.receivableFromExternal)})
 - Gastos por Categoria neste mês:
   $byCategoryDesc
@@ -1377,6 +1396,33 @@ $learnedRulesDesc
 
 ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
 Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, use OBRIGATORIAMENTE a ação LEARN_RULE ou DELETE_RULE.
+
+======================================================================
+REGRA DE OURO INVIOLÁVEL: DISTINÇÃO ENTRE "SALDO EM CONTA / EXTRATO HOJE" E "SALDO LIVRE PROJETADO DO MÊS":
+======================================================================
+1. DISTINÇÃO CONCEITUAL:
+   - "Saldo em Conta / Dinheiro na Conta Hoje / Saldo Concreto": é o dinheiro REAL que existe na conta bancária no momento (visão de caixa / extrato imediato).
+     Ele NÃO inclui salários futuros que ainda não caíram, NÃO desconta faturas de cartão que ainda não venceram, e NÃO desconta boletos pendentes. Ele parte da sobra que veio do mês anterior (${cashFlow.previousMonthLabel}), soma o que já caiu na conta até hoje (${FinanceEngine.todayKey()}) e subtrai o que já saiu no Pix/Débito.
+   - "Saldo Livre Projetado": é o planejamento orçamentário do mês inteiro. Ele projeta quanto sobrará após receber todas as receitas do mês e pagar todas as contas e faturas até o último dia.
+
+2. QUANDO O USUÁRIO PERGUNTAR PELO SALDO CONCRETO / SALDO DA CONTA HOJE / DINHEIRO NA CONTA:
+   (Ex: "quanto eu tenho na minha conta hoje?", "qual o saldo concreto?", "quanto tenho no banco?", "qual meu saldo de caixa?", "o saldo livre leva em conta pendências, quero o saldo real"):
+   - Responda OBRIGATORIAMENTE com o **SALDO CONCRETO EM CONTA HOJE** (R$ ${FinanceEngine.round2(cashFlow.currentBankBalance)})!
+   - Apresente o demonstrativo claro de caixa:
+     * 🏦 **Sobra trazida de ${cashFlow.previousMonthLabel}**: R$ ${FinanceEngine.round2(cashFlow.previousMonthsSurplus)}
+     * 🟢 **(+) Entradas creditadas na conta até hoje (${FinanceEngine.todayKey()})**: R$ ${FinanceEngine.round2(cashFlow.accountIncomesReceived)}
+     * 🔴 **(-) Saídas debitadas da conta até hoje (Pix/Débito/Faturas pagas)**: R$ ${FinanceEngine.round2(cashFlow.totalOutflowSoFar)}
+     * 💰 **(=) Saldo Concreto em Conta Bancária Hoje**: R$ ${FinanceEngine.round2(cashFlow.currentBankBalance)}
+   - Em seguida, explique de forma didática a transição para o Saldo Livre:
+     "Para o decorrer do mês de ${FinanceEngine.monthLabel(selectedMonth)}, você ainda tem R$ ${FinanceEngine.round2(cashFlow.futureIncomesRemaining)} de receitas a receber (como salários futuros) e R$ ${FinanceEngine.round2(cashFlow.futureCommittedRemaining)} de contas e faturas a pagar. Por isso, o seu **Saldo Livre Projetado** para gastar com segurança no mês todo é de **R$ ${FinanceEngine.round2(summary.freeBalance)}** ($dailyLimitDesc)."
+   - NUNCA informe o Saldo Livre Projetado como se fosse o saldo da conta corrente de hoje!
+   - NUNCA trate salários ou receitas com data futura (após hoje) como dinheiro já caído em conta!
+   - NUNCA diga que o sistema não sabe a sobra do mês anterior; use o valor oficial de ${cashFlow.previousMonthLabel} (R$ ${FinanceEngine.round2(cashFlow.previousMonthsSurplus)})!
+
+3. QUANDO O USUÁRIO PERGUNTAR PELO SALDO LIVRE / LIMITE DIÁRIO / QUANTO PODE GASTAR:
+   (Ex: "qual meu saldo livre?", "quanto posso gastar?", "qual meu limite diário?", "posso comprar X?"):
+   - Responda com foco no **Saldo Livre Projetado** (R$ ${FinanceEngine.round2(summary.freeBalance)}) e no Limite Diário Seguro ($dailyLimitDesc).
+======================================================================
 
 ======================================================================
 MEMÓRIA DE CONTEXTO E CONTINUIDADE CONVERSACIONAL (FOLLOW-UPS, REFINAMENTOS E AJUSTES DE CONSULTAS ANTERIORES):

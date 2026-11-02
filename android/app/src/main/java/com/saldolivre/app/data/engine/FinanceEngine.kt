@@ -1307,6 +1307,80 @@ object FinanceEngine {
         )
     }
 
+    data class AccountCashFlowSummary(
+        val previousMonthsSurplus: Double,
+        val previousMonthLabel: String,
+        val accountIncomesReceived: Double,
+        val accountExpensesPaid: Double,
+        val paidInvoicesAmount: Double,
+        val totalOutflowSoFar: Double,
+        val currentBankBalance: Double,
+        val futureIncomesRemaining: Double,
+        val futureCommittedRemaining: Double,
+        val projectedFreeBalance: Double,
+        val dailyLimit: Double?
+    )
+
+    fun computeAccountCashFlow(
+        all: List<Transaction>,
+        uid: String,
+        monthKey: String,
+        summary: MonthSummary,
+        cards: List<Card> = emptyList(),
+        today: String = todayKey()
+    ): AccountCashFlowSummary {
+        val prevMonth = shiftMonth(monthKey, -1)
+        val prevMonthLabel = monthLabel(prevMonth)
+
+        val previousMonthsSurplus = if (summary.carryoverAmount > 0.0) {
+            summary.carryoverAmount
+        } else {
+            round2((summary.pendingClosureSurplus ?: 0.0) - summary.previousMonthDeficit)
+        }
+
+        val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
+
+        // Apenas transações da conta bancária / extrato (exclui compras feitas em cartão de crédito)
+        val accountTxs = monthTxs.filter { it.cardId.isNullOrBlank() && it.paymentMethod != PaymentMethod.CREDIT_CARD }
+
+        val accountIncomesReceived = round2(accountTxs.filter {
+            it.type == TransactionType.INCOME && (it.status == TransactionStatus.PAID && it.dueDate <= today)
+        }.sumOf { kotlin.math.abs(impactFor(it, uid, all)) })
+
+        val accountExpensesPaid = round2(accountTxs.filter {
+            it.type == TransactionType.EXPENSE && (it.status == TransactionStatus.PAID && it.dueDate <= today)
+        }.sumOf { kotlin.math.abs(impactFor(it, uid, all)) })
+
+        val paidInvoicesAmount = round2(cards.sumOf { card ->
+            val invoice = InvoiceEngine.buildInvoice(card, monthKey, all, uid, today)
+            if (invoice.status == InvoiceStatus.PAID && invoice.dueDate <= today) {
+                invoice.myShare
+            } else {
+                0.0
+            }
+        })
+
+        val totalOutflowSoFar = round2(accountExpensesPaid + paidInvoicesAmount)
+        val currentBankBalance = round2(previousMonthsSurplus + accountIncomesReceived - totalOutflowSoFar)
+
+        val futureIncomesRemaining = round2(kotlin.math.max(0.0, summary.income - accountIncomesReceived))
+        val futureCommittedRemaining = round2(kotlin.math.max(0.0, summary.committed - totalOutflowSoFar))
+
+        return AccountCashFlowSummary(
+            previousMonthsSurplus = previousMonthsSurplus,
+            previousMonthLabel = prevMonthLabel,
+            accountIncomesReceived = accountIncomesReceived,
+            accountExpensesPaid = accountExpensesPaid,
+            paidInvoicesAmount = paidInvoicesAmount,
+            totalOutflowSoFar = totalOutflowSoFar,
+            currentBankBalance = currentBankBalance,
+            futureIncomesRemaining = futureIncomesRemaining,
+            futureCommittedRemaining = futureCommittedRemaining,
+            projectedFreeBalance = summary.freeBalance,
+            dailyLimit = summary.dailyLimit
+        )
+    }
+
     data class EstimateResult(
         val amount: Double,
         val basis: String
