@@ -156,12 +156,18 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
 
   // Reconhecimento inteligente de receitas/entradas
   const isBankStatementDoc = args.origemDocumento === 'extrato_conta' || args.ehExtrato === true
-  const isExplicitIncome = args.tipo === 'income' || args.categoria === 'Receita'
+  const tipoStr = String(args.tipo ?? '').toLowerCase()
+  const isExplicitIncome =
+    tipoStr === 'income' ||
+    tipoStr === 'receita' ||
+    tipoStr === 'entrada' ||
+    args.categoria === 'Receita' ||
+    (INCOME_CATEGORIES as readonly string[]).includes(String(args.categoria))
   const isIncome =
     isExplicitIncome ||
     INCOME_KEYWORDS_REGEX.test(description)
 
-  const type = isIncome ? 'income' : (args.tipo === 'income' ? 'income' : 'expense')
+  const type = isIncome ? 'income' : 'expense'
   let splitType: SplitType = SPLIT_MAP[String(args.tipoDivisao ?? 'MEU')] ?? 'mine'
   if (type === 'income') splitType = 'mine'
 
@@ -196,7 +202,12 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
   let category: Category = (CATEGORIES as readonly string[]).includes(String(args.categoria))
     ? (args.categoria as Category)
     : guessed.category
-  const isRefund = total < 0 || category === 'Estorno' || /estorno|reembolso|devolucao|devolução|crédito na fatura|credito fatura/i.test(description)
+  const isRefund =
+    type === 'expense' &&
+    (total < 0 ||
+      category === 'Estorno' ||
+      description.toLowerCase().startsWith('estorno') ||
+      /crédito na fatura|credito na fatura|credito fatura/i.test(description))
   if (isRefund && type === 'expense' && total > 0) {
     total = -Math.abs(total)
   }
@@ -438,7 +449,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     const actionTitle = `${actionKind}: ${finalDescription}`
 
     const confirmationLines = [
-      { label: isRefund ? 'Valor do estorno' : 'Valor da parcela', value: money(Math.abs(total)) },
+      { label: type === 'income' ? 'Valor da receita' : isRefund ? 'Valor do estorno' : 'Valor da parcela', value: money(Math.abs(total)) },
       ...(isInstallment
         ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
         : []),
@@ -460,7 +471,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       ...(card ? [{ label: 'Cartão', value: card.cardName || 'Cartão' }] : []),
       {
         label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
-        value: type === 'income' ? `+${money(total)}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
+        value: type === 'income' ? `+${money(Math.abs(total))}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
         tone: type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
       },
       ...(receivable > 0 ? [{ label: assignedFriend ? `A receber (${assignedFriend.name})` : 'A receber', value: money(receivable), tone: 'positive' as const }] : []),
@@ -471,7 +482,7 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       response: {
         ok: true,
         aguardandoConfirmacao: true,
-        mensagem: `Entendi que você deseja cadastrar ${isRefund ? 'um estorno/crédito' : type === 'income' ? 'uma receita' : 'uma despesa'}: "${finalDescription}" no valor de ${money(Math.abs(total))}${card ? ` no cartão ${card.cardName}` : ''} realizada em ${formatShortDate(date)} para a fatura de ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
+        mensagem: `Entendi que você deseja cadastrar ${type === 'income' ? 'uma receita' : isRefund ? 'um estorno/crédito' : 'uma despesa'}: "${finalDescription}" no valor de ${money(Math.abs(total))}${card ? ` no cartão ${card.cardName}` : ''} realizada em ${formatShortDate(date)} para a fatura de ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
         descricao: finalDescription,
         valorParcela: total,
         tipo: type,
@@ -654,9 +665,9 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     },
     action: {
       kind: 'created',
-      title: `${type === 'income' ? 'Receita' : 'Despesa'} registrada: ${finalDescription}`,
+      title: `${type === 'income' ? 'Receita' : isRefund ? 'Estorno' : 'Despesa'} registrada: ${finalDescription}`,
       lines: [
-        { label: 'Valor da parcela', value: money(total) },
+        { label: type === 'income' ? 'Valor da receita' : isRefund ? 'Valor do estorno' : 'Valor da parcela', value: money(Math.abs(total)) },
         ...(isInstallment
           ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
           : []),
@@ -729,9 +740,15 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     for (const item of transacoesRaw) {
       const desc = String(item.descricao ?? 'Item').trim()
       const val = Math.abs(Number(item.valorTotal ?? item.valor ?? 0))
-      const isExplicitIncome = item.tipo === 'income' || item.categoria === 'Receita'
+      const rawTipoStr = String(item.tipo ?? '').toLowerCase()
+      const isExplicitIncome =
+        rawTipoStr === 'income' ||
+        rawTipoStr === 'receita' ||
+        rawTipoStr === 'entrada' ||
+        item.categoria === 'Receita' ||
+        (INCOME_CATEGORIES as readonly string[]).includes(String(item.categoria))
       const looksLikeIncome = isExplicitIncome || INCOME_KEYWORDS_REGEX.test(desc)
-      const resolvedTipo: 'income' | 'expense' = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
+      const resolvedTipo: 'income' | 'expense' = looksLikeIncome ? 'income' : 'expense'
 
       const isRdb = /\b(aplica[çc][ãa]o|resgate)\s+rdb\b/i.test(desc) || /\brdb\b/i.test(desc) || /\bguardar\s+dinheiro\b/i.test(desc)
       const isInvoicePayment = /pagamento (recebido|de fatura|efetuado)/i.test(desc) || /saldo anterior/i.test(desc)
@@ -1322,17 +1339,58 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
   const all = env.getTransactions()
   const ids = Array.isArray(args.ids) ? args.ids.map(String) : []
   const termo = typeof args.termoBusca === 'string' ? args.termoBusca.trim() : ''
+  const termos = Array.isArray(args.termosBusca)
+    ? (args.termosBusca as string[]).map(String).filter(Boolean)
+    : termo ? [termo] : []
   const mesOrigem = typeof args.mesOrigem === 'string' && /^\d{4}-\d{2}$/.test(args.mesOrigem) ? args.mesOrigem : ''
+  const dataOriginal = typeof args.dataOriginal === 'string' ? args.dataOriginal.trim()
+    : typeof args.originDate === 'string' ? args.originDate.trim()
+    : typeof args.dataAtual === 'string' ? args.dataAtual.trim()
+    : ''
+  const valorFiltro = typeof args.valorFiltro === 'number' ? args.valorFiltro
+    : typeof args.filterAmount === 'number' ? args.filterAmount
+    : typeof args.valor === 'number' ? args.valor
+    : undefined
+  const alterarTodos = args.alterarTodos === true || args.editAllMatches === true || args.editAll === true
   const limite = typeof args.limiteQuantidade === 'number' ? args.limiteQuantidade : 50
 
   let targets: Transaction[] = []
 
   if (ids.length > 0) {
     targets = all.filter((t) => ids.includes(t.id))
-  } else if (termo || mesOrigem) {
+  } else if (termos.length > 0) {
+    const selected: Transaction[] = []
+    const selectedIds = new Set<string>()
+
+    for (const tTerm of termos) {
+      const candidates = all.filter((t) => {
+        if (selectedIds.has(t.id)) return false
+        if (mesOrigem && t.competenceMonth !== mesOrigem) return false
+        if (dataOriginal && t.dueDate !== dataOriginal) return false
+        if (valorFiltro != null && Math.abs(effectiveAmount(t) - valorFiltro) > 0.05) return false
+        return matchesSearch(t.description, tTerm) || matchesSearch(t.category, tTerm) || (t.subcategory && matchesSearch(t.subcategory, tTerm))
+      })
+
+      if (alterarTodos) {
+        for (const c of candidates) {
+          selected.push(c)
+          selectedIds.add(c.id)
+        }
+      } else {
+        // Seleção cirúrgica: escolhe apenas o item mais recente correspondente a este termo específico
+        const best = candidates.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))[0]
+        if (best) {
+          selected.push(best)
+          selectedIds.add(best.id)
+        }
+      }
+    }
+    targets = selected.slice(0, limite)
+  } else if (mesOrigem || dataOriginal) {
     targets = all.filter((t) => {
       if (mesOrigem && t.competenceMonth !== mesOrigem) return false
-      if (termo && !matchesSearch(t.description, termo)) return false
+      if (dataOriginal && t.dueDate !== dataOriginal) return false
+      if (valorFiltro != null && Math.abs(effectiveAmount(t) - valorFiltro) > 0.05) return false
       return true
     }).slice(0, limite)
   }
@@ -1361,9 +1419,18 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
     }
   }
 
+  const novoMesFatura = typeof args.novoMesFatura === 'string' && /^\d{4}-\d{2}$/.test(args.novoMesFatura)
+    ? args.novoMesFatura
+    : undefined
+  const novaDataVencimento = typeof args.novaDataVencimento === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.novaDataVencimento)
+    ? args.novaDataVencimento
+    : undefined
+
   // Se alguma das transações pertencer a um grupo de parcelamento, inclui as parcelas irmãs do mesmo grupo
+  // APENAS se NÃO estiver alterando dataVencimento ou mesFatura (alterar data é operação específica do lançamento)
+  const isDateChange = Boolean(novaDataVencimento || novoMesFatura)
   const installmentGroupIds = new Set(targets.map((t) => t.installmentGroupId).filter(Boolean) as string[])
-  if (installmentGroupIds.size > 0) {
+  if (installmentGroupIds.size > 0 && !isDateChange) {
     const siblings = all.filter(
       (t) => t.installmentGroupId && installmentGroupIds.has(t.installmentGroupId) && !targets.some((x) => x.id === t.id)
     )
@@ -1371,13 +1438,6 @@ async function editar(env: AgentEnv, args: Record<string, unknown>): Promise<Too
       targets = [...targets, ...siblings]
     }
   }
-
-  const novoMesFatura = typeof args.novoMesFatura === 'string' && /^\d{4}-\d{2}$/.test(args.novoMesFatura)
-    ? args.novoMesFatura
-    : undefined
-  const novaDataVencimento = typeof args.novaDataVencimento === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(args.novaDataVencimento)
-    ? args.novaDataVencimento
-    : undefined
   const novoValor = typeof args.novoValor === 'number' ? round2(args.novoValor) : undefined
   const novaDescricao = typeof args.novaDescricao === 'string' ? args.novaDescricao.trim() : undefined
   const novaCategoria = (CATEGORIES as readonly string[]).includes(String(args.novaCategoria))

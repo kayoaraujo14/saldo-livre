@@ -4,6 +4,7 @@
  * estimativas de contas recorrentes vivem aqui.
  */
 import type {
+  AccountCashFlowSummary,
   Allocation,
   Card,
   Category,
@@ -865,7 +866,7 @@ export function computeMonthRawBalance(all: Transaction[], uid: string, monthKey
   for (const tx of monthTxs) {
     const impact = impactFor(tx, uid, all)
     if (tx.type === 'income') {
-      inc += impact
+      inc += Math.abs(impact)
     } else {
       exp += impact
     }
@@ -905,7 +906,7 @@ export function computeSummary(
   for (const tx of nonCardTxs) {
     const impact = impactFor(tx, uid, all)
     if (tx.type === 'income') {
-      income += impact
+      income += Math.abs(impact)
       continue
     }
     if (tx.status === 'paid') paid += impact
@@ -1126,6 +1127,73 @@ export function computeSummary(
     bySubcategory: [...subcat.values()]
       .map((item) => ({ ...item, amount: round2(item.amount) }))
       .sort((a, b) => b.amount - a.amount),
+  }
+}
+
+/**
+ * Calcula o fluxo de caixa concreto da conta corrente / extrato bancário até a data de hoje,
+ * distinguindo com rigor o saldo imediatamente disponível em conta do Saldo Livre Projetado do mês.
+ */
+export function computeAccountCashFlow(
+  all: Transaction[],
+  uid: string,
+  monthKey: string,
+  summary: MonthSummary,
+  cards: Card[] = [],
+  today: string = todayKey(),
+): AccountCashFlowSummary {
+  const prevMonth = shiftMonth(monthKey, -1)
+  const prevMonthLabel = monthLabel(prevMonth)
+
+  const previousMonthsSurplus = (summary.carryoverAmount ?? 0) > 0
+    ? (summary.carryoverAmount ?? 0)
+    : round2((summary.pendingClosureSurplus ?? 0) - (summary.previousMonthDeficit ?? 0))
+
+  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
+
+  // Apenas transações da conta bancária / extrato (exclui compras feitas em cartão de crédito)
+  const accountTxs = monthTxs.filter((t) => !t.cardId && t.paymentMethod !== 'credit_card')
+
+  const accountIncomesReceived = round2(
+    accountTxs
+      .filter((t) => t.type === 'income' && t.status === 'paid' && t.dueDate <= today)
+      .reduce((sum, t) => sum + Math.abs(impactFor(t, uid, all)), 0),
+  )
+
+  const accountExpensesPaid = round2(
+    accountTxs
+      .filter((t) => t.type === 'expense' && t.status === 'paid' && t.dueDate <= today)
+      .reduce((sum, t) => sum + Math.abs(impactFor(t, uid, all)), 0),
+  )
+
+  const paidInvoicesAmount = round2(
+    (cards || []).reduce((sum, card) => {
+      const invoice = buildCardInvoice(card, monthKey, all, uid, today)
+      if (invoice.status === 'paid' && invoice.dueDate <= today) {
+        return sum + invoice.myShare
+      }
+      return sum
+    }, 0),
+  )
+
+  const totalOutflowSoFar = round2(accountExpensesPaid + paidInvoicesAmount)
+  const currentBankBalance = round2(previousMonthsSurplus + accountIncomesReceived - totalOutflowSoFar)
+
+  const futureIncomesRemaining = round2(Math.max(0, summary.income - accountIncomesReceived))
+  const futureCommittedRemaining = round2(Math.max(0, summary.committed - totalOutflowSoFar))
+
+  return {
+    previousMonthsSurplus,
+    previousMonthLabel: prevMonthLabel,
+    accountIncomesReceived,
+    accountExpensesPaid,
+    paidInvoicesAmount,
+    totalOutflowSoFar,
+    currentBankBalance,
+    futureIncomesRemaining,
+    futureCommittedRemaining,
+    projectedFreeBalance: summary.freeBalance,
+    dailyLimit: summary.dailyLimit,
   }
 }
 
@@ -1691,10 +1759,10 @@ export function projectFutureMonths(args: {
       if (t.type === 'income') {
         if (isCard) {
           // Estornos/créditos no cartão reduzem a fatura
-          projectedExpense = Math.max(0, projectedExpense - impact)
-          invoiceExpense = Math.max(0, invoiceExpense - impact)
+          projectedExpense = Math.max(0, projectedExpense - Math.abs(impact))
+          invoiceExpense = Math.max(0, invoiceExpense - Math.abs(impact))
         } else if (impact > 0) {
-          projectedIncome += impact
+          projectedIncome += Math.abs(impact)
           incomeCount++
           items.push({
             id: t.id,

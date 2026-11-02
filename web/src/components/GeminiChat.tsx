@@ -17,7 +17,7 @@ import {
   transcribeAudioWithGemini,
   type ToolName,
 } from '@/lib/gemini'
-import { effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
+import { computeAccountCashFlow, effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
 import { formatBRL, formatShortDate, monthLabel, todayKey } from '@/lib/utils'
 import { extractTextFromPdf } from '@/lib/pdfParser'
 import { ChatChart } from '@/components/ui/ChatChart'
@@ -62,15 +62,7 @@ interface GeminiChatProps {
 const INITIAL_MESSAGE: ChatMessage = {
   id: 'msg_welcome',
   role: 'assistant',
-  content: `Olá! Sou o **Copiloto Saldo Livre** 🤖
-
-Estou conectado aos seus lançamentos em tempo real. Você pode falar comigo em linguagem natural para:
-- 📄 **Importar faturas e extratos em PDF**: arraste ou anexe o arquivo PDF do seu banco (Nubank, Itaú, Inter, Bradesco, etc.) e eu cadastro todos os gastos anteriores de uma só vez!
-
-- ⚡ **Lançamentos rápidos**: contas que chegaram ou compras parceladas (ex: *"A conta de luz veio R$ 245 para o dia 22"* ou *"Jantar R$ 160 50/50"*).
-- 📊 **Consultor ativo**: pergunte seu limite diário, projeções futuras e sugestões de corte de custos.
-
-Como posso ajudar você hoje?`,
+  content: 'Olá! Sou o Copiloto Saldo Livre 🤖✨. Como posso ajudar você hoje?',
 }
 
 const PROMPT_HISTORY_KEY = 'saldo_livre_user_prompt_history'
@@ -127,6 +119,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     cards,
     friends,
     executeTool,
+    transactions,
     monthTransactions,
     summary,
     pendingBatchTransactions,
@@ -934,7 +927,10 @@ Atenção crítica:
       }
 
       // Executa exclusivamente via Google Gemini com Load Balancing e Function Calling
+      const cashFlow = summary && me ? computeAccountCashFlow(transactions, me.uid, month, summary, cards) : null
+
       const sys = buildSystemInstruction({
+        cashFlow,
         userName: me?.name ?? 'Usuário',
         partnerName: partner?.name ?? null,
         today: todayKey(),

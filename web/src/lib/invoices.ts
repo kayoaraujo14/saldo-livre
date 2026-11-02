@@ -152,7 +152,7 @@ export function buildCardInvoice(
   const creditsItems = items.filter((t) => t.type === 'income')
 
   const grossExpenses = round2(expenses.reduce((s, t) => s + effectiveAmount(t), 0))
-  const credits = round2(creditsItems.reduce((s, t) => s + effectiveAmount(t), 0))
+  const credits = round2(creditsItems.reduce((s, t) => s + Math.abs(effectiveAmount(t)), 0))
   const total = round2(Math.max(0, grossExpenses - credits))
   const paidAmount = round2(
     Math.min(total, expenses.filter((t) => t.status === 'paid').reduce((s, t) => s + effectiveAmount(t), 0)),

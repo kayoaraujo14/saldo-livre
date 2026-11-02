@@ -916,6 +916,20 @@ export interface MonthSummary {
   byInvestmentSubcategory?: { subcategory: string; amount: number; percentage: number }[]
 }
 
+export interface AccountCashFlowSummary {
+  previousMonthsSurplus: number
+  previousMonthLabel: string
+  accountIncomesReceived: number
+  accountExpensesPaid: number
+  paidInvoicesAmount: number
+  totalOutflowSoFar: number
+  currentBankBalance: number
+  futureIncomesRemaining: number
+  futureCommittedRemaining: number
+  projectedFreeBalance: number
+  dailyLimit: number | null
+}
+
 export interface ProjectedCategoryItem {
   category: string
   amount: number

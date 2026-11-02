@@ -4,7 +4,7 @@
  * `ToolExecutor` injetado pelo FinanceContext.
  */
 import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } from '@google/genai'
-import type { ActionCardData, ChatMessage, ChatAttachment, PendingBatchTransaction } from '@/types'
+import type { AccountCashFlowSummary, ActionCardData, ChatMessage, ChatAttachment, PendingBatchTransaction } from '@/types'
 import { CATEGORIES } from '@/types'
 
 export const GEMINI_MODEL = 'gemini-3.5-flash'
@@ -396,7 +396,11 @@ export const functionDeclarations: FunctionDeclaration[] = [
       properties: {
         ids: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'IDs das transações a editar (opcional).' },
         termoBusca: { type: Type.STRING, description: 'Filtra transações pela descrição (ex: "KAYO", "DECOLAR", "99FOOD").' },
+        termosBusca: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Lista de múltiplos termos para buscar e editar cirurgicamente cada um (ex: ["Uber", "Água de Coco", "BilheteÚnica"]).' },
         mesOrigem: { type: Type.STRING, description: 'Mês atual das transações a serem filtradas (YYYY-MM). Ex: "2026-10".' },
+        dataOriginal: { type: Type.STRING, description: 'Data original/atual das transações no formato YYYY-MM-DD para filtrar exatamente os lançamentos de um dia específico (ex: "2026-11-02").' },
+        valorFiltro: { type: Type.NUMBER, description: 'Valor em reais para filtrar e desambiguar transações específicas.' },
+        alterarTodos: { type: Type.BOOLEAN, description: 'Defina como true apenas se o usuário pedir explicitamente para alterar TODAS as ocorrências encontradas. Padrão: false (cirúrgico).' },
         novoMesFatura: { type: Type.STRING, description: 'Novo mês de competência da fatura (YYYY-MM). Ex: "2026-11" para mover para novembro! ATENÇÃO: NUNCA informe este campo se estiver apenas alterando categoria, subcategoria, valor ou descrição de compras parceladas, pois isso moveria todas as parcelas para o mesmo mês!' },
         novaDataVencimento: { type: Type.STRING, description: 'Nova data de vencimento da fatura (YYYY-MM-DD). Ex: "2026-11-14". ATENÇÃO: NUNCA informe este campo ao editar categoria ou subcategoria de compras parceladas!' },
         novoValor: { type: Type.NUMBER, description: 'Novo valor corrigido da compra.' },
@@ -672,6 +676,7 @@ export function buildSystemInstruction(ctx: {
   friends: Array<{ uid: string; name: string; email: string }>
   learnedRules?: string[]
   pendingTransactions?: PendingBatchTransaction[]
+  cashFlow?: AccountCashFlowSummary | null
   summary?: {
     income: number
     paid: number
@@ -712,12 +717,23 @@ export function buildSystemInstruction(ctx: {
       ? ctx.learnedRules.map((r, i) => `${i + 1}. ${r}`).join('\n')
       : 'Nenhuma regra personalizada memorizada ainda. Você pode aprender novas regras sempre que o usuário pedir ("Aprenda que...", "Lembre-se que...", "Sempre que eu falar X faça Y").'
 
+  const cashFlowDesc = ctx.cashFlow
+    ? `DISPONIBILIDADE EM CONTA BANCÁRIA / CAIXA HOJE (VISÃO DE EXTRATO IMEDIATO):
+- Sobra de ${ctx.cashFlow.previousMonthLabel} trazida na conta: R$ ${ctx.cashFlow.previousMonthsSurplus.toFixed(2)}
+- Entradas creditadas na conta até hoje (${ctx.today}): R$ ${ctx.cashFlow.accountIncomesReceived.toFixed(2)}
+- Saídas debitadas da conta até hoje (${ctx.today}): R$ ${ctx.cashFlow.totalOutflowSoFar.toFixed(2)} (Débito/Pix: R$ ${ctx.cashFlow.accountExpensesPaid.toFixed(2)}, Faturas pagas: R$ ${ctx.cashFlow.paidInvoicesAmount.toFixed(2)})
+- SALDO CONCRETO EM CONTA BANCÁRIA HOJE: R$ ${ctx.cashFlow.currentBankBalance.toFixed(2)}
+- Receitas Futuras a Entrar no Mês: R$ ${ctx.cashFlow.futureIncomesRemaining.toFixed(2)}
+- Compromissos e Faturas Futuras a Pagar no Mês: R$ ${ctx.cashFlow.futureCommittedRemaining.toFixed(2)}
+- SALDO LIVRE PROJETADO DO MÊS INTEIRO: R$ ${ctx.cashFlow.projectedFreeBalance.toFixed(2)} (${ctx.cashFlow.dailyLimit != null ? `R$ ${ctx.cashFlow.dailyLimit.toFixed(2)}/dia` : 'Mês encerrado'})`
+    : ''
+
   const summaryDesc = ctx.summary
     ? `DADOS FINANCEIROS REAIS DO USUÁRIO EM ${ctx.monthLabel.toUpperCase()} (${ctx.monthKey}):
-- Saldo Livre Real: R$ ${ctx.summary.freeBalance.toFixed(2)}
+${cashFlowDesc ? `${cashFlowDesc}\n\nPLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE PROJETADO):\n` : ''}- Saldo Livre Real Projetado: R$ ${ctx.summary.freeBalance.toFixed(2)}
 - Limite Diário Seguro: ${ctx.summary.dailyLimit != null ? `R$ ${ctx.summary.dailyLimit.toFixed(2)}/dia` : 'Mês encerrado'} (${ctx.summary.daysRemaining} dias restantes)
-- Total de Receitas: R$ ${ctx.summary.income.toFixed(2)}
-- Total Comprometido: R$ ${ctx.summary.committed.toFixed(2)} (Já Pago: R$ ${ctx.summary.paid.toFixed(2)}, A Pagar/Pendente: R$ ${(ctx.summary.committed - ctx.summary.paid).toFixed(2)})
+- Total de Receitas do Mês: R$ ${ctx.summary.income.toFixed(2)}
+- Total Comprometido do Mês: R$ ${ctx.summary.committed.toFixed(2)} (Já Pago: R$ ${ctx.summary.paid.toFixed(2)}, A Pagar/Pendente: R$ ${(ctx.summary.committed - ctx.summary.paid).toFixed(2)})
 - Valores a Receber: R$ ${ctx.summary.receivableTotal.toFixed(2)}
 - Gastos por Categoria neste mês:
   ${ctx.summary.byCategory.length > 0 ? ctx.summary.byCategory.map((c) => `* ${c.category}: R$ ${c.amount.toFixed(2)}`).join('\n  ') : '* Nenhuma despesa computada ainda'}
@@ -772,6 +788,33 @@ ${learnedRulesDesc}
 ATENÇÃO: Sempre que uma despesa ou comando do usuário corresponder a uma dessas regras aprendidas, APLIQUE-A IMEDIATAMENTE sem hesitar!
 Se o usuário pedir para você aprender uma nova regra, memorizar um comportamento ou esquecer uma regra antiga, chame OBRIGATORIAMENTE a ferramenta "gerenciarRegrasEMemoria"!
 
+======================================================================
+REGRA DE OURO INVIOLÁVEL: DISTINÇÃO ENTRE "SALDO EM CONTA / EXTRATO HOJE" E "SALDO LIVRE PROJETADO DO MÊS":
+======================================================================
+1. DISTINÇÃO CONCEITUAL:
+   - "Saldo em Conta / Dinheiro na Conta Hoje / Saldo Concreto": é o dinheiro REAL que existe na conta bancária no momento (visão de caixa / extrato imediato).
+     Ele NÃO inclui salários futuros que ainda não caíram, NÃO desconta faturas de cartão que ainda não venceram, e NÃO desconta boletos pendentes. Ele parte da sobra que veio do mês anterior (${ctx.cashFlow?.previousMonthLabel ?? 'mês anterior'}), soma o que já caiu na conta até hoje (${ctx.today}) e subtrai o que já saiu no Pix/Débito.
+   - "Saldo Livre Projetado": é o planejamento orçamentário do mês inteiro. Ele projeta quanto sobrará após receber todas as receitas do mês e pagar todas as contas e faturas até o último dia.
+
+2. QUANDO O USUÁRIO PERGUNTAR PELO SALDO CONCRETO / SALDO DA CONTA HOJE / DINHEIRO NA CONTA:
+   (Ex: "quanto eu tenho na minha conta hoje?", "qual o saldo concreto?", "quanto tenho no banco?", "qual meu saldo de caixa?", "o saldo livre leva em conta pendências, quero o saldo real"):
+   - Responda OBRIGATORIAMENTE com o **SALDO CONCRETO EM CONTA HOJE** (R$ ${(ctx.cashFlow?.currentBankBalance ?? 0).toFixed(2)})!
+   - Apresente o demonstrativo claro de caixa:
+     * 🏦 **Sobra trazida de ${ctx.cashFlow?.previousMonthLabel ?? 'mês anterior'}**: R$ ${(ctx.cashFlow?.previousMonthsSurplus ?? 0).toFixed(2)}
+     * 🟢 **(+) Entradas creditadas na conta até hoje (${ctx.today})**: R$ ${(ctx.cashFlow?.accountIncomesReceived ?? 0).toFixed(2)}
+     * 🔴 **(-) Saídas debitadas da conta até hoje (Pix/Débito/Faturas pagas)**: R$ ${(ctx.cashFlow?.totalOutflowSoFar ?? 0).toFixed(2)}
+     * 💰 **(=) Saldo Concreto em Conta Bancária Hoje**: R$ ${(ctx.cashFlow?.currentBankBalance ?? 0).toFixed(2)}
+   - Em seguida, explique de forma didática a transição para o Saldo Livre:
+     "Para o decorrer do mês de ${ctx.monthLabel}, você ainda tem R$ ${(ctx.cashFlow?.futureIncomesRemaining ?? 0).toFixed(2)} de receitas a receber (como salários futuros) e R$ ${(ctx.cashFlow?.futureCommittedRemaining ?? 0).toFixed(2)} de contas e faturas a pagar. Por isso, o seu **Saldo Livre Projetado** para gastar com segurança no mês todo é de **R$ ${(ctx.summary?.freeBalance ?? 0).toFixed(2)}** (${ctx.summary?.dailyLimit != null ? `R$ ${ctx.summary.dailyLimit.toFixed(2)}/dia` : 'Mês encerrado'})."
+   - NUNCA informe o Saldo Livre Projetado como se fosse o saldo da conta corrente de hoje!
+   - NUNCA trate salários ou receitas com data futura (após hoje) como dinheiro já caído em conta!
+   - NUNCA diga que o sistema não sabe a sobra do mês anterior; use o valor oficial de ${ctx.cashFlow?.previousMonthLabel ?? 'mês anterior'} (R$ ${(ctx.cashFlow?.previousMonthsSurplus ?? 0).toFixed(2)})!
+
+3. QUANDO O USUÁRIO PERGUNTAR PELO SALDO LIVRE / LIMITE DIÁRIO / QUANTO PODE GASTAR:
+   (Ex: "qual meu saldo livre?", "quanto posso gastar?", "qual meu limite diário?", "posso comprar X?"):
+   - Responda com foco no **Saldo Livre Projetado** (R$ ${(ctx.summary?.freeBalance ?? 0).toFixed(2)}) e no Limite Diário Seguro (${ctx.summary?.dailyLimit != null ? `R$ ${ctx.summary.dailyLimit.toFixed(2)}/dia` : 'Mês encerrado'}).
+======================================================================
+
 REGRAS DE FUNCIONAMENTO:
 
 1. CARTÕES DE CRÉDITO, FATURA E MÊS DE COMPETÊNCIA:
@@ -799,8 +842,13 @@ REGRAS DE FUNCIONAMENTO:
 - Se for pessoa sem conta na plataforma (ex: "Mãe", "Pai", "Irmão"):
   Use tipoDivisao = "TERCEIRO" com nomeTerceiro = "Mãe".
 
-3. ESTORNOS E REEMBOLSOS (VALORES NEGATIVOS):
-- Se o gasto for negativo (ex: "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"), defina obrigatoriamente categoria = "Estorno" e envie o valor negativo (ex: -8.40). Trata-se de estorno/crédito na fatura que alivia o Saldo Livre.
+3. RECEBIMENTOS, REEMBOLSOS E ESTORNOS:
+- Quando o usuário RECEBER dinheiro (ex: "recebi 150 do meu pai", "recebi um Pix", "recebi reembolso de despesas / da empresa", "acerto de amigo"):
+  * Registre OBRIGATORIAMENTE com "tipo": "income", valor POSITIVO ("valorTotal": 150.0).
+  * Use uma categoria de Receita como "Reembolsos & Acertos" (subcategoria: "Reembolso de Despesas" ou "Acerto de Amigo / Cartão") ou "Outras Receitas" (subcategoria: "Pix Recebido").
+  * Isso é uma RECEITA / ENTRADA DE RECURSOS que AUMENTA o Saldo Livre!
+- Se for estorno/crédito direto na fatura do cartão (ex: compra cancelada ou estornada no cartão de crédito como "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"):
+  * Registre com categoria = "Estorno", subcategoria = "Crédito na Fatura", tipo = "income", metodoPagamento = "credit_card", cartao = "NomeDoCartão" e valorTotal POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o total a pagar da fatura.
 
 4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
 - O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:
