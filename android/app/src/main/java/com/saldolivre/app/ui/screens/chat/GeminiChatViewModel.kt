@@ -1686,8 +1686,13 @@ REGRAS DE FUNCIONAMENTO:
   * Informe SEMPRE o valor total da compra E a parte correspondente ao usuário (ex: "Oficina Della Pizza: R$ 135,45 no total da compra, sendo R$ 67,73 a sua parte (dividida 50/50 com seu amigo)").
   * Deixe claro que o impacto no Saldo Livre reflete apenas a cota do usuário (R$ 67,73), e não o valor total da compra.
 
-3. ESTORNOS E REEMBOLSOS:
-- Se o gasto for um estorno/crédito (ex: "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"), registre com category = "Estorno", type = "income" e amount POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o Saldo Livre.
+3. RECEBIMENTOS, REEMBOLSOS E ESTORNOS:
+- Quando o usuário RECEBER dinheiro (ex: "recebi 150 do meu pai", "recebi um Pix", "recebi reembolso de despesas / da empresa", "acerto de amigo"):
+  * Registre OBRIGATORIAMENTE com "type": "income", valor POSITIVO ("amount": 150.0).
+  * Use uma categoria de Receita como "Reembolsos & Acertos" (subcategoria: "Reembolso de Despesas" ou "Acerto de Amigo / Cartão") ou "Outras Receitas" (subcategoria: "Pix Recebido").
+  * Isso é uma RECEITA / ENTRADA DE RECURSOS que AUMENTA o Saldo Livre!
+- Se for estorno/crédito direto na fatura do cartão (ex: compra cancelada ou estornada no cartão de crédito como "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"):
+  * Registre com category = "Estorno", subcategory = "Crédito na Fatura", type = "income", paymentMethod = "credit_card", cardName = "NomeDoCartão" e amount POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o total a pagar da fatura.
 
 4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
 - O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:

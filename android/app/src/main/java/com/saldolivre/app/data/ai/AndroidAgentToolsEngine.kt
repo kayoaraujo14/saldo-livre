@@ -150,13 +150,12 @@ class AndroidAgentToolsEngine(
         customDueDate: String? = null,
         confirmed: Boolean = false
     ): ToolExecutionResult {
-        val isEstorno = category?.equals("Estorno", ignoreCase = true) == true ||
-                description.contains("estorno", ignoreCase = true) ||
-                description.contains("reembolso", ignoreCase = true) ||
-                description.contains("devolucao", ignoreCase = true) ||
-                description.contains("devolução", ignoreCase = true) ||
-                description.contains("crédito na fatura", ignoreCase = true) ||
-                description.contains("credito na fatura", ignoreCase = true)
+        val isEstorno = type == TransactionType.EXPENSE && (
+            category?.equals("Estorno", ignoreCase = true) == true ||
+            description.startsWith("estorno", ignoreCase = true) ||
+            description.contains("crédito na fatura", ignoreCase = true) ||
+            description.contains("credito na fatura", ignoreCase = true)
+        )
 
         val absAmount = Math.abs(amount)
         if (absAmount <= 0.0) {
@@ -453,9 +452,14 @@ class AndroidAgentToolsEngine(
 
             val summaryNow = repository.getMonthSummary().first()
 
-            val typeLabel = if (isEstorno) "Estorno rateado" else if (type == TransactionType.INCOME) "Receita" else "Despesa"
+            val typeLabel = if (isEstorno) "Estorno" else if (type == TransactionType.INCOME) "Receita" else "Despesa"
 
             val dateLabel = if (isCreditCard) "Data da Compra" else "Vencimento"
+            val splitDetail = when {
+                isEstorno -> "(Seu alívio: +${FinanceEngine.formatCurrency(Math.abs(myImpact))})"
+                type == TransactionType.INCOME -> "(Entrada: +${FinanceEngine.formatCurrency(absAmount)})"
+                else -> "(Seu impacto: ${FinanceEngine.formatCurrency(myImpact)})"
+            }
 
             return ToolExecutionResult(
                 text = "✅ **$typeLabel ${if (isEstorno) "registrado" else "registrada"} com sucesso!**\n\n" +
@@ -463,7 +467,7 @@ class AndroidAgentToolsEngine(
                         "• **Valor**: ${FinanceEngine.formatCurrency(absAmount)}\n" +
                         "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
                         "• **Competência**: ${FinanceEngine.monthLabel(finalCompetenceMonth)} ($dateLabel: ${FinanceEngine.formatShortDate(finalDueDate)})$cardText\n" +
-                        "• **Divisão**: ${splitType.label} (Seu alívio: +${FinanceEngine.formatCurrency(Math.abs(myImpact))})\n\n" +
+                        "• **Divisão**: ${splitType.label} $splitDetail\n\n" +
                         "Seu **Saldo Livre** foi atualizado em tempo real!",
                 actionCard = ActionCardData(
                     title = actTitle,
@@ -479,7 +483,7 @@ class AndroidAgentToolsEngine(
         var desc = jsonObj.getStringOrNull("description") ?: "Lançamento via Copiloto"
         desc = neuralClassifier.extractDescription(desc).ifBlank { desc }
         val amount = jsonObj.getDoubleOrNull("amount") ?: 0.0
-        val typeStr = jsonObj.getStringOrNull("type") ?: "expense"
+        val typeStr = jsonObj.getStringOrNull("type") ?: jsonObj.getStringOrNull("tipo") ?: "expense"
         val category = jsonObj.getStringOrNull("category")
         val subcategory = jsonObj.getStringOrNull("subcategory")
         val payMethodStr = jsonObj.getStringOrNull("paymentMethod") ?: "pix"
@@ -532,7 +536,10 @@ class AndroidAgentToolsEngine(
             else -> amount
         }
 
-        val txType = if (typeStr.equals("income", ignoreCase = true)) TransactionType.INCOME else TransactionType.EXPENSE
+        val txType = when {
+            typeStr.equals("income", ignoreCase = true) || typeStr.equals("receita", ignoreCase = true) || typeStr.equals("entrada", ignoreCase = true) -> TransactionType.INCOME
+            else -> TransactionType.EXPENSE
+        }
         val payMethod = PaymentMethod.from(payMethodStr)
         val splitType = when (splitTypeStr.uppercase()) {
             "SPLIT_50", "CASAL_50_50" -> SplitType.SPLIT_50
@@ -854,7 +861,7 @@ class AndroidAgentToolsEngine(
                     if (t.id in selectedIds) return@filter false
                     if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
                     if (!originDate.isNullOrBlank() && t.dueDate != originDate) return@filter false
-                    if (filterAmount != null && kotlin.math.abs(t.effectiveAmount - filterAmount) > 0.05) return@filter false
+                    if (filterAmount != null && kotlin.math.abs(kotlin.math.abs(t.effectiveAmount) - kotlin.math.abs(filterAmount)) > 0.05) return@filter false
                     matchesSearch(t.description, term) || matchesSearch(t.category, term) || (t.subcategory != null && matchesSearch(t.subcategory, term))
                 }
 
@@ -1218,7 +1225,7 @@ class AndroidAgentToolsEngine(
                         if (t.id in resolvedTargetIds) return@filter false
                         if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
                         if (!originDate.isNullOrBlank() && t.dueDate != originDate) return@filter false
-                        if (filterAmount != null && kotlin.math.abs(t.effectiveAmount - filterAmount) > 0.05) return@filter false
+                        if (filterAmount != null && kotlin.math.abs(kotlin.math.abs(t.effectiveAmount) - kotlin.math.abs(filterAmount)) > 0.05) return@filter false
                         matchesSearch(t.description, itemTerm) || matchesSearch(t.category, itemTerm) || (t.subcategory != null && matchesSearch(t.subcategory, itemTerm))
                     }
                     if (editAllMatches) {
@@ -1304,7 +1311,7 @@ class AndroidAgentToolsEngine(
         } else if (!searchTerm.isNullOrBlank() || amount != null) {
             val matched = all.filter { t ->
                 if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
-                if (amount != null && kotlin.math.abs(t.effectiveAmount - amount) > 0.05) return@filter false
+                if (amount != null && kotlin.math.abs(kotlin.math.abs(t.effectiveAmount) - kotlin.math.abs(amount)) > 0.05) return@filter false
                 if (!searchTerm.isNullOrBlank() && !matchesSearch(t.description, searchTerm)) return@filter false
                 true
             }.maxByOrNull { it.createdAt }
@@ -2754,7 +2761,8 @@ class AndroidAgentToolsEngine(
                 val desc = args["description"] as? String ?: args["descricao"] as? String ?: "Lançamento"
                 val amount = (args["amount"] as? Number)?.toDouble() ?: (args["amount"] as? String)?.toDoubleOrNull()
                     ?: (args["valorTotal"] as? Number)?.toDouble() ?: (args["valorTotal"] as? String)?.toDoubleOrNull() ?: 0.0
-                val type = if ((args["type"] as? String)?.equals("income", ignoreCase = true) == true) TransactionType.INCOME else TransactionType.EXPENSE
+                val typeStr = (args["type"] as? String) ?: (args["tipo"] as? String)
+                val type = if (typeStr?.equals("income", ignoreCase = true) == true || typeStr?.equals("receita", ignoreCase = true) == true || typeStr?.equals("entrada", ignoreCase = true) == true) TransactionType.INCOME else TransactionType.EXPENSE
                 val cat = args["category"] as? String ?: args["categoria"] as? String
                 val sub = args["subcategory"] as? String ?: args["subcategoria"] as? String
                 val payMethod = PaymentMethod.from(args["paymentMethod"] as? String ?: args["metodoPagamento"] as? String)

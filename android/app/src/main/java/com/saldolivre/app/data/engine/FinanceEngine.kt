@@ -1053,7 +1053,7 @@ object FinanceEngine {
             val impact = impactFor(tx, uid, all)
 
             if (tx.type == TransactionType.INCOME) {
-                income += impact
+                income += kotlin.math.abs(impact)
                 continue
             }
 

@@ -173,7 +173,7 @@ object InvoiceEngine {
         val creditItems = items.filter { it.type == TransactionType.INCOME }
 
         val gross = FinanceEngine.round2(expenses.sumOf { it.effectiveAmount })
-        val credits = FinanceEngine.round2(creditItems.sumOf { it.effectiveAmount })
+        val credits = FinanceEngine.round2(creditItems.sumOf { kotlin.math.abs(it.effectiveAmount) })
         val total = FinanceEngine.round2(max(0.0, gross - credits))
         val paid = FinanceEngine.round2(
             min(total, expenses.filter { it.status == TransactionStatus.PAID }.sumOf { it.effectiveAmount })
