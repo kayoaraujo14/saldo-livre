@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md — Fonte da Verdade & Índice Arquitetural (`Saldo Livre`)
 
-> **Última Atualização:** 2026-11-01
+> **Última Atualização:** 2026-11-03
 > **Status da Fundação:** 🟢 **100% CONCLUÍDA E ESTABILIZADA**
 > **Propósito:** Índice central de arquitetura, mapeamento de paridade Web/Mobile, segurança e histórico de micro-commits para otimização máxima de contexto e tokens.
 
@@ -57,6 +57,9 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 | **Rede de Amigos** | `components/modals/FriendsModal.tsx` | `ui/screens/friends/FriendsScreen.kt`, `FriendsViewModel.kt` | 🟢 100% |
 | **Atividade Recente (Auditoria)** | `components/modals/RecentActivityModal.tsx` | `ui/screens/activity/RecentActivityScreen.kt`, `RecentActivityViewModel.kt` | 🟢 100% |
 | **Copiloto IA (Gemini Chat & Voz)** | `components/GeminiChat.tsx`, `ui/ChatChart.tsx` | `ui/screens/chat/GeminiChatScreen.kt`, `GeminiChatViewModel.kt`, `DynamicChatChart.kt`, `data/ai/AndroidSpeechManager.kt` | 🟢 100% |
+| **Saúde Financeira (Score 0-100)** | `lib/finance.ts`, `components/KpiGrid.tsx` | `engine/FinanceEngine.kt`, `FinancialHealthScore.kt`, `ui/screens/dashboard/DashboardScreen.kt` | 🟢 100% |
+| **Feedback Tátil & Haptics** | N/A (Específico nativo) | `ui/util/HapticFeedbackHelper.kt` (integrado nos formulários, faturas e fechamento) | 🟢 100% |
+| **PWA & Instalação Nativa** | `manifest.webmanifest`, `public/sw.js`, `index.html` (iOS/Desktop) | App nativo Android / APK / AAB | 🟢 100% |
 | **Navegação Mobile & Menu** | `components/mobile/MobileBottomNav.tsx`, `MobileMenuSheet.tsx` | `ui/navigation/AppNavHost.kt`, `AppBottomBar.kt`, `ui/screens/menu/MenuScreen.kt` | 🟢 100% |
 
 ---
@@ -81,6 +84,104 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+
+- **[2026-11-03] Item 3 — Qualidade & Testes (QA & Blindagem) — Conclusão Integral:**
+  - **Expansão Massiva de Testes Unitários Web (Vitest: de 34 para 79 testes verdes):**
+    - Criada suíte exaustiva de testes em `web/src/lib/__tests__/invoices.test.ts` (29 testes unitários) cobrindo todos os cenários complexos de fatura:
+      - Ciclos de corte de cartão: mesmo mês (`dueDay >= closingDay`), ciclo invertido (`dueDay < closingDay` fechando no mês anterior) e clamping em finais de mês (28/29 de fevereiro, meses de 30 dias).
+      - Transições de ciclo e status: `empty`, `open`, `closed`, `overdue`, `paid`.
+      - Abatimento de estornos, créditos e reembolsos no cartão com piso não-negativo, dedução prioritária na cota do titular e teto de `paidAmount`.
+      - Rateios e divisões avançadas (`getTransactionParticipantShares`): 100% titular, `split_50` com reconciliação exata de centavos ímpares, cota de parceiro, amigos com porcentagem customizada, alocações múltiplas explícitas e perspectividade visual (dono vs. convidado).
+      - Projeção de comprometimento e faturas futuras, cálculo de limite disponível e % de uso.
+      - Alertas Preditivos (`computePredictiveAlert`): anomalias em categorias (+25%), detecção de novas assinaturas recorrentes (Netflix, streaming) e estimativa de fechamento por média diária.
+      - Consolidação de faturas (`consolidateMonthTransactions`): agrupamento no extrato mantendo Pix/boletos individuais e filtragem de faturas com cota zero para convidados.
+  - **Blindagem e Testes Automatizados de Regras de Segurança (`firestore.rules`):**
+    - Instalado `@firebase/rules-unit-testing` e criada a suíte `web/src/lib/__tests__/firestore-rules.test.ts` com 13 testes de segurança executados ao vivo contra o Cloud Firestore Emulator (`npm run test:rules`):
+      - `/users/{userId}`: leitura apenas para autenticados, proibição de leitura anônima e bloqueio estrito contra edição de perfis alheios.
+      - `/cards/{cardId}`: prevenção de forjamento de cartões com `ownerUid` de outrem; convidados (`sharedWithUids`) possuem permissão restrita de leitura, sendo bloqueados para update ou delete; estranhos bloqueados para qualquer acesso.
+      - `/transactions/{txId}`: isolamento total de despesas privadas; amigos atribuídos no rateio (`assignedFriendUid`) podem ler a despesa mas só têm autorização para atualizar `acceptanceStatus` e `respondedAt`, sendo bloqueados de alterar valores ou descrições; apenas o criador pode excluir a transação.
+      - `/recurring_bills` e `/users/{userId}/agent_rules`: isolamento estrito por usuário.
+  - **Expansão de Testes Unitários Android (29 testes passando 100%):**
+    - Criada infraestrutura de testes unitários puros na JVM com `FakeFinanceRepository.kt` e `kotlinx-coroutines-test`.
+    - `GeminiLoadBalancerTest.kt` (5 testes): validação do pool de modelos, roteador inteligente (Router Pattern) com normalização de acentos e casing em português, e fallbacks.
+    - `LearnedRulesManagerTest.kt` (5 testes): deduplicação de regras aprendidas pela IA, ordenação por frequência, geração determinística de IDs e deleção segura.
+    - `CardsViewModelTest.kt` (3 testes): cálculo reativo de faturas, limites e comprometimento, alternância de modais de criação/edição e fluxo de exclusão.
+    - `DashboardViewModelTest.kt` (4 testes): consumo de renda por faixa (No Limite, Atenção, Alerta), descarte de modal de fechamento pendente e agregação do Radar 7 Dias de contas a vencer.
+    - `FutureProjectionsViewModelTest.kt` (4 testes): projeções para 6 e 12 meses, seleção de meses e agregação de saldos.
+    - `InvoiceEngineTest.kt` (4 testes) & `FinanceEngineProjectionTest.kt` (4 testes): consolidação e projeções no motor Kotlin.
+  - **Validação Global:**
+    - Web: **79 testes unitários verdes** (`npm --prefix web test -- --run`).
+    - Firestore Security Rules: **13 testes verdes** contra emulador local (`npm run test:rules`).
+    - Android: **29 testes unitários verdes** (`gradlew.bat testDebugUnitTest` - 100% de sucesso).
+    - Build de Produção Web: **Zero erros** (`npm --prefix web run build`).
+
+- **[2026-11-03] Item 4 — Experiência do Usuário (UI/UX & PWA) — Conclusão Integral (Etapas 4.1, 4.2 e 4.3):**
+  - **4.1. PWA Completo (Progressive Web App):**
+    - Configurado `web/public/manifest.webmanifest` e `manifest.json` com nome, descrição, display `standalone`, `portrait-primary`, tema `#090d16` e atalhos rápidos de sistema operacional (`/?action=new_expense`, `/?action=invoices`, `/?action=chat`).
+    - Desenvolvido `web/public/sw.js` com estratégia híbrida (Cache-First para fontes e assets estáticos, Network-First para navegação com fallback offline, ignorando chamadas de API Firestore e Gemini).
+    - Metatags de compatibilidade Apple iOS PWA no `index.html` (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-touch-icon`).
+    - Handlers de deep linking e auto-abertura no `App.tsx` para acionar modais instantaneamente via URL com limpeza de search params.
+  - **4.2. Termômetro de Saúde Financeira (Score 0 a 100):**
+    - **Motor Financeiro Unificado com Paridade 100%:** função pura `calculateFinancialHealthScore` implementada em `web/src/lib/finance.ts` e `android/.../FinanceEngine.kt`, avaliando 3 pilares fundamentais:
+      1. **Índice de Poupança / Aportes (até 35 pts):** proporção da renda guardada vs meta de 20% (regra 50/30/20).
+      2. **Controle de Teto de Gastos (até 35 pts):** consumo da renda $\le 70\%$ atinge pontuação máxima (35 pts); entre $70\%$ e $100\%$ decresce linearmente; $> 110\%$ zera.
+      3. **Cobertura da Reserva de Emergência (até 30 pts):** meses de custo de vida cobertos pelo saldo da caixinha de reserva ($\ge 6$ meses = 30 pts; 3 a 6 meses = 20 a 30 pts; 1 a 3 meses = 10 a 20 pts).
+    - **Classificação Semântica & Contextual:** 80–100 (*Excelente*, esmeralda), 60–79 (*Saudável*, ciano), 40–59 (*Atenção*, âmbar) e 0–39 (*Crítico*, rosa), com diagnósticos descritivos.
+    - **Card Visual no Dashboard (Web & Android):**
+      - **Web (`KpiGrid.tsx`):** card moderno com medidor circular em SVG e display dos 3 pilares (`Poupança`, `Teto Gastos`, `Reserva`) em pílulas, clicável para navegação direta ao modal de Investimentos.
+      - **Android (`DashboardScreen.kt`):** componente Compose com `CircularProgressIndicator`, indicador de pontuação, tags em pílula e navegação fluida para a tela de investimentos.
+  - **4.3. Feedback Tátil (Haptics) no Android:**
+    - Utilitário central `HapticFeedbackHelper.kt` em `com.saldolivre.app.ui.util` com permissão `android.permission.VIBRATE`.
+    - Suporte adaptativo com retrocompatibilidade total desde Android 8.0 (API 26) até Android 14+ (API 34), utilizando `VibratorManager`, `VibrationEffect.createPredefined` e fallbacks de pulso e formas de onda.
+    - Padrões táteis sutis:
+      - `confirm`: pulso curto de clique (~25ms) para confirmação de ações primárias.
+      - `success`: duplo pulso rítmico elegante (30ms / pausa 50ms / 40ms) para liquidações e fechamentos.
+      - `tick`: micro-pulso (~12ms) para seletores rápidos.
+    - Integração completa nas interfaces Android:
+      - `TransactionFormScreen.kt`: feedback tátil ao clicar em salvar e no salvamento com sucesso de despesas/receitas.
+      - `TransactionDetailDialog.kt`: pulso de sucesso ao marcar transação avulsa como paga.
+      - `CardInvoicesScreen.kt`: duplo pulso rítmico de sucesso ao confirmar o pagamento de fatura do cartão.
+      - `MonthClosureDialog.kt` e `DashboardScreen.kt`: feedback de sucesso na consolidação e desfazimento do fechamento de mês.
+  - **Validação:** 78 testes unitários do Vitest verdes na Web (`npm test`), build de produção Web OK (`npm run build`), compilação Kotlin no Android 100% aprovada (`compileDebugKotlin`).
+
+- **[2026-11-03] Engenharia & Arquitetura — Etapa 4: Decomposição de `FinanceContext.tsx`:**
+  - **Extração de Tipagem Global do Store (`web/src/store/types.ts`):** isolamento de `FinanceContextValue`, `ManualTransactionInput`, `FriendItem`, `AutoLaunchedNotice`, `DemoState` e `Mode`, desacoplando a definição do contrato público do contexto de sua implementação.
+  - **Módulo de Estado e Persistência Demo (`web/src/store/demoState.ts`):** extração das rotinas `freshDemo`, `loadDemo` e chaves de LocalStorage (`DEMO_KEY`, `FORCE_DEMO_KEY`), eliminando o acoplamento do `mockData` no arquivo principal de contexto.
+  - **Preservação Integral de Retrocompatibilidade:** `FinanceContext.tsx` re-exporta todos os tipos e funções de demo, garantindo zero impacto nos 18 componentes consumidores e na árvore do React.
+  - **Validação:** 50 testes unitários do Vitest verdes (`npm test`) e compilação de produção com zero erros em 1,63s (`npm run build`).
+
+- **[2026-11-03] Engenharia & Arquitetura — Etapa 3: Modularização de `agentTools.ts` (3.302 linhas -> 82 linhas):**
+  - **Decomposição em Módulos Especializados (`web/src/lib/agent/`):** o monólito de 137 KB foi dividido em submódulos desacoplados:
+    - `types.ts`: interfaces de ambiente (`AgentEnv`), regras (`UserRule`) e tipos de ferramentas.
+    - `common.ts`: utilitários compartilhados (`money`, `matchesSearch`, `cleanBaseDescription`, `parseMonthKey`, sinônimos e regex de receitas).
+    - `rules.ts`: motor de aprendizado e persistência de regras no Firestore e localStorage.
+    - `chartTools.ts`: gerador de gráficos Markdown/payload dinâmicos para o chat.
+    - `managementTools.ts`: operações de cartões de crédito, contas recorrentes/fixas e rede de amigos.
+    - `billTools.ts`: atualização de contas previstas e cálculo reativo de impacto no Saldo Livre.
+    - `projectionTools.ts`: relatórios orçamentários, projeções de 12 meses e faturas detalhadas.
+    - `queryTools.ts`: consultas e filtros combinados por pessoa, cartão, canal e categoria.
+    - `transactionTools.ts`: CRUD de transações individuais, em lote com inteligência de fatura e parcelamentos.
+  - **Fachada Limpa & Zero Quebra (`agentTools.ts`):** arquivo central transformado em orquestrador enxuto de 82 linhas com re-exportação de toda a API pública anterior, garantindo compatibilidade total com `FinanceContext` e a suíte de testes unitários.
+  - **Validação:** 34 testes unitários do Vitest verdes (`npm test`) e build de produção executado com sucesso em 1,11s (`npm run build`).
+
+- **[2026-11-03] Item 4 — Experiência do Usuário (UI/UX & PWA) — Etapa 4.1: PWA Completo & Suporte Nativo Web:**
+  - **Manifest Web App Completo (`manifest.webmanifest` & `manifest.json`):** especificação com `id`, `name: "Saldo Livre — Gestão Financeira"`, `short_name: "Saldo Livre"`, `theme_color` e `background_color` (`#090d16`), display `standalone`, `orientation: "portrait-primary"`, categorias e ícones com propósito `maskable` e `any`.
+  - **Atalhos Rápidos de App Nativo (Shortcuts):** atalhos na tela de início para **"Nova Despesa"** (`/?action=new_expense`), **"Ver Faturas"** (`/?action=invoices`) e **"Copiloto IA"** (`/?action=chat`), com tratamento reativo e limpeza dinâmica de URL em `App.tsx`.
+  - **Meta Tags de Integração iOS/Safari:** inclusão de `apple-mobile-web-app-capable`, `mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style: black-translucent`, `apple-mobile-web-app-title` e `apple-touch-icon` em `index.html`.
+  - **Service Worker Produtivo (`sw.js`):** substituição do script legado de desregistro por Service Worker com estratégia híbrida: pré-cache defensivo de assets essenciais, *Stale-While-Revalidate* para fontes e assets estáticos, *Network-First* com fallback offline para navegação e isolamento total de APIs em tempo real (Firestore e Gemini).
+  - **Validação:** 34 testes unitários do Vitest verdes (`npm test`) e compilação de produção com zero erros (`npm run build`).
+
+- **[2026-11-03] Engenharia & Arquitetura — Etapa 2: Code-Splitting & Lazy Loading (Redução de 64,4% no Bundle Inicial):**
+  - **Extração Dinâmica de `pdfjs-dist`:** `extractTextFromPdf` em `web/src/lib/pdfParser.ts` agora carrega a biblioteca sob demanda via import dinâmico assíncrono. O parser de texto (`parseTransactionsFromText`) e limpeza de contraparte (`extractCounterparty`) não bloqueiam mais a inicialização do app, gerando um chunk separado de 430 kB carregado exclusivamente em uploads de extrato.
+  - **Modais Secundários em `React.lazy`:** todos os modais secundários em `App.tsx` (`SharedCardsModal`, `RecurringBillsModal`, `ReceivablesModal`, `ApiKeyModal`, `TransactionModal`, `FutureProjectionModal`, `FriendsModal`, `RecentActivityModal`, `InvestmentsModal`, `CardInvoicesModal`, `MonthClosureModal`) e a tela `LoginScreen` foram encapsulados com `lazy()` e `<Suspense fallback={null}>`, sendo baixados sob demanda apenas quando ativados pelo usuário.
+  - **Vendor Splitting Inteligente:** configuração de `manualChunks` em `vite.config.ts` isolando `vendor-firebase` (637 kB) e `vendor-gemini` (375 kB) para cache HTTP persistente no navegador.
+  - **Resultados de Performance:** o bundle inicial `index.js` caiu de **2.704 kB** para **962 kB** (queda de **64,4%** de payload de script na inicialização, de 729 kB gzipped para 277 kB).
+  - **Validação:** 34 testes do Vitest verdes (`npm test`) e build de produção verificado com sucesso (`npm run build`).
+
+- **[2026-11-03] Engenharia & Arquitetura — Etapa 1: Web Offline-First Total no Firestore:**
+  - **Cache Local Resiliente Multi-Aba:** integração de `initializeFirestore` com `persistentLocalCache({ tabManager: persistentMultipleTabManager() })` em `web/src/lib/firebase.ts`. O aplicativo agora carrega instantaneamente a partir do IndexedDB local e sincroniza mutações e queries em segundo plano, mesmo com oscilações de rede ou em múltiplas abas concorrentes.
+  - **Fallback Defensivo Seguro:** verificação de ambiente (`window.indexedDB`) para ambientes restritivos (navegação privada) e ambientes de teste (Node.js/Vitest), garantindo fallback limpo para `getFirestore(app)`.
+  - **Validação:** 34 testes do Vitest verdes (`npm test`) e build de produção verificado com sucesso (`npm run build`).
 
 - **[2026-11-01] Fase 5 — Limpeza de Código e Categorias Legadas:**
   - **Categorias Obsoletas Removidas das Listas Ativas:** remoção definitiva de categorias legadas e duplicadas (`Cartão Terceiros`, `Estorno`, `Receita`, `Lazer`, `Assinaturas`, `Compras`, `Educação`, `Financiamentos & Empréstimos`) dos seletores e novos formulários (`ACTIVE_CATEGORIES`), substituídas pela taxonomia oficial.

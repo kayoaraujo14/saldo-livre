@@ -4,7 +4,7 @@ import { NumberTicker } from '@/components/ui/NumberTicker'
 import { useFinance } from '@/store/FinanceContext'
 import { formatBRL, monthLabel, shiftMonth, todayKey, round2 } from '@/lib/utils'
 import { buildCardInvoice, invoiceDates } from '@/lib/invoices'
-import { impactFor } from '@/lib/finance'
+import { impactFor, calculateFinancialHealthScore } from '@/lib/finance'
 import {
   Wallet,
   TrendingUp,
@@ -12,14 +12,16 @@ import {
   CalendarClock,
   ShoppingBag,
   RotateCcw,
+  ShieldCheck,
 } from 'lucide-react'
 
 interface KpiGridProps {
   onOpenReceivables?: () => void
+  onOpenInvestments?: () => void
 }
 
-export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
-  const { summary, month, deleteMonthClosure, transactions, cards, me } = useFinance()
+export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) {
+  const { summary, month, deleteMonthClosure, transactions, cards, me, profile } = useFinance()
 
   // 1. Consumo da Renda (Sem repetição do valor da renda que já está no Hero Card)
   const consumptionPct = summary && summary.income > 0
@@ -148,6 +150,29 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
 
     return { totalInvested, incomePercentage, isTargetReached, progressRatio, badgeText }
   }, [summary?.totalInvested, summary?.income])
+
+  // 5. Termômetro de Saúde Financeira (Score 0 a 100)
+  const healthScore = useMemo(() => {
+    const balances = profile?.investmentAssetBalances
+    let reserveBalance = 0
+    if (balances && typeof balances === 'object') {
+      if (typeof balances['Reserva de Emergência'] === 'number') {
+        reserveBalance = balances['Reserva de Emergência']
+      } else {
+        const reserveKey = Object.keys(balances).find((k) => k.toLowerCase().includes('reserva'))
+        if (reserveKey && typeof balances[reserveKey] === 'number') {
+          reserveBalance = balances[reserveKey]
+        } else {
+          const values = Object.values(balances).filter((v): v is number => typeof v === 'number')
+          if (values.length > 0) reserveBalance = values.reduce((sum, v) => sum + v, 0)
+        }
+      }
+    }
+    if (reserveBalance <= 0) {
+      reserveBalance = summary?.totalInvestedAccumulated || 0
+    }
+    return calculateFinancialHealthScore(summary, reserveBalance)
+  }, [profile?.investmentAssetBalances, summary])
 
   if (!summary) return null
 
@@ -474,6 +499,106 @@ export function KpiGrid({ onOpenReceivables }: KpiGridProps) {
           <span className="truncate min-w-0 text-slate-400">
             Aportado: <strong className="text-slate-300 font-semibold">{formatBRL(investmentData.totalInvested)}</strong>
           </span>
+        </div>
+      </div>
+
+      {/* 6. Termômetro de Saúde Financeira (Score 0 a 100) */}
+      <div
+        onClick={onOpenInvestments}
+        className="col-span-2 lg:col-span-12 rounded-2xl p-2.5 sm:p-3 bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] transition-all shadow-sm cursor-pointer group"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
+          {/* Lado Esquerdo: Ícone + Título + Score Circular e Classificação */}
+          <div className="flex items-center gap-3">
+            {/* Medidor Circular Compacto com Score */}
+            <div className="relative size-10 sm:size-11 shrink-0 flex items-center justify-center">
+              <svg className="size-full -rotate-90" viewBox="0 0 36 36">
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="14"
+                  className="stroke-white/10"
+                  strokeWidth="3.5"
+                  fill="none"
+                />
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="14"
+                  className={`${
+                    healthScore.classification === 'excellent'
+                      ? 'stroke-emerald-400'
+                      : healthScore.classification === 'healthy'
+                        ? 'stroke-cyan-400'
+                        : healthScore.classification === 'warning'
+                          ? 'stroke-amber-400'
+                          : 'stroke-rose-400'
+                  } transition-all duration-700`}
+                  strokeWidth="3.5"
+                  strokeDasharray={2 * Math.PI * 14}
+                  strokeDashoffset={2 * Math.PI * 14 * (1 - healthScore.score / 100)}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center font-mono font-extrabold text-xs sm:text-sm text-slate-100">
+                {healthScore.score}
+              </div>
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider truncate flex items-center gap-1.5">
+                  <ShieldCheck className="size-3.5 text-emerald-400 inline" />
+                  Saúde Financeira
+                </span>
+                <Badge
+                  variant="outline"
+                  className={`text-[9px] px-1.5 py-0 border-0 font-semibold shrink-0 ${
+                    healthScore.classification === 'excellent'
+                      ? 'bg-emerald-500/15 text-emerald-300'
+                      : healthScore.classification === 'healthy'
+                        ? 'bg-cyan-500/15 text-cyan-300'
+                        : healthScore.classification === 'warning'
+                          ? 'bg-amber-500/15 text-amber-300'
+                          : 'bg-rose-500/15 text-rose-300'
+                  }`}
+                >
+                  {healthScore.label}
+                </Badge>
+              </div>
+              <p className="text-[10px] text-slate-400 truncate max-w-md mt-0.5">
+                {healthScore.description}
+              </p>
+            </div>
+          </div>
+
+          {/* Lado Direito: Os 3 Pilares Fundamentais em Pílulas */}
+          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:gap-4 text-center sm:text-right shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-white/[0.04]">
+            <div className="flex flex-col sm:items-end">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500">Poupança</span>
+              <span className="text-[11px] font-mono font-bold text-slate-200">
+                {healthScore.savingsScore}<span className="text-slate-500 text-[9px]">/35</span>
+                <span className="text-[9px] text-slate-400 ml-1">({healthScore.savingsRatePercentage}%)</span>
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:items-end">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500">Teto Gastos</span>
+              <span className="text-[11px] font-mono font-bold text-slate-200">
+                {healthScore.spendingLimitScore}<span className="text-slate-500 text-[9px]">/35</span>
+                <span className="text-[9px] text-slate-400 ml-1">({healthScore.spendingRatioPercentage}%)</span>
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:items-end">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500">Reserva</span>
+              <span className="text-[11px] font-mono font-bold text-slate-200">
+                {healthScore.emergencyReserveScore}<span className="text-slate-500 text-[9px]">/30</span>
+                <span className="text-[9px] text-slate-400 ml-1">({healthScore.emergencyCoverageMonths}m)</span>
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

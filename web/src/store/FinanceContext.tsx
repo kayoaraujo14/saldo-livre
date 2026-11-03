@@ -11,7 +11,6 @@ import type {
   FriendSplitInput,
   InstallmentGroupUpdateInput,
   MonthClosure,
-  MonthSummary,
   NewTransaction,
   PendingBatchTransaction,
   PendingChargeGroup,
@@ -40,244 +39,27 @@ import {
   type Party,
 } from '@/lib/finance'
 import * as fb from '@/lib/firebase'
-import { DEMO_CARDS, DEMO_RECURRING, DEMO_USERS, buildDemoTransactions } from '@/lib/mockData'
 import { createToolExecutor, getLearnedRules, saveLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
-import type { ToolExecutor } from '@/lib/gemini'
 import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, daysInMonth, monthLabel, formatInstallmentDesc, stripInstallmentSuffix } from '@/lib/utils'
+import type {
+  AutoLaunchedNotice,
+  DemoState,
+  FinanceContextValue,
+  FriendItem,
+  ManualTransactionInput,
+  Mode,
+} from './types'
+import { DEMO_KEY, FORCE_DEMO_KEY, freshDemo, loadDemo } from './demoState'
 
-type Mode = 'demo' | 'firebase'
-
-interface DemoState {
-  users: UserProfile[]
-  cards: Card[]
-  recurring: RecurringBill[]
-  transactions: Transaction[]
-  friendships: Friendship[]
-  monthClosures?: MonthClosure[]
-
+export type {
+  AutoLaunchedNotice,
+  DemoState,
+  FinanceContextValue,
+  FriendItem,
+  ManualTransactionInput,
+  Mode,
 }
-
-const DEMO_KEY = 'saldo-livre:demo-state:v3'
-const FORCE_DEMO_KEY = 'saldo-livre:force-demo'
-
-function freshDemo(): DemoState {
-  const M = currentMonthKey()
-  const gId = 'demo_group_curso'
-  const kayoParty: Party = { uid: DEMO_USERS[0].uid, name: 'Kayo' }
-  const marinaParty: Party = { uid: DEMO_USERS[1].uid, name: 'Marina' }
-
-  const split = buildSplit({
-    splitType: 'friend',
-    total: 120,
-    me: kayoParty,
-    partner: marinaParty,
-    assignedFriend: marinaParty,
-    friendSharePct: 50,
-    payerUid: DEMO_USERS[0].uid,
-    createdByUid: DEMO_USERS[0].uid,
-  })
-
-  const sampleInstallments: Transaction[] = [1, 2, 3].map((num) => ({
-    id: `tx_demo_install_${num}`,
-    createdByUid: DEMO_USERS[0].uid,
-    paidByUid: DEMO_USERS[0].uid,
-    cardId: 'card_nubank',
-    description: `Curso Masterclass Design (${num}/3)`,
-    category: 'Outros',
-    type: 'expense',
-    paymentMethod: 'credit_card',
-    status: 'pending',
-    estimatedAmount: null,
-    actualAmount: 120,
-    totalAmount: 120,
-    dueDate: dateInMonth(shiftMonth(M, num - 1), 10),
-    competenceMonth: shiftMonth(M, num - 1),
-    visibleToUids: split.visibleToUids,
-    userImpact: split.userImpact,
-    allocations: split.allocations,
-    assignedFriendUid: DEMO_USERS[1].uid,
-    assignedFriendName: 'Marina Costa',
-    friendSharePct: 50,
-    acceptanceStatus: 'pending_approval',
-    installmentGroupId: gId,
-    installmentNumber: num,
-    installmentsTotal: 3,
-    createdAt: Date.now() - 3600000,
-  }))
-
-  return {
-    users: DEMO_USERS,
-    cards: DEMO_CARDS,
-    recurring: DEMO_RECURRING,
-    transactions: [...buildDemoTransactions(), ...sampleInstallments],
-    friendships: [
-      {
-        id: 'demo_f1',
-        requesterUid: DEMO_USERS[0].uid,
-        requesterEmail: DEMO_USERS[0].email,
-        requesterName: DEMO_USERS[0].displayName,
-        recipientUid: DEMO_USERS[1].uid,
-        recipientEmail: DEMO_USERS[1].email,
-        recipientName: DEMO_USERS[1].displayName,
-        status: 'accepted',
-        createdAt: Date.now() - 86400000,
-      },
-    ],
-  }
-}
-
-function loadDemo(): DemoState {
-  const fresh = freshDemo()
-  try {
-    const raw = localStorage.getItem(DEMO_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      return {
-        users: Array.isArray(parsed?.users) && parsed.users.length ? parsed.users : fresh.users,
-        cards: Array.isArray(parsed?.cards) ? parsed.cards : fresh.cards,
-        recurring: Array.isArray(parsed?.recurring) ? parsed.recurring : fresh.recurring,
-        transactions: Array.isArray(parsed?.transactions) ? parsed.transactions : fresh.transactions,
-        friendships: Array.isArray(parsed?.friendships) ? parsed.friendships : fresh.friendships,
-      }
-    }
-  } catch {
-    /* ignora estado corrompido */
-  }
-  return fresh
-}
-
-export interface ManualTransactionInput {
-  description: string
-  amount: number
-  category: Transaction['category']
-  subcategory?: string | null
-  date: string
-  type: Transaction['type']
-  status: TransactionStatus
-  splitType: SplitType
-  externalName?: string
-  paymentMethod: Transaction['paymentMethod']
-  cardId?: string | null
-  reserveCardId?: string | null
-  // Feature 2: Amigo
-  assignedFriendUid?: string | null
-  assignedFriendName?: string | null
-  /** Percentual (1–100) da despesa cobrado do amigo */
-  friendSharePct?: number | null
-  customAllocations?: Allocation[]
-  // Feature 3: Parcelamento
-  isInstallment?: boolean
-  installmentsCount?: number
-  installmentMode?: 'total' | 'per_installment'
-}
-
-export interface FriendItem {
-  uid: string
-  name: string
-  email: string
-  friendshipId: string
-}
-
-export interface AutoLaunchedNotice {
-  date: string
-  createdCount: number
-  bills: Array<{ id: string; description: string; amount: number; type: string; dueDay: number }>
-}
-
-interface FinanceContextValue {
-  autoLaunchedNotice: AutoLaunchedNotice | null
-  dismissAutoLaunchNotice: () => void
-  pendingRecurringLaunches: PendingRecurringCandidate[]
-  confirmLaunchRecurring: (
-    candidate: PendingRecurringCandidate,
-    options?: { asPaid?: boolean; customAmount?: number },
-  ) => Promise<void>
-  confirmLaunchAllRecurring: (candidates?: PendingRecurringCandidate[], asPaid?: boolean) => Promise<void>
-  launchBillForCurrentMonth: (
-    bill: RecurringBill,
-    options?: { asPaid?: boolean; customAmount?: number },
-  ) => Promise<void>
-  linkManualTransactionToRecurring: (candidateId: string, manualTxId: string) => Promise<void>
-  skipRecurringForMonth: (candidateId: string) => void
-  mode: Mode
-  firebaseAvailable: boolean
-  authLoading: boolean
-  isAuthenticated: boolean
-  authUser: User | null
-  // dados
-  users: UserProfile[]
-  profile: UserProfile | null
-  me: Party | null
-  partner: Party | null
-  cards: Card[]
-  recurring: RecurringBill[]
-  transactions: Transaction[]
-  monthTransactions: Transaction[]
-  summary: MonthSummary | null
-  month: string
-  setMonth: (m: string) => void
-  isFirebaseConfigured: boolean
-  // sessão
-  signIn: () => Promise<void>
-  signOut: () => Promise<void>
-  loginAsDemo: (uid: string) => void
-  switchProfile: (uid: string) => void
-  enterDemo: () => void
-  exitDemo: () => void
-  resetDemo: () => void
-  clearDemoData: () => void
-  // transações
-  addTransaction: (tx: NewTransaction) => Promise<string>
-  addMany: (txs: NewTransaction[]) => Promise<void>
-  createManual: (input: ManualTransactionInput) => Promise<string>
-  updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<void>
-  deleteTransaction: (id: string) => Promise<void>
-  deleteInstallmentGroup: (groupId: string) => Promise<number>
-  updateInstallmentGroup: (groupId: string, input: InstallmentGroupUpdateInput) => Promise<number>
-  cycleStatus: (tx: Transaction) => Promise<void>
-  setStatus: (tx: Transaction, status: TransactionStatus) => Promise<void>
-  changeSplit: (
-    tx: Transaction,
-    splitType: SplitType,
-    externalName?: string,
-    friend?: FriendSplitInput,
-    customAllocations?: Allocation[],
-  ) => Promise<void>
-  changeAmount: (tx: Transaction, values: { estimatedAmount?: number | null; actualAmount?: number | null }) => Promise<void>
-  markReimbursed: (txId: string, allocationIndex: number, value: boolean) => Promise<void>
-  generateBills: () => Promise<{ created: number; skipped: number }>
-  // cartões / moldes / perfil
-  saveCard: (card: Card) => Promise<void>
-  deleteCard: (id: string) => Promise<void>
-  saveRecurring: (bill: RecurringBill) => Promise<void>
-  deleteRecurring: (id: string) => Promise<void>
-  updateProfile: (patch: Partial<UserProfile>) => Promise<void>
-  lookupUserByEmail: (email: string) => Promise<UserProfile | null>
-  monthClosures: MonthClosure[]
-  saveMonthClosure: (closure: MonthClosure) => Promise<void>
-  deleteMonthClosure: (closedMonth: string) => Promise<void>
-  closureModalOpen: boolean
-  setClosureModalOpen: (open: boolean) => void
-  openMonthClosureModal: () => void
-  // Rede de Amigos (Feature 2)
-  friendships: Friendship[]
-
-  friends: FriendItem[]
-  pendingFriendRequests: Friendship[]
-  pendingChargeRequests: Transaction[]
-  pendingChargeGroups: PendingChargeGroup[]
-  sendFriendRequest: (email: string) => Promise<{ success: boolean; message: string }>
-  respondFriendRequest: (friendshipId: string, accept: boolean) => Promise<void>
-  removeFriend: (friendshipId: string) => Promise<void>
-  respondChargeRequest: (tx: Transaction, accept: boolean) => Promise<void>
-  // agente e regras
-  executeTool: ToolExecutor
-  pendingBatchTransactions: PendingBatchTransaction[]
-  setPendingBatchTransactions: (txs: PendingBatchTransaction[]) => void
-  rules: UserRule[]
-  addRule: (text: string, category?: string) => Promise<UserRule>
-  deleteRule: (id: string) => Promise<void>
-}
+export { DEMO_KEY, FORCE_DEMO_KEY, freshDemo, loadDemo }
 
 const FinanceContext = createContext<FinanceContextValue | null>(null)
 

@@ -2292,6 +2292,131 @@ object FinanceEngine {
 
         return groups
     }
+
+    /**
+     * Calcula o Score do Termômetro de Saúde Financeira (0 a 100).
+     * Avalia 3 pilares fundamentais da metodologia Saldo Livre com 100% de paridade com a Web:
+     * 1. Índice de Poupança & Investimentos (até 35 pts)
+     * 2. Controle de Teto de Gastos / Consumo da Renda (até 35 pts)
+     * 3. Cobertura da Reserva de Emergência (até 30 pts)
+     */
+    fun calculateFinancialHealthScore(
+        summary: MonthSummary?,
+        emergencyReserveBalance: Double = 0.0
+    ): FinancialHealthScore {
+        if (summary == null) {
+            return FinancialHealthScore(
+                score = 50,
+                classification = FinancialHealthClassification.WARNING,
+                label = "Atenção",
+                description = "Aguardando dados financeiros para calcular o score.",
+                savingsScore = 0,
+                spendingLimitScore = 0,
+                emergencyReserveScore = 0,
+                savingsRatePercentage = 0,
+                spendingRatioPercentage = 0,
+                emergencyCoverageMonths = 0.0
+            )
+        }
+
+        val income = summary.income
+        val totalExpenses = summary.paid + summary.committed
+        val totalInvested = summary.totalInvested
+
+        // 1. Pilar de Poupança & Investimentos (0 a 35 pontos)
+        var savingsScore = 0
+        var savingsRatePercentage = 0
+        if (income > 0.0) {
+            val rate = totalInvested / income
+            savingsRatePercentage = kotlin.math.round(rate * 100.0).toInt()
+            savingsScore = when {
+                rate >= 0.20 -> 35
+                rate > 0.0 -> kotlin.math.round((rate / 0.20) * 35.0).toInt()
+                else -> 0
+            }
+        } else if (totalInvested > 0.0) {
+            savingsScore = 15
+            savingsRatePercentage = 100
+        }
+
+        // 2. Pilar de Controle de Teto de Gastos (0 a 35 pontos)
+        var spendingLimitScore = 0
+        var spendingRatioPercentage = 0
+        if (income > 0.0) {
+            val ratio = totalExpenses / income
+            spendingRatioPercentage = kotlin.math.round(ratio * 100.0).toInt()
+            spendingLimitScore = when {
+                ratio <= 0.70 -> 35
+                ratio <= 1.00 -> kotlin.math.max(10, kotlin.math.round(35.0 - ((ratio - 0.70) / 0.30) * 25.0).toInt())
+                ratio <= 1.10 -> 5
+                else -> 0
+            }
+        } else if (totalExpenses == 0.0) {
+            spendingLimitScore = 20
+            spendingRatioPercentage = 0
+        } else {
+            spendingLimitScore = 0
+            spendingRatioPercentage = 100
+        }
+
+        // 3. Pilar de Cobertura da Reserva de Emergência (0 a 30 pontos)
+        var emergencyReserveScore = 0
+        val baselineCost = when {
+            totalExpenses > 0.0 -> totalExpenses
+            income > 0.0 -> income * 0.8
+            else -> 1000.0
+        }
+
+        val coverageMonths = if (emergencyReserveBalance > 0.0) {
+            round2(emergencyReserveBalance / baselineCost)
+        } else 0.0
+
+        emergencyReserveScore = when {
+            coverageMonths >= 6.0 -> 30
+            coverageMonths >= 3.0 -> kotlin.math.round(20.0 + ((coverageMonths - 3.0) / 3.0) * 10.0).toInt()
+            coverageMonths >= 1.0 -> kotlin.math.round(10.0 + ((coverageMonths - 1.0) / 2.0) * 10.0).toInt()
+            coverageMonths > 0.0 -> kotlin.math.min(10, kotlin.math.round(coverageMonths * 10.0).toInt())
+            else -> 0
+        }
+
+        val totalScore = (savingsScore + spendingLimitScore + emergencyReserveScore).coerceIn(0, 100)
+
+        val (classification, label, description) = when {
+            totalScore >= 80 -> Triple(
+                FinancialHealthClassification.EXCELLENT,
+                "Excelente",
+                "Finanças blindadas com excelente taxa de poupança e reserva sólida."
+            )
+            totalScore >= 60 -> Triple(
+                FinancialHealthClassification.HEALTHY,
+                "Saudável",
+                "Bom ritmo financeiro com despesas controladas e reservas ativas."
+            )
+            totalScore >= 40 -> Triple(
+                FinancialHealthClassification.WARNING,
+                "Atenção",
+                "Gastos próximos do limite ou reserva de emergência em formação."
+            )
+            else -> Triple(
+                FinancialHealthClassification.CRITICAL,
+                "Crítico",
+                "Despesas acima da renda ou ausência de margem e reservas."
+            )
+        }
+
+        return FinancialHealthScore(
+            score = totalScore,
+            classification = classification,
+            label = label,
+            description = description,
+            savingsScore = savingsScore,
+            spendingLimitScore = spendingLimitScore,
+            emergencyReserveScore = emergencyReserveScore,
+            savingsRatePercentage = savingsRatePercentage,
+            spendingRatioPercentage = spendingRatioPercentage,
+            emergencyCoverageMonths = coverageMonths
+        )
+    }
 }
 
 

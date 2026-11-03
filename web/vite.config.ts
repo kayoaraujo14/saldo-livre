@@ -11,6 +11,20 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/firebase/')) {
+            return 'vendor-firebase'
+          }
+          if (id.includes('node_modules/@google/genai')) {
+            return 'vendor-gemini'
+          }
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'node',

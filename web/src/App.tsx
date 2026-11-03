@@ -1,21 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
 import { FinanceProvider, useFinance } from '@/store/FinanceContext'
 import { Header } from '@/components/Header'
 import { KpiGrid } from '@/components/KpiGrid'
 import { TransactionTable } from '@/components/TransactionTable'
 import { GeminiChat } from '@/components/GeminiChat'
-import { LoginScreen } from '@/components/LoginScreen'
-import { SharedCardsModal } from '@/components/modals/SharedCardsModal'
-import { RecurringBillsModal } from '@/components/modals/RecurringBillsModal'
-import { ReceivablesModal } from '@/components/modals/ReceivablesModal'
-import { ApiKeyModal } from '@/components/modals/ApiKeyModal'
-import { TransactionModal } from '@/components/modals/TransactionModal'
-import { FutureProjectionModal } from '@/components/modals/FutureProjectionModal'
-import { FriendsModal } from '@/components/modals/FriendsModal'
-import { RecentActivityModal } from '@/components/modals/RecentActivityModal'
-import { InvestmentsModal } from '@/components/modals/InvestmentsModal'
-import { CardInvoicesModal } from '@/components/modals/CardInvoicesModal'
-import { MonthClosureModal } from '@/components/modals/MonthClosureModal'
 import { ScrollToTop } from '@/components/ui/ScrollToTop'
 import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBottomNav'
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
@@ -26,6 +14,20 @@ import { Clock, ArrowRight, ReceiptText, Sparkles } from 'lucide-react'
 import type { Transaction } from '@/types'
 import { consolidateMonthTransactions } from '@/lib/invoices'
 import { formatBRL, monthLabel } from '@/lib/utils'
+
+// Lazy-loaded secondary modals & screens to optimize initial bundle size
+const LoginScreen = lazy(() => import('@/components/LoginScreen').then((m) => ({ default: m.LoginScreen })))
+const SharedCardsModal = lazy(() => import('@/components/modals/SharedCardsModal').then((m) => ({ default: m.SharedCardsModal })))
+const RecurringBillsModal = lazy(() => import('@/components/modals/RecurringBillsModal').then((m) => ({ default: m.RecurringBillsModal })))
+const ReceivablesModal = lazy(() => import('@/components/modals/ReceivablesModal').then((m) => ({ default: m.ReceivablesModal })))
+const ApiKeyModal = lazy(() => import('@/components/modals/ApiKeyModal').then((m) => ({ default: m.ApiKeyModal })))
+const TransactionModal = lazy(() => import('@/components/modals/TransactionModal').then((m) => ({ default: m.TransactionModal })))
+const FutureProjectionModal = lazy(() => import('@/components/modals/FutureProjectionModal').then((m) => ({ default: m.FutureProjectionModal })))
+const FriendsModal = lazy(() => import('@/components/modals/FriendsModal').then((m) => ({ default: m.FriendsModal })))
+const RecentActivityModal = lazy(() => import('@/components/modals/RecentActivityModal').then((m) => ({ default: m.RecentActivityModal })))
+const InvestmentsModal = lazy(() => import('@/components/modals/InvestmentsModal').then((m) => ({ default: m.InvestmentsModal })))
+const CardInvoicesModal = lazy(() => import('@/components/modals/CardInvoicesModal').then((m) => ({ default: m.CardInvoicesModal })))
+const MonthClosureModal = lazy(() => import('@/components/modals/MonthClosureModal').then((m) => ({ default: m.MonthClosureModal })))
 
 type DesktopViewMode = 'chat_focus' | 'chat_full' | 'table_full'
 
@@ -79,6 +81,25 @@ function MainDashboard() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [desktopView])
+
+  // Processamento de atalhos rápidos do PWA (ex: ?action=new_expense, ?action=invoices, ?action=chat)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const action = params.get('action')
+    if (!action) return
+
+    if (action === 'new_expense') {
+      handleOpenNewTx()
+    } else if (action === 'invoices') {
+      setInvoicesModalOpen(true)
+    } else if (action === 'chat') {
+      setMobileTab('chat')
+      setDesktopView('chat_full')
+    }
+
+    const cleanUrl = window.location.pathname + window.location.hash
+    window.history.replaceState({}, '', cleanUrl)
+  }, [])
 
   const handleSelectMobileTab = (tab: MobileTab) => {
     setMobileTab(tab)
@@ -194,6 +215,7 @@ function MainDashboard() {
           {desktopView === 'chat_focus' && (
             <KpiGrid
               onOpenReceivables={() => setReceivablesModalOpen(true)}
+              onOpenInvestments={() => setInvestmentsModalOpen(true)}
             />
           )}
 
@@ -261,6 +283,7 @@ function MainDashboard() {
               {/* KPI Grid */}
               <KpiGrid
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
+                onOpenInvestments={() => setInvestmentsModalOpen(true)}
               />
 
               {/* Banner de Lançamento Automático / Próximos Vencimentos (Mobile) */}
@@ -358,53 +381,69 @@ function MainDashboard() {
       {/* Floating Scroll to Top Button */}
       <ScrollToTop />
 
-      {/* Modals & Dialogs (Unified across Desktop and Mobile) */}
-      <SharedCardsModal open={cardsModalOpen} onOpenChange={setCardsModalOpen} />
-      <RecurringBillsModal open={recurringModalOpen} onOpenChange={setRecurringModalOpen} />
-      <ReceivablesModal open={receivablesModalOpen} onOpenChange={setReceivablesModalOpen} />
-      <ApiKeyModal open={apiKeyModalOpen} onOpenChange={setApiKeyModalOpen} />
-      <TransactionModal
-        open={txModalOpen}
-        onOpenChange={(open) => {
-          setTxModalOpen(open)
-          if (!open) {
-            setEditingTx(null)
-          }
-        }}
-        editingTx={editingTx}
-      />
-      <FutureProjectionModal
-        open={projectionModalOpen}
-        onOpenChange={setProjectionModalOpen}
-        onSelectMonth={setMonth}
-      />
-      <FriendsModal
-        open={friendsModalOpen}
-        onOpenChange={setFriendsModalOpen}
-      />
-      <RecentActivityModal
-        open={recentActivityModalOpen}
-        onOpenChange={setRecentActivityModalOpen}
-        onEditTx={handleEditTx}
-      />
-      <InvestmentsModal
-        open={investmentsModalOpen}
-        onOpenChange={setInvestmentsModalOpen}
-        onOpenNewTx={handleOpenNewTx}
-      />
-      <CardInvoicesModal
-        open={invoicesModalOpen}
-        onOpenChange={(open) => {
-          setInvoicesModalOpen(open)
-          if (!open) setInvoicesInitialCardId(null)
-        }}
-        initialCardId={invoicesInitialCardId}
-        onEditTx={handleEditTx}
-      />
-      <MonthClosureModal
-        open={closureModalOpen}
-        onOpenChange={setClosureModalOpen}
-      />
+      {/* Modals & Dialogs (Unified across Desktop and Mobile - Lazy loaded on demand) */}
+      <Suspense fallback={null}>
+        {cardsModalOpen && <SharedCardsModal open={cardsModalOpen} onOpenChange={setCardsModalOpen} />}
+        {recurringModalOpen && <RecurringBillsModal open={recurringModalOpen} onOpenChange={setRecurringModalOpen} />}
+        {receivablesModalOpen && <ReceivablesModal open={receivablesModalOpen} onOpenChange={setReceivablesModalOpen} />}
+        {apiKeyModalOpen && <ApiKeyModal open={apiKeyModalOpen} onOpenChange={setApiKeyModalOpen} />}
+        {txModalOpen && (
+          <TransactionModal
+            open={txModalOpen}
+            onOpenChange={(open) => {
+              setTxModalOpen(open)
+              if (!open) {
+                setEditingTx(null)
+              }
+            }}
+            editingTx={editingTx}
+          />
+        )}
+        {projectionModalOpen && (
+          <FutureProjectionModal
+            open={projectionModalOpen}
+            onOpenChange={setProjectionModalOpen}
+            onSelectMonth={setMonth}
+          />
+        )}
+        {friendsModalOpen && (
+          <FriendsModal
+            open={friendsModalOpen}
+            onOpenChange={setFriendsModalOpen}
+          />
+        )}
+        {recentActivityModalOpen && (
+          <RecentActivityModal
+            open={recentActivityModalOpen}
+            onOpenChange={setRecentActivityModalOpen}
+            onEditTx={handleEditTx}
+          />
+        )}
+        {investmentsModalOpen && (
+          <InvestmentsModal
+            open={investmentsModalOpen}
+            onOpenChange={setInvestmentsModalOpen}
+            onOpenNewTx={handleOpenNewTx}
+          />
+        )}
+        {invoicesModalOpen && (
+          <CardInvoicesModal
+            open={invoicesModalOpen}
+            onOpenChange={(open) => {
+              setInvoicesModalOpen(open)
+              if (!open) setInvoicesInitialCardId(null)
+            }}
+            initialCardId={invoicesInitialCardId}
+            onEditTx={handleEditTx}
+          />
+        )}
+        {closureModalOpen && (
+          <MonthClosureModal
+            open={closureModalOpen}
+            onOpenChange={setClosureModalOpen}
+          />
+        )}
+      </Suspense>
     </div>
   )
 }
@@ -424,7 +463,11 @@ function MainContent() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen />
+    return (
+      <Suspense fallback={<div className="min-h-screen bg-[#090d16]" />}>
+        <LoginScreen />
+      </Suspense>
+    )
   }
 
   return <MainDashboard />

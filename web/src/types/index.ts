@@ -930,6 +930,21 @@ export interface AccountCashFlowSummary {
   dailyLimit: number | null
 }
 
+export type FinancialHealthClassification = 'critical' | 'warning' | 'healthy' | 'excellent'
+
+export interface FinancialHealthScore {
+  score: number // 0 a 100
+  classification: FinancialHealthClassification
+  label: string // 'Crítico' | 'Atenção' | 'Saudável' | 'Excelente'
+  description: string
+  savingsScore: number // 0 a 35
+  spendingLimitScore: number // 0 a 35
+  emergencyReserveScore: number // 0 a 30
+  savingsRatePercentage: number // % poupada da renda
+  spendingRatioPercentage: number // % despesas sobre a renda
+  emergencyCoverageMonths: number // meses de cobertura da reserva
+}
+
 export interface ProjectedCategoryItem {
   category: string
   amount: number

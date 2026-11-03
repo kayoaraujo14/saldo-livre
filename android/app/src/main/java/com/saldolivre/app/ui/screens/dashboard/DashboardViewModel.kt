@@ -12,6 +12,7 @@ import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.data.model.UserProfile
+import com.saldolivre.app.data.model.FinancialHealthScore
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -73,6 +74,7 @@ data class DashboardUiState(
     val radar7Days: Radar7DaysState = Radar7DaysState(),
     val topCategory: TopCategoryState = TopCategoryState(),
     val investmentHealth: InvestmentHealthState = InvestmentHealthState(),
+    val financialHealth: FinancialHealthScore = FinancialHealthScore(),
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
     val closureDialogDismissed: Boolean = false,
@@ -251,6 +253,12 @@ class DashboardViewModel(
                     badgeText = investBadge
                 )
 
+                // 5. Termômetro de Saúde Financeira (Score 0 a 100)
+                val reserveBalance = user.investmentAssetBalances["Reserva de Emergência"]
+                    ?: user.investmentAssetBalances.entries.firstOrNull { it.key.contains("Reserva", ignoreCase = true) }?.value
+                    ?: (if (user.investmentAssetBalances.isNotEmpty()) user.investmentAssetBalances.values.sum() else summary.totalInvestedAccumulated)
+                val financialHealth = FinanceEngine.calculateFinancialHealthScore(summary, reserveBalance)
+
                 DashboardUiState(
                     currentUser = user,
                     allUsers = repository.allUsers,
@@ -264,6 +272,7 @@ class DashboardViewModel(
                     radar7Days = radar7Days,
                     topCategory = topCategory,
                     investmentHealth = investmentHealth,
+                    financialHealth = financialHealth,
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
                     closureDialogDismissed = _uiState.value.closureDialogDismissed,

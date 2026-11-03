@@ -83,6 +83,7 @@ fun CardInvoicesScreen(
     onEditTransaction: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val selected = uiState.selected
 
@@ -285,7 +286,10 @@ fun CardInvoicesScreen(
                         showConfirm = uiState.showPayConfirm,
                         isPaying = uiState.isPaying,
                         onPay = viewModel::requestPay,
-                        onConfirm = viewModel::confirmPay,
+                        onConfirm = {
+                            com.saldolivre.app.ui.util.HapticFeedbackHelper.success(context)
+                            viewModel.confirmPay()
+                        },
                         onDismiss = viewModel::dismissPay
                     )
                 }

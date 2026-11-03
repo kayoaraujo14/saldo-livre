@@ -53,6 +53,7 @@ fun MonthClosureDialog(
     val targetMonthLabel = remember(targetMonthKey) { FinanceEngine.formatMonthLabel(targetMonthKey) }
     val formattedTotal = remember(totalSurplus) { FinanceEngine.formatCurrency(totalSurplus) }
     val haptic = LocalHapticFeedback.current
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     var destinationMode by remember { mutableStateOf(ClosureDestinationMode.KEEP_IN_ACCOUNT) }
     var selectedSubcategory by remember { mutableStateOf("Reserva de Emergência") }
@@ -335,6 +336,7 @@ fun MonthClosureDialog(
                 Button(
                     onClick = {
                         if (isExact) {
+                            com.saldolivre.app.ui.util.HapticFeedbackHelper.success(context)
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onConfirm(carryoverVal, investedVal, if (investedVal > 0.0) selectedSubcategory else null)
                         }

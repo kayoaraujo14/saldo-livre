@@ -22,6 +22,7 @@ import type {
   ProjectedMonthItem,
   LaunchTrigger,
   PendingRecurringCandidate,
+  FinancialHealthScore,
 } from '@/types'
 import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
 import { buildCardInvoice } from './invoices'
@@ -2234,4 +2235,128 @@ export function guessCategoryAndSubcategory(text: string, amount?: number, type?
 
 export function guessCategory(text: string, amount?: number, type?: 'income' | 'expense'): Category {
   return guessCategoryAndSubcategory(text, amount, type).category
+}
+
+/**
+ * Calcula o Score do Termômetro de Saúde Financeira (0 a 100).
+ * Avalia 3 pilares fundamentais da metodologia Saldo Livre:
+ * 1. Índice de Poupança & Investimentos (até 35 pts)
+ * 2. Controle de Teto de Gastos / Consumo da Renda (até 35 pts)
+ * 3. Cobertura da Reserva de Emergência (até 30 pts)
+ */
+export function calculateFinancialHealthScore(
+  summary: MonthSummary | null | undefined,
+  emergencyReserveBalance: number = 0,
+): FinancialHealthScore {
+  if (!summary) {
+    return {
+      score: 50,
+      classification: 'warning',
+      label: 'Atenção',
+      description: 'Aguardando dados financeiros para calcular o score.',
+      savingsScore: 0,
+      spendingLimitScore: 0,
+      emergencyReserveScore: 0,
+      savingsRatePercentage: 0,
+      spendingRatioPercentage: 0,
+      emergencyCoverageMonths: 0,
+    }
+  }
+
+  const income = summary.income || 0
+  const totalExpenses = (summary.paid || 0) + (summary.committed || 0)
+  const totalInvested = summary.totalInvested || 0
+
+  // 1. Pilar de Poupança & Investimentos (0 a 35 pontos)
+  let savingsScore = 0
+  let savingsRatePercentage = 0
+  if (income > 0) {
+    const rate = totalInvested / income
+    savingsRatePercentage = Math.round(rate * 100)
+    if (rate >= 0.20) {
+      savingsScore = 35
+    } else if (rate > 0) {
+      savingsScore = Math.round((rate / 0.20) * 35)
+    }
+  } else if (totalInvested > 0) {
+    savingsScore = 15
+    savingsRatePercentage = 100
+  }
+
+  // 2. Pilar de Controle de Teto de Gastos (0 a 35 pontos)
+  let spendingLimitScore = 0
+  let spendingRatioPercentage = 0
+  if (income > 0) {
+    const ratio = totalExpenses / income
+    spendingRatioPercentage = Math.round(ratio * 100)
+    if (ratio <= 0.70) {
+      spendingLimitScore = 35
+    } else if (ratio <= 1.00) {
+      spendingLimitScore = Math.max(10, Math.round(35 - ((ratio - 0.70) / 0.30) * 25))
+    } else if (ratio <= 1.10) {
+      spendingLimitScore = 5
+    } else {
+      spendingLimitScore = 0
+    }
+  } else if (totalExpenses === 0) {
+    spendingLimitScore = 20
+    spendingRatioPercentage = 0
+  } else {
+    spendingLimitScore = 0
+    spendingRatioPercentage = 100
+  }
+
+  // 3. Pilar de Cobertura da Reserva de Emergência (0 a 30 pontos)
+  let emergencyReserveScore = 0
+  const baselineCost = totalExpenses > 0
+    ? totalExpenses
+    : (income > 0 ? income * 0.8 : 1000)
+
+  const coverageMonths = emergencyReserveBalance > 0
+    ? round2(emergencyReserveBalance / baselineCost)
+    : 0
+
+  if (coverageMonths >= 6.0) {
+    emergencyReserveScore = 30
+  } else if (coverageMonths >= 3.0) {
+    emergencyReserveScore = Math.round(20 + ((coverageMonths - 3.0) / 3.0) * 10)
+  } else if (coverageMonths >= 1.0) {
+    emergencyReserveScore = Math.round(10 + ((coverageMonths - 1.0) / 2.0) * 10)
+  } else if (coverageMonths > 0) {
+    emergencyReserveScore = Math.min(10, Math.round(coverageMonths * 10))
+  }
+
+  // Pontuação Total (0 a 100)
+  const totalScore = Math.min(100, Math.max(0, savingsScore + spendingLimitScore + emergencyReserveScore))
+
+  let classification: FinancialHealthScore['classification'] = 'critical'
+  let label = 'Crítico'
+  let description = 'Despesas acima da renda ou ausência de margem e reservas.'
+
+  if (totalScore >= 80) {
+    classification = 'excellent'
+    label = 'Excelente'
+    description = 'Finanças blindadas com excelente taxa de poupança e reserva sólida.'
+  } else if (totalScore >= 60) {
+    classification = 'healthy'
+    label = 'Saudável'
+    description = 'Bom ritmo financeiro com despesas controladas e reservas ativas.'
+  } else if (totalScore >= 40) {
+    classification = 'warning'
+    label = 'Atenção'
+    description = 'Gastos próximos do limite ou reserva de emergência em formação.'
+  }
+
+  return {
+    score: totalScore,
+    classification,
+    label,
+    description,
+    savingsScore,
+    spendingLimitScore,
+    emergencyReserveScore,
+    savingsRatePercentage,
+    spendingRatioPercentage,
+    emergencyCoverageMonths: coverageMonths,
+  }
 }

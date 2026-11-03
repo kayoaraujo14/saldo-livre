@@ -64,6 +64,7 @@ fun TransactionFormScreen(
     val state by viewModel.state.collectAsState()
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
         // Auto-focus no campo de valor ao abrir a tela e exibe teclado numérico
@@ -73,6 +74,7 @@ fun TransactionFormScreen(
 
     LaunchedEffect(state.isSaved) {
         if (state.isSaved) {
+            com.saldolivre.app.ui.util.HapticFeedbackHelper.success(context)
             onNavigateBack()
         }
     }
@@ -1197,7 +1199,10 @@ fun TransactionFormScreen(
 
             // Submit Button
             Button(
-                onClick = { viewModel.saveTransaction() },
+                onClick = {
+                    com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
+                    viewModel.saveTransaction()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 52.dp),

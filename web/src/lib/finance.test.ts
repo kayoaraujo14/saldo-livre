@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { amountPatch } from './finance'
-import type { Transaction } from '@/types'
+import { amountPatch, calculateFinancialHealthScore } from './finance'
+import type { MonthSummary, Transaction } from '@/types'
 
 describe('amountPatch', () => {
   const baseTx: Transaction = {
@@ -85,5 +85,47 @@ describe('amountPatch', () => {
 
     expect(patch.allocations).toBeDefined()
     expect(patch.allocations![0].amount).toBe(100)
+  })
+})
+
+describe('calculateFinancialHealthScore', () => {
+  it('returns excellent score (100) when savings >= 20%, expenses <= 70% and reserve >= 6 months', () => {
+    const summary = {
+      income: 10000,
+      paid: 5000,
+      committed: 1000,
+      totalInvested: 2500,
+    } as unknown as MonthSummary
+
+    const result = calculateFinancialHealthScore(summary, 40000)
+
+    expect(result.score).toBe(100)
+    expect(result.classification).toBe('excellent')
+    expect(result.savingsScore).toBe(35)
+    expect(result.spendingLimitScore).toBe(35)
+    expect(result.emergencyReserveScore).toBe(30)
+  })
+
+  it('returns critical score (0) when expenses exceed 110% of income with no savings or reserve', () => {
+    const summary = {
+      income: 5000,
+      paid: 5500,
+      committed: 500,
+      totalInvested: 0,
+    } as unknown as MonthSummary
+
+    const result = calculateFinancialHealthScore(summary, 0)
+
+    expect(result.score).toBe(0)
+    expect(result.classification).toBe('critical')
+    expect(result.savingsScore).toBe(0)
+    expect(result.spendingLimitScore).toBe(0)
+    expect(result.emergencyReserveScore).toBe(0)
+  })
+
+  it('handles null/undefined gracefully with fallback score 50 and warning classification', () => {
+    const result = calculateFinancialHealthScore(null, 0)
+    expect(result.score).toBe(50)
+    expect(result.classification).toBe('warning')
   })
 })

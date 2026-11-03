@@ -11,7 +11,7 @@ import java.util.UUID
 
 class LearnedRulesManager(
     private val context: Context?,
-    private val firestore: FirebaseFirestore = runCatching { FirebaseFirestore.getInstance() }.getOrElse { null } ?: FirebaseFirestore.getInstance()
+    private val firestore: FirebaseFirestore? = runCatching { FirebaseFirestore.getInstance() }.getOrNull()
 ) {
     companion object {
         private const val PREFS_RULES = "saldo_livre_agent_rules_prefs"
@@ -81,11 +81,11 @@ class LearnedRulesManager(
                     "active" to rule.active,
                     "ownerUid" to uid
                 )
-                firestore.collection(COLLECTION_USERS)
-                    .document(uid)
-                    .collection(SUBCOLLECTION_AGENT_RULES)
-                    .document(rule.id)
-                    .set(payload, SetOptions.merge())
+                firestore?.collection(COLLECTION_USERS)
+                    ?.document(uid)
+                    ?.collection(SUBCOLLECTION_AGENT_RULES)
+                    ?.document(rule.id)
+                    ?.set(payload, SetOptions.merge())
             } catch (e: Exception) {
                 // Ignore sync errors gracefully
             }
@@ -106,15 +106,15 @@ class LearnedRulesManager(
             val idsToDelete = if (removed.isNotEmpty()) removed.map { it.id } else listOf(clean)
             for (targetId in idsToDelete) {
                 try {
-                    firestore.collection(COLLECTION_USERS)
-                        .document(uid)
-                        .collection(SUBCOLLECTION_AGENT_RULES)
-                        .document(targetId)
-                        .delete()
+                    firestore?.collection(COLLECTION_USERS)
+                        ?.document(uid)
+                        ?.collection(SUBCOLLECTION_AGENT_RULES)
+                        ?.document(targetId)
+                        ?.delete()
                     // Limpa também eventual documento legado na coleção raiz
-                    firestore.collection(SUBCOLLECTION_AGENT_RULES)
-                        .document(targetId)
-                        .delete()
+                    firestore?.collection(SUBCOLLECTION_AGENT_RULES)
+                        ?.document(targetId)
+                        ?.delete()
                 } catch (e: Exception) {
                     // Ignore delete errors
                 }
@@ -127,10 +127,10 @@ class LearnedRulesManager(
 
         // Migra silenciosamente eventuais regras antigas salvas na coleção raiz /agent_rules para /users/{uid}/agent_rules
         try {
-            firestore.collection(SUBCOLLECTION_AGENT_RULES)
-                .whereEqualTo("ownerUid", uid)
-                .get()
-                .addOnSuccessListener { legacySnap ->
+            firestore?.collection(SUBCOLLECTION_AGENT_RULES)
+                ?.whereEqualTo("ownerUid", uid)
+                ?.get()
+                ?.addOnSuccessListener { legacySnap ->
                     if (legacySnap != null && !legacySnap.isEmpty) {
                         for (doc in legacySnap.documents) {
                             val id = doc.getString("id") ?: doc.id
@@ -147,11 +147,11 @@ class LearnedRulesManager(
                                     "active" to active,
                                     "ownerUid" to uid
                                 )
-                                firestore.collection(COLLECTION_USERS)
-                                    .document(uid)
-                                    .collection(SUBCOLLECTION_AGENT_RULES)
-                                    .document(id)
-                                    .set(payload, SetOptions.merge())
+                                firestore?.collection(COLLECTION_USERS)
+                                    ?.document(uid)
+                                    ?.collection(SUBCOLLECTION_AGENT_RULES)
+                                    ?.document(id)
+                                    ?.set(payload, SetOptions.merge())
                                 doc.reference.delete()
                             }
                         }
@@ -162,10 +162,10 @@ class LearnedRulesManager(
         }
 
         return try {
-            firestore.collection(COLLECTION_USERS)
-                .document(uid)
-                .collection(SUBCOLLECTION_AGENT_RULES)
-                .addSnapshotListener { snapshot, error ->
+            firestore?.collection(COLLECTION_USERS)
+                ?.document(uid)
+                ?.collection(SUBCOLLECTION_AGENT_RULES)
+                ?.addSnapshotListener { snapshot, error ->
                     if (error == null && snapshot != null) {
                         val cloudRules = mutableListOf<UserLearnedRule>()
                         for (doc in snapshot.documents) {

@@ -63,6 +63,7 @@ fun TransactionDetailDialog(
     onConfirmRefund: ((Transaction, Double) -> Unit)? = null,
     onDeleteRequest: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val resolvedUserId = currentUserId ?: currentUser?.uid
     val myImpact = remember(transaction, resolvedUserId, allTransactions) {
         if (!resolvedUserId.isNullOrBlank()) {
@@ -668,6 +669,7 @@ fun TransactionDetailDialog(
                     Button(
                         onClick = {
                             val parsedAmount = customActualInput.replace(",", ".").toDoubleOrNull()
+                            com.saldolivre.app.ui.util.HapticFeedbackHelper.success(context)
                             onSetStatus(TransactionStatus.PAID, parsedAmount)
                             onDismissRequest()
                         },

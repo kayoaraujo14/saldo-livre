@@ -8,10 +8,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "vitest run",
     "preview": "vite preview",
     "deploy": "npm run build && npx firebase-tools deploy --project saldo-livre-c3ca3",
-    "test": "vitest run"
+    "test:rules": "vitest run src/lib/__tests__/firestore-rules.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",
@@ -29,6 +28,7 @@
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

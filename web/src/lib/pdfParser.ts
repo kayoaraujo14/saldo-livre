@@ -1,8 +1,16 @@
-import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-// Configure worker URL for Vite
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker
+let pdfjsLibPromise: Promise<typeof import('pdfjs-dist')> | null = null
+
+async function getPdfJs() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import('pdfjs-dist').then((pdfjs) => {
+      pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker
+      return pdfjs
+    })
+  }
+  return pdfjsLibPromise
+}
 
 export interface ExtractedPdfData {
   text: string
@@ -14,6 +22,7 @@ export interface ExtractedPdfData {
  * Extrai todo o texto legível de um arquivo PDF no navegador.
  */
 export async function extractTextFromPdf(fileOrBase64: File | string): Promise<ExtractedPdfData> {
+  const pdfjsLib = await getPdfJs()
   let data: ArrayBuffer | Uint8Array
 
   if (typeof fileOrBase64 === 'string') {

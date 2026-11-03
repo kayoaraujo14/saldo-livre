@@ -8,6 +8,7 @@
     "dev": "npm --prefix web run dev",
     "lint": "npm --prefix web run lint",
     "preview": "npm --prefix web run preview",
-    "test": "npm --prefix web run test"
+    "test": "npm --prefix web run test",
+    "test:rules": "firebase emulators:exec --only firestore \"npm --prefix web run test:rules\""
   }
 }

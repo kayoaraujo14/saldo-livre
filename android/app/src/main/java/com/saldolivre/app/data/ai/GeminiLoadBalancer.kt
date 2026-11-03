@@ -81,12 +81,15 @@ class GeminiLoadBalancer(
      * ou mantém o modelo Flash para operações e cadastros rápidos.
      */
     fun resolveTargetModel(userQuery: String, preferredModel: String): String {
+        val normalized = java.text.Normalizer.normalize(userQuery, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+            .lowercase()
+
         val analysisRegex = Regex(
-            """(analis(e|ar)|relat(ório|orios)|auditori|diagn[óo]stico|dre|balan[çc]o|resumo detalhado|compara[çc][ãa]o|proje[çc][ãa]o)""",
-            RegexOption.IGNORE_CASE
+            """(analis(e|ar)|relatorio|auditori|diagnostico|dre|balanco|resumo detalhado|comparacao|projecao)"""
         )
 
-        return if (analysisRegex.containsMatchIn(userQuery)) {
+        return if (analysisRegex.containsMatchIn(normalized)) {
             "gemini-pro-latest"
         } else {
             preferredModel

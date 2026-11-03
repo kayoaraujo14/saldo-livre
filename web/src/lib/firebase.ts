@@ -21,8 +21,11 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  initializeFirestore,
   limit,
   onSnapshot,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   query,
   setDoc,
   updateDoc,
@@ -110,7 +113,19 @@ function ensure() {
   if (!app) {
     app = initializeApp(firebaseConfig as Record<string, string>)
     auth = getAuth(app)
-    db = getFirestore(app)
+    try {
+      if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {
+        db = initializeFirestore(app, {
+          localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+          }),
+        })
+      } else {
+        db = getFirestore(app)
+      }
+    } catch {
+      db = getFirestore(app)
+    }
   }
   return { auth: auth!, db: db! }
 }
