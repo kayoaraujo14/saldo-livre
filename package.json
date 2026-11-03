@@ -9,6 +9,11 @@
     "lint": "npm --prefix web run lint",
     "preview": "npm --prefix web run preview",
     "test": "npm --prefix web run test",
-    "test:rules": "firebase emulators:exec --only firestore \"npm --prefix web run test:rules\""
+    "test:rules": "firebase emulators:exec --only firestore \"npm --prefix web run test:rules\"",
+    "check": "npm --prefix web run lint && npm --prefix web test -- --run",
+    "check:all": "npm --prefix web run lint && npm --prefix web test -- --run && npm --prefix web run build",
+    "backend:build": "npm --prefix backend run build",
+    "backend:serve": "npm --prefix backend run serve",
+    "deploy:all": "npm run check:all && npm run backend:build && firebase deploy"
   }
 }

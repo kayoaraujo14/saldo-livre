@@ -1,0 +1,50 @@
+version: 2
+updates:
+  # 1. Ecossistema Web (npm / React / Vite)
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 10
+    groups:
+      dev-dependencies:
+        patterns:
+          - "@types/*"
+          - "oxlint"
+          - "vitest*"
+          - "@testing-library/*"
+      production-dependencies:
+        patterns:
+          - "lucide-react"
+          - "clsx"
+          - "tailwind-merge"
+
+  # 2. Ecossistema Android (Gradle / Kotlin / Jetpack Compose)
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 10
+    groups:
+      androidx-compose:
+        patterns:
+          - "androidx.compose*"
+          - "androidx.lifecycle*"
+          - "androidx.navigation*"
+
+  # 3. GitHub Actions Workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 5
+

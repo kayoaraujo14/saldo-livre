@@ -1,5 +1,5 @@
-# Deploy automático no Firebase Hosting ao realizar push/merge na branch main
-name: Deploy to Firebase Hosting on merge
+# Deploy automático no Firebase Hosting e Firestore Rules ao realizar push/merge na branch main
+name: Deploy to Firebase Hosting and Firestore on merge
 
 on:
   push:
@@ -7,22 +7,34 @@ on:
       - main
     paths:
       - 'web/**'
+      - 'backend/**'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'firebase.json'
       - '.github/workflows/firebase-hosting-*.yml'
 
 jobs:
-  build_and_deploy:
+  build_test_and_deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repositório
         uses: actions/checkout@v4
 
-      - name: Configurar Node.js
+      - name: Configurar Node.js & Cache
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: 'npm'
+          cache-dependency-path: 'web/package-lock.json'
 
       - name: Instalar dependências
         run: npm --prefix web install
+
+      - name: Executar Linter (Oxlint)
+        run: npm --prefix web run lint
+
+      - name: Executar Testes Unitários (Vitest - 79 testes)
+        run: npm --prefix web test -- --run
 
       - name: Construir aplicação (Build)
         run: npm --prefix web run build
@@ -34,6 +46,21 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
+
+      - name: Deploy Firestore Security Rules & Indexes
+        if: success()
+        run: |
+          if [ -n "$GCP_SA_KEY" ]; then
+            echo "$GCP_SA_KEY" > /tmp/sa-key.json
+            export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json
+            npx firebase-tools deploy --only firestore:rules,firestore:indexes --project saldo-livre-c3ca3
+            rm -f /tmp/sa-key.json
+            echo "Regras e índices do Firestore publicados com sucesso."
+          else
+            echo "Service Account ausente. Ignorando deploy de regras."
+          fi
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SALDO_LIVRE_C3CA3 }}
 
       - name: Deploy no Firebase Hosting (Canal Live)
         uses: FirebaseExtended/action-hosting-deploy@v0

@@ -10,7 +10,9 @@
 - ✅ **Copiloto Gemini & IA Híbrida:** Assistente conversacional multi-turn com Function Calling, gráficos dinâmicos, comando de voz, classificador neural local e balanceador de chaves (`GeminiLoadBalancer`).
 - ✅ **Modo Demo Offline & Cloud Firestore:** Funcionamento imediato com dados interativos de demonstração (`mockData.ts` / `MockFinanceRepository.kt`) e sincronização em tempo real blindada por `firestore.rules`.
 - ✅ **UI/UX Responsiva ("Premium & Smart"):** Identidade visual unificada em Dark Mode com destaques em Verde-Esmeralda, componentes em pílula (`CircleShape` / `rounded-full`), proteção contra quebra de texto (`Ellipsis` / `truncate`) e zero *box-in-box*.
-- ✅ **CI/CD & DevOps Configurados:** Pipelines automatizados para Web (`.github/workflows/firebase-hosting-*.yml`) e Android (`.github/workflows/android-release.yml` e `android-distribution.yml`) com assinatura segura e distribuição ao grupo `qa-team` via Firebase App Distribution.
+- ✅ **CI/CD & DevOps Configurados:** Pipelines automatizados para Web (`.github/workflows/firebase-hosting-*.yml`), Android (`.github/workflows/android-release.yml` e `android-distribution.yml`) com assinatura segura e distribuição ao grupo `qa-team` via Firebase App Distribution.
+- ✅ **Infraestrutura Serverless & Backend Cloud Functions V2:** Microsserviços e cron jobs agendados em TypeScript (`/backend`) para autolançamento de contas recorrentes, backup diário, expurgo de logs e healthcheck de uptime.
+- ✅ **Quality Gates & Supply Chain Security:** Verificação universal de PRs (Web, Android e Backend), deploy automatizado de regras e índices do Firestore e monitoramento contínuo com Dependabot.
 
 ---
 
@@ -84,6 +86,34 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+
+- **[2026-11-03] Infraestrutura & Backend Serverless — 5 Pilares Consolidados (Conclusão Integral):**
+  - **Pilar 1 — CI/CD & Deploy Automático de Regras & Quality Gates Universal:**
+    - `.github/workflows/firebase-hosting-merge.yml`: Adicionados gatilhos para `firestore.rules`, `firestore.indexes.json`, `firebase.json` e `backend/**`; habilitado cache de dependências `cache: 'npm'`; incluídos steps de validação `npm --prefix web run lint` e Vitest (79 testes verdes); adicionado deploy automatizado das regras e índices do Firestore (`npx firebase-tools deploy --only firestore:rules,firestore:indexes`) com credenciais do Service Account (`FIREBASE_SERVICE_ACCOUNT_SALDO_LIVRE_C3CA3`).
+    - `.github/workflows/firebase-hosting-pull-request.yml`: Adicionado caching de dependências, oxlint, Vitest e preview deploy seguro.
+    - `.github/workflows/quality-gates.yml`: Novo pipeline universal de Pull Request para branch `main` executando validação cruzada Web (Node 22, oxlint, 79 testes Vitest, Vite build), Android (JDK 17, Gradle Cache, mock `google-services.json`, compilação Kotlin e testes unitários JVM) e Backend (Node 22, TypeScript compilation).
+  - **Pilar 2 — Supply Chain Security & Dependabot (`.github/dependabot.yml`):**
+    - Configuração de escaneamento automatizado semanal de vulnerabilidades e atualizações de dependências para `npm` (`/web`), `gradle` (`/android`) e `github-actions`, com agrupamento inteligente de dependências (`frontend-dependencies`, `android-dependencies`, `ci-dependencies`) e limite de PRs abertos para prevenir fadiga de alertas.
+  - **Pilar 3 — Índices Compostos do Cloud Firestore (`firestore.indexes.json`):**
+    - Mapeamento e versionamento de índices compostos em produção:
+      - `/transactions`: `visibleToUids` (array-contains) + `date` (desc); `cardId` (asc) + `date` (desc).
+      - `/cards`: `ownerUid` (asc) + `name` (asc); `sharedWithUids` (array-contains) + `name` (asc).
+      - `/friendships`: `requesterUid` (asc) + `status` (asc); `recipientUid` (asc) + `status` (asc).
+  - **Pilar 4 — Backend Serverless com Cloud Functions V2 (`/backend`):**
+    - Módulo TypeScript escalável (`Node 22 / ES2022`) com `firebase-admin` e `firebase-functions` V2.
+    - 4 Cloud Functions de missão crítica implementadas e compiladas:
+      1. `autoLaunchRecurringBillsScheduled`: Cron mensal (dia 1º às 00:05 BRT / 03:05 UTC) para escanear contas fixas ativas e autolançar pendências no Firestore no primeiro instante do mês.
+      2. `backupFirestoreScheduled`: Cron diário às 23:00 BRT para rotina de snapshot e disaster recovery de coleções no Firestore.
+      3. `cleanupEphemeralLogsScheduled`: Cron semanal aos domingos às 04:00 UTC para expurgo de logs e sessões de chat efêmeras com >180 dias.
+      4. `healthCheck`: Endpoint HTTP público com monitoramento de uptime, timestamp e integridade da infraestrutura.
+    - Vinculação com target `functions` em `firebase.json` e compilação validada (`backend/lib/index.js`).
+  - **Pilar 5 — Orquestração & Scripts Raiz (`package.json`):**
+    - Adicionados scripts unificados: `check:all` (lint + vitest + web build), `backend:build`, `backend:serve` (emulador de functions) e `deploy:all`.
+  - **Validação Global:**
+    - Linter & Testes Web: 79 testes Vitest verdes (`npm --prefix web test -- --run`).
+    - Build Web: Zero erros (`npm --prefix web run build`).
+    - Backend Serverless: TypeScript compilado com 100% de sucesso (`npm --prefix backend run build`).
+    - Android: Compilação Kotlin aprovada (`compileDebugKotlin` - BUILD SUCCESSFUL).
 
 - **[2026-11-03] Item 3 — Qualidade & Testes (QA & Blindagem) — Conclusão Integral:**
   - **Expansão Massiva de Testes Unitários Web (Vitest: de 34 para 79 testes verdes):**
