@@ -128,7 +128,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.1.0"))
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.android.gms:play-services-auth:21.1.1")
+    implementation("com.google.android.gms:play-services-auth:22.0.0")
 
     // Google Gemini AI SDK for Android
     implementation("com.google.ai.client.generativeai:generativeai:0.4.0")
