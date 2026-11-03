@@ -13,7 +13,7 @@
     "test:rules": "vitest run src/lib/__tests__/firestore-rules.test.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.30.0",
+    "@google/genai": "^2.32.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "firebase": "^13.0.0",
