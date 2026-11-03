@@ -131,7 +131,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.1.1")
 
     // Google Gemini AI SDK for Android
-    implementation("com.google.ai.client.generativeai:generativeai:0.4.0")
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
