@@ -151,7 +151,7 @@ fun MenuScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Hero Card: Perfil, Parceria 50/50 & Resumo Mensal
+            // 1. Hero Card: Perfil & Resumo Salarial
             ProfilePartnershipHeroCard(
                 uiState = uiState,
                 onSwitchUser = { viewModel.switchUser(it) }
@@ -162,7 +162,7 @@ fun MenuScreen(
                 title = "RATEIOS, ACERTOS & CONEXÕES",
                 items = listOf(
                     MenuToolItemData(
-                        title = "Acertos & Reembolsos do Mês",
+                        title = "Acertos & Reembolsos",
                         subtitle = if (uiState.summary.receivableTotal > 0 || uiState.summary.payableToOthers > 0) {
                             buildString {
                                 if (uiState.summary.receivableTotal > 0) {
@@ -174,7 +174,7 @@ fun MenuScreen(
                                 }
                             }
                         } else {
-                            "Reembolsos de parceiro(a), amigos e terceiros"
+                            "Divisões com parceiro(a), amigos e terceiros"
                         },
                         icon = Icons.Default.Payments,
                         accentColor = Amber400,
@@ -187,15 +187,15 @@ fun MenuScreen(
                         onClick = onNavigateToReceivables
                     ),
                     MenuToolItemData(
-                        title = "Rede de Amigos & Rateios",
+                        title = "Rede de Amigos & Divisões",
                         subtitle = if (uiState.pendingAlertsCount > 0) {
-                            "${uiState.pendingAlertsCount} solicitação(ões) aguardando sua aprovação"
+                            "${uiState.pendingAlertsCount} solicitação(ões) pendente(s)"
                         } else {
-                            "${uiState.acceptedFriendsCount} amigo(s) conectado(s) para divisão de despesas"
+                            "${uiState.acceptedFriendsCount} amigo(s) conectado(s) para rateio"
                         },
                         icon = Icons.Default.People,
                         accentColor = Cyan400,
-                        badgeText = if (uiState.pendingAlertsCount > 0) "${uiState.pendingAlertsCount} pendente(s)" else "${uiState.acceptedFriendsCount}",
+                        badgeText = if (uiState.pendingAlertsCount > 0) "${uiState.pendingAlertsCount} pendente(s)" else "${uiState.acceptedFriendsCount} amigos",
                         badgeColor = if (uiState.pendingAlertsCount > 0) Amber400 else Cyan400,
                         highlightBadge = uiState.pendingAlertsCount > 0,
                         onClick = onNavigateToFriends
@@ -209,10 +209,10 @@ fun MenuScreen(
                 items = listOf(
                     MenuToolItemData(
                         title = "Contas Fixas & Recorrentes",
-                        subtitle = "${uiState.activeRecurringCount} conta(s) ativa(s) com lançamento automático",
+                        subtitle = "${uiState.activeRecurringCount} conta(s) com lançamento automático",
                         icon = Icons.Default.EventRepeat,
                         accentColor = Emerald400,
-                        badgeText = "${uiState.activeRecurringCount} ativa(s)",
+                        badgeText = "${uiState.activeRecurringCount} ativas",
                         badgeColor = Emerald400,
                         onClick = onNavigateToRecurringBills
                     ),
@@ -221,7 +221,7 @@ fun MenuScreen(
                         subtitle = if (uiState.summary.totalInvested > 0) {
                             "Aportado em ${FinanceEngine.formatMonthLabel(uiState.selectedMonth)}: ${FinanceEngine.formatCurrency(uiState.summary.totalInvested)}"
                         } else {
-                            "Carteira patrimonial, simulador de juros e regra 50/30/20"
+                            "Carteira patrimonial, simulador e regra 50/30/20"
                         },
                         icon = Icons.Default.Savings,
                         accentColor = Purple400,
@@ -232,8 +232,8 @@ fun MenuScreen(
                         onClick = onNavigateToInvestments
                     ),
                     MenuToolItemData(
-                        title = "Projeção de Fluxo (6 Meses)",
-                        subtitle = "Simulação preditiva de receitas, faturas e saldo livre futuro",
+                        title = "Projeção de Fluxo",
+                        subtitle = "Simulação preditiva de receitas e saldo livre futuro",
                         icon = Icons.Default.QueryStats,
                         accentColor = Cyan400,
                         badgeText = "6 meses",
@@ -249,17 +249,17 @@ fun MenuScreen(
                 items = listOf(
                     MenuToolItemData(
                         title = "Histórico de Atividades",
-                        subtitle = "Linha do tempo de cadastros, vencimentos e rateios",
+                        subtitle = "Linha do tempo de cadastros e lançamentos",
                         icon = Icons.Default.History,
                         accentColor = Color(0xFF38BDF8),
                         onClick = onNavigateToRecentActivity
                     ),
                     MenuToolItemData(
-                        title = "Motor de IA (Google Gemini)",
+                        title = "Copiloto IA (Gemini)",
                         subtitle = if (uiState.hasGeminiKey) {
                             "Conectado • Modelo ativo: ${uiState.activeGeminiModel}"
                         } else {
-                            "Modo local heurístico • Toque para conectar sua API Key"
+                            "Modo local heurístico • Conectar API Key"
                         },
                         icon = Icons.Default.AutoAwesome,
                         accentColor = if (uiState.hasGeminiKey) Emerald400 else Amber400,
@@ -330,7 +330,6 @@ private fun ProfilePartnershipHeroCard(
     onSwitchUser: (String) -> Unit
 ) {
     val user = uiState.currentUser
-    val partner = uiState.partnerUser
     val initials = remember(user.displayName) {
         user.displayName
             .trim()
@@ -429,81 +428,72 @@ private fun ProfilePartnershipHeroCard(
                 }
             }
 
-            // Sub-container: Parceria 50/50 e Renda Base
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // Sub-container: Salário Base / Base de Cálculo Orçamentária
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = DarkSurfaceVariant.copy(alpha = 0.65f),
+                border = BorderStroke(1.dp, DarkBorder),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .background(DarkSurfaceVariant.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
-                        .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = null,
-                            tint = Cyan400,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = "PARCERIA 50/50",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextMuted,
-                            letterSpacing = 0.5.sp
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Emerald500.copy(alpha = 0.18f), RoundedCornerShape(10.dp))
+                                .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountBalanceWallet,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "SALÁRIO BASE MENSAL",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextMuted,
+                                letterSpacing = 0.6.sp
+                            )
+                            Spacer(modifier = Modifier.height(1.dp))
+                            Text(
+                                text = if (user.monthlyIncome > 0) FinanceEngine.formatCurrency(user.monthlyIncome) else "Não definido",
+                                style = Typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (user.monthlyIncome > 0) Emerald400 else Amber400
+                            )
+                        }
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = partner?.displayName?.ifBlank { "Conectado" } ?: "Individual",
-                        style = Typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (partner != null) Cyan400 else TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
 
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .background(DarkSurfaceVariant.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
-                        .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    Box(
+                        modifier = Modifier
+                            .background(Emerald500.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                            .border(1.dp, Emerald500.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountBalanceWallet,
-                            contentDescription = null,
-                            tint = Emerald400,
-                            modifier = Modifier.size(12.dp)
-                        )
                         Text(
-                            text = "SALÁRIO BASE",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextMuted,
-                            letterSpacing = 0.5.sp
+                            text = "Base de Cálculo",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Emerald400,
+                            style = LocalTextStyle.current.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false)
+                            )
                         )
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (user.monthlyIncome > 0) FinanceEngine.formatCurrency(user.monthlyIncome) else "Não definido",
-                        style = Typography.bodyMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Emerald400,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
                 }
             }
 

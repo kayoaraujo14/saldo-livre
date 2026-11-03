@@ -23,8 +23,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -112,17 +114,17 @@ fun RecurringBillsScreen(
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-                            Column {
+                            Column(modifier = Modifier.weight(1f, fill = false)) {
                                 Text(
                                     text = "Contas Fixas",
-                                    style = Typography.titleLarge,
+                                    style = Typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "Automação inteligente • ${FinanceEngine.formatMonthLabel(uiState.selectedMonth)}",
+                                    text = "Automações • ${FinanceEngine.formatMonthLabel(uiState.selectedMonth)}",
                                     style = Typography.bodySmall,
                                     color = TextMuted,
                                     fontSize = 11.sp,
@@ -135,25 +137,25 @@ fun RecurringBillsScreen(
                     actions = {
                         FilledTonalButton(
                             onClick = { viewModel.openNewBill() },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.filledTonalButtonColors(
                                 containerColor = Emerald500.copy(alpha = 0.2f),
                                 contentColor = Emerald400
                             ),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                             modifier = Modifier
-                                .padding(end = 12.dp)
-                                .height(36.dp)
+                                .padding(end = 10.dp)
+                                .height(34.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Add,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "Nova Fixa",
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -372,6 +374,7 @@ private fun BaseSalaryHeroCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f, fill = false),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -382,11 +385,13 @@ private fun BaseSalaryHeroCard(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "SALÁRIO BASE PRINCIPAL (${userName.uppercase()})",
+                        text = if (userName.isNotBlank()) "SALÁRIO BASE (${userName.uppercase()})" else "SALÁRIO BASE PRINCIPAL",
                         style = Typography.labelMedium,
                         color = Emerald400,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
+                        letterSpacing = 0.8.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -460,7 +465,7 @@ private fun BaseSalaryHeroCard(
                     color = if (monthlyIncome > 0) Emerald400 else Amber400
                 )
                 Text(
-                    text = "Programado automaticamente para o dia 5 de cada mês com confirmação inteligente na Tela Inicial.",
+                    text = "Base de cálculo mensal para provisionamento e apuração do saldo livre.",
                     style = Typography.bodySmall,
                     color = TextSecondary,
                     fontSize = 11.sp
@@ -480,17 +485,19 @@ private fun ExecutiveCommitmentGrid(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ExecutiveMiniCard(
-                label = "Renda Fixa Total",
+                label = "RENDA FIXA TOTAL",
                 value = FinanceEngine.formatCurrency(stats.totalFixedIncome),
-                sublabel = "Salário + rendas fixas",
+                sublabel = "Salário + rendas extras",
                 color = Emerald400,
+                icon = Icons.Default.TrendingUp,
                 modifier = Modifier.weight(1f)
             )
             ExecutiveMiniCard(
-                label = "Fixas (Extrato/Boleto)",
-                value = FinanceEngine.formatCurrency(stats.fixedCashExpenses),
-                sublabel = "Aluguel, luz, água, etc.",
+                label = "DESPESAS FIXAS",
+                value = FinanceEngine.formatCurrency(stats.totalFixedCommitment),
+                sublabel = "Total de custos fixos",
                 color = Rose400,
+                icon = Icons.Default.TrendingDown,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -499,22 +506,24 @@ private fun ExecutiveCommitmentGrid(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ExecutiveMiniCard(
-                label = "Assinaturas Cartão",
-                value = FinanceEngine.formatCurrency(stats.fixedCardSubscriptions),
-                sublabel = "Recorrentes na fatura",
-                color = Purple400,
+                label = "SALDO LIVRE BASE",
+                value = FinanceEngine.formatCurrency(stats.freeBaseBalance),
+                sublabel = "Sobra após custos fixos",
+                color = if (stats.freeBaseBalance >= 0) Cyan400 else Rose400,
+                icon = Icons.Default.AccountBalanceWallet,
                 modifier = Modifier.weight(1f)
             )
             val ratioColor = when {
-                stats.commitmentRatioPct > 60.0 -> Rose400
+                stats.commitmentRatioPct > 65.0 -> Rose400
                 stats.commitmentRatioPct > 45.0 -> Amber400
-                else -> Cyan400
+                else -> Emerald400
             }
             ExecutiveMiniCard(
-                label = "Comprometimento Fixo",
+                label = "COMPROMETIMENTO",
                 value = "${stats.commitmentRatioPct.toInt()}% da renda",
-                sublabel = "Livre base: ${FinanceEngine.formatCurrency(stats.freeBaseBalance)}",
+                sublabel = if (stats.commitmentRatioPct > 65.0) "Atenção: limite alto" else "Orçamento sob controle",
                 color = ratioColor,
+                icon = Icons.Default.PieChart,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -527,6 +536,7 @@ private fun ExecutiveMiniCard(
     value: String,
     sublabel: String,
     color: Color,
+    icon: ImageVector,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -536,17 +546,33 @@ private fun ExecutiveMiniCard(
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 11.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-            Text(
-                text = label,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextMuted,
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = color.copy(alpha = 0.7f),
+                    modifier = Modifier.size(13.dp)
+                )
+            }
             Text(
                 text = value,
                 fontSize = 15.sp,
@@ -566,6 +592,7 @@ private fun ExecutiveMiniCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecurringBillItemCard(
     bill: RecurringBill,
@@ -585,9 +612,9 @@ private fun RecurringBillItemCard(
 
     val triggerLabel = when (bill.launchTrigger) {
         LaunchTrigger.DAY_BEFORE -> "Lança 1 dia antes"
-        LaunchTrigger.ON_DUE_DATE -> "Lança no vencimento"
+        LaunchTrigger.ON_DUE_DATE -> "No vencimento"
         LaunchTrigger.DAY_AFTER -> "Lança 1 dia após"
-        LaunchTrigger.FIRST_DAY_OF_MONTH -> "Lança dia 1º do mês"
+        LaunchTrigger.FIRST_DAY_OF_MONTH -> "Lança dia 1º"
     }
 
     Surface(
@@ -609,7 +636,7 @@ private fun RecurringBillItemCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Linha 1: Ícone + Título + Valor + Switch Ativo
+            // Linha 1: Ícone + Título + Valor
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -689,18 +716,18 @@ private fun RecurringBillItemCard(
                 }
             }
 
-            // Linha 2: Badges de Automação, 50/30/20, Método e Status Mensal
-            Row(
+            // Linha 2: Badges com FlowRow (Nunca quebram ou saem da tela!)
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 // Badge de Status no Mês Selecionado
                 val (statusLabel, statusColor) = when (monthStatus.state) {
-                    BillMonthlyState.PAID_OR_RECEIVED -> (if (isIncome) "Recebido" else "Pago") to Emerald400
-                    BillMonthlyState.IN_CARD_INVOICE -> "Na Fatura" to Purple400
-                    BillMonthlyState.IN_STATEMENT_PENDING -> "Previsto no Extrato" to Amber400
-                    BillMonthlyState.NOT_LAUNCHED -> "A lançar" to TextMuted
+                    BillMonthlyState.PAID_OR_RECEIVED -> (if (isIncome) "✓ Recebido" else "✓ Pago") to Emerald400
+                    BillMonthlyState.IN_CARD_INVOICE -> "💳 Na Fatura" to Purple400
+                    BillMonthlyState.IN_STATEMENT_PENDING -> "⏳ Previsto no Extrato" to Amber400
+                    BillMonthlyState.NOT_LAUNCHED -> "📅 A lançar" to TextMuted
                 }
                 MiniPillBadge(text = statusLabel, color = statusColor)
 
@@ -715,36 +742,45 @@ private fun RecurringBillItemCard(
                     MiniPillBadge(text = natLabel, color = natColor)
                 }
 
-                // Badge de Método / Cartão / Gatilho
-                MiniPillBadge(
-                    text = if (isCard && !cardName.isNullOrBlank()) "Cartão $cardName" else triggerLabel,
-                    color = TextSecondary
-                )
+                // Badge de Método / Cartão
+                val methodLabel = if (isCard && !cardName.isNullOrBlank()) "Cartão $cardName" else (bill.paymentMethod?.label ?: "Boleto")
+                MiniPillBadge(text = methodLabel, color = TextSecondary)
+
+                // Badge de Gatilho
+                MiniPillBadge(text = triggerLabel, color = TextMuted)
             }
 
             HorizontalDivider(color = DarkBorder.copy(alpha = 0.55f))
 
-            // Linha 3: Ações Rápidas (Efetivar em 1 toque + Ativar/Pausar + Editar + Excluir)
+            // Linha 3: Ações Rápidas (Zero sobreposições, tamanhos harmoniosos)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Switch Ativa / Pausada com escala adequada para não distorcer
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Switch(
-                        checked = bill.active,
-                        onCheckedChange = { onToggleActive() },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Emerald500,
-                            uncheckedThumbColor = TextMuted,
-                            uncheckedTrackColor = DarkBackground
-                        ),
-                        modifier = Modifier.height(24.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .wrapContentWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Switch(
+                            checked = bill.active,
+                            onCheckedChange = { onToggleActive() },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Emerald500,
+                                uncheckedThumbColor = TextMuted,
+                                uncheckedTrackColor = DarkBackground
+                            ),
+                            modifier = Modifier.scale(0.75f)
+                        )
+                    }
                     Text(
                         text = if (bill.active) "Ativa" else "Pausada",
                         fontSize = 11.sp,
@@ -753,32 +789,33 @@ private fun RecurringBillItemCard(
                     )
                 }
 
+                // Controles à Direita: Botão de Ação + Ícones de Editar e Excluir
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // Botão de 1 toque para efetivar no mês caso ainda não esteja pago/na fatura
+                    // Botão de 1 toque para efetivar no mês
                     if (bill.active && (monthStatus.state == BillMonthlyState.NOT_LAUNCHED || monthStatus.state == BillMonthlyState.IN_STATEMENT_PENDING)) {
-                        val quickLabel = when {
-                            monthStatus.state == BillMonthlyState.IN_STATEMENT_PENDING -> "Confirmar Pago"
-                            isCard -> "Lançar Fatura"
-                            isIncome -> "Já Recebi"
-                            else -> "Já Paguei"
+                        val (quickLabel, quickIcon) = when {
+                            monthStatus.state == BillMonthlyState.IN_STATEMENT_PENDING -> "Confirmar" to Icons.Default.Check
+                            isCard -> "Lançar" to Icons.Default.CreditCard
+                            isIncome -> "Receber" to Icons.Default.ArrowDownward
+                            else -> "Efetivar" to Icons.Default.Check
                         }
                         FilledTonalButton(
                             onClick = onQuickEffectivate,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             colors = ButtonDefaults.filledTonalButtonColors(
                                 containerColor = Emerald500.copy(alpha = 0.18f),
                                 contentColor = Emerald400
                             ),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(32.dp)
+                            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 3.dp),
+                            modifier = Modifier.height(30.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Check,
+                                imageVector = quickIcon,
                                 contentDescription = null,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(quickLabel, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -787,25 +824,25 @@ private fun RecurringBillItemCard(
 
                     IconButton(
                         onClick = onEdit,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(30.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Editar",
                             tint = TextSecondary,
-                            modifier = Modifier.size(17.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
 
                     IconButton(
                         onClick = onDelete,
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier.size(30.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.DeleteOutline,
                             contentDescription = "Excluir",
                             tint = Rose400,
-                            modifier = Modifier.size(17.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }

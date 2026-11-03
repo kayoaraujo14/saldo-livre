@@ -203,6 +203,14 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                             Mês Atual
                           </Badge>
                         )}
+                        {isSelected && !isCurrent && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] py-0 px-2 bg-cyan-950/60 text-cyan-300 border-cyan-800"
+                          >
+                            Em Exibição
+                          </Badge>
+                        )}
                       </div>
 
                       {p.isGenerated ? (
@@ -483,7 +491,7 @@ export function FutureProjectionModal({ open, onOpenChange, onSelectMonth }: Fut
                       onClick={() => handleGoToMonth(p.monthKey)}
                       className="text-xs h-8 ml-auto bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white gap-1.5 rounded-lg px-3 cursor-pointer shadow-sm shrink-0"
                     >
-                      <span>Abrir Mês</span>
+                      <span>{isSelected ? 'Mês Ativo' : 'Abrir Mês'}</span>
                       <ArrowRight className="size-3" />
                     </Button>
                   </div>

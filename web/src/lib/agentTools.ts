@@ -148,11 +148,30 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
 }
 
 async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
-  const rawTotal = Number(args.valorTotal)
-  if (isNaN(rawTotal) || rawTotal === 0) return { response: { ok: false, erro: 'valorTotal inválido' } }
+  const rawTotal = Number(args.valorTotal ?? args.amount)
+  if (isNaN(rawTotal) || rawTotal <= 0) {
+    return {
+      response: {
+        ok: false,
+        precisaClarificacao: true,
+        campoFaltante: 'valorTotal',
+        erro: 'Qual foi o valor dessa transação?',
+      },
+    }
+  }
   let total = round2(rawTotal)
 
-  const description = String(args.descricao ?? 'Lançamento').trim()
+  const description = String(args.descricao ?? args.description ?? '').trim()
+  if (!description || description.toLowerCase() === 'lançamento' || description.toLowerCase() === 'despesa' || description.toLowerCase() === 'gasto') {
+    return {
+      response: {
+        ok: false,
+        precisaClarificacao: true,
+        campoFaltante: 'descricao',
+        erro: 'Qual foi o estabelecimento ou a descrição dessa transação?',
+      },
+    }
+  }
 
   // Reconhecimento inteligente de receitas/entradas
   const isBankStatementDoc = args.origemDocumento === 'extrato_conta' || args.ehExtrato === true
@@ -168,26 +187,38 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     INCOME_KEYWORDS_REGEX.test(description)
 
   const type = isIncome ? 'income' : 'expense'
-  let splitType: SplitType = SPLIT_MAP[String(args.tipoDivisao ?? 'MEU')] ?? 'mine'
+  let splitType: SplitType = SPLIT_MAP[String(args.tipoDivisao ?? args.splitType ?? 'MEU')] ?? 'mine'
   if (type === 'income') splitType = 'mine'
 
-  let method: PaymentMethod
+  const explicitMethod = args.metodoPagamento ?? args.paymentMethod
+  let method: PaymentMethod | undefined
   if (type === 'income') {
     method = 'pix'
   } else if (isBankStatementDoc) {
     if (/pix/i.test(description)) method = 'pix'
     else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(description)) method = 'bill'
     else method = 'debit'
-  } else if (['pix', 'credit_card', 'debit', 'bill'].includes(String(args.metodoPagamento))) {
-    method = args.metodoPagamento as PaymentMethod
+  } else if (['pix', 'credit_card', 'debit', 'bill'].includes(String(explicitMethod))) {
+    method = explicitMethod as PaymentMethod
   } else if (/pix/i.test(description)) {
     method = 'pix'
   } else if (/debito|débito/i.test(description)) {
     method = 'debit'
   } else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(description)) {
     method = 'bill'
-  } else {
+  } else if (/cart[aã]o|cr[eé]dito|fatura/i.test(description) || args.cartao || args.cardName) {
     method = 'credit_card'
+  }
+
+  if (!method) {
+    return {
+      response: {
+        ok: false,
+        precisaClarificacao: true,
+        campoFaltante: 'metodoPagamento',
+        erro: `Qual foi a forma de pagamento do lançamento de R$ ${total.toFixed(2)} (${description})? (Pix, Débito, Cartão de Crédito ou Boleto?)`,
+      },
+    }
   }
 
   // Receitas ou transações de extrato bancário NUNCA devem ser vinculadas a cartão de crédito
@@ -236,12 +267,31 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
       : 'paid') as TransactionStatus
 
   const cards = env.getCards()
-  const card = method === 'credit_card' ? pickCard(env.me.uid, cards, splitType, args.cartao as string | undefined) : undefined
+  const cardHint = (args.cartao || args.cardName) as string | undefined
+  if (method === 'credit_card' && !cardHint && cards.length > 1) {
+    return {
+      response: {
+        ok: false,
+        precisaClarificacao: true,
+        campoFaltante: 'cartao',
+        erro: `Você possui múltiplos cartões cadastrados (${cards.map((c) => c.cardName).join(', ')}). Em qual deles foi realizada a compra de R$ ${total.toFixed(2)} (${description})?`,
+      },
+    }
+  }
+  const card = method === 'credit_card' ? pickCard(env.me.uid, cards, splitType, cardHint) : undefined
   const payerUid = card?.ownerUid ?? env.me.uid
 
   // Identificação e atribuição de amigo na plataforma
-  const emailAmigo = typeof args.emailAmigo === 'string' ? args.emailAmigo.trim().toLowerCase() : ''
-  const nomeAmigo = typeof args.nomeAmigo === 'string' ? args.nomeAmigo.trim() : ''
+  const emailAmigo = typeof args.emailAmigo === 'string'
+    ? args.emailAmigo.trim().toLowerCase()
+    : typeof args.friendEmail === 'string'
+      ? args.friendEmail.trim().toLowerCase()
+      : ''
+  const nomeAmigo = typeof args.nomeAmigo === 'string'
+    ? args.nomeAmigo.trim()
+    : typeof args.friendName === 'string'
+      ? args.friendName.trim()
+      : ''
 
   let assignedFriend: Party | null = null
   const friendsList = env.getFriends ? env.getFriends() : []
@@ -264,7 +314,29 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
     }
   }
 
-  if (!assignedFriend && (nomeAmigo || emailAmigo || splitType === 'friend')) {
+  if (splitType === 'friend' && !assignedFriend && !nomeAmigo && !emailAmigo) {
+    return {
+      response: {
+        ok: false,
+        precisaClarificacao: true,
+        campoFaltante: 'divisao',
+        erro: `Com quem você gostaria de dividir essa despesa de R$ ${total.toFixed(2)} (${description}) e qual a porcentagem ou valor de cada um?`,
+      },
+    }
+  }
+
+  if (splitType === 'external' && !args.nomeTerceiro && !args.thirdPartyName) {
+    return {
+      response: {
+        ok: false,
+        precisaClarificacao: true,
+        campoFaltante: 'terceiro',
+        erro: `Qual o nome da pessoa com quem você dividiu essa despesa de R$ ${total.toFixed(2)} (${description})?`,
+      },
+    }
+  }
+
+  if (!assignedFriend && (nomeAmigo || emailAmigo)) {
     const resolvedName = nomeAmigo || (emailAmigo ? emailAmigo.split('@')[0] : 'Amigo')
     assignedFriend = {
       uid: `usr_amigo_${normalize(resolvedName).replace(/[^a-z0-9]/g, '_')}`,
@@ -274,8 +346,9 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
 
   // Cálculo da porcentagem do amigo ou divisão personalizada
   let friendSharePct = 100
-  if (args.porcentagemAmigo != null && !isNaN(Number(args.porcentagemAmigo))) {
-    friendSharePct = clampPct(Number(args.porcentagemAmigo))
+  const rawPctAmigo = args.porcentagemAmigo ?? args.percentualAmigo ?? args.friendSharePct ?? args.friendPct
+  if (rawPctAmigo != null && !isNaN(Number(rawPctAmigo))) {
+    friendSharePct = clampPct(Number(rawPctAmigo))
   } else if (args.valorAmigo != null && !isNaN(Number(args.valorAmigo)) && total > 0) {
     friendSharePct = clampPct(round2((Number(args.valorAmigo) / Math.abs(total)) * 100))
   } else if (args.porcentagemMinha != null && !isNaN(Number(args.porcentagemMinha))) {
@@ -355,8 +428,8 @@ async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<
           reimbursed: true,
         },
         {
-          type: 'PLATFORM_USER',
-          uid: assignedFriend.uid,
+          type: assignedFriend.uid.startsWith('usr_amigo_') ? 'EXTERNAL' : 'PLATFORM_USER',
+          uid: assignedFriend.uid.startsWith('usr_amigo_') ? undefined : assignedFriend.uid,
           name: assignedFriend.name,
           amount: friendVal,
           reimbursed: false,
@@ -708,7 +781,13 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
   const origemDoc = typeof args.origemDocumento === 'string' ? args.origemDocumento : undefined
   const defaultMes = typeof args.mesFaturaPadrao === 'string' ? args.mesFaturaPadrao : undefined
   const defaultVenc = typeof args.dataVencimentoPadrao === 'string' ? args.dataVencimentoPadrao : undefined
-  const defaultCartao = typeof args.cartaoPadrao === 'string' ? args.cartaoPadrao : undefined
+  const defaultCartao = typeof args.cartaoPadrao === 'string'
+    ? args.cartaoPadrao
+    : typeof args.cartao === 'string'
+      ? args.cartao
+      : typeof args.cardName === 'string'
+        ? args.cardName
+        : undefined
   const defaultMetodo = typeof args.metodoPagamentoPadrao === 'string'
     ? args.metodoPagamentoPadrao
     : origemDoc === 'extrato_conta'
@@ -719,6 +798,19 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
 
   const availableCards = env.getCards()
   const isCardInvoice = origemDoc === 'fatura_cartao' || defaultMetodo === 'credit_card'
+  const hasBatchCardItems = isCardInvoice || transacoesRaw.some((t) => t.metodoPagamento === 'credit_card' || t.paymentMethod === 'credit_card')
+  const hasBatchExplicitCard = defaultCartao || transacoesRaw.some((t) => t.cartao || t.cardName || t.cardId)
+  if (hasBatchCardItems && !hasBatchExplicitCard && availableCards.length > 1) {
+    return {
+      response: {
+        ok: false,
+        precisaClarificacao: true,
+        campoFaltante: 'cartao',
+        erro: `Identifiquei compras de cartão de crédito no lote, mas você possui múltiplos cartões cadastrados (${availableCards.map((c) => c.cardName).join(', ')}). Em qual deles essas compras foram realizadas?`,
+      },
+    }
+  }
+
   const resolvedDefaultCartao = defaultCartao || (
     isCardInvoice
       ? (availableCards.find((c) => c.ownerUid === env.me.uid)?.cardName || availableCards[0]?.cardName)
@@ -738,15 +830,16 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     const pendingTransactionsList: PendingBatchTransaction[] = []
 
     for (const item of transacoesRaw) {
-      const desc = String(item.descricao ?? 'Item').trim()
-      const val = Math.abs(Number(item.valorTotal ?? item.valor ?? 0))
-      const rawTipoStr = String(item.tipo ?? '').toLowerCase()
+      const desc = String(item.descricao ?? item.description ?? item.contraparte ?? 'Item').trim()
+      const val = Math.abs(Number(item.valorTotal ?? item.amount ?? item.valor_exato ?? item.valor ?? 0))
+      const rawTipoStr = String(item.tipo ?? item.type ?? '').toLowerCase()
       const isExplicitIncome =
         rawTipoStr === 'income' ||
         rawTipoStr === 'receita' ||
         rawTipoStr === 'entrada' ||
         item.categoria === 'Receita' ||
-        (INCOME_CATEGORIES as readonly string[]).includes(String(item.categoria))
+        item.category === 'Receita' ||
+        (INCOME_CATEGORIES as readonly string[]).includes(String(item.categoria ?? item.category))
       const looksLikeIncome = isExplicitIncome || INCOME_KEYWORDS_REGEX.test(desc)
       const resolvedTipo: 'income' | 'expense' = looksLikeIncome ? 'income' : 'expense'
 
@@ -759,23 +852,91 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
         ? item.contraparte.trim()
         : extractCounterparty(desc)
 
-      const txDate = (typeof item.data === 'string' && item.data.trim()) || defaultVenc || `${targetMonth}-01`
+      const txDate = (typeof item.data === 'string' && item.data.trim()) ||
+        (typeof item.date === 'string' && item.date.trim()) ||
+        defaultVenc || `${targetMonth}-01`
 
       const guessed = guessCategoryAndSubcategory(desc, val, resolvedTipo)
-      const resolvedCategory = typeof item.categoria === 'string' ? item.categoria : guessed.category
-      const resolvedSubcat = typeof item.subcategoria === 'string' && item.subcategoria.trim()
+      const resolvedCategory = typeof item.categoria === 'string'
+        ? item.categoria
+        : typeof item.category === 'string'
+          ? item.category
+          : guessed.category
+      const rawSub = typeof item.subcategoria === 'string'
         ? item.subcategoria.trim()
+        : typeof item.subcategory === 'string'
+          ? item.subcategory.trim()
+          : undefined
+      const resolvedSubcat = rawSub
+        ? rawSub
         : (resolvedCategory === guessed.category ? guessed.subcategory : (resolvedTipo === 'income' ? 'Outras Receitas' : undefined))
+
+      // Detecção inteligente de rateio / split no item
+      let itemFriendName = item.nomeAmigo ?? item.amigo ?? item.friendName
+      let itemFriendEmail = item.emailAmigo ?? item.friendEmail
+      let itemFriendPct = item.porcentagemAmigo ?? item.percentualAmigo ?? item.friendSharePct ?? item.friendPct
+      let itemSplitType = item.tipoDivisao ?? item.splitType
+      let cleanDesc = desc
+
+      if (!itemFriendName && !itemSplitType) {
+        const pctMatch = desc.match(/[;,]?\s*(\d+(?:[.,]\d+)?)\s*%\s*(?:para|com|de)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+        if (pctMatch) {
+          itemFriendPct = Number(pctMatch[1].replace(',', '.'))
+          itemFriendName = pctMatch[2].trim()
+          cleanDesc = desc.replace(pctMatch[0], '').replace(/[;,]?\s*R\$\s*\d+(?:[.,]\d+)?/gi, '').replace(/[;,]\s*$/, '').trim()
+        } else {
+          const divMatch = desc.match(/[;,]?\s*(?:dividid[oa]|divis[ãa]o|dividi|meio\s+a\s+meio|50\/50|50-50)\s*(?:com|para)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+          if (divMatch) {
+            itemFriendPct = 50
+            itemFriendName = divMatch[1].trim()
+            cleanDesc = desc.replace(divMatch[0], '').replace(/[;,]\s*$/, '').trim()
+          }
+        }
+      }
+      cleanDesc = cleanDesc.replace(/[;,]?\s*R\$\s*\d+(?:[.,]\d+)?/gi, '').replace(/[;,]\s*$/, '').trim()
+
+      const rawPayMethod = item.metodoPagamento ?? item.paymentMethod
+      let resolvedItemMetodo: PaymentMethod
+      if (resolvedTipo === 'income') {
+        resolvedItemMetodo = 'pix'
+      } else if (isBankStatement) {
+        if (/pix/i.test(desc)) resolvedItemMetodo = 'pix'
+        else if (/debito|débito/i.test(desc)) resolvedItemMetodo = 'debit'
+        else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(desc)) resolvedItemMetodo = 'bill'
+        else resolvedItemMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
+      } else if (rawPayMethod && ['pix', 'credit_card', 'debit', 'bill'].includes(rawPayMethod)) {
+        resolvedItemMetodo = rawPayMethod
+      } else if (defaultMetodo && ['pix', 'credit_card', 'debit', 'bill'].includes(defaultMetodo)) {
+        resolvedItemMetodo = defaultMetodo as PaymentMethod
+      } else if (resolvedDefaultCartao || item.cartao || item.cardName || item.cardId) {
+        resolvedItemMetodo = 'credit_card'
+      } else if (/pix/i.test(desc)) {
+        resolvedItemMetodo = 'pix'
+      } else {
+        resolvedItemMetodo = 'credit_card'
+      }
+
+      const itemCardParam = item.cartao || item.cardName || item.cardId
+      const fallbackCartao = availableCards.find((c) => c.ownerUid === env.me.uid)?.cardName || availableCards[0]?.cardName
+      const resolvedItemCartao = (!isBankStatement && resolvedItemMetodo === 'credit_card')
+        ? (itemCardParam || resolvedDefaultCartao || fallbackCartao)
+        : undefined
 
       pendingTransactionsList.push({
         data: txDate,
         tipo: resolvedTipo,
         valor_exato: round2(val),
-        contraparte,
+        contraparte: contraparte || cleanDesc,
+        descricao: cleanDesc,
         categoria_filtro: filterCat,
         categoria: resolvedCategory,
         subcategoria: resolvedSubcat || undefined,
-        metodoPagamento: (typeof item.metodoPagamento === 'string' ? item.metodoPagamento : defaultMetodo) as any,
+        metodoPagamento: resolvedItemMetodo,
+        cartao: resolvedItemCartao,
+        nomeAmigo: itemFriendName,
+        emailAmigo: itemFriendEmail,
+        porcentagemAmigo: itemFriendPct != null ? Number(itemFriendPct) : undefined,
+        tipoDivisao: itemSplitType,
         motivoIgnorado: motivoIgn,
       })
     }
@@ -786,7 +947,14 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     const countReceitas = validTxs.filter((t) => t.tipo === 'income').length
     const countDespesas = validTxs.filter((t) => t.tipo === 'expense').length
     const previewReceitas = round2(validTxs.filter((t) => t.tipo === 'income').reduce((s, t) => s + t.valor_exato, 0))
-    const previewDespesas = round2(validTxs.filter((t) => t.tipo === 'expense').reduce((s, t) => s + t.valor_exato, 0))
+    const previewDespesas = round2(
+      validTxs.filter((t) => t.tipo === 'expense').reduce((s, t) => {
+        const friendShare = (t.porcentagemAmigo != null && t.porcentagemAmigo > 0 && t.porcentagemAmigo <= 100)
+          ? (t.valor_exato * (t.porcentagemAmigo / 100))
+          : 0
+        return s + (t.valor_exato - friendShare)
+      }, 0)
+    )
     const previewImpacto = round2(previewReceitas - previewDespesas)
 
     const tabelaMarkdown = [
@@ -870,8 +1038,8 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
   let totalParcelasGeradas = 0
 
   for (const item of transacoesRaw) {
-    const desc = String(item.descricao ?? '')
-    const itemValor = Math.abs(Number(item.valorTotal ?? 0))
+    const desc = String(item.descricao ?? item.description ?? item.contraparte ?? '')
+    const itemValor = Math.abs(Number(item.valorTotal ?? item.amount ?? item.valor_exato ?? item.valor ?? 0))
 
     const isRdb = /\b(aplica[çc][ãa]o|resgate)\s+rdb\b/i.test(desc) || /\brdb\b/i.test(desc) || /\bguardar\s+dinheiro\b/i.test(desc)
     const isInvoicePayment = /pagamento (recebido|de fatura|efetuado)/i.test(desc) || /saldo anterior/i.test(desc)
@@ -880,7 +1048,14 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     }
 
     // Detecção inteligente de receitas/entradas
-    const isExplicitIncome = item.tipo === 'income' || item.categoria === 'Receita'
+    const rawTipoStr = String(item.tipo ?? item.type ?? '').toLowerCase()
+    const isExplicitIncome =
+      rawTipoStr === 'income' ||
+      rawTipoStr === 'receita' ||
+      rawTipoStr === 'entrada' ||
+      item.categoria === 'Receita' ||
+      item.category === 'Receita' ||
+      (INCOME_CATEGORIES as readonly string[]).includes(String(item.categoria ?? item.category))
     const looksLikeIncome =
       isExplicitIncome ||
       INCOME_KEYWORDS_REGEX.test(desc)
@@ -888,6 +1063,7 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     const resolvedTipo = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
 
     // Detecção de forma de pagamento
+    const rawPayMethod = item.metodoPagamento ?? item.paymentMethod
     let resolvedMetodo: PaymentMethod
     if (resolvedTipo === 'income') {
       resolvedMetodo = 'pix'
@@ -895,12 +1071,12 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
       if (/pix/i.test(desc)) resolvedMetodo = 'pix'
       else if (/debito|débito/i.test(desc)) resolvedMetodo = 'debit'
       else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(desc)) resolvedMetodo = 'bill'
-      else resolvedMetodo = (item.metodoPagamento && ['pix', 'debit', 'bill'].includes(item.metodoPagamento)) ? item.metodoPagamento : 'debit'
-    } else if (item.metodoPagamento && ['pix', 'credit_card', 'debit', 'bill'].includes(item.metodoPagamento)) {
-      resolvedMetodo = item.metodoPagamento
+      else resolvedMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
+    } else if (rawPayMethod && ['pix', 'credit_card', 'debit', 'bill'].includes(rawPayMethod)) {
+      resolvedMetodo = rawPayMethod
     } else if (defaultMetodo && ['pix', 'credit_card', 'debit', 'bill'].includes(defaultMetodo)) {
       resolvedMetodo = defaultMetodo as PaymentMethod
-    } else if (defaultCartao || item.cartao) {
+    } else if (defaultCartao || item.cartao || item.cardName || item.cardId) {
       resolvedMetodo = 'credit_card'
     } else if (/pix/i.test(desc)) {
       resolvedMetodo = 'pix'
@@ -921,16 +1097,52 @@ async function registrarLote(env: AgentEnv, args: Record<string, unknown>): Prom
     const resolvedStatus = resolvedMetodo === 'credit_card' ? (item.status || 'pending') : 'paid'
 
     // Cartão só existe se o método for cartão de crédito E não for extrato bancário
-    const resolvedCartao = (!isBankStatement && resolvedMetodo === 'credit_card') ? (item.cartao || resolvedDefaultCartao) : undefined
+    const itemCardParam = item.cartao || item.cardName || item.cardId
+    const fallbackCartao = env.getCards().find((c) => c.ownerUid === env.me.uid)?.cardName || env.getCards()[0]?.cardName
+    const resolvedCartao = (!isBankStatement && resolvedMetodo === 'credit_card')
+      ? (itemCardParam || resolvedDefaultCartao || fallbackCartao)
+      : undefined
 
+    // Detecção inteligente de rateio / split no item
+    let itemFriendName = item.nomeAmigo ?? item.amigo ?? item.friendName
+    let itemFriendEmail = item.emailAmigo ?? item.friendEmail
+    let itemFriendPct = item.porcentagemAmigo ?? item.percentualAmigo ?? item.friendSharePct ?? item.friendPct
+    let itemSplitType = item.tipoDivisao ?? item.splitType
+    let cleanDesc = desc
+
+    if (!itemFriendName && !itemSplitType) {
+      const pctMatch = desc.match(/[;,]?\s*(\d+(?:[.,]\d+)?)\s*%\s*(?:para|com|de)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+      if (pctMatch) {
+        itemFriendPct = Number(pctMatch[1].replace(',', '.'))
+        itemFriendName = pctMatch[2].trim()
+        cleanDesc = desc.replace(pctMatch[0], '').replace(/[;,]?\s*R\$\s*\d+(?:[.,]\d+)?/gi, '').replace(/[;,]\s*$/, '').trim()
+      } else {
+        const divMatch = desc.match(/[;,]?\s*(?:dividid[oa]|divis[ãa]o|dividi|meio\s+a\s+meio|50\/50|50-50)\s*(?:com|para)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+        if (divMatch) {
+          itemFriendPct = 50
+          itemFriendName = divMatch[1].trim()
+          cleanDesc = desc.replace(divMatch[0], '').replace(/[;,]\s*$/, '').trim()
+        }
+      }
+    }
+    cleanDesc = cleanDesc.replace(/[;,]?\s*R\$\s*\d+(?:[.,]\d+)?/gi, '').replace(/[;,]\s*$/, '').trim()
+
+    const itemDate = item.data || item.date || defaultVenc || todayKey()
     const merged = {
       ...item,
+      descricao: cleanDesc,
+      valorTotal: itemValor,
+      data: itemDate,
       tipo: resolvedTipo,
       metodoPagamento: resolvedMetodo,
       status: resolvedStatus,
       cartao: resolvedCartao,
-      mesFatura: item.mesFatura || defaultMes,
-      dataVencimento: item.dataVencimento || (resolvedMetodo === 'credit_card' ? defaultVenc : item.data),
+      nomeAmigo: itemFriendName,
+      emailAmigo: itemFriendEmail,
+      porcentagemAmigo: itemFriendPct,
+      tipoDivisao: itemSplitType,
+      mesFatura: item.mesFatura || item.competenceMonth || defaultMes,
+      dataVencimento: item.dataVencimento || (resolvedMetodo === 'credit_card' ? defaultVenc : itemDate),
       __confirmed: true,
     }
 

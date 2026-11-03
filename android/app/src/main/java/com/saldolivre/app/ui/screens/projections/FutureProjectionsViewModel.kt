@@ -13,10 +13,13 @@ data class FutureProjectionsUiState(
     val currentUser: UserProfile = UserProfile(),
     val selectedMonth: String = "",
     val currentMonth: String = "",
+    val horizonCount: Int = 12,
     val projections: List<FutureMonthProjection> = emptyList(),
     val averageFreeBalance: Double = 0.0,
     val totalProjectedIncome: Double = 0.0,
     val totalProjectedExpense: Double = 0.0,
+    val totalInvoicesExpense: Double = 0.0,
+    val totalFixedBillsExpense: Double = 0.0,
     val isLoading: Boolean = false,
     val userMessage: String? = null
 )
@@ -25,20 +28,24 @@ class FutureProjectionsViewModel(
     private val repository: FinanceRepository
 ) : ViewModel() {
 
+    private val _horizonCount = MutableStateFlow(12)
+    val horizonCount: StateFlow<Int> = _horizonCount.asStateFlow()
+
     private val _uiState = MutableStateFlow(FutureProjectionsUiState())
     val uiState: StateFlow<FutureProjectionsUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
             combine(
-                combine(repository.currentUser, repository.selectedMonth) { u, m -> Pair(u, m) },
+                combine(repository.currentUser, repository.selectedMonth, _horizonCount) { u, m, h ->
+                    Triple(u, m, h)
+                },
                 repository.getTransactions(),
                 repository.getRecurringBills(),
                 repository.getMonthClosures(),
                 repository.getCards()
-            ) { userMonth, transactions, recurringBills, closures, cards ->
-                val user = userMonth.first
-                val selectedMonth = userMonth.second
+            ) { userMonthHorizon, transactions, recurringBills, closures, cards ->
+                val (user, selectedMonth, horizon) = userMonthHorizon
                 val curMonth = FinanceEngine.currentMonthKey()
 
                 val projectionsList = FinanceEngine.projectFutureMonths(
@@ -47,7 +54,7 @@ class FutureProjectionsViewModel(
                     profile = user,
                     uid = user.uid,
                     startMonthKey = curMonth,
-                    count = 6,
+                    count = horizon,
                     cards = cards,
                     closures = closures
                 )
@@ -58,21 +65,31 @@ class FutureProjectionsViewModel(
 
                 val totIncome = FinanceEngine.round2(projectionsList.sumOf { it.projectedIncome + it.carryoverAmount })
                 val totExpense = FinanceEngine.round2(projectionsList.sumOf { it.projectedExpense })
+                val totInvoices = FinanceEngine.round2(projectionsList.sumOf { it.invoiceExpense })
+                val totFixed = FinanceEngine.round2(projectionsList.sumOf { it.fixedBillsExpense })
 
                 FutureProjectionsUiState(
                     currentUser = user,
                     selectedMonth = selectedMonth,
                     currentMonth = curMonth,
+                    horizonCount = horizon,
                     projections = projectionsList,
                     averageFreeBalance = avgFree,
                     totalProjectedIncome = totIncome,
                     totalProjectedExpense = totExpense,
+                    totalInvoicesExpense = totInvoices,
+                    totalFixedBillsExpense = totFixed,
                     userMessage = _uiState.value.userMessage
                 )
             }.collect { newState ->
                 _uiState.value = newState
             }
         }
+    }
+
+    fun setHorizonCount(count: Int) {
+        if (count != 6 && count != 12) return
+        _horizonCount.value = count
     }
 
     fun selectMonth(monthKey: String) {

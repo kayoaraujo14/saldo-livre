@@ -1960,8 +1960,8 @@ object FinanceEngine {
 
                 if (t.type == TransactionType.INCOME) {
                     if (isCard) {
-                        projectedExpense = max(0.0, projectedExpense - impact)
-                        invoiceExpense = max(0.0, invoiceExpense - impact)
+                        projectedExpense = max(0.0, projectedExpense - kotlin.math.abs(impact))
+                        invoiceExpense = max(0.0, invoiceExpense - kotlin.math.abs(impact))
                     } else if (impact > 0.0) {
                         projectedIncome += impact
                         incomeCount++

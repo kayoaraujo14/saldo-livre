@@ -1011,10 +1011,16 @@ export interface PendingBatchTransaction {
   tipo: 'income' | 'expense'
   valor_exato: number
   contraparte: string
+  descricao?: string
   categoria_filtro: 'valida' | 'ignorada'
   categoria?: string
   subcategoria?: string
   metodoPagamento?: 'pix' | 'credit_card' | 'debit' | 'bill'
+  cartao?: string
+  tipoDivisao?: SplitType | string
+  nomeAmigo?: string
+  emailAmigo?: string
+  porcentagemAmigo?: number
   motivoIgnorado?: string
 }
 

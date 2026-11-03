@@ -143,6 +143,7 @@ class AndroidAgentToolsEngine(
         splitType: SplitType = SplitType.MINE,
         friendName: String? = null,
         friendEmail: String? = null,
+        friendSharePct: Double? = null,
         thirdPartyName: String? = null,
         currentInstallment: Int = 1,
         totalInstallments: Int = 1,
@@ -166,13 +167,21 @@ class AndroidAgentToolsEngine(
         val user = repository.currentUser.value
         val cards = repository.getCards().first()
 
+        val requestedCreditCard = paymentMethod == PaymentMethod.CREDIT_CARD || !cardName.isNullOrBlank()
         val matchedCard = if (!cardName.isNullOrBlank()) {
-            cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
-        } else if (paymentMethod == PaymentMethod.CREDIT_CARD) {
+            val found = cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
+            if (found == null && cards.isNotEmpty()) {
+                return ToolExecutionResult(text = "⚠️ Não encontrei o cartão \"$cardName\". Seus cartões cadastrados são: ${cards.joinToString { it.cardName }}. Em qual deles foi realizada a compra?")
+            }
+            found
+        } else if (requestedCreditCard) {
+            if (cards.size > 1) {
+                return ToolExecutionResult(text = "⚠️ Você possui múltiplos cartões cadastrados (${cards.joinToString { it.cardName }}). Em qual deles foi realizada a compra de R$ ${FinanceEngine.round2(absAmount)} em $description?")
+            }
             cards.firstOrNull()
         } else null
 
-        val isCreditCard = paymentMethod == PaymentMethod.CREDIT_CARD || matchedCard != null
+        val isCreditCard = requestedCreditCard || matchedCard != null
         val effectiveMethod = if (isCreditCard) PaymentMethod.CREDIT_CARD else paymentMethod
 
         val today = FinanceEngine.todayKey()
@@ -229,8 +238,24 @@ class AndroidAgentToolsEngine(
             else if (!thirdPartyName.isNullOrBlank()) SplitType.EXTERNAL
             else splitType
 
-        val friendPct = if (effectiveSplitType == SplitType.FRIEND) 100.0 else null
+        if (splitType == SplitType.FRIEND && assignedFriendUid == null && friendName.isNullOrBlank()) {
+            return ToolExecutionResult(text = "⚠️ Com quem você gostaria de dividir essa despesa de R$ ${FinanceEngine.round2(absAmount)} e qual a porcentagem ou valor de cada um?")
+        }
+        if (splitType == SplitType.EXTERNAL && thirdPartyName.isNullOrBlank()) {
+            return ToolExecutionResult(text = "⚠️ Qual o nome da pessoa com quem você dividiu essa despesa de R$ ${FinanceEngine.round2(absAmount)}?")
+        }
+
+        val friendPct = friendSharePct
+            ?: if (effectiveSplitType == SplitType.FRIEND) {
+                if (splitType == SplitType.SPLIT_50) 50.0 else 100.0
+            } else null
         val acceptanceStatus = if (assignedFriendUid != null) "pending_approval" else null
+
+        val payerUid = if (isCreditCard && matchedCard != null) {
+            matchedCard.ownerUid.ifBlank { user.uid }
+        } else {
+            user.uid
+        }
 
         val splitResult = FinanceEngine.buildSplit(
             splitType = effectiveSplitType,
@@ -239,7 +264,7 @@ class AndroidAgentToolsEngine(
             myName = user.displayName,
             partnerUid = partner?.uid,
             partnerName = partner?.displayName,
-            payerUid = user.uid,
+            payerUid = payerUid,
             externalName = thirdPartyName,
             assignedFriendUid = assignedFriendUid,
             assignedFriendName = assignedFriendName,
@@ -304,6 +329,7 @@ class AndroidAgentToolsEngine(
                     "splitType" to splitType.name,
                     "friendName" to friendName,
                     "friendEmail" to friendEmail,
+                    "friendSharePct" to friendPct,
                     "thirdPartyName" to thirdPartyName,
                     "currentInstallment" to currentInstallment,
                     "totalInstallments" to totalInstallments,
@@ -346,7 +372,7 @@ class AndroidAgentToolsEngine(
                     Transaction(
                         id = "tx_" + UUID.randomUUID().toString().take(8),
                         createdByUid = user.uid,
-                        paidByUid = user.uid,
+                        paidByUid = payerUid,
                         cardId = matchedCard?.id,
                         description = FinanceEngine.formatInstallmentDesc(cleanDesc, i, totalInstallments),
                         category = finalCat,
@@ -409,7 +435,7 @@ class AndroidAgentToolsEngine(
             val tx = Transaction(
                 id = "tx_" + UUID.randomUUID().toString().take(8),
                 createdByUid = user.uid,
-                paidByUid = user.uid,
+                paidByUid = payerUid,
                 cardId = matchedCard?.id,
                 description = cleanDesc,
                 category = finalCat,
@@ -480,17 +506,23 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeCreateFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        var desc = jsonObj.getStringOrNull("description") ?: "Lançamento via Copiloto"
+        var desc = jsonObj.getStringOrNull("description") ?: jsonObj.getStringOrNull("descricao") ?: ""
         desc = neuralClassifier.extractDescription(desc).ifBlank { desc }
-        val amount = jsonObj.getDoubleOrNull("amount") ?: 0.0
+        val amount = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor") ?: 0.0
         val typeStr = jsonObj.getStringOrNull("type") ?: jsonObj.getStringOrNull("tipo") ?: "expense"
-        val category = jsonObj.getStringOrNull("category")
-        val subcategory = jsonObj.getStringOrNull("subcategory")
-        val payMethodStr = jsonObj.getStringOrNull("paymentMethod") ?: "pix"
-        val cardName = jsonObj.getStringOrNull("cardName")
+        val category = jsonObj.getStringOrNull("category") ?: jsonObj.getStringOrNull("categoria")
+        val subcategory = jsonObj.getStringOrNull("subcategory") ?: jsonObj.getStringOrNull("subcategoria")
+        val rawPayMethod = jsonObj.getStringOrNull("paymentMethod") ?: jsonObj.getStringOrNull("metodoPagamento")
+        val cardName = jsonObj.getStringOrNull("cardName") ?: jsonObj.getStringOrNull("cartao")
         val splitTypeStr = jsonObj.getStringOrNull("splitType") ?: "MINE"
         val friendName = jsonObj.getStringOrNull("friendName")
         val friendEmail = jsonObj.getStringOrNull("friendEmail")
+        val friendSharePct = jsonObj.getDoubleOrNull("friendSharePct")
+            ?: jsonObj.getDoubleOrNull("friendPct")
+            ?: jsonObj.getDoubleOrNull("percentualAmigo")
+            ?: jsonObj.getDoubleOrNull("porcentagemAmigo")
+            ?: jsonObj.getDoubleOrNull("pctAmigo")
+            ?: jsonObj.getDoubleOrNull("pct")
         val thirdPartyName = jsonObj.getStringOrNull("thirdPartyName")
         val competenceMonth = jsonObj.getStringOrNull("competenceMonth")
         val dueDate = jsonObj.getStringOrNull("date")
@@ -540,7 +572,28 @@ class AndroidAgentToolsEngine(
             typeStr.equals("income", ignoreCase = true) || typeStr.equals("receita", ignoreCase = true) || typeStr.equals("entrada", ignoreCase = true) -> TransactionType.INCOME
             else -> TransactionType.EXPENSE
         }
-        val payMethod = PaymentMethod.from(payMethodStr)
+
+        if (finalAmount <= 0.0) {
+            return ToolExecutionResult(text = "⚠️ Qual foi o valor dessa transação?")
+        }
+        if (desc.isBlank() || desc.equals("Lançamento via Copiloto", ignoreCase = true) || desc.equals("Lançamento", ignoreCase = true) || desc.equals("Despesa", ignoreCase = true) || desc.equals("Gasto", ignoreCase = true)) {
+            return ToolExecutionResult(text = "⚠️ Qual foi o estabelecimento ou a descrição dessa transação?")
+        }
+
+        val inferredPayMethod = when {
+            !rawPayMethod.isNullOrBlank() -> PaymentMethod.from(rawPayMethod)
+            Regex("""\bpix\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.PIX
+            Regex("""\bd[eé]bito\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.DEBIT
+            Regex("""\b(boleto|darf)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.BILL
+            Regex("""\b(cart[aã]o|cr[eé]dito|fatura)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) || !cardName.isNullOrBlank() -> PaymentMethod.CREDIT_CARD
+            txType == TransactionType.INCOME -> PaymentMethod.PIX
+            else -> null
+        }
+
+        if (inferredPayMethod == null) {
+            return ToolExecutionResult(text = "⚠️ Qual foi a forma de pagamento do lançamento de R$ ${FinanceEngine.round2(finalAmount)} em $desc? (Pix, Débito, Cartão de Crédito ou Boleto?)")
+        }
+        val payMethod = inferredPayMethod
         val splitType = when (splitTypeStr.uppercase()) {
             "SPLIT_50", "CASAL_50_50" -> SplitType.SPLIT_50
             "PARTNER", "PARCEIRO" -> SplitType.PARTNER
@@ -561,6 +614,7 @@ class AndroidAgentToolsEngine(
             splitType = splitType,
             friendName = friendName,
             friendEmail = friendEmail,
+            friendSharePct = friendSharePct,
             thirdPartyName = thirdPartyName,
             currentInstallment = currentInstallment,
             totalInstallments = totalInstallments,
@@ -598,14 +652,33 @@ class AndroidAgentToolsEngine(
             defaultPayMethod.equals("cartao_credito", ignoreCase = true)
 
         val allCards = repository.getCards().first()
+        val hasBatchCardItems = isFaturaDoc || array.any { elem ->
+            if (!elem.isJsonObject) return@any false
+            val obj = elem.asJsonObject
+            val pm = obj.getStringOrNull("paymentMethod") ?: obj.getStringOrNull("metodoPagamento")
+            pm?.equals("credit_card", ignoreCase = true) == true
+        }
+        val hasBatchExplicitCard = !cardParam.isNullOrBlank() || array.any { elem ->
+            if (!elem.isJsonObject) return@any false
+            val obj = elem.asJsonObject
+            !obj.getStringOrNull("cartao").isNullOrBlank() || !obj.getStringOrNull("cardName").isNullOrBlank() || !obj.getStringOrNull("cardId").isNullOrBlank()
+        }
+        if (hasBatchCardItems && !hasBatchExplicitCard && allCards.size > 1) {
+            return ToolExecutionResult(text = "⚠️ Identifiquei compras de cartão de crédito no lote, mas você possui múltiplos cartões cadastrados (${allCards.joinToString { it.cardName }}). Em qual deles essas compras foram realizadas?")
+        }
+
         val defaultCard: Card? = if (!cardParam.isNullOrBlank()) {
-            allCards.find { it.id == cardParam || it.cardName.contains(cardParam, ignoreCase = true) }
+            allCards.find { it.id == cardParam || it.cardName.contains(cardParam, ignoreCase = true) || cardParam.contains(it.cardName, ignoreCase = true) }
                 ?: allCards.firstOrNull { it.ownerUid == user.uid }
+                ?: allCards.firstOrNull()
         } else if (isFaturaDoc) {
             allCards.firstOrNull { it.ownerUid == user.uid } ?: allCards.firstOrNull()
         } else {
-            null
+            allCards.firstOrNull { it.ownerUid == user.uid } ?: allCards.firstOrNull()
         }
+
+        val friendships = repository.getFriendships().first()
+        val partner = FinanceEngine.resolvePartner(user.uid, allCards, repository.allUsers)
 
         val createdList = mutableListOf<Transaction>()
         val pendingTxMaps = mutableListOf<Map<String, Any?>>()
@@ -616,7 +689,7 @@ class AndroidAgentToolsEngine(
             if (!elem.isJsonObject) continue
             val item = elem.asJsonObject
             val filterStatus = item.getStringOrNull("categoria_filtro") ?: "valida"
-            val desc = item.getStringOrNull("description")
+            var desc = item.getStringOrNull("description")
                 ?: item.getStringOrNull("descricao")
                 ?: item.getStringOrNull("contraparte")
                 ?: "Item de Lote"
@@ -636,21 +709,6 @@ class AndroidAgentToolsEngine(
             val dt = item.getStringOrNull("date") ?: item.getStringOrNull("data") ?: item.getStringOrNull("dataVencimento") ?: FinanceEngine.todayKey()
             val comp = item.getStringOrNull("competenceMonth") ?: item.getStringOrNull("mesFatura") ?: defaultMonth
 
-            pendingTxMaps.add(
-                mapOf(
-                    "data" to dt,
-                    "tipo" to if (isIncome) "income" else "expense",
-                    "valor_exato" to amt,
-                    "contraparte" to desc,
-                    "categoria_filtro" to filterStatus,
-                    "categoria" to cat,
-                    "subcategoria" to subcat,
-                    "metodoPagamento" to payMethodStr,
-                    "motivoIgnorado" to item.getStringOrNull("motivoIgnorado")
-                )
-            )
-            if (filterStatus.equals("ignorada", ignoreCase = true)) continue
-
             val itemInstObj = item.getAsJsonObjectOrNull("installments")
             val itemCur = itemInstObj?.getIntOrNull("current")
                 ?: item.getIntOrNull("currentInstallment")
@@ -666,9 +724,9 @@ class AndroidAgentToolsEngine(
             val finalCur = if (itemTot > 1) itemCur else (detectedBatchInst?.first ?: itemCur)
             val finalTot = if (itemTot > 1) itemTot else (detectedBatchInst?.second ?: itemTot)
 
-            val itemCardParam = item.getStringOrNull("cartao") ?: item.getStringOrNull("cardId")
+            val itemCardParam = item.getStringOrNull("cartao") ?: item.getStringOrNull("cardId") ?: item.getStringOrNull("cardName")
             val itemCard = if (!itemCardParam.isNullOrBlank()) {
-                allCards.find { it.id == itemCardParam || it.cardName.contains(itemCardParam, ignoreCase = true) }
+                allCards.find { it.id == itemCardParam || it.cardName.contains(itemCardParam, ignoreCase = true) || itemCardParam.contains(it.cardName, ignoreCase = true) }
             } else defaultCard
 
             val isCardPayment = (itemCard != null && !isIncome) ||
@@ -684,7 +742,9 @@ class AndroidAgentToolsEngine(
                 PaymentMethod.from(payMethodStr)
             }
 
-            val targetCard = if (resolvedPayMethod == PaymentMethod.CREDIT_CARD) (itemCard ?: defaultCard) else null
+            val targetCard = if (resolvedPayMethod == PaymentMethod.CREDIT_CARD) {
+                itemCard ?: defaultCard ?: allCards.firstOrNull { it.ownerUid == user.uid } ?: allCards.firstOrNull()
+            } else null
             val targetCardId = targetCard?.id
 
             val (resolvedDueDate, resolvedComp) = if (targetCard != null) {
@@ -692,13 +752,140 @@ class AndroidAgentToolsEngine(
                 val compMonth = item.getStringOrNull("competenceMonth")
                     ?: item.getStringOrNull("mesFatura")
                     ?: dates.second
-                Pair(dates.first, compMonth)
+                // Para cartão de crédito, a data da transação é a data da compra (dt).
+                // O mês de competência da fatura do cartão é compMonth.
+                Pair(dt, compMonth)
             } else {
                 Pair(dt, comp)
             }
 
+            // Split / Rateio detection and resolution
+            val itemSplitTypeStr = item.getStringOrNull("splitType")
+                ?: item.getStringOrNull("tipoDivisao")
+                ?: item.getStringOrNull("tipo_divisao")
+            var itemFriendName = item.getStringOrNull("friendName")
+                ?: item.getStringOrNull("amigo")
+                ?: item.getStringOrNull("nomeAmigo")
+            val itemFriendEmail = item.getStringOrNull("friendEmail")
+                ?: item.getStringOrNull("emailAmigo")
+            var itemFriendPct = item.getDoubleOrNull("friendSharePct")
+                ?: item.getDoubleOrNull("friendPct")
+                ?: item.getDoubleOrNull("percentualAmigo")
+                ?: item.getDoubleOrNull("porcentagemAmigo")
+                ?: item.getDoubleOrNull("pctAmigo")
+                ?: item.getDoubleOrNull("pct")
+            var itemThirdParty = item.getStringOrNull("thirdPartyName")
+                ?: item.getStringOrNull("externalName")
+                ?: item.getStringOrNull("terceiro")
+                ?: item.getStringOrNull("nomeTerceiro")
+
+            // Detecção via regex se a descrição contiver indicação de rateio (ex: "50% para Kayo Araujo" ou "divido com Fulano")
+            var cleanDesc = desc
+            if (itemSplitTypeStr.isNullOrBlank() && itemFriendName.isNullOrBlank() && itemThirdParty.isNullOrBlank()) {
+                val pctSplitMatch = Regex("""[;,]?\s*(\d+(?:[.,]\d+)?)\s*%\s*(?:para|com|de)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)""", RegexOption.IGNORE_CASE).find(desc)
+                if (pctSplitMatch != null) {
+                    val pctVal = pctSplitMatch.groupValues[1].replace(',', '.').toDoubleOrNull() ?: 50.0
+                    val targetName = pctSplitMatch.groupValues[2].trim()
+                    itemFriendPct = pctVal
+                    itemFriendName = targetName
+                    cleanDesc = desc.replace(pctSplitMatch.value, "").trim().removeSuffix(";").removeSuffix(",").trim()
+                } else {
+                    val dividedMatch = Regex("""[;,]?\s*(?:dividid[oa]|divis[ãa]o|dividi|meio\s+a\s+meio|50/50|50-50)\s*(?:com|para)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)""", RegexOption.IGNORE_CASE).find(desc)
+                    if (dividedMatch != null) {
+                        val targetName = dividedMatch.groupValues[1].trim()
+                        itemFriendPct = 50.0
+                        itemFriendName = targetName
+                        cleanDesc = desc.replace(dividedMatch.value, "").trim().removeSuffix(";").removeSuffix(",").trim()
+                    }
+                }
+            }
+            cleanDesc = cleanDesc.replace(Regex("""[;,]?\s*R\$\s*\d+(?:[.,]\d+)?""", RegexOption.IGNORE_CASE), "").trim().removeSuffix(";").removeSuffix(",").trim()
+
+            val matchedFriend = if (!itemFriendEmail.isNullOrBlank()) {
+                friendships.find {
+                    it.status == FriendshipStatus.ACCEPTED &&
+                    (it.recipientEmail.equals(itemFriendEmail, true) || it.requesterEmail.equals(itemFriendEmail, true))
+                }
+            } else if (!itemFriendName.isNullOrBlank()) {
+                friendships.find {
+                    it.status == FriendshipStatus.ACCEPTED &&
+                    (it.recipientName.contains(itemFriendName, true) || it.requesterName.contains(itemFriendName, true))
+                }
+            } else null
+
+            val assignedFriendUid = matchedFriend?.let {
+                if (it.requesterUid == user.uid) it.recipientUid else it.requesterUid
+            }
+            val assignedFriendName = matchedFriend?.let {
+                if (it.requesterUid == user.uid) it.recipientName else it.requesterName
+            } ?: itemFriendName ?: itemFriendEmail
+
+            val parsedSplitType = when (itemSplitTypeStr?.uppercase()) {
+                "SPLIT_50", "CASAL_50_50", "50/50" -> SplitType.SPLIT_50
+                "PARTNER", "PARCEIRO" -> SplitType.PARTNER
+                "FRIEND", "AMIGO" -> SplitType.FRIEND
+                "EXTERNAL", "TERCEIRO" -> SplitType.EXTERNAL
+                "CUSTOM", "PERSONALIZADA" -> SplitType.CUSTOM
+                else -> null
+            }
+
+            val effectiveSplitType = when {
+                parsedSplitType != null -> parsedSplitType
+                assignedFriendUid != null || !itemFriendName.isNullOrBlank() -> SplitType.FRIEND
+                !itemThirdParty.isNullOrBlank() -> SplitType.EXTERNAL
+                else -> SplitType.MINE
+            }
+
+            val effectiveFriendPct = itemFriendPct
+                ?: if (effectiveSplitType == SplitType.FRIEND) {
+                    if (parsedSplitType == SplitType.SPLIT_50) 50.0 else 50.0
+                } else null
+
+            val payerUid = if (resolvedPayMethod == PaymentMethod.CREDIT_CARD && targetCard != null) {
+                targetCard.ownerUid.ifBlank { user.uid }
+            } else {
+                user.uid
+            }
+
+            val splitResult = FinanceEngine.buildSplit(
+                splitType = effectiveSplitType,
+                total = amt,
+                myUid = user.uid,
+                myName = user.displayName,
+                partnerUid = partner?.uid,
+                partnerName = partner?.displayName,
+                payerUid = payerUid,
+                externalName = itemThirdParty,
+                assignedFriendUid = assignedFriendUid,
+                assignedFriendName = assignedFriendName,
+                friendSharePct = effectiveFriendPct
+            )
+
+            val myImpact = splitResult.userImpact[user.uid] ?: amt
+            val acceptanceStatus = if (assignedFriendUid != null) "pending_approval" else null
+
+            pendingTxMaps.add(
+                mapOf(
+                    "data" to dt,
+                    "tipo" to if (isIncome) "income" else "expense",
+                    "valor_exato" to amt,
+                    "contraparte" to cleanDesc,
+                    "categoria_filtro" to filterStatus,
+                    "categoria" to cat,
+                    "subcategoria" to subcat,
+                    "metodoPagamento" to payMethodStr,
+                    "cartao" to (targetCard?.cardName ?: itemCardParam ?: cardParam),
+                    "cardId" to targetCardId,
+                    "splitType" to effectiveSplitType.name,
+                    "friendName" to assignedFriendName,
+                    "friendSharePct" to effectiveFriendPct,
+                    "motivoIgnorado" to item.getStringOrNull("motivoIgnorado")
+                )
+            )
+            if (filterStatus.equals("ignorada", ignoreCase = true)) continue
+
             if (finalTot > 1 && !isIncome) {
-                val cleanDesc = FinanceEngine.stripInstallmentSuffix(desc)
+                val cleanInstDesc = FinanceEngine.stripInstallmentSuffix(cleanDesc)
                 val groupId = "inst_" + UUID.randomUUID().toString().take(8)
                 for (i in 1..finalTot) {
                     val delta = i - finalCur
@@ -708,8 +895,8 @@ class AndroidAgentToolsEngine(
                     val tx = Transaction(
                         id = "tx_" + UUID.randomUUID().toString().take(8),
                         createdByUid = user.uid,
-                        paidByUid = user.uid,
-                        description = FinanceEngine.formatInstallmentDesc(cleanDesc, i, finalTot),
+                        paidByUid = payerUid,
+                        description = FinanceEngine.formatInstallmentDesc(cleanInstDesc, i, finalTot),
                         category = cat,
                         subcategory = subcat,
                         type = TransactionType.EXPENSE,
@@ -720,22 +907,28 @@ class AndroidAgentToolsEngine(
                         totalAmount = amt,
                         dueDate = targetDueDate,
                         competenceMonth = targetMonth,
-                        visibleToUids = listOf(user.uid),
-                        userImpact = mapOf(user.uid to amt),
-                        allocations = listOf(Allocation(type = "PLATFORM_USER", uid = user.uid, name = user.displayName, amount = amt, reimbursed = isPast)),
+                        visibleToUids = splitResult.visibleToUids,
+                        userImpact = splitResult.userImpact,
+                        allocations = if (isPast) splitResult.allocations.map { it.copy(reimbursed = true) } else splitResult.allocations,
+                        splitType = effectiveSplitType,
+                        assignedFriendUid = assignedFriendUid,
+                        assignedFriendName = assignedFriendName,
+                        friendSharePct = effectiveFriendPct,
+                        externalName = if (effectiveSplitType == SplitType.EXTERNAL) itemThirdParty else null,
+                        acceptanceStatus = acceptanceStatus,
                         installmentGroupId = groupId,
                         installmentNumber = i,
                         installmentsTotal = finalTot
                     )
                     createdList.add(tx)
                 }
-                totalExpenses += amt
+                totalExpenses += myImpact
             } else {
                 val tx = Transaction(
                     id = "tx_" + UUID.randomUUID().toString().take(8),
                     createdByUid = user.uid,
-                    paidByUid = user.uid,
-                    description = desc,
+                    paidByUid = payerUid,
+                    description = cleanDesc,
                     category = cat,
                     subcategory = subcat,
                     type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
@@ -746,12 +939,18 @@ class AndroidAgentToolsEngine(
                     totalAmount = amt,
                     dueDate = resolvedDueDate,
                     competenceMonth = resolvedComp,
-                    visibleToUids = listOf(user.uid),
-                    userImpact = mapOf(user.uid to amt),
-                    allocations = listOf(Allocation(type = "PLATFORM_USER", uid = user.uid, name = user.displayName, amount = amt, reimbursed = true))
+                    visibleToUids = splitResult.visibleToUids,
+                    userImpact = splitResult.userImpact,
+                    allocations = splitResult.allocations,
+                    splitType = effectiveSplitType,
+                    assignedFriendUid = assignedFriendUid,
+                    assignedFriendName = assignedFriendName,
+                    friendSharePct = effectiveFriendPct,
+                    externalName = if (effectiveSplitType == SplitType.EXTERNAL) itemThirdParty else null,
+                    acceptanceStatus = acceptanceStatus
                 )
                 createdList.add(tx)
-                if (isIncome) totalIncomes += amt else totalExpenses += amt
+                if (isIncome) totalIncomes += amt else totalExpenses += myImpact
             }
         }
 
@@ -773,6 +972,13 @@ class AndroidAgentToolsEngine(
                 args = mapOf(
                     "transactionsJson" to array.toString(),
                     "pending_transactions" to pendingTxMaps,
+                    "cartaoPadrao" to (cardParam ?: defaultCard?.cardName),
+                    "cartao" to (cardParam ?: defaultCard?.cardName),
+                    "cardName" to (cardParam ?: defaultCard?.cardName),
+                    "cardId" to defaultCard?.id,
+                    "metodoPagamentoPadrao" to defaultPayMethod,
+                    "origemDocumento" to (origemDoc ?: if (isFaturaDoc) "fatura_cartao" else null),
+                    "mesFaturaPadrao" to defaultMonth,
                     "confirmed" to true
                 ),
                 status = PendingActionStatus.PENDING
@@ -2786,6 +2992,10 @@ class AndroidAgentToolsEngine(
                     ?: (args["totalParcelas"] as? Number)?.toInt() ?: (args["totalParcelas"] as? String)?.toIntOrNull() ?: 1
                 val compMonth = args["competenceMonth"] as? String ?: args["mesFatura"] as? String ?: args["mesCompetenciaFatura"] as? String
                 val dueDate = args["dueDate"] as? String ?: args["dataVencimento"] as? String
+                val friendSharePct = (args["friendSharePct"] as? Number)?.toDouble()
+                    ?: (args["friendSharePct"] as? String)?.toDoubleOrNull()
+                    ?: (args["friendPct"] as? Number)?.toDouble()
+                    ?: (args["friendPct"] as? String)?.toDoubleOrNull()
 
                 executeCreateTransaction(
                     description = desc,
@@ -2798,6 +3008,7 @@ class AndroidAgentToolsEngine(
                     splitType = splitType,
                     friendName = friendName,
                     friendEmail = friendEmail,
+                    friendSharePct = friendSharePct,
                     thirdPartyName = thirdPartyName,
                     currentInstallment = currentInst,
                     totalInstallments = totalInst,
@@ -2819,6 +3030,13 @@ class AndroidAgentToolsEngine(
                         add("transactions", array)
                         (args["mesFaturaPadrao"] as? String)?.let { addProperty("mesFaturaPadrao", it) }
                         (args["metodoPagamentoPadrao"] as? String)?.let { addProperty("metodoPagamentoPadrao", it) }
+                        (args["cartaoPadrao"] as? String ?: args["cartao"] as? String ?: args["cardName"] as? String)?.let {
+                            addProperty("cartaoPadrao", it)
+                            addProperty("cartao", it)
+                            addProperty("cardName", it)
+                        }
+                        (args["cardId"] as? String)?.let { addProperty("cardId", it) }
+                        (args["origemDocumento"] as? String)?.let { addProperty("origemDocumento", it) }
                         addProperty("confirmed", true)
                     }
                     executeBatchFromJson(jsonObj)
