@@ -2248,9 +2248,62 @@ export function guessCategory(text: string, amount?: number, type?: 'income' | '
  * 2. Controle de Teto de Gastos / Consumo da Renda (até 35 pts)
  * 3. Cobertura da Reserva de Emergência (até 30 pts)
  */
+export const FIXED_MONTHLY_CATEGORIES = new Set([
+  'Moradia',
+  'Assinaturas',
+  'Assinaturas & Serviços',
+  'Educação',
+  'Educação & Desenvolvimento',
+  'Financiamentos',
+  'Financiamentos & Dívidas',
+  'Impostos',
+  'Impostos & Tributos',
+])
+
+export const NON_ENVELOPE_CATEGORIES = new Set([
+  'Investimentos',
+  'Receita',
+  'Estorno',
+  'Cartão Terceiros',
+  'Rendimentos & Investimentos',
+  'Salário & Remuneração',
+  'Outras Receitas',
+  'Reembolsos & Acertos',
+  'Benefícios',
+])
+
+export function resolveEmergencyReserveBalance(
+  profile: UserProfile | null | undefined,
+  summary: MonthSummary | null | undefined,
+): number {
+  const balances = profile?.investmentAssetBalances
+  let reserveBalance = 0
+  if (balances && typeof balances === 'object') {
+    if (typeof balances['Reserva de Emergência'] === 'number') {
+      reserveBalance = balances['Reserva de Emergência']
+    } else {
+      const reserveKey = Object.keys(balances).find((k) => k.toLowerCase().includes('reserva'))
+      if (reserveKey && typeof balances[reserveKey] === 'number') {
+        reserveBalance = balances[reserveKey]
+      } else {
+        const values = Object.values(balances).filter((v): v is number => typeof v === 'number')
+        if (values.length > 0) reserveBalance = values.reduce((sum, v) => sum + v, 0)
+      }
+    }
+  }
+  if (reserveBalance <= 0 && typeof profile?.emergencyReserveBalance === 'number') {
+    reserveBalance = profile.emergencyReserveBalance
+  }
+  if (reserveBalance <= 0) {
+    reserveBalance = summary?.totalInvestedAccumulated || 0
+  }
+  return round2(Math.max(0, reserveBalance))
+}
+
 export function calculateFinancialHealthScore(
   summary: MonthSummary | null | undefined,
   emergencyReserveBalance: number = 0,
+  budgetReport?: CategoryBudgetReport | null,
 ): FinancialHealthScore {
   if (!summary) {
     return {
@@ -2264,30 +2317,55 @@ export function calculateFinancialHealthScore(
       savingsRatePercentage: 0,
       spendingRatioPercentage: 0,
       emergencyCoverageMonths: 0,
+      budgetAdherenceScore: 0,
+      budgetConfiguredCount: 0,
+      budgetOverspentCount: 0,
+      monthlyLivingCost: 0,
+      potentialSavingsRatePercentage: 0,
+      actionableTips: ['Cadastre suas receitas e despesas do mês para liberar o diagnóstico completo.'],
     }
   }
 
   const income = summary.income || 0
-  const totalExpenses = (summary.paid || 0) + (summary.committed || 0)
-  const totalInvested = summary.totalInvested || 0
+  const rawTotalOutflow = (summary.paid || 0) + (summary.committed || 0)
+  const totalInvested = Math.max(0, summary.totalInvested || 0)
+  const positiveFreeBalance = Math.max(0, summary.freeBalance || 0)
 
-  // 1. Pilar de Poupança & Investimentos (0 a 35 pontos)
+  // Se byCategory está presente e contém Investimentos, desconta os aportes do cálculo de custo de vida
+  // para nunca penalizar quem investe mais de 20% da renda.
+  const investedInByCategory = Array.isArray(summary.byCategory)
+    ? (summary.byCategory.find((c) => c.category === 'Investimentos')?.amount || 0)
+    : 0
+  const totalExpenses = Math.max(0, round2(rawTotalOutflow - investedInByCategory))
+
+  // 1. Pilar de Poupança, Investimentos & Margem Livre (0 a 35 pontos)
   let savingsScore = 0
   let savingsRatePercentage = 0
+  let potentialSavingsRatePercentage = 0
   if (income > 0) {
     const rate = totalInvested / income
     savingsRatePercentage = Math.round(rate * 100)
+    potentialSavingsRatePercentage = Math.min(
+      100,
+      Math.round(((totalInvested + positiveFreeBalance) / income) * 100),
+    )
+
     if (rate >= 0.20) {
       savingsScore = 35
-    } else if (rate > 0) {
-      savingsScore = Math.round((rate / 0.20) * 35)
+    } else {
+      const baseInvestedPts = rate > 0 ? Math.round((rate / 0.20) * 35) : 0
+      // Reconhece parte do Saldo Livre positivo projetado como potencial real de poupança no mês (até +12 pts)
+      const freeMarginRate = positiveFreeBalance / income
+      const marginBonusPts = freeMarginRate > 0 ? Math.min(12, Math.round((freeMarginRate / 0.20) * 12)) : 0
+      savingsScore = Math.min(35, baseInvestedPts + marginBonusPts)
     }
   } else if (totalInvested > 0) {
     savingsScore = 15
     savingsRatePercentage = 100
+    potentialSavingsRatePercentage = 100
   }
 
-  // 2. Pilar de Controle de Teto de Gastos (0 a 35 pontos)
+  // 2. Pilar de Controle de Custo de Vida / Teto de Gastos (0 a 35 pontos)
   let spendingLimitScore = 0
   let spendingRatioPercentage = 0
   if (income > 0) {
@@ -2330,8 +2408,38 @@ export function calculateFinancialHealthScore(
     emergencyReserveScore = Math.min(10, Math.round(coverageMonths * 10))
   }
 
+  // 4. Sinergia com Envelopes Orçamentários (Aderência por Categoria)
+  let budgetAdherenceScore = 0
+  let budgetConfiguredCount = 0
+  let budgetOverspentCount = 0
+  let envelopeScoreAdjustment = 0
+
+  if (budgetReport && budgetReport.totalBudgeted > 0) {
+    const configuredItems = budgetReport.items.filter((i) => i.limit > 0)
+    budgetConfiguredCount = configuredItems.length
+    const overspentItems = configuredItems.filter((i) => i.spent > i.limit)
+    budgetOverspentCount = overspentItems.length
+
+    if (budgetConfiguredCount > 0) {
+      if (budgetOverspentCount === 0) {
+        budgetAdherenceScore = 100
+        envelopeScoreAdjustment = 4 // Bônus de disciplina: 100% dos envelopes respeitados
+      } else {
+        const overspentPenalty = Math.round((overspentItems.length / budgetConfiguredCount) * 70)
+        const globalOverPenalty = budgetReport.overallPercentage > 100
+          ? Math.min(30, Math.round(budgetReport.overallPercentage - 100))
+          : 0
+        budgetAdherenceScore = Math.max(0, Math.min(100, 100 - overspentPenalty - globalOverPenalty))
+        envelopeScoreAdjustment = -Math.min(8, budgetOverspentCount * 3)
+      }
+    }
+  }
+
   // Pontuação Total (0 a 100)
-  const totalScore = Math.min(100, Math.max(0, savingsScore + spendingLimitScore + emergencyReserveScore))
+  const totalScore = Math.min(
+    100,
+    Math.max(0, savingsScore + spendingLimitScore + emergencyReserveScore + envelopeScoreAdjustment),
+  )
 
   let classification: FinancialHealthScore['classification'] = 'critical'
   let label = 'Crítico'
@@ -2340,7 +2448,7 @@ export function calculateFinancialHealthScore(
   if (totalScore >= 80) {
     classification = 'excellent'
     label = 'Excelente'
-    description = 'Finanças blindadas com excelente taxa de poupança e reserva sólida.'
+    description = 'Finanças blindadas com excelente taxa de poupança, controle e reserva sólida.'
   } else if (totalScore >= 60) {
     classification = 'healthy'
     label = 'Saudável'
@@ -2349,6 +2457,61 @@ export function calculateFinancialHealthScore(
     classification = 'warning'
     label = 'Atenção'
     description = 'Gastos próximos do limite ou reserva de emergência em formação.'
+  }
+
+  // Geração de dicas práticas e acionáveis (Actionable Coach)
+  const actionableTips: string[] = []
+
+  if (budgetConfiguredCount > 0 && budgetOverspentCount > 0 && budgetReport?.topOverspentCategory) {
+    const topOver = budgetReport.topOverspentCategory
+    const excess = round2(Math.max(0, topOver.spent - topOver.limit))
+    actionableTips.push(
+      `📦 Envelope de ${topOver.category} excedeu o teto em R$ ${excess.toFixed(2).replace('.', ',')}. Reequilibrar seus envelopes recupera +${Math.min(8, budgetOverspentCount * 3)} pts no Score.`,
+    )
+  } else if (budgetConfiguredCount === 0 && income > 0) {
+    actionableTips.push(
+      '📦 Ative os Envelopes Orçamentários com IA para blindar suas categorias variáveis e ganhar até +4 pts de bônus de disciplina.',
+    )
+  }
+
+  if (income > 0 && savingsRatePercentage < 20) {
+    const idealInvest = round2(income * 0.20)
+    const missingInvest = round2(Math.max(0, idealInvest - totalInvested))
+    const potentialGain = Math.max(1, 35 - savingsScore)
+    if (positiveFreeBalance >= missingInvest && missingInvest > 0) {
+      actionableTips.push(
+        `📈 Você tem Saldo Livre suficiente para aportar mais R$ ${missingInvest.toFixed(2).replace('.', ',')} (atingindo 20% da renda) e ganhar +${potentialGain} pts.`,
+      )
+    } else if (missingInvest > 0) {
+      actionableTips.push(
+        `📈 Aportar na categoria Investimentos (meta ideal: R$ ${idealInvest.toFixed(2).replace('.', ',')}/mês) pode elevar seu Score em até +${potentialGain} pts.`,
+      )
+    }
+  }
+
+  if (income > 0 && spendingRatioPercentage > 70) {
+    const targetExpense = round2(income * 0.70)
+    const excessExpense = round2(Math.max(0, totalExpenses - targetExpense))
+    const potentialGain = Math.max(1, 35 - spendingLimitScore)
+    actionableTips.push(
+      `🎯 Seu custo de vida consome ${spendingRatioPercentage}% da renda. Reduzir R$ ${excessExpense.toFixed(2).replace('.', ',')} em gastos variáveis destrava +${potentialGain} pts.`,
+    )
+  }
+
+  if (coverageMonths < 6.0) {
+    const nextTargetMonths = coverageMonths < 1 ? 1 : coverageMonths < 3 ? 3 : 6
+    const neededAmount = round2(Math.max(0, baselineCost * nextTargetMonths - emergencyReserveBalance))
+    if (neededAmount > 0) {
+      actionableTips.push(
+        `🛡️ Sua Reserva cobre ${coverageMonths}m do seu custo de vida. Acumular mais R$ ${neededAmount.toFixed(2).replace('.', ',')} atinge o marco de ${nextTargetMonths} ${nextTargetMonths === 1 ? 'mês' : 'meses'} de proteção.`,
+      )
+    }
+  }
+
+  if (actionableTips.length === 0) {
+    actionableTips.push(
+      '✨ Parabéns! Você atingiu excelência nos 4 pilares (Poupança, Custo de Vida, Envelopes e Reserva de Emergência).',
+    )
   }
 
   return {
@@ -2362,6 +2525,12 @@ export function calculateFinancialHealthScore(
     savingsRatePercentage,
     spendingRatioPercentage,
     emergencyCoverageMonths: coverageMonths,
+    budgetAdherenceScore,
+    budgetConfiguredCount,
+    budgetOverspentCount,
+    monthlyLivingCost: round2(baselineCost),
+    potentialSavingsRatePercentage,
+    actionableTips,
   }
 }
 
@@ -2436,28 +2605,48 @@ export function computeCategoryBudgets(
   for (const category of allCategoriesSet) {
     const limit = round2(Math.max(0, Number(categoryBudgets[category]) || 0))
     const spent = round2(Math.max(0, spentMap.get(category) || 0))
+
+    // Categorias patrimoniais ou de entrada (ex: Investimentos, Estorno) não devem gerar alerta
+    // de "despesa sem teto", a menos que o usuário tenha criado um envelope explícito para ela.
+    if (limit <= 0 && NON_ENVELOPE_CATEGORIES.has(category)) continue
+
     const remaining = round2(limit - spent)
 
     // Se a categoria não tem orçamento e não teve gastos, pula
     if (limit <= 0 && spent <= 0) continue
 
     const percentage = limit > 0 ? round2((spent / limit) * 100) : (spent > 0 ? 100 : 0)
+    const isFixedCategory = FIXED_MONTHLY_CATEGORIES.has(category)
 
     let status: 'ok' | 'warning' | 'danger' = 'ok'
     if (limit > 0) {
-      if (percentage >= 100) status = 'danger'
-      else if (percentage >= 80) status = 'warning'
+      if (isFixedCategory) {
+        if (spent > limit) status = 'danger'
+        else status = 'ok'
+      } else {
+        if (percentage >= 100) status = 'danger'
+        else if (percentage >= 80) status = 'warning'
+      }
     } else if (spent > 0) {
       status = 'warning' // Sem teto mas com gasto
     }
 
     const dailyPace = currentDay > 0 ? round2(spent / currentDay) : 0
-    const projectedSpent = round2(dailyPace * totalDays)
+    // Para categorias mensais fixas (Moradia, Assinaturas, Educação, Financiamentos), o pagamento
+    // integral no início do mês não projeta repetição diária linear, evitando falsos alertas.
+    const projectedSpent = isFixedCategory && limit > 0
+      ? round2(Math.max(spent, limit))
+      : round2(dailyPace * totalDays)
     const projectedPercentage = limit > 0 ? round2((projectedSpent / limit) * 100) : (projectedSpent > 0 ? 100 : 0)
     const recommendedDailyRemaining = remaining > 0 && daysRemaining > 0 ? round2(remaining / daysRemaining) : 0
 
     let burnRateStatus: CategoryBudgetPaceStatus = 'normal'
-    if (status === 'danger' || (limit > 0 && projectedPercentage >= 115)) {
+    if (isFixedCategory) {
+      if (limit > 0 && spent > limit) {
+        burnRateStatus = 'critical'
+        criticalCount++
+      }
+    } else if (status === 'danger' || (limit > 0 && projectedPercentage >= 115)) {
       burnRateStatus = 'critical'
       criticalCount++
     } else if (status === 'warning' || (limit > 0 && projectedPercentage >= 95)) {
@@ -2485,6 +2674,7 @@ export function computeCategoryBudgets(
       daysRemaining,
       currentDay,
       totalDays,
+      isFixedCategory,
     })
   }
 
@@ -2594,6 +2784,7 @@ export function suggestCategoryBudgets(
   let totalSuggested = 0
 
   for (const [cat, sum] of sumMap.entries()) {
+    if (NON_ENVELOPE_CATEGORIES.has(cat)) continue
     const avg = round2(sum / divisor)
     categoryAverages[cat] = avg
     if (avg >= 20) {

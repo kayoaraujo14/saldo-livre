@@ -130,6 +130,14 @@ fun GeminiChatScreen(
     val messagesCount = uiState.messages.size
     val isTyping = uiState.isTyping
 
+    // Ponte direta dos cards de Saúde Financeira e Envelopes Orçamentários no Dashboard para o Copiloto IA
+    LaunchedEffect(Unit) {
+        val pendingPrompt = GeminiChatViewModel.consumePendingPrompt()
+        if (!pendingPrompt.isNullOrBlank()) {
+            viewModel.sendMessage(overrideText = pendingPrompt)
+        }
+    }
+
     // Smooth Scroll automático para o final da tela durante o streaming contínuo das mensagens da IA
     LaunchedEffect(messagesCount, lastMessageText, isTyping) {
         if (uiState.messages.isNotEmpty()) {

@@ -111,6 +111,8 @@ class AndroidAgentToolsEngine(
             "MANAGE_RECURRING", "gerenciarContasRecorrentes" -> executeManageRecurringFromJson(jsonObj)
             "EXPAND_INSTALLMENTS", "expandirParcelamentos" -> executeExpandInstallmentsFromJson(jsonObj)
             "GENERATE_CHART", "gerarGraficoFinanceiro" -> executeGenerateChartFromJson(jsonObj)
+            "MANAGE_BUDGETS", "gerenciarEnvelopesOrcamentarios" -> executeManageBudgetsFromJson(jsonObj)
+            "HEALTH_DIAGNOSIS", "diagnosticoSaudeFinanceira" -> executeManageBudgets(acao = "diagnostico_saude_financeira")
             "LEARN_RULE", "gerenciarRegrasEMemoria" -> {
                 val op = jsonObj.getStringOrNull("acao") ?: jsonObj.getStringOrNull("operation") ?: "aprender"
                 val rule = jsonObj.getStringOrNull("rule") ?: jsonObj.getStringOrNull("regra") ?: ""
@@ -2920,6 +2922,376 @@ class AndroidAgentToolsEngine(
     }
 
     // -------------------------------------------------------------
+    // 10.2. ENVELOPES ORÇAMENTÁRIOS & DIAGNÓSTICO DE SAÚDE FINANCEIRA
+    // -------------------------------------------------------------
+
+    private suspend fun executeManageBudgetsFromJson(jsonObj: JsonObject): ToolExecutionResult {
+        val acao = jsonObj.getStringOrNull("acao")
+            ?: jsonObj.getStringOrNull("operation")
+            ?: jsonObj.getStringOrNull("subAction")
+            ?: "consultar"
+        val categoria = jsonObj.getStringOrNull("categoria")
+            ?: jsonObj.getStringOrNull("category")
+        val valorTeto = jsonObj.getDoubleOrNull("valorTeto")
+            ?: jsonObj.getDoubleOrNull("limit")
+            ?: jsonObj.getDoubleOrNull("amount")
+            ?: jsonObj.getDoubleOrNull("valor")
+        val categoriaOrigem = jsonObj.getStringOrNull("categoriaOrigem")
+            ?: jsonObj.getStringOrNull("fromCategory")
+        val categoriaDestino = jsonObj.getStringOrNull("categoriaDestino")
+            ?: jsonObj.getStringOrNull("toCategory")
+        val valorTransferencia = jsonObj.getDoubleOrNull("valorTransferencia")
+            ?: jsonObj.getDoubleOrNull("transferAmount")
+            ?: jsonObj.getDoubleOrNull("valor")
+        val valorSimulacao = jsonObj.getDoubleOrNull("valorSimulacao")
+            ?: jsonObj.getDoubleOrNull("simulatedAmount")
+            ?: jsonObj.getDoubleOrNull("amount")
+            ?: jsonObj.getDoubleOrNull("valor")
+        val descricaoSimulacao = jsonObj.getStringOrNull("descricaoSimulacao")
+            ?: jsonObj.getStringOrNull("description")
+            ?: jsonObj.getStringOrNull("descricao")
+
+        return executeManageBudgets(
+            acao = acao,
+            categoria = categoria,
+            valorTeto = valorTeto,
+            categoriaOrigem = categoriaOrigem,
+            categoriaDestino = categoriaDestino,
+            valorTransferencia = valorTransferencia,
+            valorSimulacao = valorSimulacao,
+            descricaoSimulacao = descricaoSimulacao
+        )
+    }
+
+    suspend fun executeManageBudgets(
+        acao: String = "consultar",
+        categoria: String? = null,
+        valorTeto: Double? = null,
+        categoriaOrigem: String? = null,
+        categoriaDestino: String? = null,
+        valorTransferencia: Double? = null,
+        valorSimulacao: Double? = null,
+        descricaoSimulacao: String? = null
+    ): ToolExecutionResult {
+        val all = repository.getTransactions().first()
+        val cards = repository.getCards().first()
+        val closures = repository.getMonthClosures().first()
+        val user = repository.currentUser.value
+        val month = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val summary = FinanceEngine.computeSummary(all, user.uid, month, cards, closures)
+        val currentBudgets = user.categoryBudgets.toMutableMap()
+        val report = FinanceEngine.computeCategoryBudgets(summary, currentBudgets)
+        val emergencyReserve = FinanceEngine.resolveEmergencyReserveBalance(user, summary)
+        val health = FinanceEngine.calculateFinancialHealthScore(summary, emergencyReserve, report)
+
+        return when (acao.lowercase(Locale.ROOT).trim()) {
+            "diagnostico_saude_financeira", "saude_financeira", "diagnostico" -> {
+                val tipsBlock = if (health.actionableTips.isNotEmpty()) {
+                    "\n\n💡 **Plano de Ação Personalizado (Coach IA):**\n" +
+                        health.actionableTips.joinToString("\n") { "  • $it" }
+                } else ""
+
+                val budgetLine = if (health.budgetConfiguredCount > 0) {
+                    "${health.budgetAdherenceScore}% de aderência (${health.budgetConfiguredCount - health.budgetOverspentCount}/${health.budgetConfiguredCount} dentro do teto)"
+                } else {
+                    "Nenhum envelope configurado ainda (configure para ganhar +4 pts de bônus!)"
+                }
+
+                val text = """
+🩺 **Diagnóstico Completo de Saúde Financeira (${FinanceEngine.formatMonthLabel(month)}):**
+
+• **Score Geral**: **${health.score}/100 (${health.label})**
+  *${health.description}*
+
+📊 **Raio-X dos 4 Pilares:**
+1. **Taxa de Poupança & Investimento**: **${health.savingsScore}/35 pts**
+   ↳ Taxa real aportada: **${health.savingsRatePercentage}%** (${FinanceEngine.formatCurrency(summary.totalInvested)}) | Potencial com Saldo Livre: **${health.potentialSavingsRatePercentage}%** (Meta ideal: ≥ 20%)
+2. **Controle de Custo de Vida**: **${health.spendingLimitScore}/35 pts**
+   ↳ Custo de vida real (excluindo aportes): **${health.spendingRatioPercentage}%** da renda (${FinanceEngine.formatCurrency(health.monthlyLivingCost)}) (Meta ideal: ≤ 70%)
+3. **Reserva de Emergência**: **${health.emergencyReserveScore}/30 pts**
+   ↳ Cobertura atual: **${health.emergencyCoverageMonths} meses** do custo de vida (${FinanceEngine.formatCurrency(emergencyReserve)}) (Meta ideal: 6 meses)
+4. **Aderência aos Envelopes**: **$budgetLine**$tipsBlock
+""".trimIndent()
+
+                ToolExecutionResult(
+                    text = text,
+                    actionCard = ActionCardData(
+                        title = "Saúde Financeira: ${health.score}/100 (${health.label})",
+                        description = health.actionableTips.firstOrNull() ?: health.description,
+                        detail = "Poupança ${health.savingsScore}/35 • Custo ${health.spendingLimitScore}/35 • Reserva ${health.emergencyReserveScore}/30",
+                        newFreeBalance = "Saldo Livre: ${FinanceEngine.formatCurrency(summary.freeBalance)}"
+                    )
+                )
+            }
+
+            "definir_teto" -> {
+                val catName = categoria?.trim().orEmpty()
+                if (catName.isBlank()) {
+                    return ToolExecutionResult(text = "⚠️ Informe a categoria para definir o teto (ex: Alimentação, Lazer, Transporte).")
+                }
+                if (valorTeto == null || valorTeto < 0.0) {
+                    return ToolExecutionResult(text = "⚠️ Informe um valor válido para o teto de **$catName**.")
+                }
+
+                val cleanVal = FinanceEngine.round2(valorTeto)
+                if (cleanVal <= 0.0) {
+                    currentBudgets.remove(catName)
+                } else {
+                    currentBudgets[catName] = cleanVal
+                }
+                repository.updateCategoryBudgets(currentBudgets)
+
+                val updatedReport = FinanceEngine.computeCategoryBudgets(summary, currentBudgets)
+                val catStatus = updatedReport.categories.find { it.category.equals(catName, ignoreCase = true) }
+                val spent = catStatus?.spent ?: 0.0
+                val rem = cleanVal - spent
+
+                val msg = if (cleanVal <= 0.0) {
+                    "🗑️ **Teto de $catName removido!**\n\nO envelope de **$catName** foi desativado."
+                } else {
+                    "🎯 **Teto de $catName atualizado para ${FinanceEngine.formatCurrency(cleanVal)}!**\n\n" +
+                        "• **Gasto atual no mês**: ${FinanceEngine.formatCurrency(spent)} (${catStatus?.percentage ?: 0.0}%)\n" +
+                        "• **Folga no envelope**: ${if (rem >= 0) "${FinanceEngine.formatCurrency(rem)} disponíveis" else "Estourado em ${FinanceEngine.formatCurrency(kotlin.math.abs(rem))}"}\n" +
+                        (if (catStatus != null && !catStatus.isFixedCategory && rem > 0) "• **Ritmo seguro até o fim do mês**: ${FinanceEngine.formatCurrency(catStatus.recommendedDailyRemaining)}/dia" else "")
+                }
+
+                ToolExecutionResult(
+                    text = msg,
+                    actionCard = ActionCardData(
+                        title = if (cleanVal > 0) "Envelope Atualizado: $catName" else "Envelope Removido: $catName",
+                        description = if (cleanVal > 0) "Teto: ${FinanceEngine.formatCurrency(cleanVal)} (Gasto: ${FinanceEngine.formatCurrency(spent)})" else "Teto desativado",
+                        detail = if (cleanVal > 0) "${catStatus?.percentage ?: 0.0}% utilizado • Aderência geral: ${updatedReport.overallPercentage}%" else null
+                    )
+                )
+            }
+
+            "rebalancear" -> {
+                val fromCat = categoriaOrigem?.trim().orEmpty()
+                val toCat = categoriaDestino?.trim().orEmpty()
+                val transferAmt = valorTransferencia ?: 0.0
+
+                if (fromCat.isBlank() || toCat.isBlank() || transferAmt <= 0.0) {
+                    return ToolExecutionResult(text = "⚠️ Informe a categoria de origem, a categoria de destino e o valor positivo a transferir.")
+                }
+
+                val currentFrom = currentBudgets[fromCat] ?: 0.0
+                val currentTo = currentBudgets[toCat] ?: 0.0
+                val newFrom = kotlin.math.max(0.0, FinanceEngine.round2(currentFrom - transferAmt))
+                val newTo = FinanceEngine.round2(currentTo + transferAmt)
+
+                currentBudgets[fromCat] = newFrom
+                currentBudgets[toCat] = newTo
+                repository.updateCategoryBudgets(currentBudgets)
+
+                ToolExecutionResult(
+                    text = "⚖️ **Rebalanceamento concluído com sucesso!**\n\n" +
+                        "Transferi **${FinanceEngine.formatCurrency(transferAmt)}** do envelope de **$fromCat** para **$toCat**:\n" +
+                        "• **$fromCat**: ${FinanceEngine.formatCurrency(currentFrom)} → **${FinanceEngine.formatCurrency(newFrom)}**\n" +
+                        "• **$toCat**: ${FinanceEngine.formatCurrency(currentTo)} → **${FinanceEngine.formatCurrency(newTo)}**",
+                    actionCard = ActionCardData(
+                        title = "Envelopes Rebalanceados ⚖️",
+                        description = "${FinanceEngine.formatCurrency(transferAmt)} de $fromCat → $toCat",
+                        detail = "$fromCat: ${FinanceEngine.formatCurrency(newFrom)} | $toCat: ${FinanceEngine.formatCurrency(newTo)}"
+                    )
+                )
+            }
+
+            "rebalancear_automatico" -> {
+                val plan = FinanceEngine.suggestBudgetRebalance(report)
+                if (!plan.canCoverFullDeficit && plan.transfers.isEmpty()) {
+                    return ToolExecutionResult(
+                        text = if (report.overspentCount == 0) {
+                            "✅ **Todos os seus envelopes estão dentro do teto!** Não há estouros para rebalancear no momento."
+                        } else {
+                            "⚠️ Há um estouro de **${FinanceEngine.formatCurrency(plan.totalDeficit)}**, mas não há outros envelopes com folga suficiente para cobrir automaticamente. Considere revisar seus tetos."
+                        }
+                    )
+                }
+
+                for (t in plan.transfers) {
+                    currentBudgets[t.fromCategory] = t.newFromLimit
+                    currentBudgets[t.toCategory] = t.newToLimit
+                }
+                repository.updateCategoryBudgets(currentBudgets)
+
+                val lines = plan.transfers.joinToString("\n") { t ->
+                    "• **${t.fromCategory} → ${t.toCategory}**: ${FinanceEngine.formatCurrency(t.amount)} (${t.toCategory} passa para ${FinanceEngine.formatCurrency(t.newToLimit)})"
+                }
+
+                ToolExecutionResult(
+                    text = "✨ **Rebalanceamento Inteligente Aplicado!**\n\n${plan.summaryText}\n\n$lines",
+                    actionCard = ActionCardData(
+                        title = "Rebalanceamento IA Aplicado ✨",
+                        description = "Coberto: ${FinanceEngine.formatCurrency(plan.totalCovered)} em ${plan.transfers.size} transferência(s)",
+                        detail = plan.transfers.joinToString(" | ") { "${it.fromCategory} → ${it.toCategory}" }
+                    )
+                )
+            }
+
+            "sugerir_tetos" -> {
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income)
+                val suggested = suggestedResult.suggestedBudgets
+                if (suggested.isEmpty()) {
+                    return ToolExecutionResult(text = "ℹ️ Ainda não há dados suficientes de renda ou despesas para sugerir tetos automaticamente.")
+                }
+                val totalSuggested = suggested.values.sum()
+                val lines = suggested.entries.sortedByDescending { it.value }.joinToString("\n") { (cat, lim) ->
+                    val currentSpent = summary.byCategory.find { it.category == cat }?.amount ?: 0.0
+                    val kind = if (FinanceEngine.isFixedBudgetCategory(cat)) "📌 Fixa" else "🔄 Variável"
+                    "• **$cat** ($kind): Teto sugerido **${FinanceEngine.formatCurrency(lim)}** (Gasto atual: ${FinanceEngine.formatCurrency(currentSpent)})"
+                }
+
+                ToolExecutionResult(
+                    text = "🤖 **Sugestão de Envelopes Inteligentes (Regra 50/30/20):**\n\n" +
+                        "Com base na sua renda de **${FinanceEngine.formatCurrency(summary.income)}** e no seu padrão real de gastos, sugiro um orçamento total de **${FinanceEngine.formatCurrency(totalSuggested)}**:\n\n" +
+                        "$lines\n\n" +
+                        "Deseja que eu aplique esses tetos agora? Basta dizer **\"Aplicar sugestão de tetos\"**!",
+                    actionCard = ActionCardData(
+                        title = "Tetos Sugeridos pela IA (50/30/20)",
+                        description = "${suggested.size} categorias • Total: ${FinanceEngine.formatCurrency(totalSuggested)}",
+                        detail = "Diga \"Aplicar sugestão de tetos\" para ativar com 1 clique"
+                    )
+                )
+            }
+
+            "aplicar_sugestao_ia" -> {
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income)
+                val suggested = suggestedResult.suggestedBudgets
+                if (suggested.isEmpty()) {
+                    return ToolExecutionResult(text = "⚠️ Não foi possível gerar tetos sugeridos sem receita ou histórico no mês.")
+                }
+                val merged = currentBudgets.toMutableMap()
+                for ((k, v) in suggested) {
+                    merged[k] = v
+                }
+                repository.updateCategoryBudgets(merged)
+                val totalSuggested = merged.values.sum()
+
+                ToolExecutionResult(
+                    text = "✅ **Envelopes Orçamentários IA ativados com sucesso!**\n\n" +
+                        "Configurei **${merged.size} categorias** somando **${FinanceEngine.formatCurrency(totalSuggested)}** em tetos inteligentes.\n" +
+                        "Você já pode acompanhar o ritmo de cada envelope no Dashboard ou me perguntar a qualquer momento!",
+                    actionCard = ActionCardData(
+                        title = "Envelopes IA Ativados ✨",
+                        description = "${merged.size} categorias configuradas (${FinanceEngine.formatCurrency(totalSuggested)})",
+                        detail = "Bônus de disciplina ativo no Score de Saúde Financeira"
+                    )
+                )
+            }
+
+            "simular_compra" -> {
+                val simAmount = valorSimulacao ?: valorTeto ?: 0.0
+                if (simAmount <= 0.0) {
+                    return ToolExecutionResult(text = "⚠️ Informe o valor da compra que deseja simular (ex: \"Posso gastar R$ 180 em Lazer?\").")
+                }
+                val targetCat = categoria?.takeIf { it.isNotBlank() }
+                    ?: descricaoSimulacao?.let { neuralClassifier.guessCategory(it) }
+                    ?: "Lazer"
+
+                val catStatus = report.categories.find { it.category.equals(targetCat, ignoreCase = true) }
+                val currentSpent = catStatus?.spent ?: (summary.byCategory.find { it.category.equals(targetCat, ignoreCase = true) }?.amount ?: 0.0)
+                val limit = catStatus?.limit ?: 0.0
+                val newFreeBalance = FinanceEngine.round2(summary.freeBalance - simAmount)
+                val newDailyLimit = if (summary.daysRemaining > 0) {
+                    FinanceEngine.round2(kotlin.math.max(0.0, newFreeBalance / summary.daysRemaining))
+                } else null
+
+                val envelopeAnalysis = if (limit > 0.0) {
+                    val afterSpent = FinanceEngine.round2(currentSpent + simAmount)
+                    val afterPct = FinanceEngine.round2((afterSpent / limit) * 100.0)
+                    val afterRem = FinanceEngine.round2(limit - afterSpent)
+                    if (afterRem >= 0.0) {
+                        "✅ **Cabe no envelope de $targetCat!**\n" +
+                            "• Uso do envelope: ${FinanceEngine.formatCurrency(currentSpent)} → **${FinanceEngine.formatCurrency(afterSpent)}** ($afterPct% do teto de ${FinanceEngine.formatCurrency(limit)})\n" +
+                            "• Folga restante em $targetCat: **${FinanceEngine.formatCurrency(afterRem)}**"
+                    } else {
+                        val deficit = kotlin.math.abs(afterRem)
+                        val donor = report.categories.filter { it.category != targetCat && it.status == CategoryBudgetAlertStatus.OK && it.remaining >= 20.0 }
+                            .maxByOrNull { it.remaining }
+                        "⚠️ **Atenção: Estoura o envelope de $targetCat em ${FinanceEngine.formatCurrency(deficit)}!**\n" +
+                            "• Uso do envelope: ${FinanceEngine.formatCurrency(currentSpent)} → **${FinanceEngine.formatCurrency(afterSpent)}** ($afterPct% do teto de ${FinanceEngine.formatCurrency(limit)})\n" +
+                            (if (donor != null) "💡 *Dica IA:* Você pode cobrir esse excesso transferindo de **${donor.category}** (que tem ${FinanceEngine.formatCurrency(donor.remaining)} livres)." else "")
+                    }
+                } else {
+                    "ℹ️ Você ainda não definiu um teto específico para **$targetCat** (gasto atual: ${FinanceEngine.formatCurrency(currentSpent)})."
+                }
+
+                val verdict = when {
+                    newFreeBalance < 0 -> "🚨 **Risco Alto**: Essa compra deixará seu Saldo Livre do mês negativo em **${FinanceEngine.formatCurrency(kotlin.math.abs(newFreeBalance))}**."
+                    limit > 0.0 && (currentSpent + simAmount) > limit -> "⚠️ **Cautela**: Seu Saldo Livre comporta, mas você precisará rebalancear o envelope de **$targetCat**."
+                    else -> "🟢 **Compra Segura**: Cabe tanto no seu Saldo Livre quanto no planejamento do mês!"
+                }
+
+                ToolExecutionResult(
+                    text = "🧮 **Simulação de Impacto: ${descricaoSimulacao ?: targetCat} (${FinanceEngine.formatCurrency(simAmount)})**\n\n" +
+                        "$verdict\n\n" +
+                        "$envelopeAnalysis\n\n" +
+                        "💰 **Impacto no Saldo Livre do Mês:**\n" +
+                        "• Saldo Livre: ${FinanceEngine.formatCurrency(summary.freeBalance)} → **${FinanceEngine.formatCurrency(newFreeBalance)}**\n" +
+                        (if (newDailyLimit != null) "• Novo Limite Diário Seguro: **${FinanceEngine.formatCurrency(newDailyLimit)}/dia**" else ""),
+                    actionCard = ActionCardData(
+                        title = "Simulação: ${FinanceEngine.formatCurrency(simAmount)} em $targetCat",
+                        description = if (newFreeBalance >= 0) "Saldo Livre após compra: ${FinanceEngine.formatCurrency(newFreeBalance)}" else "Saldo Livre ficaria negativo: ${FinanceEngine.formatCurrency(newFreeBalance)}",
+                        detail = if (limit > 0) "Envelope $targetCat: ${FinanceEngine.round2(((currentSpent + simAmount) / limit) * 100)}% do teto" else "Categoria sem teto configurado"
+                    )
+                )
+            }
+
+            else -> {
+                // "consultar"
+                if (report.categories.isEmpty()) {
+                    val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income)
+                    val suggested = suggestedResult.suggestedBudgets
+                    val sugTotal = suggested.values.sum()
+                    return ToolExecutionResult(
+                        text = "🎯 **Você ainda não tem Envelopes Orçamentários configurados para ${FinanceEngine.formatMonthLabel(month)}.**\n\n" +
+                            "Com base na sua renda de **${FinanceEngine.formatCurrency(summary.income)}**, posso criar automaticamente **${suggested.size} envelopes inteligentes** (somando ${FinanceEngine.formatCurrency(sugTotal)}) calibrados pela Regra 50/30/20.\n\n" +
+                            "Deseja ativar agora? Diga **\"Aplicar sugestão de tetos\"**!",
+                        actionCard = ActionCardData(
+                            title = "Envelopes Orçamentários",
+                            description = "Nenhum teto ativo • Sugestão IA pronta (${suggested.size} categorias)",
+                            detail = "Peça \"Aplicar sugestão de tetos\" para ativar"
+                        )
+                    )
+                }
+
+                val lines = report.categories.joinToString("\n") { c ->
+                    val icon = when (c.status) {
+                        CategoryBudgetAlertStatus.DANGER -> "🔴"
+                        CategoryBudgetAlertStatus.WARNING -> "🟡"
+                        CategoryBudgetAlertStatus.OK -> "🟢"
+                    }
+                    val typeTag = if (c.isFixedCategory) "📌 Fixa" else "🔄 Variável"
+                    val paceNote = if (!c.isFixedCategory && c.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL && c.status != CategoryBudgetAlertStatus.DANGER) {
+                        " ⚠️ *Projeção: ${FinanceEngine.formatCurrency(c.projectedSpent)}*"
+                    } else if (!c.isFixedCategory && c.remaining > 0) {
+                        " • *Meta: ${FinanceEngine.formatCurrency(c.recommendedDailyRemaining)}/dia*"
+                    } else ""
+                    "$icon **${c.category}** ($typeTag): ${FinanceEngine.formatCurrency(c.spent)} / ${FinanceEngine.formatCurrency(c.limit)} (**${c.percentage.toInt()}%**)$paceNote"
+                }
+
+                val rebalance = FinanceEngine.suggestBudgetRebalance(report)
+                val rebalanceBlock = if (rebalance.transfers.isNotEmpty()) {
+                    "\n\n⚖️ **Sugestão de Rebalanceamento IA:**\n${rebalance.summaryText}\n*(Diga \"Rebalancear envelopes\" para aplicar)*"
+                } else ""
+
+                ToolExecutionResult(
+                    text = "🎯 **Raio-X dos Envelopes Orçamentários (${FinanceEngine.formatMonthLabel(month)}):**\n\n" +
+                        "• **Orçamento Total**: ${FinanceEngine.formatCurrency(report.totalSpentInBudgeted)} de ${FinanceEngine.formatCurrency(report.totalBudgeted)} (**${report.overallPercentage}%**)\n" +
+                        "• **Folga nos Envelopes**: ${FinanceEngine.formatCurrency(report.totalRemaining)}\n" +
+                        "• **Status**: ${report.safeCount} no verde • ${report.warningCount} em atenção • ${report.overspentCount} estourado(s)\n\n" +
+                        "$lines$rebalanceBlock",
+                    actionCard = ActionCardData(
+                        title = "Envelopes: ${report.overallPercentage}% utilizado",
+                        description = "${FinanceEngine.formatCurrency(report.totalSpentInBudgeted)} de ${FinanceEngine.formatCurrency(report.totalBudgeted)}",
+                        detail = "${report.safeCount} seguros • ${report.warningCount} atenção • ${report.overspentCount} estourados"
+                    )
+                )
+            }
+        }
+    }
+
+    // -------------------------------------------------------------
     // 11. REGRAS APRENDIDAS (MEMÓRIA VIVA)
     // -------------------------------------------------------------
 
@@ -3163,6 +3535,88 @@ class AndroidAgentToolsEngine(
         val deleteRuleMatch = Regex("""^(?:esque[çc]a|delete a regra|remova a regra)\s+(.+)$""", RegexOption.IGNORE_CASE).find(trimmed)
         if (deleteRuleMatch != null) {
             return executeDeleteRule(deleteRuleMatch.groupValues[1])
+        }
+
+        // 2.1. Diagnóstico de Saúde Financeira (4 Pilares)
+        if (
+            lower.contains("saude financeira") ||
+            lower.contains("meu score") ||
+            lower.contains("score financeiro") ||
+            lower.contains("diagnostico financeiro") ||
+            lower.contains("termometro financeiro") ||
+            lower.contains("4 pilares")
+        ) {
+            return executeManageBudgets(acao = "diagnostico_saude_financeira")
+        }
+
+        // 2.2. Envelopes Orçamentários: Definir Teto ("definir teto de Lazer para 500", "teto de Alimentação 1200")
+        val setCapRegex = Regex("""(?:definir|colocar|ajustar|mudar|alterar)?\s*(?:o\s+)?teto\s+(?:de|para|em)\s+([a-zA-ZÀ-ÿ\s]+?)\s+(?:para|em|de)\s*r?\$?\s*([\d.,]+)""", RegexOption.IGNORE_CASE)
+        val setCapMatch = setCapRegex.find(trimmed)
+        if (setCapMatch != null) {
+            val catRaw = setCapMatch.groupValues[1].trim()
+            val amt = neuralClassifier.parseAmount(setCapMatch.groupValues[2])
+            if (amt != null) {
+                val matchedCat = CategoryRegistry.EXPENSE_CATEGORIES.find { normalize(it.name) == normalize(catRaw) }?.name
+                    ?: catRaw.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                return executeManageBudgets(acao = "definir_teto", categoria = matchedCat, valorTeto = amt)
+            }
+        }
+
+        // 2.3. Envelopes Orçamentários: Aplicar Sugestão IA
+        if (
+            lower.contains("aplicar sugestao") ||
+            lower.contains("ativar tetos") ||
+            lower.contains("aplicar tetos") ||
+            lower.contains("ativar sugestao")
+        ) {
+            return executeManageBudgets(acao = "aplicar_sugestao_ia")
+        }
+
+        // 2.4. Envelopes Orçamentários: Sugerir Tetos / Regra 50/30/20
+        if (
+            lower.contains("sugerir tetos") ||
+            lower.contains("sugira tetos") ||
+            lower.contains("sugerir envelopes") ||
+            lower.contains("50/30/20") ||
+            lower.contains("50 30 20")
+        ) {
+            return executeManageBudgets(acao = "sugerir_tetos")
+        }
+
+        // 2.5. Envelopes Orçamentários: Rebalanceamento Automático
+        if (
+            lower.contains("rebalancear") ||
+            lower.contains("rebalanceamento") ||
+            lower.contains("cobrir estouro")
+        ) {
+            return executeManageBudgets(acao = "rebalancear_automatico")
+        }
+
+        // 2.6. Envelopes Orçamentários: Simular Compra ("posso gastar 200 no jantar", "posso comprar 350 em lazer")
+        val simRegex = Regex("""^(?:posso\s+(?:gastar|comprar)|simul(?:ar|e)\s+(?:compra|gasto)\s*(?:de)?)\s*r?\$?\s*([\d.,]+)\s*(?:em|no|na|com|de)?\s*(.*)$""", RegexOption.IGNORE_CASE)
+        val simMatch = simRegex.find(trimmed)
+        if (simMatch != null) {
+            val amt = neuralClassifier.parseAmount(simMatch.groupValues[1])
+            val desc = simMatch.groupValues[2].replace("?", "").trim()
+            if (amt != null && amt > 0.0) {
+                val catGuess = if (desc.isNotBlank()) neuralClassifier.guessCategory(desc) else "Lazer"
+                return executeManageBudgets(
+                    acao = "simular_compra",
+                    categoria = catGuess,
+                    valorSimulacao = amt,
+                    descricaoSimulacao = desc.ifBlank { catGuess }
+                )
+            }
+        }
+
+        // 2.7. Envelopes Orçamentários: Consultar Envelopes
+        if (
+            lower.contains("envelope") ||
+            lower.contains("tetos de gastos") ||
+            lower.contains("orcamento por categoria") ||
+            lower.contains("meus tetos")
+        ) {
+            return executeManageBudgets(acao = "consultar")
         }
 
         // 3. Consulta de Saldo Livre e Limite Diário

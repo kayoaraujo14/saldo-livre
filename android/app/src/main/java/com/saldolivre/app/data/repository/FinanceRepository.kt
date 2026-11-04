@@ -56,4 +56,5 @@ interface FinanceRepository {
     suspend fun saveUserProfile(profile: UserProfile)
     suspend fun updateInvestmentAssetBalances(balances: Map<String, Double>)
     suspend fun updateInvestmentMonthlyTarget(target: Double)
+    suspend fun updateCategoryBudgets(budgets: Map<String, Double>)
 }

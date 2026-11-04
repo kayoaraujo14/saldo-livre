@@ -2293,16 +2293,55 @@ object FinanceEngine {
         return groups
     }
 
+    val FIXED_MONTHLY_CATEGORIES = setOf(
+        "Moradia",
+        "Assinaturas",
+        "Assinaturas & Serviços",
+        "Educação",
+        "Educação & Desenvolvimento",
+        "Financiamentos",
+        "Financiamentos & Dívidas",
+        "Impostos",
+        "Impostos & Tributos"
+    )
+
+    val NON_ENVELOPE_CATEGORIES = setOf(
+        "Investimentos",
+        "Receita",
+        "Estorno",
+        "Cartão Terceiros",
+        "Rendimentos & Investimentos",
+        "Salário & Remuneração",
+        "Outras Receitas",
+        "Reembolsos & Acertos",
+        "Benefícios"
+    )
+
     /**
      * Calcula o Score do Termômetro de Saúde Financeira (0 a 100).
-     * Avalia 3 pilares fundamentais da metodologia Saldo Livre com 100% de paridade com a Web:
-     * 1. Índice de Poupança & Investimentos (até 35 pts)
-     * 2. Controle de Teto de Gastos / Consumo da Renda (até 35 pts)
+     * Avalia 4 pilares integrados da metodologia Saldo Livre com 100% de paridade com a Web:
+     * 1. Índice de Poupança, Investimentos & Margem Livre (até 35 pts)
+     * 2. Controle de Custo de Vida / Consumo da Renda (até 35 pts)
      * 3. Cobertura da Reserva de Emergência (até 30 pts)
+     * 4. Sinergia e Disciplina nos Envelopes Orçamentários (+4 a -8 pts)
      */
+    fun isFixedBudgetCategory(category: String): Boolean = category in FIXED_MONTHLY_CATEGORIES
+
+    fun resolveEmergencyReserveBalance(profile: UserProfile?, summary: MonthSummary?): Double {
+        if (profile != null && profile.investmentAssetBalances.isNotEmpty()) {
+            val explicit = profile.investmentAssetBalances["Reserva de Emergência"]
+                ?: profile.investmentAssetBalances.entries.firstOrNull { it.key.contains("Reserva", ignoreCase = true) }?.value
+            if (explicit != null && explicit > 0.0) return explicit
+            val totalAssets = profile.investmentAssetBalances.values.sum()
+            if (totalAssets > 0.0) return totalAssets
+        }
+        return summary?.totalInvestedAccumulated ?: 0.0
+    }
+
     fun calculateFinancialHealthScore(
         summary: MonthSummary?,
-        emergencyReserveBalance: Double = 0.0
+        emergencyReserveBalance: Double = 0.0,
+        budgetReport: CategoryBudgetReport? = null
     ): FinancialHealthScore {
         if (summary == null) {
             return FinancialHealthScore(
@@ -2315,31 +2354,57 @@ object FinanceEngine {
                 emergencyReserveScore = 0,
                 savingsRatePercentage = 0,
                 spendingRatioPercentage = 0,
-                emergencyCoverageMonths = 0.0
+                emergencyCoverageMonths = 0.0,
+                budgetAdherenceScore = 0,
+                budgetConfiguredCount = 0,
+                budgetOverspentCount = 0,
+                monthlyLivingCost = 0.0,
+                potentialSavingsRatePercentage = 0,
+                actionableTips = listOf("Cadastre suas receitas e despesas do mês para liberar o diagnóstico completo.")
             )
         }
 
         val income = summary.income
-        val totalExpenses = summary.paid + summary.committed
-        val totalInvested = summary.totalInvested
+        val rawTotalOutflow = when {
+            summary.byCategory.isNotEmpty() -> summary.byCategory.sumOf { it.amount }
+            summary.paid == summary.committed && summary.committedEstimated == 0.0 && summary.committedPending == 0.0 -> summary.committed
+            else -> summary.paid + summary.committed
+        }
+        val totalInvested = kotlin.math.max(0.0, summary.totalInvested)
+        val positiveFreeBalance = kotlin.math.max(0.0, summary.freeBalance)
 
-        // 1. Pilar de Poupança & Investimentos (0 a 35 pontos)
+        // Desconta aportes de Investimentos do cálculo de custo de vida quando presentes em byCategory
+        val investedInByCategory = summary.byCategory.firstOrNull { it.category == "Investimentos" }?.amount ?: 0.0
+        val totalExpenses = kotlin.math.max(0.0, round2(rawTotalOutflow - investedInByCategory))
+
+        // 1. Pilar de Poupança, Investimentos & Margem Livre (0 a 35 pontos)
         var savingsScore = 0
         var savingsRatePercentage = 0
+        var potentialSavingsRatePercentage = 0
         if (income > 0.0) {
             val rate = totalInvested / income
             savingsRatePercentage = kotlin.math.round(rate * 100.0).toInt()
-            savingsScore = when {
-                rate >= 0.20 -> 35
-                rate > 0.0 -> kotlin.math.round((rate / 0.20) * 35.0).toInt()
-                else -> 0
+            potentialSavingsRatePercentage = kotlin.math.min(
+                100,
+                kotlin.math.round(((totalInvested + positiveFreeBalance) / income) * 100.0).toInt()
+            )
+            savingsScore = if (rate >= 0.20) {
+                35
+            } else {
+                val baseInvestedPts = if (rate > 0.0) kotlin.math.round((rate / 0.20) * 35.0).toInt() else 0
+                val freeMarginRate = positiveFreeBalance / income
+                val marginBonusPts = if (freeMarginRate > 0.0) {
+                    kotlin.math.min(12, kotlin.math.round((freeMarginRate / 0.20) * 12.0).toInt())
+                } else 0
+                kotlin.math.min(35, baseInvestedPts + marginBonusPts)
             }
         } else if (totalInvested > 0.0) {
             savingsScore = 15
             savingsRatePercentage = 100
+            potentialSavingsRatePercentage = 100
         }
 
-        // 2. Pilar de Controle de Teto de Gastos (0 a 35 pontos)
+        // 2. Pilar de Controle de Custo de Vida / Teto de Gastos (0 a 35 pontos)
         var spendingLimitScore = 0
         var spendingRatioPercentage = 0
         if (income > 0.0) {
@@ -2360,7 +2425,6 @@ object FinanceEngine {
         }
 
         // 3. Pilar de Cobertura da Reserva de Emergência (0 a 30 pontos)
-        var emergencyReserveScore = 0
         val baselineCost = when {
             totalExpenses > 0.0 -> totalExpenses
             income > 0.0 -> income * 0.8
@@ -2371,7 +2435,7 @@ object FinanceEngine {
             round2(emergencyReserveBalance / baselineCost)
         } else 0.0
 
-        emergencyReserveScore = when {
+        val emergencyReserveScore = when {
             coverageMonths >= 6.0 -> 30
             coverageMonths >= 3.0 -> kotlin.math.round(20.0 + ((coverageMonths - 3.0) / 3.0) * 10.0).toInt()
             coverageMonths >= 1.0 -> kotlin.math.round(10.0 + ((coverageMonths - 1.0) / 2.0) * 10.0).toInt()
@@ -2379,13 +2443,40 @@ object FinanceEngine {
             else -> 0
         }
 
-        val totalScore = (savingsScore + spendingLimitScore + emergencyReserveScore).coerceIn(0, 100)
+        // 4. Sinergia com Envelopes Orçamentários
+        var budgetAdherenceScore = 0
+        var budgetConfiguredCount = 0
+        var budgetOverspentCount = 0
+        var envelopeScoreAdjustment = 0
+
+        if (budgetReport != null && budgetReport.totalBudgeted > 0.0) {
+            val configuredItems = budgetReport.items.filter { it.limit > 0.0 }
+            budgetConfiguredCount = configuredItems.size
+            val overspentItems = configuredItems.filter { it.spent > it.limit }
+            budgetOverspentCount = overspentItems.size
+
+            if (budgetConfiguredCount > 0) {
+                if (budgetOverspentCount == 0) {
+                    budgetAdherenceScore = 100
+                    envelopeScoreAdjustment = 4
+                } else {
+                    val overspentPenalty = kotlin.math.round((overspentItems.size.toDouble() / budgetConfiguredCount) * 70.0).toInt()
+                    val globalOverPenalty = if (budgetReport.overallPercentage > 100.0) {
+                        kotlin.math.min(30, kotlin.math.round(budgetReport.overallPercentage - 100.0).toInt())
+                    } else 0
+                    budgetAdherenceScore = (100 - overspentPenalty - globalOverPenalty).coerceIn(0, 100)
+                    envelopeScoreAdjustment = -kotlin.math.min(8, budgetOverspentCount * 3)
+                }
+            }
+        }
+
+        val totalScore = (savingsScore + spendingLimitScore + emergencyReserveScore + envelopeScoreAdjustment).coerceIn(0, 100)
 
         val (classification, label, description) = when {
             totalScore >= 80 -> Triple(
                 FinancialHealthClassification.EXCELLENT,
                 "Excelente",
-                "Finanças blindadas com excelente taxa de poupança e reserva sólida."
+                "Finanças blindadas com excelente taxa de poupança, controle e reserva sólida."
             )
             totalScore >= 60 -> Triple(
                 FinancialHealthClassification.HEALTHY,
@@ -2404,6 +2495,64 @@ object FinanceEngine {
             )
         }
 
+        val actionableTips = mutableListOf<String>()
+
+        if (budgetConfiguredCount > 0 && budgetOverspentCount > 0 && budgetReport?.topOverspentCategory != null) {
+            val topOver = budgetReport.topOverspentCategory
+            val excess = round2(kotlin.math.max(0.0, topOver.spent - topOver.limit))
+            actionableTips.add(
+                "📦 Envelope de ${topOver.category} excedeu o teto em ${formatCurrency(excess)}. Reequilibrar seus envelopes recupera +${kotlin.math.min(8, budgetOverspentCount * 3)} pts no Score."
+            )
+        } else if (budgetConfiguredCount == 0 && income > 0.0) {
+            actionableTips.add(
+                "📦 Ative os Envelopes Orçamentários com IA para blindar suas categorias variáveis e ganhar até +4 pts de bônus de disciplina."
+            )
+        }
+
+        if (income > 0.0 && savingsRatePercentage < 20) {
+            val idealInvest = round2(income * 0.20)
+            val missingInvest = round2(kotlin.math.max(0.0, idealInvest - totalInvested))
+            val potentialGain = kotlin.math.max(1, 35 - savingsScore)
+            if (positiveFreeBalance >= missingInvest && missingInvest > 0.0) {
+                actionableTips.add(
+                    "📈 Você tem Saldo Livre suficiente para aportar mais ${formatCurrency(missingInvest)} (atingindo 20% da renda) e ganhar +$potentialGain pts."
+                )
+            } else if (missingInvest > 0.0) {
+                actionableTips.add(
+                    "📈 Aportar na categoria Investimentos (meta ideal: ${formatCurrency(idealInvest)}/mês) pode elevar seu Score em até +$potentialGain pts."
+                )
+            }
+        }
+
+        if (income > 0.0 && spendingRatioPercentage > 70) {
+            val targetExpense = round2(income * 0.70)
+            val excessExpense = round2(kotlin.math.max(0.0, totalExpenses - targetExpense))
+            val potentialGain = kotlin.math.max(1, 35 - spendingLimitScore)
+            actionableTips.add(
+                "🎯 Seu custo de vida consome $spendingRatioPercentage% da renda. Reduzir ${formatCurrency(excessExpense)} em gastos variáveis destrava +$potentialGain pts."
+            )
+        }
+
+        if (coverageMonths < 6.0) {
+            val nextTargetMonths = when {
+                coverageMonths < 1.0 -> 1
+                coverageMonths < 3.0 -> 3
+                else -> 6
+            }
+            val neededAmount = round2(kotlin.math.max(0.0, baselineCost * nextTargetMonths - emergencyReserveBalance))
+            if (neededAmount > 0.0) {
+                actionableTips.add(
+                    "🛡️ Sua Reserva cobre ${coverageMonths}m do seu custo de vida. Acumular mais ${formatCurrency(neededAmount)} atinge o marco de $nextTargetMonths ${if (nextTargetMonths == 1) "mês" else "meses"} de proteção."
+                )
+            }
+        }
+
+        if (actionableTips.isEmpty()) {
+            actionableTips.add(
+                "✨ Parabéns! Você atingiu excelência nos 4 pilares (Poupança, Custo de Vida, Envelopes e Reserva de Emergência)."
+            )
+        }
+
         return FinancialHealthScore(
             score = totalScore,
             classification = classification,
@@ -2414,7 +2563,362 @@ object FinanceEngine {
             emergencyReserveScore = emergencyReserveScore,
             savingsRatePercentage = savingsRatePercentage,
             spendingRatioPercentage = spendingRatioPercentage,
-            emergencyCoverageMonths = coverageMonths
+            emergencyCoverageMonths = coverageMonths,
+            budgetAdherenceScore = budgetAdherenceScore,
+            budgetConfiguredCount = budgetConfiguredCount,
+            budgetOverspentCount = budgetOverspentCount,
+            monthlyLivingCost = round2(baselineCost),
+            potentialSavingsRatePercentage = potentialSavingsRatePercentage,
+            actionableTips = actionableTips
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // Envelopes Orçamentários Inteligentes & Análise de Gastos (IA-Ready)
+    // ------------------------------------------------------------------
+
+    fun computeCategoryBudgets(
+        summary: MonthSummary,
+        categoryBudgets: Map<String, Double> = emptyMap(),
+        referenceDate: String = todayKey()
+    ): CategoryBudgetReport {
+        val mKey = summary.monthKey.ifBlank { currentMonthKey() }
+        return computeCategoryBudgets(
+            byCategory = summary.byCategory,
+            categoryBudgets = categoryBudgets,
+            monthKey = mKey,
+            referenceDate = referenceDate
+        )
+    }
+
+    fun computeCategoryBudgets(
+        byCategory: List<CategoryExpense>,
+        categoryBudgets: Map<String, Double> = emptyMap(),
+        monthKey: String = currentMonthKey(),
+        referenceDate: String = todayKey()
+    ): CategoryBudgetReport {
+        val spentMap = mutableMapOf<String, Double>()
+        for (item in byCategory) {
+            if (item.category.isNotBlank()) {
+                spentMap[item.category] = (spentMap[item.category] ?: 0.0) + item.amount
+            }
+        }
+        return buildCategoryBudgetReport(spentMap, categoryBudgets, monthKey, referenceDate)
+    }
+
+    fun computeCategoryBudgetsFromTransactions(
+        transactions: List<Transaction>,
+        categoryBudgets: Map<String, Double> = emptyMap(),
+        monthKey: String = currentMonthKey(),
+        referenceDate: String = todayKey(),
+        uid: String,
+        allTransactions: List<Transaction> = transactions
+    ): CategoryBudgetReport {
+        val spentMap = mutableMapOf<String, Double>()
+        for (tx in transactions) {
+            if (tx.type == TransactionType.EXPENSE && tx.competenceMonth == monthKey) {
+                val impact = impactFor(tx, uid, allTransactions)
+                if (impact > 0.0 && tx.category.isNotBlank()) {
+                    spentMap[tx.category] = (spentMap[tx.category] ?: 0.0) + impact
+                }
+            }
+        }
+        return buildCategoryBudgetReport(spentMap, categoryBudgets, monthKey, referenceDate)
+    }
+
+    private fun buildCategoryBudgetReport(
+        spentMap: Map<String, Double>,
+        categoryBudgets: Map<String, Double>,
+        monthKey: String,
+        referenceDate: String
+    ): CategoryBudgetReport {
+        val totalDays = daysInMonth(monthKey)
+        var currentDay = totalDays
+
+        if (referenceDate.startsWith(monthKey)) {
+            val dayParsed = referenceDate.split("-").getOrNull(2)?.toIntOrNull() ?: 1
+            currentDay = dayParsed.coerceIn(1, totalDays)
+        } else if (referenceDate < monthKey) {
+            currentDay = 1
+        }
+
+        val daysRemaining = kotlin.math.max(0, totalDays - currentDay)
+
+        val budgetedCategories = categoryBudgets.filter { it.value > 0.0 }.keys
+        val allCategoriesSet = linkedSetOf<String>().apply {
+            addAll(budgetedCategories)
+            addAll(spentMap.keys)
+        }
+
+        val items = mutableListOf<CategoryBudgetStatus>()
+        var totalBudgeted = 0.0
+        var totalSpent = 0.0
+        var criticalCount = 0
+        var warningCount = 0
+
+        for (category in allCategoriesSet) {
+            val limit = round2(kotlin.math.max(0.0, categoryBudgets[category] ?: 0.0))
+            val spent = round2(kotlin.math.max(0.0, spentMap[category] ?: 0.0))
+
+            if (limit <= 0.0 && category in NON_ENVELOPE_CATEGORIES) continue
+            if (limit <= 0.0 && spent <= 0.0) continue
+
+            val remaining = round2(limit - spent)
+            val percentage = if (limit > 0.0) round2((spent / limit) * 100.0) else if (spent > 0.0) 100.0 else 0.0
+            val isFixedCategory = category in FIXED_MONTHLY_CATEGORIES
+
+            val status = when {
+                limit > 0.0 && isFixedCategory -> {
+                    if (spent > limit) CategoryBudgetAlertStatus.DANGER
+                    else CategoryBudgetAlertStatus.OK
+                }
+                limit > 0.0 && percentage >= 100.0 -> CategoryBudgetAlertStatus.DANGER
+                limit > 0.0 && percentage >= 80.0 -> CategoryBudgetAlertStatus.WARNING
+                limit <= 0.0 && spent > 0.0 -> CategoryBudgetAlertStatus.WARNING
+                else -> CategoryBudgetAlertStatus.OK
+            }
+
+            val dailyPace = if (currentDay > 0) round2(spent / currentDay) else 0.0
+            val projectedSpent = if (isFixedCategory && limit > 0.0) {
+                round2(kotlin.math.max(spent, limit))
+            } else {
+                round2(dailyPace * totalDays)
+            }
+            val projectedPercentage = if (limit > 0.0) {
+                round2((projectedSpent / limit) * 100.0)
+            } else if (projectedSpent > 0.0) 100.0 else 0.0
+            val recommendedDailyRemaining = if (remaining > 0.0 && daysRemaining > 0) {
+                round2(remaining / daysRemaining)
+            } else 0.0
+
+            val burnRateStatus = when {
+                isFixedCategory -> {
+                    if (limit > 0.0 && spent > limit) {
+                        criticalCount++
+                        CategoryBudgetPaceStatus.CRITICAL
+                    } else {
+                        CategoryBudgetPaceStatus.NORMAL
+                    }
+                }
+                status == CategoryBudgetAlertStatus.DANGER || (limit > 0.0 && projectedPercentage >= 115.0) -> {
+                    criticalCount++
+                    CategoryBudgetPaceStatus.CRITICAL
+                }
+                status == CategoryBudgetAlertStatus.WARNING || (limit > 0.0 && projectedPercentage >= 95.0) -> {
+                    warningCount++
+                    CategoryBudgetPaceStatus.FAST
+                }
+                else -> CategoryBudgetPaceStatus.NORMAL
+            }
+
+            if (limit > 0.0) {
+                totalBudgeted += limit
+                totalSpent += spent
+            }
+
+            items.add(
+                CategoryBudgetStatus(
+                    category = category,
+                    limit = limit,
+                    spent = spent,
+                    remaining = remaining,
+                    percentage = percentage,
+                    status = status,
+                    dailyPace = dailyPace,
+                    projectedSpent = projectedSpent,
+                    projectedPercentage = projectedPercentage,
+                    recommendedDailyRemaining = recommendedDailyRemaining,
+                    burnRateStatus = burnRateStatus,
+                    daysRemaining = daysRemaining,
+                    currentDay = currentDay,
+                    totalDays = totalDays,
+                    isFixedCategory = isFixedCategory
+                )
+            )
+        }
+
+        items.sortWith(
+            compareByDescending<CategoryBudgetStatus> {
+                when (it.status) {
+                    CategoryBudgetAlertStatus.DANGER -> 3
+                    CategoryBudgetAlertStatus.WARNING -> 2
+                    CategoryBudgetAlertStatus.OK -> 1
+                }
+            }.thenByDescending { it.spent }
+        )
+
+        totalBudgeted = round2(totalBudgeted)
+        totalSpent = round2(totalSpent)
+        val totalRemaining = round2(totalBudgeted - totalSpent)
+        val overallPercentage = if (totalBudgeted > 0.0) round2((totalSpent / totalBudgeted) * 100.0) else 0.0
+
+        val overallStatus = when {
+            overallPercentage >= 100.0 || criticalCount > 0 -> CategoryBudgetAlertStatus.DANGER
+            overallPercentage >= 80.0 -> CategoryBudgetAlertStatus.WARNING
+            else -> CategoryBudgetAlertStatus.OK
+        }
+
+        val topOverspentCategory = items.firstOrNull {
+            it.status == CategoryBudgetAlertStatus.DANGER || it.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL
+        }
+
+        val unbudgetedCategories = spentMap.entries
+            .filter { (cat, amt) -> amt > 0.0 && (categoryBudgets[cat] ?: 0.0) <= 0.0 && cat !in NON_ENVELOPE_CATEGORIES }
+            .map { (cat, amt) -> CategoryExpense(category = cat, amount = round2(amt)) }
+            .sortedByDescending { it.amount }
+
+        return CategoryBudgetReport(
+            items = items,
+            totalBudgeted = totalBudgeted,
+            totalSpent = totalSpent,
+            totalRemaining = totalRemaining,
+            overallPercentage = overallPercentage,
+            status = overallStatus,
+            criticalCount = criticalCount,
+            warningCount = warningCount,
+            topOverspentCategory = topOverspentCategory,
+            unbudgetedCategories = unbudgetedCategories
+        )
+    }
+
+    fun suggestCategoryBudgets(
+        allTransactions: List<Transaction>,
+        uid: String,
+        referenceMonth: String = currentMonthKey(),
+        monthlyIncome: Double = 0.0
+    ): SuggestedBudgetsResult {
+        val previousMonths = listOf(
+            shiftMonth(referenceMonth, -1),
+            shiftMonth(referenceMonth, -2),
+            shiftMonth(referenceMonth, -3)
+        )
+
+        val monthCategoryTotals = mutableMapOf<String, MutableMap<String, Double>>()
+        for (m in previousMonths) {
+            monthCategoryTotals[m] = mutableMapOf()
+        }
+
+        var matchingCount = 0
+        for (tx in allTransactions) {
+            if (tx.type != TransactionType.EXPENSE) continue
+            val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
+            if (m !in previousMonths) continue
+            val impact = impactFor(tx, uid, allTransactions)
+            if (impact <= 0.0 || tx.category.isBlank()) continue
+            val catMap = monthCategoryTotals.getOrPut(m) { mutableMapOf() }
+            catMap[tx.category] = (catMap[tx.category] ?: 0.0) + impact
+            matchingCount++
+        }
+
+        if (matchingCount == 0) {
+            val curMap = mutableMapOf<String, Double>()
+            for (tx in allTransactions) {
+                if (tx.type != TransactionType.EXPENSE) continue
+                val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
+                if (m != referenceMonth) continue
+                val impact = impactFor(tx, uid, allTransactions)
+                if (impact <= 0.0 || tx.category.isBlank()) continue
+                curMap[tx.category] = (curMap[tx.category] ?: 0.0) + impact
+            }
+            monthCategoryTotals[referenceMonth] = curMap
+        }
+
+        val activeMonths = monthCategoryTotals.keys.filter { (monthCategoryTotals[it]?.size ?: 0) > 0 }
+        val divisor = kotlin.math.max(1, activeMonths.size)
+
+        val sumMap = mutableMapOf<String, Double>()
+        for (m in activeMonths) {
+            val catMap = monthCategoryTotals[m] ?: continue
+            for ((cat, amt) in catMap) {
+                sumMap[cat] = (sumMap[cat] ?: 0.0) + amt
+            }
+        }
+
+        val suggestedBudgets = linkedMapOf<String, Double>()
+        val categoryAverages = linkedMapOf<String, Double>()
+        var totalSuggested = 0.0
+
+        for ((cat, sum) in sumMap) {
+            if (cat in NON_ENVELOPE_CATEGORIES) continue
+            val avg = round2(sum / divisor)
+            categoryAverages[cat] = avg
+            if (avg >= 20.0) {
+                val suggested = kotlin.math.max(50.0, kotlin.math.ceil((avg * 1.1) / 10.0) * 10.0)
+                suggestedBudgets[cat] = suggested
+                totalSuggested += suggested
+            }
+        }
+
+        totalSuggested = round2(totalSuggested)
+        val incomeCoveragePct = if (monthlyIncome > 0.0) round2((totalSuggested / monthlyIncome) * 100.0) else 0.0
+
+        return SuggestedBudgetsResult(
+            suggestedBudgets = suggestedBudgets,
+            totalSuggested = totalSuggested,
+            incomeCoveragePct = incomeCoveragePct,
+            categoryAverages = categoryAverages
+        )
+    }
+
+    fun suggestBudgetRebalance(report: CategoryBudgetReport): BudgetRebalanceResult {
+        val overspent = report.items.filter { it.limit > 0.0 && it.spent > it.limit }
+        val surplus = report.items.filter { it.limit > 0.0 && it.remaining > 20.0 }
+
+        val deficitTotal = round2(overspent.sumOf { it.spent - it.limit })
+        val surplusTotal = round2(surplus.sumOf { it.remaining })
+
+        if (overspent.isEmpty() || surplus.isEmpty()) {
+            return BudgetRebalanceResult(
+                canRebalance = false,
+                deficitTotal = deficitTotal,
+                surplusTotal = surplusTotal,
+                suggestions = emptyList()
+            )
+        }
+
+        val remainingSurplusMap = surplus.associate { it.category to it.remaining }.toMutableMap()
+        val suggestions = mutableListOf<BudgetRebalanceSuggestion>()
+
+        for (o in overspent) {
+            var needed = round2(o.spent - o.limit)
+            for (s in surplus) {
+                if (needed <= 0.0) break
+                val avail = remainingSurplusMap[s.category] ?: 0.0
+                if (avail <= 0.0) continue
+
+                val transfer = round2(kotlin.math.min(needed, avail))
+                if (transfer >= 5.0) {
+                    val curFromLim = s.limit - (s.remaining - avail)
+                    val curToLim = o.limit + ((o.spent - o.limit) - needed)
+                    suggestions.add(
+                        BudgetRebalanceSuggestion(
+                            overspentCategory = o.category,
+                            overspentAmount = round2(o.spent - o.limit),
+                            compensateFrom = s.category,
+                            availableSurplus = avail,
+                            suggestedTransfer = transfer,
+                            newFromLimit = round2(kotlin.math.max(0.0, curFromLim - transfer)),
+                            newToLimit = round2(curToLim + transfer)
+                        )
+                    )
+                    needed = round2(needed - transfer)
+                    remainingSurplusMap[s.category] = round2(avail - transfer)
+                }
+            }
+        }
+
+        val totalCovered = round2(suggestions.sumOf { it.suggestedTransfer })
+        val summaryText = if (suggestions.isNotEmpty()) {
+            val parts = suggestions.joinToString(", ") { "${formatCurrency(it.suggestedTransfer)} de ${it.compensateFrom} → ${it.overspentCategory}" }
+            "Cobertura inteligente de ${formatCurrency(totalCovered)} ($parts)."
+        } else ""
+
+        return BudgetRebalanceResult(
+            canRebalance = suggestions.isNotEmpty(),
+            deficitTotal = deficitTotal,
+            surplusTotal = surplusTotal,
+            suggestions = suggestions,
+            summaryText = summaryText
         )
     }
 }

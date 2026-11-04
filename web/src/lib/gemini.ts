@@ -4,7 +4,15 @@
  * `ToolExecutor` injetado pelo FinanceContext.
  */
 import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } from '@google/genai'
-import type { AccountCashFlowSummary, ActionCardData, ChatMessage, ChatAttachment, PendingBatchTransaction } from '@/types'
+import type {
+  AccountCashFlowSummary,
+  ActionCardData,
+  CategoryBudgetReport,
+  ChatMessage,
+  ChatAttachment,
+  FinancialHealthScore,
+  PendingBatchTransaction,
+} from '@/types'
 import { CATEGORIES } from '@/types'
 
 export const GEMINI_MODEL = 'gemini-3.5-flash'
@@ -668,15 +676,24 @@ export const functionDeclarations: FunctionDeclaration[] = [
   {
     name: 'gerenciarEnvelopesOrcamentarios',
     description:
-      'Consulta o consumo dos envelopes orçamentários por categoria, define tetos mensais, analisa o ritmo de gastos, sugere rebalanceamento inteligente entre categorias com folga para compensar imprevistos e simula compras à vista ou parceladas.',
+      'Consulta o consumo dos envelopes orçamentários por categoria, define tetos mensais, analisa o ritmo de gastos (burn rate diário vs fixo mensal), realiza rebalanceamento inteligente entre categorias com folga para compensar imprevistos, sugere/aplica tetos automáticos com IA, simula compras à vista ou parceladas e gera o diagnóstico completo dos 4 pilares de Saúde Financeira.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         acao: {
           type: Type.STRING,
-          enum: ['consultar', 'definir_teto', 'rebalancear', 'sugerir_tetos', 'simular_compra'],
+          enum: [
+            'consultar',
+            'definir_teto',
+            'rebalancear',
+            'rebalancear_automatico',
+            'sugerir_tetos',
+            'aplicar_sugestao_ia',
+            'simular_compra',
+            'diagnostico_saude_financeira',
+          ],
           description:
-            'Ação a realizar: "consultar" (ver status dos envelopes e ritmo do mês), "definir_teto" (configurar limite mensal para uma categoria), "rebalancear" (transferir saldo entre envelopes), "sugerir_tetos" (gerar proposta com base no histórico de 3 meses), ou "simular_compra" (avaliar se uma compra à vista ou parcelada cabe no orçamento).',
+            'Ação a realizar: "consultar" (ver status dos envelopes e ritmo do mês), "definir_teto" (configurar limite mensal para uma categoria), "rebalancear" (transferir saldo específico entre 2 envelopes), "rebalancear_automatico" (aplicar em 1 clique todas as transferências sugeridas pela IA para cobrir estouros), "sugerir_tetos" (gerar proposta com base no histórico de 3 meses), "aplicar_sugestao_ia" (salvar imediatamente os tetos sugeridos pela IA), "simular_compra" (avaliar se uma compra à vista ou parcelada cabe no envelope e no Saldo Livre), ou "diagnostico_saude_financeira" (analisar o Score 0-100, os 4 pilares e dicas práticas para subir a nota).',
         },
         categoria: {
           type: Type.STRING,
@@ -723,6 +740,8 @@ export function buildSystemInstruction(ctx: {
   learnedRules?: string[]
   pendingTransactions?: PendingBatchTransaction[]
   cashFlow?: AccountCashFlowSummary | null
+  healthScore?: FinancialHealthScore | null
+  budgetReport?: CategoryBudgetReport | null
   summary?: {
     income: number
     paid: number
@@ -774,6 +793,32 @@ export function buildSystemInstruction(ctx: {
 - SALDO LIVRE PROJETADO DO MÊS INTEIRO: R$ ${ctx.cashFlow.projectedFreeBalance.toFixed(2)} (${ctx.cashFlow.dailyLimit != null ? `R$ ${ctx.cashFlow.dailyLimit.toFixed(2)}/dia` : 'Mês encerrado'})`
     : ''
 
+  const healthAndBudgetsDesc =
+    ctx.healthScore || ctx.budgetReport
+      ? `\nSAÚDE FINANCEIRA (SCORE 0 A 100) E ENVELOPES ORÇAMENTÁRIOS DO MÊS:
+${
+  ctx.healthScore
+    ? `- Score de Saúde Financeira Atual: ${ctx.healthScore.score}/100 (${ctx.healthScore.label}) — ${ctx.healthScore.description}
+  * Pilar 1 — Taxa de Poupança & Margem (Máx 35 pts): Nota ${ctx.healthScore.savingsScore}/35 | Investido: ${ctx.healthScore.savingsRatePercentage}% da renda | Potencial c/ Saldo Livre: ${ctx.healthScore.potentialSavingsRatePercentage ?? ctx.healthScore.savingsRatePercentage}%
+  * Pilar 2 — Controle do Custo de Vida Real (Máx 35 pts): Nota ${ctx.healthScore.spendingLimitScore}/35 | Custo de Vida (sem investimentos): R$ ${(ctx.healthScore.monthlyLivingCost ?? 0).toFixed(2)} (${ctx.healthScore.spendingRatioPercentage}% da renda)
+  * Pilar 3 — Reserva de Emergência (Máx 30 pts): Nota ${ctx.healthScore.emergencyReserveScore}/30 | Cobertura atual: ${ctx.healthScore.emergencyCoverageMonths} meses do custo de vida
+  * Pilar 4 — Disciplina nos Envelopes (Bônus/Penalidade): Aderência ${ctx.healthScore.budgetAdherenceScore ?? 100}% (${ctx.healthScore.budgetConfiguredCount ?? 0} configurados, ${ctx.healthScore.budgetOverspentCount ?? 0} estourados)
+  * Alavancas Práticas para Subir o Score:
+    ${(ctx.healthScore.actionableTips || []).map((t) => `• ${t}`).join('\n    ')}`
+    : ''
+}${
+  ctx.budgetReport && ctx.budgetReport.items.length > 0
+    ? `\n- Status dos Envelopes Orçamentários (${ctx.budgetReport.overallPercentage}% consumido | Orçado: R$ ${ctx.budgetReport.totalBudgeted.toFixed(2)} | Gasto: R$ ${ctx.budgetReport.totalSpent.toFixed(2)} | Sobra: R$ ${ctx.budgetReport.totalRemaining.toFixed(2)}):
+  ${ctx.budgetReport.items
+    .map(
+      (i) =>
+        `* ${i.category} [${i.isFixedCategory ? 'Fixo Mensal' : 'Variável'}]: Gasto R$ ${i.spent.toFixed(2)} de R$ ${i.limit.toFixed(2)} (${i.percentage}%) | Sobra: R$ ${i.remaining.toFixed(2)} | Ritmo: ${i.burnRateStatus.toUpperCase()}${!i.isFixedCategory && i.remaining > 0 ? ` | Meta diária restante: R$ ${i.recommendedDailyRemaining.toFixed(2)}/dia` : ''}`,
+    )
+    .join('\n  ')}`
+    : '\n- Envelopes Orçamentários: Nenhum envelope configurado ainda (você pode sugerir e aplicar tetos automáticos com gerenciarEnvelopesOrcamentarios acao="aplicar_sugestao_ia").'
+}`
+      : ''
+
   const summaryDesc = ctx.summary
     ? `DADOS FINANCEIROS REAIS DO USUÁRIO EM ${ctx.monthLabel.toUpperCase()} (${ctx.monthKey}):
 ${cashFlowDesc ? `${cashFlowDesc}\n\nPLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE PROJETADO):\n` : ''}- Saldo Livre Real Projetado: R$ ${ctx.summary.freeBalance.toFixed(2)}
@@ -786,8 +831,8 @@ ${cashFlowDesc ? `${cashFlowDesc}\n\nPLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE P
 ${ctx.summary.bySubcategory && ctx.summary.bySubcategory.length > 0 ? `- Gastos Detalhados por Subgrupo/Subcategoria:\n  ${ctx.summary.bySubcategory.map((s) => `* ${s.category} › ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count} item${s.count > 1 ? 's' : ''})`).join('\n  ')}` : ''}
 - Total Investido no Mês: R$ ${ctx.summary.totalInvested != null ? ctx.summary.totalInvested.toFixed(2) : '0.00'}
 - Patrimônio Total Investido Acumulado: R$ ${ctx.summary.totalInvestedAccumulated != null ? ctx.summary.totalInvestedAccumulated.toFixed(2) : '0.00'}
-${ctx.summary.byInvestmentSubcategory && ctx.summary.byInvestmentSubcategory.length > 0 ? `- Alocação de Investimentos por Subcategoria:\n  ${ctx.summary.byInvestmentSubcategory.map((i) => `* ${i.subcategory}: R$ ${i.amount.toFixed(2)} (${i.percentage.toFixed(1)}%)`).join('\n  ')}` : ''}`
-    : `DADOS FINANCEIROS: Mês ${ctx.monthLabel} (${ctx.monthKey})`
+${ctx.summary.byInvestmentSubcategory && ctx.summary.byInvestmentSubcategory.length > 0 ? `- Alocação de Investimentos por Subcategoria:\n  ${ctx.summary.byInvestmentSubcategory.map((i) => `* ${i.subcategory}: R$ ${i.amount.toFixed(2)} (${i.percentage.toFixed(1)}%)`).join('\n  ')}` : ''}${healthAndBudgetsDesc}`
+    : `DADOS FINANCEIROS: Mês ${ctx.monthLabel} (${ctx.monthKey})${healthAndBudgetsDesc}`
 
   const recentTxsDesc =
     ctx.recentTransactions && ctx.recentTransactions.length > 0
@@ -1156,6 +1201,19 @@ F) APRESENTAÇÃO DESCRITIVA SUPERIOR ("MOSTRAR DESCRITIVAMENTE MELHOR"):
 
   4. EXECUÇÃO EM LOTE:
      - Chame SEMPRE a ferramenta "registrarTransacoesLote" preenchendo origemDocumento, metodoPagamentoPadrao e a lista completa de transações com cada campo tipo, metodoPagamento, categoria, contraparte e categoria_filtro!
+
+9. SAÚDE FINANCEIRA (4 PILARES) E ENVELOPES ORÇAMENTÁRIOS INTELIGENTES:
+- O Saldo Livre integra **Saúde Financeira (Score 0 a 100)** e **Envelopes Orçamentários Inteligentes** em um motor único e realista:
+  * **Envelopes Fixos vs. Variáveis:** Categorias fixas mensais (Moradia, Assinaturas, Educação, Financiamentos, Impostos) têm ritmo avaliado apenas pelo limite total do mês (sem falso alarme de ritmo diário no início do mês). Categorias variáveis (Alimentação, Lazer, Transporte, Compras, etc.) projetam o ritmo diário (burn rate) e calculam a meta diária restante.
+  * **Sinergia dos 4 Pilares da Saúde Financeira:**
+    1. Taxa de Poupança & Margem (35%): Avalia o percentual aportado em Investimentos + reconhece positivamente o Saldo Livre positivo projetado do mês.
+    2. Controle do Custo de Vida Real (35%): Desconta aportes em Investimentos do gasto bruto, para que investir mais de 20% da renda nunca penalize o indicador de custo de vida.
+    3. Reserva de Emergência (30%): Mede quantos meses do custo de vida real estão cobertos pela Reserva de Emergência (meta ideal: 6 meses).
+    4. Disciplina nos Envelopes Orçamentários: Concede bônus (+4 pts) quando todos os envelopes estão sob controle e aplica penalidade quando há categorias estouradas.
+- Quando o usuário perguntar sobre sua **Saúde Financeira**, como subir seu Score, análise dos pilares ou pedir um diagnóstico:
+  * Chame "gerenciarEnvelopesOrcamentarios" com acao: "diagnostico_saude_financeira" e apresente um diagnóstico consultivo claro, citando as notas dos 4 pilares e as alavancas práticas com valores exatos em R$ e quantos pontos ele ganha no Score!
+- Quando o usuário pedir para ver seus **Envelopes Orçamentários**, definir um teto (ex: "defina o teto de Alimentação em R$ 1.200"), rebalancear categorias ("reequilibrar orçamento" -> acao: "rebalancear_automatico"), sugerir/aplicar tetos com IA (acao: "sugerir_tetos" ou "aplicar_sugestao_ia") ou simular se uma compra cabe no orçamento ("posso comprar uma TV de R$ 2.400 em 6x?" -> acao: "simular_compra"):
+  * Chame SEMPRE a ferramenta "gerenciarEnvelopesOrcamentarios" com a ação correspondente!
 
 10. CONFIRMAÇÃO PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER EXECUÇÃO NO SISTEMA (HUMAN-IN-THE-LOOP):
 - NUNCA assuma que você executa as ações no banco diretamente. Antes de efetivar alterações no banco de dados, o backend (Firestore) é bloqueado e as ferramentas SEMPRE retornam "aguardandoConfirmacao: true" em um estado de DRAFT (rascunho).

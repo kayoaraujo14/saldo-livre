@@ -693,6 +693,7 @@ export interface UserProfile {
   resolvedRecurring?: Record<string, string[]>
   investmentMonthlyTarget?: number
   investmentAssetBalances?: Record<string, number>
+  emergencyReserveBalance?: number
   categoryBudgets?: Record<string, number>
 }
 
@@ -717,6 +718,7 @@ export interface CategoryBudgetStatus {
   daysRemaining: number
   currentDay: number
   totalDays: number
+  isFixedCategory?: boolean
 }
 
 export interface CategoryBudgetReport {
@@ -987,6 +989,12 @@ export interface FinancialHealthScore {
   savingsRatePercentage: number // % poupada da renda
   spendingRatioPercentage: number // % despesas sobre a renda
   emergencyCoverageMonths: number // meses de cobertura da reserva
+  budgetAdherenceScore?: number // 0 a 100 (% de aderência aos envelopes)
+  budgetConfiguredCount?: number
+  budgetOverspentCount?: number
+  monthlyLivingCost?: number
+  potentialSavingsRatePercentage?: number
+  actionableTips?: string[]
 }
 
 export interface ProjectedCategoryItem {

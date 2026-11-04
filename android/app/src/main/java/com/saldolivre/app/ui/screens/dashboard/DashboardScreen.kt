@@ -66,13 +66,17 @@ fun DashboardScreen(
     onNavigateToInvestments: () -> Unit = {},
     onNavigateToEditTransaction: (String) -> Unit = {},
     onNavigateToRefundTransaction: (String) -> Unit = {},
-    onNavigateToCards: () -> Unit = {}
+    onNavigateToCards: () -> Unit = {},
+    onNavigateToChatWithPrompt: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
     var txToDelete by remember { mutableStateOf<Transaction?>(null) }
     var showUndoClosureDialog by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    var showFinancialHealthDialog by remember { mutableStateOf(false) }
+    var showManageBudgetsDialog by remember { mutableStateOf(false) }
+    var budgetsDialogTab by remember { mutableIntStateOf(0) }
     val summary = uiState.summary
 
     val formattedIncome = remember(summary.income) { FinanceEngine.formatCurrency(summary.income) }
@@ -476,7 +480,7 @@ fun DashboardScreen(
                 }
             }
 
-            // 3.1 Termômetro de Saúde Financeira (Score 0 a 100)
+            // 3.1 Termômetro de Saúde Financeira (Score 0 a 100 com 4 Pilares)
             item(key = "financial_health_score", contentType = "financial_health_score") {
                 val health = uiState.financialHealth
                 val healthColor = when (health.classification) {
@@ -490,7 +494,7 @@ fun DashboardScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable { onNavigateToInvestments() },
+                        .clickable { showFinancialHealthDialog = true },
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
@@ -556,7 +560,7 @@ fun DashboardScreen(
                                     }
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = health.description,
+                                        text = health.actionableTips.firstOrNull() ?: health.description,
                                         fontSize = 10.sp,
                                         color = TextMuted,
                                         maxLines = 1,
@@ -564,6 +568,12 @@ fun DashboardScreen(
                                     )
                                 }
                             }
+                            Text(
+                                text = "Raio-X →",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Emerald400
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
@@ -585,7 +595,7 @@ fun DashboardScreen(
                                 )
                                 Text(
                                     text = "${health.savingsScore}/35 (${health.savingsRatePercentage}%)",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -600,14 +610,14 @@ fun DashboardScreen(
 
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(
-                                    text = "TETO GASTOS",
+                                    text = "CUSTO VIDA",
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = TextMuted
                                 )
                                 Text(
                                     text = "${health.spendingLimitScore}/35 (${health.spendingRatioPercentage}%)",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
@@ -629,14 +639,59 @@ fun DashboardScreen(
                                 )
                                 Text(
                                     text = "${health.emergencyReserveScore}/30 (${health.emergencyCoverageMonths}m)",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(20.dp)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                            )
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "ENVELOPES",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextMuted
+                                )
+                                Text(
+                                    text = if (health.budgetConfiguredCount > 0) "${health.budgetAdherenceScore}%" else "Config.",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (health.budgetOverspentCount > 0) Rose400 else Emerald400
                                 )
                             }
                         }
                     }
                 }
+            }
+
+            // 3.2 Envelopes Orçamentários Inteligentes
+            item(key = "category_budgets", contentType = "category_budgets") {
+                CategoryBudgetsSectionCard(
+                    report = uiState.categoryBudgetReport,
+                    rebalance = uiState.budgetRebalance,
+                    onOpenConfig = {
+                        budgetsDialogTab = 0
+                        showManageBudgetsDialog = true
+                    },
+                    onOpenRebalance = {
+                        budgetsDialogTab = 1
+                        showManageBudgetsDialog = true
+                    },
+                    onQuickApplyAiBudgets = {
+                        com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
+                        viewModel.applyAiSuggestedBudgets()
+                    },
+                    onAskCopilot = { prompt ->
+                        onNavigateToChatWithPrompt(prompt)
+                    }
+                )
             }
 
             // 4. Central de Lançamentos Recorrentes Programados (Confirmação inteligente)
@@ -1105,6 +1160,49 @@ fun DashboardScreen(
                     Text(text = "Manter Fechamento", color = TextSecondary)
                 }
             }
+        )
+    }
+
+    // Dialog de Diagnóstico de Saúde Financeira (4 Pilares + Coach IA)
+    if (showFinancialHealthDialog) {
+        FinancialHealthDialog(
+            health = uiState.financialHealth,
+            summary = summary,
+            monthKey = uiState.selectedMonth,
+            onDismiss = { showFinancialHealthDialog = false },
+            onOpenBudgets = {
+                showFinancialHealthDialog = false
+                budgetsDialogTab = 0
+                showManageBudgetsDialog = true
+            },
+            onOpenInvestments = {
+                showFinancialHealthDialog = false
+                onNavigateToInvestments()
+            },
+            onAskCopilot = { prompt ->
+                showFinancialHealthDialog = false
+                onNavigateToChatWithPrompt(prompt)
+            }
+        )
+    }
+
+    // Dialog de Gestão de Envelopes Orçamentários & Rebalanceamento IA
+    if (showManageBudgetsDialog) {
+        ManageBudgetsDialog(
+            initialTab = budgetsDialogTab,
+            currentBudgets = uiState.currentUser.categoryBudgets,
+            suggestedBudgets = uiState.suggestedBudgets,
+            report = uiState.categoryBudgetReport,
+            rebalance = uiState.budgetRebalance,
+            onSaveBudgets = { newBudgets ->
+                com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
+                viewModel.updateCategoryBudgets(newBudgets)
+            },
+            onApplyRebalance = { fromCat, toCat, amount ->
+                com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
+                viewModel.applyBudgetRebalance(fromCat, toCat, amount)
+            },
+            onDismiss = { showManageBudgetsDialog = false }
         )
     }
 }

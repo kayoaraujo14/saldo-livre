@@ -3,6 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useFinance } from '@/store/FinanceContext'
 import { formatBRL } from '@/lib/utils'
+import { suggestCategoryBudgets } from '@/lib/finance'
 import { getCategoryDetail } from '@/types'
 import { ManageBudgetsModal } from '@/components/modals/ManageBudgetsModal'
 import {
@@ -13,10 +14,18 @@ import {
   Flame,
   ChevronDown,
   ChevronUp,
+  MessageSquare,
 } from 'lucide-react'
 
 export function CategoryBudgetsCard() {
-  const { categoryBudgetReport } = useFinance()
+  const {
+    categoryBudgetReport,
+    transactions,
+    me,
+    month,
+    profile,
+    setCategoryBudgets,
+  } = useFinance()
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTab, setModalTab] = useState<'budgets' | 'rebalance'>('budgets')
   const [isExpanded, setIsExpanded] = useState(false)
@@ -42,6 +51,31 @@ export function CategoryBudgetsCard() {
   const openRebalance = () => {
     setModalTab('rebalance')
     setModalOpen(true)
+  }
+
+  const handleAskCopilot = () => {
+    window.dispatchEvent(
+      new CustomEvent('saldo-livre:ask-copilot', {
+        detail: {
+          prompt:
+            'Analise o ritmo dos meus Envelopes Orçamentários deste mês, indique se há categorias em risco e sugira ajustes ou rebalanceamentos.',
+        },
+      }),
+    )
+  }
+
+  const handleQuickApplyAiBudgets = async () => {
+    const suggestion = suggestCategoryBudgets(
+      transactions,
+      me?.uid || '',
+      month,
+      profile?.monthlyIncome || 0,
+    )
+    if (Object.keys(suggestion.suggestedBudgets).length > 0) {
+      await setCategoryBudgets(suggestion.suggestedBudgets)
+    } else {
+      openConfig()
+    }
   }
 
   return (
@@ -98,7 +132,7 @@ export function CategoryBudgetsCard() {
           </div>
 
           {/* Botões de Ação */}
-          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto flex-wrap">
             {topOverspentCategory && (
               <Button
                 type="button"
@@ -111,6 +145,17 @@ export function CategoryBudgetsCard() {
                 Compensar IA
               </Button>
             )}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleAskCopilot}
+              title="Analisar seus envelopes diretamente na conversa com o Copiloto IA"
+              className="h-7 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/25 px-2.5"
+            >
+              <MessageSquare className="size-3 mr-1 text-emerald-400" />
+              Analisar no Chat
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -196,7 +241,7 @@ export function CategoryBudgetsCard() {
                             className="text-[8px] px-1 py-0 border-0 bg-rose-500/15 text-rose-300 font-mono shrink-0 flex items-center gap-0.5"
                           >
                             <Flame className="size-2.5" />
-                            Crítico
+                            {item.spent > item.limit && item.limit > 0 ? 'Estourado' : 'Crítico'}
                           </Badge>
                         ) : item.burnRateStatus === 'fast' ? (
                           <Badge
@@ -205,6 +250,13 @@ export function CategoryBudgetsCard() {
                           >
                             <AlertTriangle className="size-2.5" />
                             Acelerado
+                          </Badge>
+                        ) : item.isFixedCategory ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[8px] px-1 py-0 border-0 bg-cyan-500/15 text-cyan-300 font-mono shrink-0"
+                          >
+                            Fixo Mensal
                           </Badge>
                         ) : (
                           <Badge
@@ -238,21 +290,23 @@ export function CategoryBudgetsCard() {
                         />
                       </div>
 
-                      {/* Rodapé informativo */}
-                      <div className="flex items-center justify-between text-[9px] text-slate-400 pt-0.5">
-                        <span className="font-mono">
-                          {item.percentage}% gasto
+                      {/* Rodapé informativo realista */}
+                      <div className="flex items-center justify-between text-[9px] text-slate-400 pt-0.5 gap-1">
+                        <span className="font-mono truncate">
+                          {!item.isFixedCategory && item.remaining > 0 && item.limit > 0
+                            ? `Meta: ${formatBRL(item.recommendedDailyRemaining)}/dia`
+                            : `${item.percentage}% gasto`}
                         </span>
                         {item.remaining > 0 ? (
-                          <span className="text-emerald-400 font-medium">
+                          <span className="text-emerald-400 font-medium shrink-0">
                             +{formatBRL(item.remaining)}
                           </span>
                         ) : item.remaining < 0 ? (
-                          <span className="text-rose-400 font-medium">
+                          <span className="text-rose-400 font-medium shrink-0">
                             -{formatBRL(Math.abs(item.remaining))}
                           </span>
                         ) : (
-                          <span className="text-slate-500">Esgotado</span>
+                          <span className="text-slate-500 shrink-0">No limite</span>
                         )}
                       </div>
                     </div>
@@ -285,19 +339,31 @@ export function CategoryBudgetsCard() {
             )}
           </div>
         ) : (
-          <div className="p-4 rounded-xl bg-slate-950/40 border border-white/[0.04] text-center space-y-2">
+          <div className="p-4 rounded-xl bg-slate-950/40 border border-white/[0.04] text-center space-y-2.5">
             <p className="text-xs text-slate-400">
-              Nenhum envelope definido para este mês. Comece agora mesmo com uma sugestão automática baseada no seu histórico real de gastos!
+              Nenhum envelope definido para este mês. Gere tetos automáticos em 1 clique baseados na sua média histórica real!
             </p>
-            <Button
-              type="button"
-              size="sm"
-              onClick={openConfig}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8"
-            >
-              <Sparkles className="size-3.5 mr-1.5" />
-              Sugerir Orçamento com IA
-            </Button>
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleQuickApplyAiBudgets}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8"
+              >
+                <Sparkles className="size-3.5 mr-1.5" />
+                Ativar Tetos com IA em 1 Clique
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={openConfig}
+                className="bg-slate-900 hover:bg-slate-800 text-slate-300 border-white/10 text-xs h-8"
+              >
+                <Sliders className="size-3.5 mr-1.5" />
+                Personalizar Manualmente
+              </Button>
+            </div>
           </div>
         )}
       </div>

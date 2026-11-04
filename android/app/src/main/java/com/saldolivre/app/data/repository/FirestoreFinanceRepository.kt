@@ -710,6 +710,14 @@ class FirestoreFinanceRepository(
         }
     }
 
+    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>) {
+        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
+        _currentUser.value = _currentUser.value.copy(categoryBudgets = budgets)
+        if (uid.isNotBlank() && uid != "default_uid") {
+            firestore.collection("users").document(uid).update("categoryBudgets", budgets).await()
+        }
+    }
+
     override suspend fun saveCard(card: Card) {
         val uid = auth.currentUser?.uid ?: _currentUser.value.uid
         val cardId = if (card.id.isBlank() || card.id.startsWith("new_")) {

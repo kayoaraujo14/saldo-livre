@@ -3,9 +3,10 @@ import {
   computeCategoryBudgets,
   suggestCategoryBudgets,
   suggestBudgetRebalance,
+  calculateFinancialHealthScore,
 } from '../finance'
 import { createToolExecutor } from '../agentTools'
-import type { Transaction, UserProfile } from '@/types'
+import type { MonthSummary, Transaction, UserProfile } from '@/types'
 
 describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
   describe('computeCategoryBudgets', () => {
@@ -351,6 +352,78 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
       })
       expect(resSimOver.response.ok).toBe(true)
       expect((resSimOver.response.veredito as string).includes('ATENÇÃO')).toBe(true)
+
+      // 7. Diagnóstico de Saúde Financeira integrado (4 pilares)
+      const resDiag = await executor('gerenciarEnvelopesOrcamentarios', {
+        acao: 'diagnostico_saude_financeira',
+      })
+      expect(resDiag.response.ok).toBe(true)
+      expect(resDiag.response.pilares).toBeDefined()
+      expect(resDiag.action?.kind).toBe('report')
+    })
+
+    it('trata categorias fixas (Moradia) sem falso alarme de ritmo diário no início do mês e ignora Investimentos não orçados', () => {
+      const spendData = [
+        { category: 'Moradia', amount: 1800 }, // pago dia 5 de 1800 orçados -> 100% dentro do teto fixo
+        { category: 'Investimentos', amount: 1500 }, // aporte não deve gerar alerta de gasto sem envelope
+      ]
+      const budgets = {
+        Moradia: 1800,
+      }
+
+      const report = computeCategoryBudgets(spendData, budgets, '2026-11', '2026-11-05')
+      const moradia = report.items.find((i) => i.category === 'Moradia')!
+      expect(moradia.isFixedCategory).toBe(true)
+      expect(moradia.burnRateStatus).toBe('normal')
+      expect(moradia.projectedSpent).toBe(1800)
+
+      const inv = report.items.find((i) => i.category === 'Investimentos')
+      expect(inv).toBeUndefined()
+    })
+
+    it('integra os 4 pilares da Saúde Financeira descontando investimentos do custo de vida e premiando aderência aos envelopes', () => {
+      const summary: MonthSummary = {
+        month: '2026-11',
+        income: 10000,
+        paid: 5000,
+        committed: 2500, // 7500 total outflow, mas 2000 são Investimentos -> custo de vida real = 5500 (55%)
+        committedEstimated: 0,
+        committedPending: 2500,
+        freeBalance: 2500,
+        daysRemaining: 15,
+        dailyLimit: 166.67,
+        monthState: 'current',
+        receivableTotal: 0,
+        receivableFromPartner: 0,
+        receivableFromExternal: 0,
+        receivableFromFriends: 0,
+        payableToOthers: 0,
+        byCategory: [
+          { category: 'Moradia', amount: 3000 },
+          { category: 'Alimentação', amount: 1500 },
+          { category: 'Lazer', amount: 1000 },
+          { category: 'Investimentos', amount: 2000 },
+        ],
+        totalInvested: 2000,
+        totalInvestedAccumulated: 33000,
+      }
+
+      const budgetReport = computeCategoryBudgets(
+        summary.byCategory,
+        { Moradia: 3000, Alimentação: 1800, Lazer: 1200 },
+        '2026-11',
+        '2026-11-15',
+      )
+
+      const health = calculateFinancialHealthScore(summary, 33000, budgetReport)
+      expect(health.monthlyLivingCost).toBe(5500)
+      expect(health.spendingRatioPercentage).toBe(55)
+      expect(health.spendingLimitScore).toBe(35)
+      expect(health.savingsScore).toBe(35)
+      expect(health.emergencyReserveScore).toBe(30)
+      expect(health.budgetAdherenceScore).toBe(100)
+      expect(health.score).toBe(100)
+      expect(health.actionableTips?.length).toBeGreaterThan(0)
     })
   })
 })

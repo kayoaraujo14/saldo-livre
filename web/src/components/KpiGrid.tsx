@@ -4,7 +4,11 @@ import { NumberTicker } from '@/components/ui/NumberTicker'
 import { useFinance } from '@/store/FinanceContext'
 import { formatBRL, monthLabel, shiftMonth, todayKey, nextWeekKey, round2 } from '@/lib/utils'
 import { buildCardInvoice, invoiceDates } from '@/lib/invoices'
-import { impactFor, calculateFinancialHealthScore } from '@/lib/finance'
+import {
+  impactFor,
+  calculateFinancialHealthScore,
+  resolveEmergencyReserveBalance,
+} from '@/lib/finance'
 import {
   Wallet,
   TrendingUp,
@@ -13,15 +17,30 @@ import {
   ShoppingBag,
   RotateCcw,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react'
 
 interface KpiGridProps {
   onOpenReceivables?: () => void
   onOpenInvestments?: () => void
+  onOpenFinancialHealth?: () => void
 }
 
-export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) {
-  const { summary, month, deleteMonthClosure, transactions, cards, me, profile } = useFinance()
+export function KpiGrid({
+  onOpenReceivables,
+  onOpenInvestments,
+  onOpenFinancialHealth,
+}: KpiGridProps) {
+  const {
+    summary,
+    month,
+    deleteMonthClosure,
+    transactions,
+    cards,
+    me,
+    profile,
+    categoryBudgetReport,
+  } = useFinance()
 
   // 1. Consumo da Renda (Sem repetição do valor da renda que já está no Hero Card)
   const consumptionPct = summary && summary.income > 0
@@ -145,28 +164,11 @@ export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) 
     return { totalInvested, incomePercentage, isTargetReached, progressRatio, badgeText }
   }, [summary?.totalInvested, summary?.income])
 
-  // 5. Termômetro de Saúde Financeira (Score 0 a 100)
+  // 5. Termômetro de Saúde Financeira (Score 0 a 100) integrado com os 4 pilares
   const healthScore = useMemo(() => {
-    const balances = profile?.investmentAssetBalances
-    let reserveBalance = 0
-    if (balances && typeof balances === 'object') {
-      if (typeof balances['Reserva de Emergência'] === 'number') {
-        reserveBalance = balances['Reserva de Emergência']
-      } else {
-        const reserveKey = Object.keys(balances).find((k) => k.toLowerCase().includes('reserva'))
-        if (reserveKey && typeof balances[reserveKey] === 'number') {
-          reserveBalance = balances[reserveKey]
-        } else {
-          const values = Object.values(balances).filter((v): v is number => typeof v === 'number')
-          if (values.length > 0) reserveBalance = values.reduce((sum, v) => sum + v, 0)
-        }
-      }
-    }
-    if (reserveBalance <= 0) {
-      reserveBalance = summary?.totalInvestedAccumulated || 0
-    }
-    return calculateFinancialHealthScore(summary, reserveBalance)
-  }, [profile?.investmentAssetBalances, summary])
+    const reserveBalance = resolveEmergencyReserveBalance(profile, summary)
+    return calculateFinancialHealthScore(summary, reserveBalance, categoryBudgetReport)
+  }, [profile, summary, categoryBudgetReport])
 
   if (!summary) return null
 
@@ -496,14 +498,15 @@ export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) 
         </div>
       </div>
 
-      {/* 6. Termômetro de Saúde Financeira (Score 0 a 100) */}
+      {/* 6. Termômetro de Saúde Financeira (Score 0 a 100 - 4 Pilares) */}
       <div
-        onClick={onOpenInvestments}
-        className="col-span-2 lg:col-span-12 rounded-2xl p-2.5 sm:p-3 bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] transition-all shadow-sm cursor-pointer group"
+        onClick={onOpenFinancialHealth ?? onOpenInvestments}
+        title="Clique para abrir o diagnóstico completo dos 4 pilares de Saúde Financeira"
+        className="col-span-2 lg:col-span-12 rounded-2xl p-2.5 sm:p-3 bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-emerald-500/30 transition-all shadow-sm cursor-pointer group"
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
           {/* Lado Esquerdo: Ícone + Título + Score Circular e Classificação */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Medidor Circular Compacto com Score */}
             <div className="relative size-10 sm:size-11 shrink-0 flex items-center justify-center">
               <svg className="size-full -rotate-90" viewBox="0 0 36 36">
@@ -540,9 +543,9 @@ export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) 
               </div>
             </div>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider truncate flex items-center gap-1.5">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider truncate flex items-center gap-1.5 group-hover:text-emerald-300 transition-colors">
                   <ShieldCheck className="size-3.5 text-emerald-400 inline" />
                   Saúde Financeira
                 </span>
@@ -560,28 +563,32 @@ export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) 
                 >
                   {healthScore.label}
                 </Badge>
+                <span className="text-[9px] text-emerald-400/80 hidden md:inline-flex items-center gap-1 font-medium">
+                  <Sparkles className="size-2.5" />
+                  Ver Diagnóstico & Dicas IA
+                </span>
               </div>
-              <p className="text-[10px] text-slate-400 truncate max-w-md mt-0.5">
-                {healthScore.description}
+              <p className="text-[10px] text-slate-400 truncate max-w-xl mt-0.5">
+                {healthScore.actionableTips?.[0] || healthScore.description}
               </p>
             </div>
           </div>
 
-          {/* Lado Direito: Os 3 Pilares Fundamentais em Pílulas */}
-          <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:gap-4 text-center sm:text-right shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-white/[0.04]">
+          {/* Lado Direito: Os 4 Pilares Fundamentais */}
+          <div className="grid grid-cols-4 gap-2 sm:flex sm:items-center sm:gap-4 text-center sm:text-right shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-white/[0.04]">
             <div className="flex flex-col sm:items-end">
               <span className="text-[9px] uppercase tracking-wider text-slate-500">Poupança</span>
               <span className="text-[11px] font-mono font-bold text-slate-200">
                 {healthScore.savingsScore}<span className="text-slate-500 text-[9px]">/35</span>
-                <span className="text-[9px] text-slate-400 ml-1">({healthScore.savingsRatePercentage}%)</span>
+                <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.savingsRatePercentage}%)</span>
               </span>
             </div>
 
             <div className="flex flex-col sm:items-end">
-              <span className="text-[9px] uppercase tracking-wider text-slate-500">Teto Gastos</span>
+              <span className="text-[9px] uppercase tracking-wider text-slate-500">Custo Vida</span>
               <span className="text-[11px] font-mono font-bold text-slate-200">
                 {healthScore.spendingLimitScore}<span className="text-slate-500 text-[9px]">/35</span>
-                <span className="text-[9px] text-slate-400 ml-1">({healthScore.spendingRatioPercentage}%)</span>
+                <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.spendingRatioPercentage}%)</span>
               </span>
             </div>
 
@@ -589,7 +596,24 @@ export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) 
               <span className="text-[9px] uppercase tracking-wider text-slate-500">Reserva</span>
               <span className="text-[11px] font-mono font-bold text-slate-200">
                 {healthScore.emergencyReserveScore}<span className="text-slate-500 text-[9px]">/30</span>
-                <span className="text-[9px] text-slate-400 ml-1">({healthScore.emergencyCoverageMonths}m)</span>
+                <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.emergencyCoverageMonths}m)</span>
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:items-end">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500">Envelopes</span>
+              <span
+                className={`text-[11px] font-mono font-bold ${
+                  (healthScore.budgetOverspentCount ?? 0) > 0
+                    ? 'text-rose-400'
+                    : (healthScore.budgetConfiguredCount ?? 0) > 0
+                      ? 'text-emerald-400'
+                      : 'text-slate-400'
+                }`}
+              >
+                {(healthScore.budgetConfiguredCount ?? 0) > 0
+                  ? `${healthScore.budgetAdherenceScore ?? 100}%`
+                  : '—'}
               </span>
             </div>
           </div>

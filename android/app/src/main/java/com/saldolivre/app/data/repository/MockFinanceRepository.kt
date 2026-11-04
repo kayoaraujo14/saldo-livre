@@ -30,14 +30,27 @@ class MockFinanceRepository(
         uid = "demo-kayo",
         email = "kayo@demo.app",
         displayName = "Kayo Araújo",
-        monthlyIncome = 8500.0
+        monthlyIncome = 8500.0,
+        categoryBudgets = mapOf(
+            "Moradia" to 2100.0,
+            "Alimentação" to 1200.0,
+            "Transporte" to 500.0,
+            "Lazer" to 400.0,
+            "Assinaturas" to 150.0,
+            "Saúde" to 300.0
+        )
     )
 
     private val userMarina = UserProfile(
         uid = "demo-marina",
         email = "marina@demo.app",
         displayName = "Marina Costa",
-        monthlyIncome = 6200.0
+        monthlyIncome = 6200.0,
+        categoryBudgets = mapOf(
+            "Moradia" to 1800.0,
+            "Alimentação" to 900.0,
+            "Lazer" to 350.0
+        )
     )
 
     private val userLucas = UserProfile(
@@ -580,6 +593,15 @@ class MockFinanceRepository(
 
     override suspend fun updateInvestmentMonthlyTarget(target: Double) {
         _currentUser.value = _currentUser.value.copy(investmentMonthlyTarget = target)
+    }
+
+    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>) {
+        val current = _currentUser.value
+        _currentUser.value = current.copy(categoryBudgets = budgets)
+        try {
+            prefs?.edit()?.putString("demo_budgets_${current.uid}", gson.toJson(budgets))?.apply()
+        } catch (_: Exception) {
+        }
     }
 
     override suspend fun saveCard(card: Card) {

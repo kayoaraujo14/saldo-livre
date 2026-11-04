@@ -13,6 +13,9 @@ import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.data.model.FinancialHealthScore
+import com.saldolivre.app.data.model.CategoryBudgetReport
+import com.saldolivre.app.data.model.BudgetRebalanceResult
+import com.saldolivre.app.data.model.SuggestedBudgetsResult
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -75,6 +78,9 @@ data class DashboardUiState(
     val topCategory: TopCategoryState = TopCategoryState(),
     val investmentHealth: InvestmentHealthState = InvestmentHealthState(),
     val financialHealth: FinancialHealthScore = FinancialHealthScore(),
+    val categoryBudgetReport: CategoryBudgetReport = CategoryBudgetReport(),
+    val budgetRebalance: BudgetRebalanceResult = BudgetRebalanceResult(),
+    val suggestedBudgets: SuggestedBudgetsResult = SuggestedBudgetsResult(),
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
     val closureDialogDismissed: Boolean = false,
@@ -253,11 +259,29 @@ class DashboardViewModel(
                     badgeText = investBadge
                 )
 
-                // 5. Termômetro de Saúde Financeira (Score 0 a 100)
+                // 5. Envelopes Orçamentários Inteligentes & Termômetro de Saúde Financeira (4 Pilares)
+                val categoryBudgetReport = FinanceEngine.computeCategoryBudgets(
+                    byCategory = summary.byCategory,
+                    categoryBudgets = user.categoryBudgets,
+                    monthKey = month,
+                    referenceDate = todayStr
+                )
+                val budgetRebalance = FinanceEngine.suggestBudgetRebalance(categoryBudgetReport)
+                val suggestedBudgets = FinanceEngine.suggestCategoryBudgets(
+                    allTransactions = allTxs,
+                    uid = user.uid,
+                    referenceMonth = month,
+                    monthlyIncome = if (summary.income > 0.0) summary.income else user.monthlyIncome
+                )
+
                 val reserveBalance = user.investmentAssetBalances["Reserva de Emergência"]
                     ?: user.investmentAssetBalances.entries.firstOrNull { it.key.contains("Reserva", ignoreCase = true) }?.value
                     ?: (if (user.investmentAssetBalances.isNotEmpty()) user.investmentAssetBalances.values.sum() else summary.totalInvestedAccumulated)
-                val financialHealth = FinanceEngine.calculateFinancialHealthScore(summary, reserveBalance)
+                val financialHealth = FinanceEngine.calculateFinancialHealthScore(
+                    summary = summary,
+                    emergencyReserveBalance = reserveBalance,
+                    budgetReport = categoryBudgetReport
+                )
 
                 DashboardUiState(
                     currentUser = user,
@@ -273,6 +297,9 @@ class DashboardViewModel(
                     topCategory = topCategory,
                     investmentHealth = investmentHealth,
                     financialHealth = financialHealth,
+                    categoryBudgetReport = categoryBudgetReport,
+                    budgetRebalance = budgetRebalance,
+                    suggestedBudgets = suggestedBudgets,
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
                     closureDialogDismissed = _uiState.value.closureDialogDismissed,
@@ -550,6 +577,60 @@ class DashboardViewModel(
                 repository.addTransaction(refundTx)
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao registrar estorno", e)
+            }
+        }
+    }
+
+    fun updateCategoryBudgets(budgets: Map<String, Double>) {
+        viewModelScope.launch {
+            try {
+                val cleaned = budgets.filterValues { it > 0.0 }.mapValues { FinanceEngine.round2(it.value) }
+                repository.updateCategoryBudgets(cleaned)
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao atualizar envelopes orçamentários", e)
+            }
+        }
+    }
+
+    fun applyAiSuggestedBudgets() {
+        viewModelScope.launch {
+            try {
+                val suggested = _uiState.value.suggestedBudgets.suggestedBudgets
+                if (suggested.isNotEmpty()) {
+                    val merged = _uiState.value.currentUser.categoryBudgets.toMutableMap()
+                    merged.putAll(suggested)
+                    repository.updateCategoryBudgets(merged)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao aplicar sugestão de envelopes IA", e)
+            }
+        }
+    }
+
+    fun applyBudgetRebalance(fromCategory: String? = null, toCategory: String? = null, amount: Double? = null) {
+        viewModelScope.launch {
+            try {
+                val current = _uiState.value.currentUser.categoryBudgets.toMutableMap()
+                if (!fromCategory.isNullOrBlank() && !toCategory.isNullOrBlank() && amount != null && amount > 0.0) {
+                    val fromVal = current[fromCategory] ?: 0.0
+                    val toVal = current[toCategory] ?: 0.0
+                    current[fromCategory] = max(0.0, FinanceEngine.round2(fromVal - amount))
+                    current[toCategory] = FinanceEngine.round2(toVal + amount)
+                    repository.updateCategoryBudgets(current)
+                } else {
+                    val suggestions = _uiState.value.budgetRebalance.suggestions
+                    if (suggestions.isNotEmpty()) {
+                        for (s in suggestions) {
+                            val fromVal = current[s.compensateFrom] ?: 0.0
+                            val toVal = current[s.overspentCategory] ?: 0.0
+                            current[s.compensateFrom] = max(0.0, FinanceEngine.round2(fromVal - s.suggestedTransfer))
+                            current[s.overspentCategory] = FinanceEngine.round2(toVal + s.suggestedTransfer)
+                        }
+                        repository.updateCategoryBudgets(current)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao rebalancear envelopes", e)
             }
         }
     }

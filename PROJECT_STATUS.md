@@ -59,8 +59,9 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 | **Projeções Futuras** | `components/modals/FutureProjectionModal.tsx` | `ui/screens/projections/FutureProjectionsScreen.kt`, `FutureProjectionsViewModel.kt` | 🟢 100% |
 | **Rede de Amigos** | `components/modals/FriendsModal.tsx` | `ui/screens/friends/FriendsScreen.kt`, `FriendsViewModel.kt` | 🟢 100% |
 | **Atividade Recente (Auditoria)** | `components/modals/RecentActivityModal.tsx` | `ui/screens/activity/RecentActivityScreen.kt`, `RecentActivityViewModel.kt` | 🟢 100% |
-| **Copiloto IA (Gemini Chat & Voz)** | `components/GeminiChat.tsx`, `ui/ChatChart.tsx` | `ui/screens/chat/GeminiChatScreen.kt`, `GeminiChatViewModel.kt`, `DynamicChatChart.kt`, `data/ai/AndroidSpeechManager.kt` | 🟢 100% |
-| **Saúde Financeira (Score 0-100)** | `lib/finance.ts`, `components/KpiGrid.tsx` | `engine/FinanceEngine.kt`, `FinancialHealthScore.kt`, `ui/screens/dashboard/DashboardScreen.kt` | 🟢 100% |
+| **Copiloto IA (Gemini Chat & Voz)** | `components/GeminiChat.tsx`, `ui/ChatChart.tsx`, `lib/agent/budgetTools.ts` | `ui/screens/chat/GeminiChatScreen.kt`, `GeminiChatViewModel.kt`, `DynamicChatChart.kt`, `data/ai/AndroidSpeechManager.kt` | 🟢 100% |
+| **Saúde Financeira (4 Pilares & Coach IA)** | `lib/finance.ts`, `components/KpiGrid.tsx`, `modals/FinancialHealthModal.tsx` | `engine/FinanceEngine.kt`, `FinancialHealthScore.kt`, `ui/screens/dashboard/DashboardScreen.kt`, `FinancialHealthAndBudgetsComponents.kt` | 🟢 100% |
+| **Envelopes Orçamentários Inteligentes** | `lib/finance.ts`, `components/CategoryBudgetsCard.tsx`, `modals/ManageBudgetsModal.tsx` | `engine/FinanceEngine.kt`, `FinancialHealthScore.kt`, `ui/screens/dashboard/FinancialHealthAndBudgetsComponents.kt` | 🟢 100% |
 | **Feedback Tátil & Haptics** | N/A (Específico nativo) | `ui/util/HapticFeedbackHelper.kt` (integrado nos formulários, faturas e fechamento) | 🟢 100% |
 | **PWA & Instalação Nativa** | `manifest.webmanifest`, `public/sw.js`, `index.html` (iOS/Desktop) | App nativo Android / APK / AAB | 🟢 100% |
 | **Navegação Mobile & Menu** | `components/mobile/MobileBottomNav.tsx`, `MobileMenuSheet.tsx` | `ui/navigation/AppNavHost.kt`, `AppBottomBar.kt`, `ui/screens/menu/MenuScreen.kt` | 🟢 100% |
@@ -87,6 +88,26 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+
+- **[2026-11-04] Sinergia Total de Saúde Financeira (4 Pilares) & Envelopes Orçamentários Realistas — Paridade 100% Web/Android & Integração Profunda no Chat (Conclusão Integral):**
+  - **1. Paridade 100% Web (`/web`) e Android (`/android`):**
+    - Unificação matemática e contratual entre `web/src/lib/finance.ts` e `android/.../FinanceEngine.kt` (`calculateFinancialHealthScore`, `resolveEmergencyReserveBalance`, `computeCategoryBudgets`, `suggestCategoryBudgets`, `suggestBudgetRebalance` e `isFixedBudgetCategory`).
+    - Implementação completa dos componentes de Envelopes Orçamentários e Saúde Financeira no Android (`FinancialHealthAndBudgetsComponents.kt`, `DashboardScreen.kt` e `DashboardViewModel.kt`) e do modal interativo `FinancialHealthModal.tsx` na Web.
+    - Persistência sincronizada no Cloud Firestore (`updateCategoryBudgets` em `FirestoreFinanceRepository.kt` e `FinanceContext.tsx`).
+  - **2. Realismo Financeiro & Alta Aderência do Usuário:**
+    - **Distinção Inteligente entre Envelopes Fixos vs. Variáveis:** Categorias fixas mensais (`Moradia`, `Assinaturas`, `Educação`, `Financiamentos`, `Impostos`) pagas integralmente no início do mês não disparam falsos alarmes de ritmo diário crítico (`burnRateStatus = normal/on_track` e `status = safe` quando `spent <= limit`). Categorias variáveis (`Alimentação`, `Lazer`, `Transporte`, etc.) calculam ritmo diário (`dailyPace`), projeção de fechamento (`projectedSpent`) e meta diária segura (`recommendedDailyRemaining`).
+    - **Filtro de Categorias Não-Consumo:** `Investimentos`, `Receita`, `Estorno` e `Cartão Terceiros` são excluídos automaticamente de alertas de categorias sem teto (`unbudgetedCategories`) e de sugestões automáticas de tetos de despesa.
+    - **Sinergia dos 4 Pilares na Saúde Financeira (`calculateFinancialHealthScore`):**
+      1. *Taxa de Poupança & Investimento (35 pts):* Reconhece aportes reais + potencial de poupança do `freeBalance` positivo (até +12 pts de bônus).
+      2. *Controle de Custo de Vida (35 pts):* Desconta aportes de `Investimentos` do `committed` (`monthlyLivingCost`), garantindo que investir >20% da renda jamais penalize o indicador de custo de vida.
+      3. *Reserva de Emergência (30 pts):* Calcula meses de cobertura sobre o custo de vida real (`monthlyLivingCost`) usando `resolveEmergencyReserveBalance`.
+      4. *Aderência aos Envelopes (`budgetAdherenceScore` 0–100%):* Concede bônus de disciplina (**+4 pts**) quando há envelopes ativos e zero estouros, e aplica penalidade proporcional (até **-8 pts**) quando há envelopes estourados.
+      - Geração automática de `actionableTips` personalizadas com valores exatos em R$ e ganho estimado de pontos (`+X pts`).
+  - **3. Integração Profunda no Chat (Coração do Projeto — Web & Android):**
+    - Injeção em tempo real do **Diagnóstico de Saúde Financeira (4 Pilares + Dicas do Coach IA)** e do **Relatório de Envelopes Orçamentários** no `buildSystemInstruction` (`web/src/lib/gemini.ts` e `GeminiChatViewModel.kt`).
+    - Expansão da tool `gerenciarEnvelopesOrcamentarios` (`budgetTools.ts` na Web e `MANAGE_BUDGETS` em `AndroidAgentToolsEngine.kt` no Android) com 8 operações: `consultar`, `definir_teto`, `rebalancear`, `rebalancear_automatico`, `sugerir_tetos`, `aplicar_sugestao_ia`, `simular_compra` e `diagnostico_saude_financeira`, retornando `ActionCardData` visuais no Chat.
+    - Suporte completo em modo Offline/Demo NLP (`demoAgent.ts` conectada ao `GeminiChat.tsx` na Web e `processNaturalLanguageOffline` em `AndroidAgentToolsEngine.kt` no Android).
+    - Ponte direta 1-clique (**"Analisar no Copiloto IA ✨"**) nos cards e modais do Dashboard para abrir o Chat e disparar a análise contextual automaticamente (`saldo-livre:ask-copilot` na Web e `GeminiChatViewModel.pendingInitialPrompt` no Android).
 
 - **[2026-11-04] Orçamento Inteligente & Envelopes de Gastos com IA — Etapa 3: Integração Copiloto Gemini & Function Calling (Conclusão Integral):**
   - **Nova Ferramenta do Copiloto (`gerenciarEnvelopesOrcamentarios`):**

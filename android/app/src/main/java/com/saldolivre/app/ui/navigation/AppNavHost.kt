@@ -207,7 +207,11 @@ fun AppNavHost(
                     onNavigateToInvestments = { navController.navigate("investments") },
                     onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") },
                     onNavigateToRefundTransaction = {},
-                    onNavigateToCards = { navController.navigate(BottomNavItem.Cards.route) }
+                    onNavigateToCards = { navController.navigate(BottomNavItem.Cards.route) },
+                    onNavigateToChatWithPrompt = { prompt ->
+                        GeminiChatViewModel.pendingInitialPrompt = prompt
+                        navController.navigate("chat")
+                    }
                 )
             }
 

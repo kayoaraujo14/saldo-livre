@@ -142,4 +142,7 @@ class FakeFinanceRepository(
 
     override suspend fun updateInvestmentAssetBalances(balances: Map<String, Double>) {}
     override suspend fun updateInvestmentMonthlyTarget(target: Double) {}
+    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>) {
+        _currentUser.value = _currentUser.value.copy(categoryBudgets = budgets)
+    }
 }

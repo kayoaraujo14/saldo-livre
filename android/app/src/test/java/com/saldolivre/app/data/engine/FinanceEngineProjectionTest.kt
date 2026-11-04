@@ -173,4 +173,92 @@ class FinanceEngineProjectionTest {
         // Salário 5000 + carryover 400 = 5400 saldo livre
         assertEquals(5400.0, proj.projectedFreeBalance, 0.01)
     }
+
+    @Test
+    fun `computeCategoryBudgets distinguishes fixed vs variable categories and excludes Investments from unbudgeted`() {
+        val summary = MonthSummary(
+            monthKey = "2026-10",
+            income = 8000.0,
+            committed = 4100.0,
+            paid = 3000.0,
+            freeBalance = 3900.0,
+            byCategory = listOf(
+                CategoryExpense("Moradia", 2000.0),
+                CategoryExpense("Alimentação", 900.0),
+                CategoryExpense("Lazer", 500.0),
+                CategoryExpense("Investimentos", 700.0)
+            )
+        )
+
+        val budgets = mapOf(
+            "Moradia" to 2000.0,      // 100% no início do mês -> categoria fixa -> SAFE
+            "Alimentação" to 1200.0,  // 75% -> SAFE
+            "Lazer" to 400.0          // 125% -> DANGER
+        )
+
+        val report = FinanceEngine.computeCategoryBudgets(
+            summary = summary,
+            categoryBudgets = budgets,
+            referenceDate = "2026-10-08"
+        )
+
+        val moradia = report.categories.find { it.category == "Moradia" }
+        assertNotNull(moradia)
+        assertTrue(moradia!!.isFixedCategory)
+        assertEquals(BudgetEnvelopeStatus.SAFE, moradia.status)
+        assertEquals(BudgetBurnRateStatus.ON_TRACK, moradia.burnRateStatus)
+
+        val lazer = report.categories.find { it.category == "Lazer" }
+        assertNotNull(lazer)
+        assertFalse(lazer!!.isFixedCategory)
+        assertEquals(BudgetEnvelopeStatus.DANGER, lazer.status)
+
+        // Investimentos não deve aparecer como categoria desprotegida sem teto
+        assertTrue(report.unbudgetedCategories.none { it.category == "Investimentos" })
+
+        val rebalance = FinanceEngine.suggestBudgetRebalance(report)
+        assertTrue(rebalance.canCoverFullDeficit)
+        assertEquals(100.0, rebalance.totalDeficit, 0.01)
+        assertEquals("Alimentação", rebalance.transfers.first().fromCategory)
+        assertEquals("Lazer", rebalance.transfers.first().toCategory)
+    }
+
+    @Test
+    fun `calculateFinancialHealthScore applies 4-pillar synergy and discounts investments from living cost`() {
+        val summary = MonthSummary(
+            monthKey = "2026-10",
+            income = 10000.0,
+            committed = 8000.0, // 5000 custo de vida + 3000 investimentos
+            paid = 8000.0,
+            freeBalance = 2000.0,
+            totalInvested = 3000.0,
+            byCategory = listOf(
+                CategoryExpense("Moradia", 3000.0),
+                CategoryExpense("Alimentação", 2000.0),
+                CategoryExpense("Investimentos", 3000.0)
+            )
+        )
+
+        val budgets = mapOf(
+            "Moradia" to 3000.0,
+            "Alimentação" to 2200.0
+        )
+        val report = FinanceEngine.computeCategoryBudgets(summary, budgets, "2026-10-15")
+        val health = FinanceEngine.calculateFinancialHealthScore(
+            summary = summary,
+            emergencyReserveBalance = 30000.0, // 6x custo de vida (5000)
+            budgetReport = report
+        )
+
+        // Custo de vida deve descontar Investimentos (8000 - 3000 = 5000 -> 50% da renda -> 35/35 pts)
+        assertEquals(5000.0, health.monthlyLivingCost, 0.01)
+        assertEquals(50, health.spendingRatioPercentage)
+        assertEquals(35, health.spendingLimitScore)
+        assertEquals(35, health.savingsScore)
+        assertEquals(30, health.emergencyReserveScore)
+        assertEquals(100, health.budgetAdherenceScore)
+        assertEquals(100, health.score)
+        assertEquals(FinancialHealthClassification.EXCELLENT, health.classification)
+        assertTrue(health.actionableTips.isNotEmpty())
+    }
 }

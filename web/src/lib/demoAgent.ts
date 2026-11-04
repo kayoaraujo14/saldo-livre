@@ -276,6 +276,145 @@ export async function runDemoAgent(
     }
   }
 
+  // ---------------- Saúde Financeira & Envelopes Orçamentários Inteligentes ----------------
+  if (/saude financeira|meu score|score financeiro|diagnostico financeiro|4 pilares|quatro pilares|subir.*score|melhorar.*score|termometro financeiro/.test(n)) {
+    const r = await execute('gerenciarEnvelopesOrcamentarios', { acao: 'diagnostico_saude_financeira' })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    const p = d.pilares || {}
+    const dicas = (d.dicasPraticasParaSubirScore as string[]) || []
+
+    return {
+      text: `### 🛡️ Diagnóstico de Saúde Financeira — **${d.scoreGeral}** (${d.classificacao})
+
+| Pilar de Avaliação | Nota / Status | Detalhamento |
+| :--- | :--- | :--- |
+| 💰 **1. Poupança & Margem (35%)** | **${p.poupancaEInvestimentos?.nota || '—'}** | Investido: ${p.poupancaEInvestimentos?.taxaInvestidaReal || '0%'} (Potencial c/ Saldo Livre: ${p.poupancaEInvestimentos?.taxaPoupancaPotencialComSaldoLivre || '0%'}) |
+| 🏠 **2. Custo de Vida Real (35%)** | **${p.controleCustoDeVida?.nota || '—'}** | ${p.controleCustoDeVida?.custoDeVidaReal || '—'} (Meta: até 70% da renda) |
+| 🛟 **3. Reserva de Emergência (30%)** | **${p.reservaDeEmergencia?.nota || '—'}** | ${p.reservaDeEmergencia?.coberturaEmMeses || '0 meses'} (Meta 6m: ${p.reservaDeEmergencia?.metaIdeal6Meses || '—'}) |
+| 🎯 **4. Disciplina nos Envelopes** | **${p.disciplinaNosEnvelopes?.aderencia || '100%'}** | ${p.disciplinaNosEnvelopes?.envelopesConfigurados || 0} configurados · ${p.disciplinaNosEnvelopes?.envelopesEstourados || 0} estourados |
+
+**🚀 Alavancas Práticas para Subir seu Score:**
+${dicas.map((tip) => `- ${tip}`).join('\n') || '- Continue mantendo seus envelopes e reserva sob controle!'}`,
+      actions,
+    }
+  }
+
+  if (/(aplicar|usar|configurar|gerar|criar|ativar).*(tetos?|envelopes?).*(ia|inteligente|automatico|sugerid)|aplicar sugestao/i.test(n)) {
+    const r = await execute('gerenciarEnvelopesOrcamentarios', { acao: 'aplicar_sugestao_ia' })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    if (!d.ok) {
+      return { text: `⚠️ ${d.erro || 'Não foi possível aplicar os tetos sugeridos.'}`, actions }
+    }
+    const list = ((d.tetosAplicados as Array<{ categoria: string; teto: string }>) || [])
+      .map((item) => `• **${item.categoria}:** ${item.teto}`)
+      .join('\n')
+    return {
+      text: `✨ **Envelopes Orçamentários IA configurados com sucesso!**\n\n${d.mensagem}\n\n${list}`,
+      actions,
+    }
+  }
+
+  if (/sugerir.*(tetos?|envelopes?|orcamento)|quais tetos.*suger|proposta de envelopes/i.test(n)) {
+    const r = await execute('gerenciarEnvelopesOrcamentarios', { acao: 'sugerir_tetos' })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    const list = ((d.tetosRecomendados as Array<{ categoria: string; mediaHistorica3Meses: string; tetoSugeridoComMargem10Pct: string }>) || [])
+      .map((item) => `| ${item.categoria} | ${item.mediaHistorica3Meses} | **${item.tetoSugeridoComMargem10Pct}** |`)
+      .join('\n')
+    return {
+      text: `✨ **Sugestão de Envelopes Inteligentes (Média de 3 Meses + 10%):**\n\n• **Total Orçado Sugerido:** ${d.totalSugerido} (${d.coberturaRenda})\n\n| Categoria | Média 3M | Teto Sugerido |\n| :--- | :--- | :--- |\n${list}\n\n💡 Diga **"Aplicar tetos sugeridos pela IA"** para ativar todos de uma vez!`,
+      actions,
+    }
+  }
+
+  if (/rebalancear|reequilibrar|compensar.*envelope|transferir.*envelope/i.test(n)) {
+    const r = await execute('gerenciarEnvelopesOrcamentarios', { acao: 'rebalancear_automatico' })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    if (!d.ok) {
+      return { text: `ℹ️ ${d.mensagem || d.erro}`, actions }
+    }
+    const transfers = ((d.transferenciasRealizadas as Array<{ de: string; para: string; valor: string }>) || [])
+      .map((t) => `• **${t.valor}** transferidos de **${t.de}** ➔ **${t.para}**`)
+      .join('\n')
+    return {
+      text: `🔄 **Rebalanceamento Inteligente Concluído!**\n\n${d.mensagem}\n\n${transfers}`,
+      actions,
+    }
+  }
+
+  if (/(definir|defina|colocar|coloque|ajustar|ajuste|mudar|mude|configurar|configure).*(teto|envelope|limite)/i.test(n) && amount != null) {
+    let targetCat = 'Alimentação'
+    for (const cat of CATEGORIES) {
+      if (n.includes(normalize(cat))) {
+        targetCat = cat
+        break
+      }
+    }
+    const r = await execute('gerenciarEnvelopesOrcamentarios', {
+      acao: 'definir_teto',
+      categoria: targetCat,
+      limite: amount,
+    })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    return {
+      text: `🎯 **${d.mensagem}**\n\n• **Gasto atual no mês:** ${d.gastoAtual}\n• **Saldo disponível no envelope:** ${d.saldoRestante}`,
+      actions,
+    }
+  }
+
+  if (/(posso comprar|simular compra|cabe no orcamento|cabe no envelope|vale a pena comprar)/i.test(n) && amount != null) {
+    const parcMatch = n.match(/(\d{1,2})\s*(?:x|vezes|parcelas?)/i)
+    const parcelas = parcMatch ? Math.max(1, Number(parcMatch[1])) : 1
+    const guessed = guessCategoryAndSubcategory(n, amount)
+    const r = await execute('gerenciarEnvelopesOrcamentarios', {
+      acao: 'simular_compra',
+      valorCompra: amount,
+      parcelas,
+      categoria: guessed.category === 'Outros' ? 'Compras & Estilo de Vida' : guessed.category,
+    })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    return {
+      text: `🛍️ **Simulação de Compra no Orçamento:**\n\n**${d.veredito}**\n\n• **Valor / Parcelamento:** ${d.detalhes?.parcelas}\n• **Envelope avaliado:** ${d.detalhes?.categoria} (Teto: ${d.detalhes?.tetoDoEnvelope})\n• **Sobra no envelope após a compra:** ${d.detalhes?.sobraAposCompra}\n• **Saldo Livre projetado após a compra:** ${d.detalhes?.saldoLivreAposCompra}\n\n💡 *Recomendação IA:* ${d.recomendacaoIA}`,
+      actions,
+    }
+  }
+
+  if (/envelopes?|orcamento por categoria|meus tetos|status dos envelopes|ritmo dos envelopes/i.test(n)) {
+    const r = await execute('gerenciarEnvelopesOrcamentarios', { acao: 'consultar' })
+    if (r.action) actions.push(r.action)
+    const d = r.response as Record<string, any>
+    const rg = d.resumoGeral || {}
+    const envs = (d.envelopes as Array<any>) || []
+    const rows = envs
+      .map(
+        (e) =>
+          `| **${e.categoria}** (${e.tipoEnvelope === 'Fixo Mensal' ? 'Fixo' : 'Variável'}) | ${e.gastoReal} / ${e.tetoMensal} (${e.porcentagemGasta}) | ${e.saldoRestante} | ${e.statusRitmo} |`,
+      )
+      .join('\n')
+    const rebal = ((d.sugestoesRebalanceamento as Array<any>) || [])
+      .map((s) => `- Transferir **${s.valorSugerido}** de **${s.tirarDe}** (sobra ${s.disponivel}) para **${s.transferirPara}**`)
+      .join('\n')
+
+    return {
+      text: `### 🎯 Envelopes Orçamentários — ${d.mes}
+
+• **Total Orçado:** ${rg.totalOrcado} · **Consumido:** ${rg.totalGasto} (${rg.percentualConsumidoGeral})
+• **Sobra nos Envelopes:** ${rg.saldoLivreOrcado} · **Status:** ${rg.statusGeral}
+
+| Categoria | Gasto / Teto | Sobra | Ritmo |
+| :--- | :--- | :--- | :--- |
+${rows || '| Nenhum envelope configurado | — | — | — |'}
+
+${rebal ? `\n💡 **Sugestão de Rebalanceamento IA:**\n${rebal}\n*(Diga "Rebalancear envelopes" para aplicar automaticamente)*` : ''}`,
+      actions,
+    }
+  }
+
   // ---------------- Relatório / economia ----------------
   if (/relatorio|economiz|resumo|analise|onde .*gast|como estou|situacao/.test(n)) {
     const r = await execute('obterRelatorioEProjecaoMensal', {})

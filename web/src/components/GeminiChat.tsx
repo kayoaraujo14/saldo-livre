@@ -17,7 +17,14 @@ import {
   transcribeAudioWithGemini,
   type ToolName,
 } from '@/lib/gemini'
-import { computeAccountCashFlow, effectiveAmount, SPLIT_LABELS } from '@/lib/finance'
+import {
+  calculateFinancialHealthScore,
+  computeAccountCashFlow,
+  effectiveAmount,
+  resolveEmergencyReserveBalance,
+  SPLIT_LABELS,
+} from '@/lib/finance'
+import { runDemoAgent } from '@/lib/demoAgent'
 import { formatBRL, formatShortDate, monthLabel, todayKey } from '@/lib/utils'
 import { extractTextFromPdf } from '@/lib/pdfParser'
 import { ChatChart } from '@/components/ui/ChatChart'
@@ -90,6 +97,7 @@ function saveLearnedPrompt(prompt: string) {
   }
 }
 
+let lastCopilotEventTimestamp = 0
 const SESSIONS_STORAGE_KEY_PREFIX = 'saldo_livre_chat_sessions_'
 
 function getStoredSessions(uid: string): ChatSession[] {
@@ -116,6 +124,7 @@ function saveStoredSessions(uid: string, sessions: ChatSession[]) {
 export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiChatProps) {
   const {
     me,
+    profile,
     partner,
     month,
     cards,
@@ -124,6 +133,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     transactions,
     monthTransactions,
     summary,
+    categoryBudgetReport,
     pendingBatchTransactions,
     setPendingBatchTransactions,
     rules: syncedRules,
@@ -133,6 +143,15 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
   const currentUid = me?.uid ?? 'guest'
   const geminiKeys = getGeminiApiKeys()
   const hasGeminiKey = geminiKeys.length > 0
+
+  const healthScore = useMemo(() => {
+    if (!summary) return null
+    return calculateFinancialHealthScore(
+      summary,
+      resolveEmergencyReserveBalance(profile, summary),
+      categoryBudgetReport,
+    )
+  }, [summary, profile, categoryBudgetReport])
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     const loaded = getStoredSessions(currentUid)
@@ -917,22 +936,31 @@ Atenção crítica:
 
     try {
       if (!hasGeminiKey) {
-        const noKeyMsg: ChatMessage = {
+        const demoRes = await runDemoAgent(
+          text,
+          executeTool,
+          month,
+          currentAttachment || undefined,
+          activePendingTxs,
+          messages,
+        )
+        const botMsg: ChatMessage = {
           id: `bot_${Date.now()}`,
           role: 'assistant',
-          content:
-            '🔑 **Chave da API do Google Gemini não encontrada**\n\n' +
-            'Para conversar com o Copiloto com inteligência artificial, configure sua chave de API no ícone 🔑 acima ou cole sua chave diretamente nesta conversa.',
+          content: demoRes.text,
+          actions: demoRes.actions.length > 0 ? demoRes.actions : undefined,
         }
-        updateSessionMessages((prev) => [...prev, noKeyMsg])
+        updateSessionMessages((prev) => [...prev, botMsg])
         return
       }
 
-      // Executa exclusivamente via Google Gemini com Load Balancing e Function Calling
+      // Executa via Google Gemini com Load Balancing e Function Calling
       const cashFlow = summary && me ? computeAccountCashFlow(transactions, me.uid, month, summary, cards) : null
 
       const sys = buildSystemInstruction({
         cashFlow,
+        healthScore,
+        budgetReport: categoryBudgetReport,
         userName: me?.name ?? 'Usuário',
         partnerName: partner?.name ?? null,
         today: todayKey(),
@@ -1034,6 +1062,23 @@ Atenção crítica:
       setLoading(false)
     }
   }
+
+  const handleSendRef = useRef(handleSend)
+  handleSendRef.current = handleSend
+
+  useEffect(() => {
+    const onAskCopilot = (e: Event) => {
+      if (Date.now() - lastCopilotEventTimestamp < 400) return
+      const custom = e as CustomEvent<{ prompt?: string }>
+      const prompt = custom.detail?.prompt?.trim()
+      if (prompt) {
+        lastCopilotEventTimestamp = Date.now()
+        handleSendRef.current(prompt)
+      }
+    }
+    window.addEventListener('saldo-livre:ask-copilot', onAskCopilot)
+    return () => window.removeEventListener('saldo-livre:ask-copilot', onAskCopilot)
+  }, [])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

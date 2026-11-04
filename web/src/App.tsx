@@ -27,6 +27,8 @@ const FutureProjectionModal = lazy(() => import('@/components/modals/FutureProje
 const FriendsModal = lazy(() => import('@/components/modals/FriendsModal').then((m) => ({ default: m.FriendsModal })))
 const RecentActivityModal = lazy(() => import('@/components/modals/RecentActivityModal').then((m) => ({ default: m.RecentActivityModal })))
 const InvestmentsModal = lazy(() => import('@/components/modals/InvestmentsModal').then((m) => ({ default: m.InvestmentsModal })))
+const FinancialHealthModal = lazy(() => import('@/components/modals/FinancialHealthModal').then((m) => ({ default: m.FinancialHealthModal })))
+const ManageBudgetsModal = lazy(() => import('@/components/modals/ManageBudgetsModal').then((m) => ({ default: m.ManageBudgetsModal })))
 const CardInvoicesModal = lazy(() => import('@/components/modals/CardInvoicesModal').then((m) => ({ default: m.CardInvoicesModal })))
 const MonthClosureModal = lazy(() => import('@/components/modals/MonthClosureModal').then((m) => ({ default: m.MonthClosureModal })))
 
@@ -72,6 +74,8 @@ function MainDashboard() {
   const [friendsModalOpen, setFriendsModalOpen] = useState(false)
   const [recentActivityModalOpen, setRecentActivityModalOpen] = useState(false)
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
+  const [financialHealthModalOpen, setFinancialHealthModalOpen] = useState(false)
+  const [budgetsModalOpen, setBudgetsModalOpen] = useState(false)
   const [invoicesModalOpen, setInvoicesModalOpen] = useState(() => initialAction === 'invoices')
   const [invoicesInitialCardId, setInvoicesInitialCardId] = useState<string | null>(null)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
@@ -96,6 +100,19 @@ function MainDashboard() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [desktopView])
+
+  useEffect(() => {
+    const onAskCopilot = () => {
+      if (desktopView === 'table_full') {
+        setDesktopView('chat_focus')
+      }
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+        setMobileTab('chat')
+      }
+    }
+    window.addEventListener('saldo-livre:ask-copilot', onAskCopilot)
+    return () => window.removeEventListener('saldo-livre:ask-copilot', onAskCopilot)
   }, [desktopView])
 
   const handleSelectMobileTab = (tab: MobileTab) => {
@@ -214,6 +231,7 @@ function MainDashboard() {
               <KpiGrid
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
                 onOpenInvestments={() => setInvestmentsModalOpen(true)}
+                onOpenFinancialHealth={() => setFinancialHealthModalOpen(true)}
               />
               <CategoryBudgetsCard />
             </div>
@@ -284,6 +302,7 @@ function MainDashboard() {
               <KpiGrid
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
                 onOpenInvestments={() => setInvestmentsModalOpen(true)}
+                onOpenFinancialHealth={() => setFinancialHealthModalOpen(true)}
               />
 
               {/* Envelopes Orçamentários */}
@@ -427,6 +446,20 @@ function MainDashboard() {
             open={investmentsModalOpen}
             onOpenChange={setInvestmentsModalOpen}
             onOpenNewTx={handleOpenNewTx}
+          />
+        )}
+        {financialHealthModalOpen && (
+          <FinancialHealthModal
+            open={financialHealthModalOpen}
+            onOpenChange={setFinancialHealthModalOpen}
+            onOpenInvestments={() => setInvestmentsModalOpen(true)}
+            onOpenBudgets={() => setBudgetsModalOpen(true)}
+          />
+        )}
+        {budgetsModalOpen && (
+          <ManageBudgetsModal
+            open={budgetsModalOpen}
+            onOpenChange={setBudgetsModalOpen}
           />
         )}
         {invoicesModalOpen && (

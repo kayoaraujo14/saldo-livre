@@ -90,6 +90,15 @@ class GeminiChatViewModel(
 
     companion object {
         val AVAILABLE_MODELS = GeminiLoadBalancer.DEFAULT_MODELS_POOL
+
+        @Volatile
+        var pendingInitialPrompt: String? = null
+
+        fun consumePendingPrompt(): String? {
+            val p = pendingInitialPrompt
+            pendingInitialPrompt = null
+            return p
+        }
     }
 
     private val _uiState = MutableStateFlow(
@@ -835,7 +844,19 @@ class GeminiChatViewModel(
             list.add("📊 Criar comparativo das categorias onde mais gastei")
         }
 
-        // 2. Análise Estratégica 50/30/20
+        // 2. Saúde Financeira & Envelopes Orçamentários Inteligentes
+        list.add("🩺 Faça um diagnóstico completo da minha Saúde Financeira")
+        val userBudgets = repository.currentUser.value.categoryBudgets
+        if (userBudgets.isEmpty()) {
+            list.add("🎯 Sugerir tetos de gastos (Envelopes 50/30/20) para $monthLabel")
+        } else {
+            val budgetReport = FinanceEngine.computeCategoryBudgets(summary, userBudgets)
+            if (budgetReport.overspentCount > 0) {
+                list.add("⚖️ Rebalancear automaticamente meus envelopes estourados")
+            } else {
+                list.add("🎯 Como estão meus Envelopes Orçamentários em $monthLabel?")
+            }
+        }
         list.add("⚖️ Avaliar meus gastos segundo a Regra 50/30/20")
 
         // 3. Limite Diário e Fim de Semana
@@ -1149,9 +1170,11 @@ class GeminiChatViewModel(
         val keys = loadBalancer.getApiKeys()
 
         if (keys.isEmpty()) {
+            val offlineResult = toolsEngine.processNaturalLanguageOffline(query)
             return AgentResponse(
-                text = "🔑 **Chave da API do Google Gemini não encontrada**\n\n" +
-                        "Para conversar com o Copiloto com inteligência artificial, configure sua chave de API no ícone 🔑 acima ou cole sua chave diretamente nesta conversa."
+                text = offlineResult.text,
+                actions = offlineResult.actions,
+                chartPayload = offlineResult.chartPayload
             )
         }
 
@@ -1290,6 +1313,32 @@ class GeminiChatViewModel(
             cards = cards
         )
 
+        val budgetReport = FinanceEngine.computeCategoryBudgets(summary, user.categoryBudgets)
+        val emergencyReserve = FinanceEngine.resolveEmergencyReserveBalance(user, summary)
+        val healthScore = FinanceEngine.calculateFinancialHealthScore(summary, emergencyReserve, budgetReport)
+        val rebalancePlan = FinanceEngine.suggestBudgetRebalance(budgetReport)
+
+        val budgetsDesc = if (budgetReport.categories.isEmpty()) {
+            "Nenhum teto de categoria configurado ainda (sugira ao usuário configurar Envelopes 50/30/20 via MANAGE_BUDGETS com acao = \"sugerir_tetos\" ou \"aplicar_sugestao_ia\")."
+        } else {
+            budgetReport.categories.joinToString("\n  ") { c ->
+                val kind = if (c.isFixedCategory) "Fixa" else "Variável"
+                val statusLabel = when (c.status) {
+                    CategoryBudgetAlertStatus.DANGER -> "ESTOURADO"
+                    CategoryBudgetAlertStatus.WARNING -> "ATENÇÃO"
+                    CategoryBudgetAlertStatus.OK -> "SEGURO"
+                }
+                val paceInfo = if (!c.isFixedCategory) " | Ritmo: R$ ${FinanceEngine.round2(c.dailyPace)}/dia (Proj: R$ ${FinanceEngine.round2(c.projectedSpent)}) | Meta segura: R$ ${FinanceEngine.round2(c.recommendedDailyRemaining)}/dia" else " | Despesa Fixa Mensal"
+                "* ${c.category} [$kind - $statusLabel]: R$ ${FinanceEngine.round2(c.spent)} / R$ ${FinanceEngine.round2(c.limit)} (${c.percentage}%)$paceInfo"
+            } + (if (rebalancePlan.transfers.isNotEmpty()) "\n  ⚖️ Sugestão de Rebalanceamento IA: ${rebalancePlan.summaryText}" else "")
+        }
+
+        val healthTipsDesc = if (healthScore.actionableTips.isNotEmpty()) {
+            healthScore.actionableTips.joinToString("\n  ") { "* $it" }
+        } else {
+            "* Finanças equilibradas neste mês."
+        }
+
         // Bloco de dados financeiros (paridade com `summaryDesc` da Web)
         val summaryDescText = """
 DADOS FINANCEIROS REAIS DO USUÁRIO EM ${FinanceEngine.monthLabel(selectedMonth).uppercase()} ($selectedMonth):
@@ -1313,6 +1362,20 @@ PLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE PROJETADO):
 - Total Investido no Mês: R$ ${FinanceEngine.round2(summary.totalInvested)}$byInvestmentDesc
 - Assinaturas e Contas Fixas Cadastradas [ATENÇÃO: PREVISÕES TEÓRICAS - NÃO SÃO TRANSAÇÕES EFETIVADAS ATÉ SEREM LANÇADAS]:
   $recurringDesc
+
+TERMÔMETRO DE SAÚDE FINANCEIRA (4 PILARES EM TEMPO REAL):
+- Score Geral: ${healthScore.score}/100 (${healthScore.label}) — ${healthScore.description}
+- Pilar 1 (Taxa de Poupança & Investimento): ${healthScore.savingsScore}/35 pts (Taxa real aportada: ${healthScore.savingsRatePercentage}% | Potencial com Saldo Livre: ${healthScore.potentialSavingsRatePercentage}% | Meta: >= 20%)
+- Pilar 2 (Controle de Custo de Vida, excluindo aportes): ${healthScore.spendingLimitScore}/35 pts (Custo de vida: R$ ${FinanceEngine.round2(healthScore.monthlyLivingCost)} = ${healthScore.spendingRatioPercentage}% da renda | Meta: <= 70%)
+- Pilar 3 (Reserva de Emergência): ${healthScore.emergencyReserveScore}/30 pts (Reserva estimada: R$ ${FinanceEngine.round2(emergencyReserve)} = ${healthScore.emergencyCoverageMonths} meses do custo de vida | Meta: 6 meses)
+- Pilar 4 (Aderência aos Envelopes Orçamentários): ${healthScore.budgetAdherenceScore}% (${healthScore.budgetConfiguredCount} configurados, ${healthScore.budgetOverspentCount} estourados)
+- Dicas Acionáveis do Coach IA para Subir o Score:
+  $healthTipsDesc
+
+ENVELOPES ORÇAMENTÁRIOS INTELIGENTES (TETOS POR CATEGORIA):
+- Resumo dos Envelopes: Gasto R$ ${FinanceEngine.round2(budgetReport.totalSpentInBudgeted)} de R$ ${FinanceEngine.round2(budgetReport.totalBudgeted)} (${budgetReport.overallPercentage}%) | Folga: R$ ${FinanceEngine.round2(budgetReport.totalRemaining)}
+- Detalhamento por Envelope:
+  $budgetsDesc
 """.trim()
 
         // Lote pendente de confirmação (memória estruturada de estado — paridade com `pendingTxsDesc` da Web)
@@ -1773,6 +1836,22 @@ Todos os campos são opcionais e combináveis entre si!)*
 }
 ```
 
+13. Gerenciar Envelopes Orçamentários Inteligentes, Simular Compra e Diagnóstico de Saúde Financeira (acao: "consultar" | "definir_teto" | "rebalancear" | "rebalancear_automatico" | "sugerir_tetos" | "aplicar_sugestao_ia" | "simular_compra" | "diagnostico_saude_financeira"):
+```json
+{
+  "action": "MANAGE_BUDGETS",
+  "acao": "definir_teto",
+  "categoria": "Lazer",
+  "valorTeto": 500.0,
+  "categoriaOrigem": null,
+  "categoriaDestino": null,
+  "valorTransferencia": null,
+  "valorSimulacao": null,
+  "descricaoSimulacao": null
+}
+```
+*(Use "acao": "diagnostico_saude_financeira" sempre que o usuário pedir análise de Saúde Financeira, Score ou como melhorar os 4 pilares; use "acao": "simular_compra" com "valorSimulacao" e "categoria"/"descricaoSimulacao" quando o usuário perguntar "posso gastar X em Y?"; use "acao": "rebalancear_automatico" ou "aplicar_sugestao_ia" para executar ajustes com 1 clique).*
+
 REGRAS DE FUNCIONAMENTO:
 
 1. CARTÕES DE CRÉDITO, FATURA E MÊS DE COMPETÊNCIA:
@@ -2168,6 +2247,8 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
                 upper.contains("SEARCH_TRANSACTIONS") || upper.contains("QUERY_TRANSACTIONS") ||
                 upper.contains("BUSCARTRANSACOES") || upper.contains("CONSULTARTRANSACOES") ||
                 upper.contains("REPORT_PROJECTION") || upper.contains("PROJECT_MONTH") || upper.contains("OBTERRELATORIOEPROJECAOMENSAL") ||
+                upper.contains("HEALTH_DIAGNOSIS") || upper.contains("DIAGNOSTICOSAUDEFINANCEIRA") ||
+                (upper.contains("MANAGE_BUDGETS") && (upper.contains("CONSULTAR") || upper.contains("SUGERIR_TETOS") || upper.contains("SIMULAR_COMPRA") || upper.contains("DIAGNOSTICO_SAUDE_FINANCEIRA"))) ||
                 upper.contains("\"OPERACAO\": \"LISTAR\"") || upper.contains("\"OPERATION\": \"LISTAR\"")
             }
 
