@@ -1518,6 +1518,7 @@ object FinanceEngine {
         bill: RecurringBill
     ): Transaction? {
         val normBill = normalizeText(bill.description)
+        if (normBill.isBlank()) return null
         val monthTxs = allTxs.filter { it.competenceMonth == monthKey && it.type == bill.type }
 
         val explicit = monthTxs.firstOrNull { it.recurringBillId == bill.id }
@@ -1525,7 +1526,7 @@ object FinanceEngine {
 
         return monthTxs.firstOrNull { tx ->
             val normTx = normalizeText(tx.description)
-            normTx.contains(normBill) || normBill.contains(normTx)
+            normTx.isNotBlank() && (normTx.contains(normBill) || normBill.contains(normTx))
         }
     }
 

@@ -61,6 +61,7 @@ class FinanceEngineBudgetTest {
         val txs = listOf(
             Transaction(
                 id = "tx1",
+                description = "Mercado",
                 competenceMonth = "2026-11",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.PIX,
@@ -73,6 +74,7 @@ class FinanceEngineBudgetTest {
             ),
             Transaction(
                 id = "tx2",
+                description = "Aporte Tesouro Selic",
                 competenceMonth = "2026-11",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.PIX,
@@ -125,6 +127,7 @@ class FinanceEngineBudgetTest {
             // Gasto já pago de alimentação
             Transaction(
                 id = "tx_food",
+                description = "Almoço Restaurante",
                 competenceMonth = "2026-11",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.DEBIT,
@@ -137,6 +140,7 @@ class FinanceEngineBudgetTest {
             // Compra pendente no cartão
             Transaction(
                 id = "tx_food_pending",
+                description = "Supermercado Semanal",
                 competenceMonth = "2026-11",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.CREDIT_CARD,
@@ -181,6 +185,7 @@ class FinanceEngineBudgetTest {
         val txs = listOf(
             Transaction(
                 id = "tx1",
+                description = "Cinema",
                 competenceMonth = "2026-11",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.PIX,
@@ -201,7 +206,7 @@ class FinanceEngineBudgetTest {
             referenceDate = "2026-11-20"
         )
 
-        val lazer = report.items.first { it.category == "Lazer" }
+        val lazer = report.items.first { it.category.startsWith("Lazer") }
         assertNotEquals(CategoryBudgetAlertStatus.DANGER, lazer.status)
         assertEquals("No Limite", lazer.badgeLabel)
     }
@@ -211,6 +216,7 @@ class FinanceEngineBudgetTest {
         val history = listOf(
             Transaction(
                 id = "tx1",
+                description = "Supermercado",
                 competenceMonth = "2026-10",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.DEBIT,
@@ -221,6 +227,7 @@ class FinanceEngineBudgetTest {
             ),
             Transaction(
                 id = "tx2",
+                description = "Combustível",
                 competenceMonth = "2026-09",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.DEBIT,
