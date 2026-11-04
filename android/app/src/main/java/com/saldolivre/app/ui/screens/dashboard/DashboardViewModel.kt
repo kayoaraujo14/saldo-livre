@@ -216,9 +216,21 @@ class DashboardViewModel(
                     isUrgent = isUrgent
                 )
 
-                // 3. Maior Gasto (Top Categoria do Mês - Substitui o Termômetro Diário)
-                val totalExpenses = summary.byCategory.sumOf { it.amount }
-                val topCatExpense = summary.byCategory.firstOrNull { it.amount > 0.0 }
+                // 3. Maior Gasto (Top Categoria do Mês - Paridade 100% Web & Android)
+                val nonInvestCategories = summary.byCategory.filter {
+                    it.amount > 0.0 && !it.category.contains("investimento", ignoreCase = true)
+                }
+                val validCategories = if (nonInvestCategories.isNotEmpty()) {
+                    nonInvestCategories
+                } else {
+                    summary.byCategory.filter { it.amount > 0.0 }
+                }
+                val totalExpenses = if (summary.paid + summary.committed > 0.0) {
+                    summary.paid + summary.committed
+                } else {
+                    summary.byCategory.sumOf { it.amount }
+                }
+                val topCatExpense = validCategories.firstOrNull()
                 val topCategory = if (topCatExpense != null && totalExpenses > 0.0) {
                     val catPct = ((topCatExpense.amount / totalExpenses) * 100.0).roundToInt()
                     TopCategoryState(
@@ -260,23 +272,23 @@ class DashboardViewModel(
                 )
 
                 // 5. Envelopes Orçamentários Inteligentes & Termômetro de Saúde Financeira (4 Pilares)
+                val expectedMonthIncome = if (summary.income > 0.0) summary.income else user.monthlyIncome
                 val categoryBudgetReport = FinanceEngine.computeCategoryBudgets(
                     byCategory = summary.byCategory,
                     categoryBudgets = user.categoryBudgets,
                     monthKey = month,
-                    referenceDate = todayStr
+                    referenceDate = todayStr,
+                    expectedIncome = expectedMonthIncome
                 )
                 val budgetRebalance = FinanceEngine.suggestBudgetRebalance(categoryBudgetReport)
                 val suggestedBudgets = FinanceEngine.suggestCategoryBudgets(
                     allTransactions = allTxs,
                     uid = user.uid,
                     referenceMonth = month,
-                    monthlyIncome = if (summary.income > 0.0) summary.income else user.monthlyIncome
+                    monthlyIncome = expectedMonthIncome
                 )
 
-                val reserveBalance = user.investmentAssetBalances["Reserva de Emergência"]
-                    ?: user.investmentAssetBalances.entries.firstOrNull { it.key.contains("Reserva", ignoreCase = true) }?.value
-                    ?: (if (user.investmentAssetBalances.isNotEmpty()) user.investmentAssetBalances.values.sum() else summary.totalInvestedAccumulated)
+                val reserveBalance = FinanceEngine.resolveEmergencyReserveBalance(user, summary)
                 val financialHealth = FinanceEngine.calculateFinancialHealthScore(
                     summary = summary,
                     emergencyReserveBalance = reserveBalance,
@@ -581,11 +593,41 @@ class DashboardViewModel(
         }
     }
 
+    private fun calibrateMapToIncome(budgets: Map<String, Double>): Map<String, Double> {
+        val cleaned = budgets.filterValues { it > 0.0 }.mapValues { FinanceEngine.round2(it.value) }.toMutableMap()
+        val expectedIncome = if ((_uiState.value.summary?.income ?: 0.0) > 0.0) {
+            _uiState.value.summary!!.income
+        } else {
+            _uiState.value.currentUser.monthlyIncome
+        }
+        val rawSum = cleaned.values.sum()
+        if (expectedIncome > 0.0 && rawSum > expectedIncome) {
+            val scale = expectedIncome / rawSum
+            var running = 0.0
+            var maxCat = ""
+            var maxVal = -1.0
+            for (cat in cleaned.keys.toList()) {
+                val scaled = FinanceEngine.round2((cleaned[cat] ?: 0.0) * scale)
+                cleaned[cat] = scaled
+                running = FinanceEngine.round2(running + scaled)
+                if (scaled > maxVal) {
+                    maxVal = scaled
+                    maxCat = cat
+                }
+            }
+            val diff = FinanceEngine.round2(expectedIncome - running)
+            if (maxCat.isNotEmpty() && kotlin.math.abs(diff) > 0.0 && (cleaned[maxCat] ?: 0.0) + diff >= 0.0) {
+                cleaned[maxCat] = FinanceEngine.round2((cleaned[maxCat] ?: 0.0) + diff)
+            }
+        }
+        return cleaned
+    }
+
     fun updateCategoryBudgets(budgets: Map<String, Double>) {
         viewModelScope.launch {
             try {
-                val cleaned = budgets.filterValues { it > 0.0 }.mapValues { FinanceEngine.round2(it.value) }
-                repository.updateCategoryBudgets(cleaned)
+                val calibrated = calibrateMapToIncome(budgets)
+                repository.updateCategoryBudgets(calibrated)
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao atualizar envelopes orçamentários", e)
             }
@@ -597,9 +639,8 @@ class DashboardViewModel(
             try {
                 val suggested = _uiState.value.suggestedBudgets.suggestedBudgets
                 if (suggested.isNotEmpty()) {
-                    val merged = _uiState.value.currentUser.categoryBudgets.toMutableMap()
-                    merged.putAll(suggested)
-                    repository.updateCategoryBudgets(merged)
+                    val calibrated = calibrateMapToIncome(suggested)
+                    repository.updateCategoryBudgets(calibrated)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao aplicar sugestão de envelopes IA", e)

@@ -425,5 +425,96 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
       expect(health.score).toBe(100)
       expect(health.actionableTips?.length).toBeGreaterThan(0)
     })
+
+    it('calibra automaticamente o orçamento para nunca ultrapassar a entrada prevista do mês e reconcilia aliases de categorias', () => {
+      // Usuário gastou em "Lazer", mas o teto foi salvo como "Lazer & Entretenimento"
+      const spendData = [
+        { category: 'Moradia', amount: 2000 },
+        { category: 'Alimentação', amount: 1200 },
+        { category: 'Lazer', amount: 300 },
+      ]
+      // Soma bruta = 3000 + 2000 + 1000 = 6000, porém a entrada prevista deste mês é de apenas 4500
+      const budgets = {
+        Moradia: 3000,
+        Alimentação: 2000,
+        'Lazer & Entretenimento': 1000,
+      }
+
+      const report = computeCategoryBudgets(spendData, budgets, '2026-11', '2026-11-15', undefined, undefined, 4500)
+      expect(report.isCappedToIncome).toBe(true)
+      expect(report.rawTotalBudgeted).toBe(6000)
+      expect(report.expectedIncome).toBe(4500)
+      expect(report.totalBudgeted).toBeLessThanOrEqual(4500)
+      expect(report.totalBudgeted).toBe(4500)
+
+      // Alias "Lazer" deve ter sido reconciliado com "Lazer & Entretenimento"
+      const lazerItem = report.items.find((i) => i.category === 'Lazer & Entretenimento')!
+      expect(lazerItem).toBeDefined()
+      expect(lazerItem.spent).toBe(300)
+      expect(lazerItem.rawLimit).toBe(1000)
+      expect(lazerItem.limit).toBe(750) // 1000 * (4500 / 6000)
+
+      // E suggestCategoryBudgets também nunca deve sugerir mais que a entrada prevista do mês
+      const txs: Transaction[] = [
+        {
+          id: 'inc1',
+          description: 'Salário do Mês',
+          category: 'Salário & Remuneração',
+          type: 'income',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 3000,
+          totalAmount: 3000,
+          estimatedAmount: null,
+          dueDate: '2026-11-05',
+          competenceMonth: '2026-11',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 3000 },
+        },
+        {
+          id: 'exp1',
+          description: 'Moradia Alta',
+          category: 'Moradia',
+          type: 'expense',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 2500,
+          totalAmount: 2500,
+          estimatedAmount: null,
+          dueDate: '2026-10-10',
+          competenceMonth: '2026-10',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 2500 },
+        },
+        {
+          id: 'exp2',
+          description: 'Alimentação Alta',
+          category: 'Alimentação',
+          type: 'expense',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 1800,
+          totalAmount: 1800,
+          estimatedAmount: null,
+          dueDate: '2026-10-15',
+          competenceMonth: '2026-10',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 1800 },
+        },
+      ]
+
+      // Mesmo passando monthlyIncome = 8500, a entrada prevista de 2026-11 (inc1 = 3000) prevalece!
+      const sug = suggestCategoryBudgets(txs, 'me', '2026-11', 8500)
+      expect(sug.expectedIncome).toBe(3000)
+      expect(sug.isCappedToIncome).toBe(true)
+      expect(sug.totalSuggested).toBeLessThanOrEqual(3000)
+      expect(sug.incomeCoveragePct).toBeLessThanOrEqual(100)
+    })
   })
 })

@@ -89,6 +89,21 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-04] Calibração de Orçamento pela Entrada Prevista do Mês, Paridade 100% de KPIs de Saúde Financeira & Upgrade de UI/UX (Web & Android):**
+  - **1. Orçamento Calibrado Estritamente pela Entrada Prevista do Mês (`summary.income`):**
+    - Tanto o cálculo ativo dos envelopes (`computeCategoryBudgets`) quanto a sugestão da IA (`suggestCategoryBudgets`) em `web/src/lib/finance.ts` e `android/.../FinanceEngine.kt` utilizam a **entrada prevista real do mês selecionado (`summary.income`)** (usando `profile.monthlyIncome` apenas como fallback caso não haja receitas no mês).
+    - **Teto Máximo Garantido (`totalBudgeted <= expectedIncome` e `totalSuggested <= expectedIncome`):** Quando a soma bruta dos tetos configurados ou sugeridos supera o que é esperado entrar no mês, o motor calibra proporcionalmente os tetos (`isCappedToIncome = true`), preservando `rawLimit` e `rawTotalBudgeted` para transparência total na UI.
+    - Categorias fixas mensais (`FIXED_MONTHLY_CATEGORIES`) não recebem mais inflação de `+10%` na sugestão da IA, mantendo o valor exato da conta recorrente/média.
+  - **2. Paridade 100% dos KPIs de Saúde Financeira e Envelopes (Web vs. Android):**
+    - Alinhamento integral do cálculo de `rawTotalOutflow` (`summary.paid + summary.committed`) em `FinanceEngine.calculateFinancialHealthScore` com `web/src/lib/finance.ts`.
+    - Unificação de `resolveEmergencyReserveBalance(profile, summary)` em ambas as plataformas (incluindo parsing de `emergencyReserveBalance` no `FirestoreFinanceRepository.kt` e substituição da cadeia Elvis no `DashboardViewModel.kt`).
+    - Paridade total de fallbacks legados no `impactFor(tx, uid, all)` na Web (`allocations`, `splitType`, `createdByUid`/`paidByUid`) espelhando o `FinanceEngine.kt`.
+    - Reconciliação canônica de aliases de categorias (`normalizeBudgetCategory`: ex. `"Lazer"` ↔ `"Lazer & Entretenimento"`, `"Assinaturas"` ↔ `"Assinaturas & Serviços"`) e alinhamento do KPI `"Maior Gasto"` (`topCategoryData` / `topCategory`).
+  - **3. Elevação de UI e UX em Ambas as Plataformas:**
+    - **Card de Envelopes (`CategoryBudgetsCard.tsx` & `CategoryBudgetsSectionCard`):** Novo painel executivo de 4 métricas (`Entrada Prevista`, `Teto Orçado (% da entrada)`, `Consumido`, `Folga/Excesso nos Envelopes`), badge `Calibrado à Entrada`, filtros rápidos (`Todos`, `Em Alerta`, `Variáveis`, `Fixos`) e marcador de ritmo do calendário nas barras de progresso.
+    - **Modal de Gestão de Envelopes (`ManageBudgetsModal.tsx` & `ManageBudgetsDialog`):** Termômetro ao vivo de alocação da entrada prevista do mês, botão 1-clique `"Calibrar à Entrada"` quando a soma digitada excede a entrada do mês, pílulas rápidas `"Usar IA: R$ X"` por categoria e calibração automática ao salvar.
+    - **Modal de Diagnóstico de Saúde Financeira (`FinancialHealthModal.tsx` & `FinancialHealthDialog`):** Faixa de Resumo Executivo do Mês (`Entrada Prevista`, `Custo de Vida Líquido`, `Investido no Mês`, `Saldo Livre Real`) e cartões interativos para os 4 pilares.
+
 - **[2026-11-04] Sinergia Total de Saúde Financeira (4 Pilares) & Envelopes Orçamentários Realistas — Paridade 100% Web/Android & Integração Profunda no Chat (Conclusão Integral):**
   - **1. Paridade 100% Web (`/web`) e Android (`/android`):**
     - Unificação matemática e contratual entre `web/src/lib/finance.ts` e `android/.../FinanceEngine.kt` (`calculateFinancialHealthScore`, `resolveEmergencyReserveBalance`, `computeCategoryBudgets`, `suggestCategoryBudgets`, `suggestBudgetRebalance` e `isFixedBudgetCategory`).

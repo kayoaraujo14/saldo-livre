@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useFinance } from '@/store/FinanceContext'
-import { formatBRL } from '@/lib/utils'
+import { formatBRL, monthLabel } from '@/lib/utils'
 import { suggestCategoryBudgets } from '@/lib/finance'
 import { getCategoryDetail } from '@/types'
 import { ManageBudgetsModal } from '@/components/modals/ManageBudgetsModal'
@@ -15,11 +15,16 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquare,
+  CheckCircle2,
+  PlusCircle,
 } from 'lucide-react'
+
+type EnvelopeFilter = 'all' | 'alerts' | 'variable' | 'fixed'
 
 export function CategoryBudgetsCard() {
   const {
     categoryBudgetReport,
+    summary,
     transactions,
     me,
     month,
@@ -29,10 +34,16 @@ export function CategoryBudgetsCard() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTab, setModalTab] = useState<'budgets' | 'rebalance'>('budgets')
   const [isExpanded, setIsExpanded] = useState(false)
+  const [activeFilter, setActiveFilter] = useState<EnvelopeFilter>('all')
 
   const {
     items,
     totalBudgeted,
+    rawTotalBudgeted,
+    expectedIncome: reportExpectedIncome,
+    isCappedToIncome,
+    incomeUsagePercentage,
+    unallocatedIncome,
     totalSpent,
     totalRemaining,
     overallPercentage,
@@ -40,8 +51,38 @@ export function CategoryBudgetsCard() {
     topOverspentCategory,
   } = categoryBudgetReport
 
+  const expectedIncome =
+    reportExpectedIncome && reportExpectedIncome > 0
+      ? reportExpectedIncome
+      : summary?.income && summary.income > 0
+        ? summary.income
+        : (profile?.monthlyIncome || 0)
+
+  const filteredItems = useMemo(() => {
+    if (activeFilter === 'alerts') {
+      return items.filter(
+        (i) => i.status !== 'ok' || i.burnRateStatus === 'critical' || i.burnRateStatus === 'fast',
+      )
+    }
+    if (activeFilter === 'variable') {
+      return items.filter((i) => !i.isFixedCategory)
+    }
+    if (activeFilter === 'fixed') {
+      return items.filter((i) => Boolean(i.isFixedCategory))
+    }
+    return items
+  }, [items, activeFilter])
+
+  const alertsCount = useMemo(
+    () =>
+      items.filter(
+        (i) => i.status !== 'ok' || i.burnRateStatus === 'critical' || i.burnRateStatus === 'fast',
+      ).length,
+    [items],
+  )
+
   // Mostra os 4 primeiros ou todos se expandido
-  const visibleItems = isExpanded ? items : items.slice(0, 4)
+  const visibleItems = isExpanded ? filteredItems : filteredItems.slice(0, 4)
 
   const openConfig = () => {
     setModalTab('budgets')
@@ -69,7 +110,7 @@ export function CategoryBudgetsCard() {
       transactions,
       me?.uid || '',
       month,
-      profile?.monthlyIncome || 0,
+      expectedIncome,
     )
     if (Object.keys(suggestion.suggestedBudgets).length > 0) {
       await setCategoryBudgets(suggestion.suggestedBudgets)
@@ -77,6 +118,13 @@ export function CategoryBudgetsCard() {
       openConfig()
     }
   }
+
+  const incomeAllocPct =
+    incomeUsagePercentage !== undefined
+      ? Math.round(incomeUsagePercentage)
+      : expectedIncome > 0
+        ? Math.round((totalBudgeted / expectedIncome) * 100)
+        : 0
 
   return (
     <>
@@ -88,7 +136,7 @@ export function CategoryBudgetsCard() {
               <Target className="size-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
                   Envelopes Orçamentários
                 </h3>
@@ -108,24 +156,28 @@ export function CategoryBudgetsCard() {
                       ? 'Ritmo Acelerado'
                       : 'Dentro da Meta'}
                 </Badge>
+                {isCappedToIncome && (
+                  <Badge
+                    variant="outline"
+                    title={`Teto original (${formatBRL(rawTotalBudgeted || totalBudgeted)}) calibrado automaticamente para não exceder a entrada prevista de ${monthLabel(month)} (${formatBRL(expectedIncome)}).`}
+                    className="text-[9px] px-1.5 py-0 font-mono border-0 shrink-0 bg-cyan-500/15 text-cyan-300"
+                  >
+                    Calibrado à Entrada do Mês
+                  </Badge>
+                )}
               </div>
               <p className="text-[11px] text-slate-400">
                 {totalBudgeted > 0 ? (
                   <span>
-                    Orçado: <strong className="text-slate-200 font-mono">{formatBRL(totalBudgeted)}</strong>
+                    Entrada Prevista: <strong className="text-slate-200 font-mono">{formatBRL(expectedIncome)}</strong>
                     {' • '}
-                    Gasto: <strong className="text-slate-200 font-mono">{formatBRL(totalSpent)}</strong>
-                    {' '}
-                    <span className="text-slate-500 font-mono">({Math.round(overallPercentage)}%)</span>
-                    {' • '}
-                    {totalRemaining >= 0 ? (
-                      <span className="text-emerald-400 font-medium">Sobra: {formatBRL(totalRemaining)}</span>
-                    ) : (
-                      <span className="text-rose-400 font-medium">Excedido: {formatBRL(Math.abs(totalRemaining))}</span>
+                    Orçado: <strong className="text-emerald-300 font-mono">{formatBRL(totalBudgeted)}</strong>
+                    {expectedIncome > 0 && (
+                      <span className="text-slate-500 font-mono"> ({incomeAllocPct}% da entrada)</span>
                     )}
                   </span>
                 ) : (
-                  'Defina tetos por categoria para receber alertas e compensações com IA.'
+                  'Defina tetos calibrados pela entrada prevista do mês com alertas e compensações IA.'
                 )}
               </p>
             </div>
@@ -164,25 +216,71 @@ export function CategoryBudgetsCard() {
               className="h-7 text-xs bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border-white/[0.08] px-2.5"
             >
               <Sliders className="size-3 mr-1 text-slate-400" />
-              {totalBudgeted > 0 ? 'Ajustar' : 'Configurar'}
+              {totalBudgeted > 0 ? 'Ajustar Tetos' : 'Configurar'}
             </Button>
           </div>
         </div>
 
-        {/* Barra de Progresso Global do Orçamento */}
+        {/* Painel Resumo de Execução do Orçamento vs Entrada Prevista */}
         {totalBudgeted > 0 && (
-          <div className="space-y-1">
-            <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-white/[0.05]">
-              <div
-                className={`h-full transition-all duration-500 rounded-full ${
-                  overallPercentage >= 100
-                    ? 'bg-rose-500'
-                    : overallPercentage >= 80
-                      ? 'bg-amber-500'
-                      : 'bg-emerald-500'
-                }`}
-                style={{ width: `${Math.min(100, Math.max(0, overallPercentage))}%` }}
-              />
+          <div className="p-3 rounded-xl bg-slate-950/55 border border-white/[0.06] space-y-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+              <div className="p-2 rounded-lg bg-slate-900/60 border border-white/[0.04]">
+                <span className="text-[10px] text-slate-400 block">Entrada Prevista</span>
+                <strong className="font-mono text-xs text-slate-100">
+                  {formatBRL(expectedIncome)}
+                </strong>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-900/60 border border-white/[0.04]">
+                <span className="text-[10px] text-slate-400 block">Teto Orçado ({incomeAllocPct}%)</span>
+                <strong className="font-mono text-xs text-emerald-300">
+                  {formatBRL(totalBudgeted)}
+                </strong>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-900/60 border border-white/[0.04]">
+                <span className="text-[10px] text-slate-400 block">Consumido ({Math.round(overallPercentage)}%)</span>
+                <strong className="font-mono text-xs text-slate-100">
+                  {formatBRL(totalSpent)}
+                </strong>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-900/60 border border-white/[0.04]">
+                <span className="text-[10px] text-slate-400 block">
+                  {totalRemaining >= 0 ? 'Folga nos Envelopes' : 'Excesso nos Envelopes'}
+                </span>
+                <strong
+                  className={`font-mono text-xs ${
+                    totalRemaining >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {totalRemaining >= 0
+                    ? `+${formatBRL(totalRemaining)}`
+                    : `-${formatBRL(Math.abs(totalRemaining))}`}
+                </strong>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span>Progresso de consumo dos envelopes</span>
+                <span className="font-mono">
+                  {Math.round(overallPercentage)}% usado
+                  {unallocatedIncome && unallocatedIncome > 0
+                    ? ` • Margem livre não orçada: ${formatBRL(unallocatedIncome)}`
+                    : ''}
+                </span>
+              </div>
+              <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-white/[0.05]">
+                <div
+                  className={`h-full transition-all duration-500 rounded-full ${
+                    overallPercentage >= 100
+                      ? 'bg-rose-500'
+                      : overallPercentage >= 80
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.min(100, Math.max(0, overallPercentage))}%` }}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -195,7 +293,7 @@ export function CategoryBudgetsCard() {
               <span className="truncate">
                 {topOverspentCategory.status === 'danger'
                   ? `"${topOverspentCategory.category}" ultrapassou o teto em ${formatBRL(Math.abs(topOverspentCategory.remaining))}.`
-                  : `Projeção de estouro em "${topOverspentCategory.category}" até o fim do mês.`}
+                  : `Projeção de estouro em "${topOverspentCategory.category}" (${formatBRL(topOverspentCategory.projectedSpent)} até o fim do mês).`}
               </span>
             </div>
             <button
@@ -208,115 +306,188 @@ export function CategoryBudgetsCard() {
           </div>
         )}
 
-        {/* Grade de Envelopes */}
+        {/* Filtros Rápidos e Grade de Envelopes */}
         {items.length > 0 ? (
-          <div className="space-y-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-              {visibleItems.map((item) => {
-                const detail = getCategoryDetail(item.category)
-                const isOver = item.status === 'danger'
-                const isWarn = item.status === 'warning'
+          <div className="space-y-2.5">
+            {items.length > 2 && (
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {(
+                    [
+                      { id: 'all', label: `Todos (${items.length})` },
+                      { id: 'alerts', label: `Em Alerta (${alertsCount})` },
+                      { id: 'variable', label: 'Variáveis' },
+                      { id: 'fixed', label: 'Fixos Mensais' },
+                    ] as const
+                  ).map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setActiveFilter(tab.id)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition-all cursor-pointer ${
+                        activeFilter === tab.id
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-slate-950/50 text-slate-400 border border-white/[0.05] hover:text-slate-200'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[10px] text-slate-500 hidden sm:inline">
+                  Clique em qualquer envelope para ajustar o teto
+                </span>
+              </div>
+            )}
 
-                return (
-                  <div
-                    key={item.category}
-                    className="p-3 rounded-xl bg-slate-950/60 border border-white/[0.06] hover:border-white/[0.12] transition-colors flex flex-col justify-between gap-2"
-                  >
-                    <div>
-                      {/* Top linha: Categoria + Badge de Ritmo */}
-                      <div className="flex items-center justify-between gap-1 mb-1.5">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <div
-                            className="size-2 rounded-full shrink-0"
-                            style={{ backgroundColor: detail.color || '#10b981' }}
-                          />
-                          <span className="font-semibold text-xs text-slate-200 truncate">
-                            {item.category}
-                          </span>
+            {visibleItems.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                {visibleItems.map((item) => {
+                  const detail = getCategoryDetail(item.category)
+                  const isOver = item.status === 'danger'
+                  const isWarn = item.status === 'warning'
+                  const calendarPacePct =
+                    item.totalDays > 0
+                      ? Math.min(100, Math.round((item.currentDay / item.totalDays) * 100))
+                      : 0
+
+                  return (
+                    <div
+                      key={item.category}
+                      onClick={openConfig}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openConfig()
+                        }
+                      }}
+                      title={`Clique para ajustar o teto de ${item.category}`}
+                      className="p-3 rounded-xl bg-slate-950/60 border border-white/[0.06] hover:border-emerald-500/30 transition-all flex flex-col justify-between gap-2 cursor-pointer group"
+                    >
+                      <div>
+                        {/* Top linha: Categoria + Badge de Ritmo */}
+                        <div className="flex items-center justify-between gap-1 mb-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div
+                              className="size-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: detail.color || '#10b981' }}
+                            />
+                            <span className="font-semibold text-xs text-slate-200 truncate group-hover:text-white transition-colors">
+                              {item.category}
+                            </span>
+                          </div>
+
+                          {item.limit <= 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[8px] px-1.5 py-0 border-0 bg-amber-500/15 text-amber-300 font-mono shrink-0 flex items-center gap-0.5"
+                            >
+                              <PlusCircle className="size-2.5" />
+                              Definir teto
+                            </Badge>
+                          ) : item.burnRateStatus === 'critical' ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[8px] px-1 py-0 border-0 bg-rose-500/15 text-rose-300 font-mono shrink-0 flex items-center gap-0.5"
+                            >
+                              <Flame className="size-2.5" />
+                              {item.spent > item.limit ? 'Estourado' : 'Crítico'}
+                            </Badge>
+                          ) : item.burnRateStatus === 'fast' ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[8px] px-1 py-0 border-0 bg-amber-500/15 text-amber-300 font-mono shrink-0 flex items-center gap-0.5"
+                            >
+                              <AlertTriangle className="size-2.5" />
+                              Acelerado
+                            </Badge>
+                          ) : item.isFixedCategory ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[8px] px-1 py-0 border-0 bg-cyan-500/15 text-cyan-300 font-mono shrink-0"
+                            >
+                              Fixo Mensal
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="text-[8px] px-1 py-0 border-0 bg-emerald-500/15 text-emerald-300 font-mono shrink-0 flex items-center gap-0.5"
+                            >
+                              <CheckCircle2 className="size-2.5" />
+                              No Ritmo
+                            </Badge>
+                          )}
                         </div>
 
-                        {item.burnRateStatus === 'critical' ? (
-                          <Badge
-                            variant="outline"
-                            className="text-[8px] px-1 py-0 border-0 bg-rose-500/15 text-rose-300 font-mono shrink-0 flex items-center gap-0.5"
-                          >
-                            <Flame className="size-2.5" />
-                            {item.spent > item.limit && item.limit > 0 ? 'Estourado' : 'Crítico'}
-                          </Badge>
-                        ) : item.burnRateStatus === 'fast' ? (
-                          <Badge
-                            variant="outline"
-                            className="text-[8px] px-1 py-0 border-0 bg-amber-500/15 text-amber-300 font-mono shrink-0 flex items-center gap-0.5"
-                          >
-                            <AlertTriangle className="size-2.5" />
-                            Acelerado
-                          </Badge>
-                        ) : item.isFixedCategory ? (
-                          <Badge
-                            variant="outline"
-                            className="text-[8px] px-1 py-0 border-0 bg-cyan-500/15 text-cyan-300 font-mono shrink-0"
-                          >
-                            Fixo Mensal
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className="text-[8px] px-1 py-0 border-0 bg-emerald-500/15 text-emerald-300 font-mono shrink-0"
-                          >
-                            Normal
-                          </Badge>
-                        )}
+                        {/* Valores */}
+                        <div className="flex items-baseline justify-between text-xs">
+                          <span className="font-mono font-bold text-white">
+                            {formatBRL(item.spent)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {item.limit > 0 ? `/ ${formatBRL(item.limit)}` : 'Sem teto definido'}
+                          </span>
+                        </div>
                       </div>
 
-                      {/* Valores */}
-                      <div className="flex items-baseline justify-between text-xs">
-                        <span className="font-mono font-bold text-white">
-                          {formatBRL(item.spent)}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {item.limit > 0 ? `/ ${formatBRL(item.limit)}` : 'Sem teto'}
-                        </span>
+                      {/* Barra de Progresso individual com marcador de ritmo do mês */}
+                      <div className="space-y-1">
+                        <div className="relative w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              isOver ? 'bg-rose-500' : isWarn ? 'bg-amber-500' : 'bg-emerald-500'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(0, item.percentage))}%` }}
+                          />
+                          {!item.isFixedCategory && item.limit > 0 && calendarPacePct > 5 && calendarPacePct < 95 && (
+                            <div
+                              title={`Tempo decorrido do mês: ${calendarPacePct}%`}
+                              className="absolute top-0 bottom-0 w-0.5 bg-white/40"
+                              style={{ left: `${calendarPacePct}%` }}
+                            />
+                          )}
+                        </div>
+
+                        {/* Rodapé informativo realista */}
+                        <div className="flex items-center justify-between text-[9px] text-slate-400 pt-0.5 gap-1">
+                          <span className="font-mono truncate">
+                            {item.limit <= 0
+                              ? 'Toque para orçar'
+                              : !item.isFixedCategory && item.remaining > 0 && item.daysRemaining > 0
+                                ? `Meta: ${formatBRL(item.recommendedDailyRemaining)}/dia`
+                                : item.isFixedCategory
+                                  ? `Custo fixo (${Math.round(item.percentage)}%)`
+                                  : `${Math.round(item.percentage)}% consumido`}
+                          </span>
+                          {item.limit <= 0 ? (
+                            <span className="text-amber-400 font-medium shrink-0">Sem teto</span>
+                          ) : item.remaining > 0 ? (
+                            <span className="text-emerald-400 font-medium shrink-0 font-mono">
+                              +{formatBRL(item.remaining)}
+                            </span>
+                          ) : item.remaining < 0 ? (
+                            <span className="text-rose-400 font-medium shrink-0 font-mono">
+                              -{formatBRL(Math.abs(item.remaining))}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 shrink-0">No limite</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-
-                    {/* Barra de Progresso individual */}
-                    <div className="space-y-1">
-                      <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-300 ${
-                            isOver ? 'bg-rose-500' : isWarn ? 'bg-amber-500' : 'bg-emerald-500'
-                          }`}
-                          style={{ width: `${Math.min(100, Math.max(0, item.percentage))}%` }}
-                        />
-                      </div>
-
-                      {/* Rodapé informativo realista */}
-                      <div className="flex items-center justify-between text-[9px] text-slate-400 pt-0.5 gap-1">
-                        <span className="font-mono truncate">
-                          {!item.isFixedCategory && item.remaining > 0 && item.limit > 0
-                            ? `Meta: ${formatBRL(item.recommendedDailyRemaining)}/dia`
-                            : `${item.percentage}% gasto`}
-                        </span>
-                        {item.remaining > 0 ? (
-                          <span className="text-emerald-400 font-medium shrink-0">
-                            +{formatBRL(item.remaining)}
-                          </span>
-                        ) : item.remaining < 0 ? (
-                          <span className="text-rose-400 font-medium shrink-0">
-                            -{formatBRL(Math.abs(item.remaining))}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500 shrink-0">No limite</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="p-3 rounded-xl bg-slate-950/40 border border-white/[0.04] text-center text-xs text-slate-400">
+                Nenhum envelope encontrado para o filtro selecionado.
+              </div>
+            )}
 
             {/* Botão de expansão se houver mais de 4 */}
-            {items.length > 4 && (
+            {filteredItems.length > 4 && (
               <div className="flex justify-center pt-1">
                 <button
                   type="button"
@@ -331,7 +502,7 @@ export function CategoryBudgetsCard() {
                   ) : (
                     <>
                       <ChevronDown className="size-3" />
-                      Ver todos os {items.length} envelopes
+                      Ver todos os {filteredItems.length} envelopes
                     </>
                   )}
                 </button>
@@ -341,7 +512,8 @@ export function CategoryBudgetsCard() {
         ) : (
           <div className="p-4 rounded-xl bg-slate-950/40 border border-white/[0.04] text-center space-y-2.5">
             <p className="text-xs text-slate-400">
-              Nenhum envelope definido para este mês. Gere tetos automáticos em 1 clique baseados na sua média histórica real!
+              Nenhum envelope definido para este mês. Gere tetos automáticos em 1 clique calibrados pela sua entrada prevista de{' '}
+              <strong className="text-slate-200 font-mono">{formatBRL(expectedIncome)}</strong>!
             </p>
             <div className="flex items-center justify-center gap-2 flex-wrap">
               <Button

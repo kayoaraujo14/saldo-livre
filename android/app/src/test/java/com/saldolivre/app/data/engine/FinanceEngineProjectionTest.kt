@@ -261,4 +261,43 @@ class FinanceEngineProjectionTest {
         assertEquals(FinancialHealthClassification.EXCELLENT, health.classification)
         assertTrue(health.actionableTips.isNotEmpty())
     }
+
+    @Test
+    fun `computeCategoryBudgets and suggestCategoryBudgets cap total budget to expected monthly income and reconcile aliases`() {
+        val summary = MonthSummary(
+            monthKey = "2026-11",
+            income = 4500.0,
+            committed = 1500.0,
+            paid = 2000.0,
+            freeBalance = 1000.0,
+            byCategory = listOf(
+                CategoryExpense("Moradia", 2000.0),
+                CategoryExpense("Alimentação", 1200.0),
+                CategoryExpense("Lazer", 300.0)
+            )
+        )
+
+        // Soma bruta = 6000, mas entrada esperada no mês (summary.income) = 4500
+        val budgets = mapOf(
+            "Moradia" to 3000.0,
+            "Alimentação" to 2000.0,
+            "Lazer & Entretenimento" to 1000.0
+        )
+
+        val report = FinanceEngine.computeCategoryBudgets(
+            summary = summary,
+            categoryBudgets = budgets,
+            referenceDate = "2026-11-15"
+        )
+
+        assertTrue(report.isCappedToIncome)
+        assertEquals(6000.0, report.rawTotalBudgeted, 0.01)
+        assertEquals(4500.0, report.expectedIncome, 0.01)
+        assertEquals(4500.0, report.totalBudgeted, 0.01)
+
+        val lazer = report.items.find { it.category == "Lazer & Entretenimento" }
+        assertNotNull(lazer)
+        assertEquals(300.0, lazer!!.spent, 0.01)
+        assertEquals(750.0, lazer.limit, 0.01)
+    }
 }

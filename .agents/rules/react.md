@@ -29,3 +29,8 @@ Ao desenvolver, manter ou refatorar código no diretório `/web`, você deve seg
 ## 3. Padrões de Código e Arquitetura
 - Mantenha componentes coesos, desacoplados e de responsabilidade única.
 - Separe componentes de apresentação de lógica de negócios e chamadas à API / banco de dados (Firebase / Supabase).
+
+## 4. Validação Visual Obrigatória (Skill ui-ux-validator)
+- Sempre que houver criação, modificação ou refatoração em arquivos de interface (`web/src/components/**` ou `web/src/App.tsx`), é **obrigatório** acionar o protocolo da skill `.agents/skills/ui-ux-validator/SKILL.md`.
+- Capture screenshots nos formatos Desktop (1440x900) e Mobile Web (390x844) salvando em `.agents/screenshots/web/`.
+- Inspecione as imagens com visão multimodal aplicando o Checklist de Auditoria Visual e o Loop de Auto-correção antes de considerar a entrega finalizada.

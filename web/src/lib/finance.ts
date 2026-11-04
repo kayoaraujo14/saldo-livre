@@ -747,15 +747,65 @@ export function impactFor(tx: Transaction, uid: string, all: Transaction[]) {
     if (tx.acceptanceStatus === 'accepted') {
       // Amigo aceitou: cada um sofre apenas a sua parte
       if (uid === tx.assignedFriendUid) return friendShare
-      return tx.userImpact?.[uid] ?? 0
+      const ownImpact = tx.userImpact?.[uid]
+      if (typeof ownImpact === 'number') return ownImpact
+      if (uid === tx.createdByUid || uid === tx.paidByUid) {
+        return round2(effectiveAmount(tx) - friendShare)
+      }
+      return 0
     }
     // Pendente ou recusado: amigo ainda NÃO tem o saldo comprometido
     if (uid === tx.assignedFriendUid) return 0
     // Quem lançou tem apenas o seu próprio impacto (a cota do amigo é valor a receber em receivables)
-    return tx.userImpact?.[uid] ?? 0
+    const ownImpact = tx.userImpact?.[uid]
+    if (typeof ownImpact === 'number') return ownImpact
+    return uid === tx.createdByUid || uid === tx.paidByUid
+      ? round2(effectiveAmount(tx) - friendShare)
+      : 0
   }
 
-  return tx.userImpact?.[uid] ?? 0
+  const directImpact = tx.userImpact?.[uid]
+  if (typeof directImpact === 'number') {
+    return directImpact
+  }
+
+  // Fallbacks de paridade Web/Android para documentos legados sem userImpact explícito:
+  if (Array.isArray(tx.allocations) && tx.allocations.length > 0) {
+    const userAllocs = tx.allocations.filter(
+      (a) =>
+        a &&
+        a.type === 'PLATFORM_USER' &&
+        (a.uid === uid || a.name?.toLowerCase() === 'você' || a.name?.toLowerCase() === 'meu'),
+    )
+    if (userAllocs.length > 0) {
+      return round2(userAllocs.reduce((s, a) => s + (Number(a.amount) || 0), 0))
+    }
+    return 0
+  }
+
+  if (tx.splitType === 'external' || (tx.splitType as string) === 'THIRD_PARTY') {
+    return 0
+  }
+
+  if (tx.splitType === 'split_50' || (tx.splitType as string) === 'SHARED_50_50') {
+    if ((tx.visibleToUids || []).includes(uid) || uid === tx.createdByUid || uid === tx.paidByUid) {
+      return round2(effectiveAmount(tx) / 2)
+    }
+    return 0
+  }
+
+  if (tx.splitType === 'partner') {
+    if (uid === tx.createdByUid || uid === tx.paidByUid) return 0
+    if ((tx.visibleToUids || []).includes(uid)) return effectiveAmount(tx)
+    return 0
+  }
+
+  if (tx.splitType === 'mine') {
+    if (uid === tx.createdByUid || uid === tx.paidByUid) return effectiveAmount(tx)
+    return 0
+  }
+
+  return uid === tx.createdByUid || uid === tx.paidByUid ? effectiveAmount(tx) : 0
 }
 
 /**
@@ -2272,6 +2322,24 @@ export const NON_ENVELOPE_CATEGORIES = new Set([
   'Benefícios',
 ])
 
+const CATEGORY_CANONICAL_MAP: Record<string, string> = {
+  Lazer: 'Lazer & Entretenimento',
+  Assinaturas: 'Assinaturas & Serviços',
+  Compras: 'Compras & Estilo de Vida',
+  Educação: 'Educação & Desenvolvimento',
+  Financiamentos: 'Financiamentos & Dívidas',
+  'Financiamentos & Empréstimos': 'Financiamentos & Dívidas',
+  Impostos: 'Impostos & Tributos',
+  'Cuidados Pessoais': 'Cuidados Pessoais & Estética',
+  Família: 'Família & Dependentes',
+  Trabalho: 'Trabalho / PJ / Carreira',
+}
+
+export function normalizeBudgetCategory(category: string): string {
+  const trimmed = (category || '').trim()
+  return CATEGORY_CANONICAL_MAP[trimmed] || trimmed
+}
+
 export function resolveEmergencyReserveBalance(
   profile: UserProfile | null | undefined,
   summary: MonthSummary | null | undefined,
@@ -2279,19 +2347,21 @@ export function resolveEmergencyReserveBalance(
   const balances = profile?.investmentAssetBalances
   let reserveBalance = 0
   if (balances && typeof balances === 'object') {
-    if (typeof balances['Reserva de Emergência'] === 'number') {
-      reserveBalance = balances['Reserva de Emergência']
+    const exactReserve = balances['Reserva de Emergência']
+    if (typeof exactReserve === 'number' && exactReserve > 0) {
+      reserveBalance = exactReserve
     } else {
       const reserveKey = Object.keys(balances).find((k) => k.toLowerCase().includes('reserva'))
-      if (reserveKey && typeof balances[reserveKey] === 'number') {
-        reserveBalance = balances[reserveKey]
+      const keyVal = reserveKey ? balances[reserveKey] : undefined
+      if (typeof keyVal === 'number' && keyVal > 0) {
+        reserveBalance = keyVal
       } else {
-        const values = Object.values(balances).filter((v): v is number => typeof v === 'number')
+        const values = Object.values(balances).filter((v): v is number => typeof v === 'number' && v > 0)
         if (values.length > 0) reserveBalance = values.reduce((sum, v) => sum + v, 0)
       }
     }
   }
-  if (reserveBalance <= 0 && typeof profile?.emergencyReserveBalance === 'number') {
+  if (reserveBalance <= 0 && typeof profile?.emergencyReserveBalance === 'number' && profile.emergencyReserveBalance > 0) {
     reserveBalance = profile.emergencyReserveBalance
   }
   if (reserveBalance <= 0) {
@@ -2540,7 +2610,8 @@ export function calculateFinancialHealthScore(
 
 /**
  * Calcula o consumo, ritmo diário, projeção de fechamento e alertas de estouro
- * para envelopes orçamentários por categoria.
+ * para envelopes orçamentários por categoria, calibrando automaticamente o teto
+ * caso a soma dos envelopes ultrapasse a entrada prevista do mês (expectedIncome).
  */
 export function computeCategoryBudgets(
   categorySpendData: Array<{ category: string; amount: number }> | Transaction[],
@@ -2549,8 +2620,28 @@ export function computeCategoryBudgets(
   referenceDate: string = todayKey(),
   uid?: string,
   allTransactions?: Transaction[],
+  expectedIncome: number = 0,
 ): CategoryBudgetReport {
-  // 1. Extrai ou computa o mapa de gastos por categoria
+  const rawBudgetsInput = categoryBudgets || {}
+  const resolveKey = (rawCat: string): string => {
+    const trimmed = (rawCat || '').trim()
+    if (!trimmed) return ''
+    if (trimmed in rawBudgetsInput && (Number(rawBudgetsInput[trimmed]) || 0) > 0) {
+      return trimmed
+    }
+    const canon = normalizeBudgetCategory(trimmed)
+    if (canon in rawBudgetsInput && (Number(rawBudgetsInput[canon]) || 0) > 0) {
+      return canon
+    }
+    for (const k of Object.keys(rawBudgetsInput)) {
+      if ((Number(rawBudgetsInput[k]) || 0) > 0 && normalizeBudgetCategory(k) === canon) {
+        return k
+      }
+    }
+    return canon
+  }
+
+  // 1. Extrai ou computa o mapa de gastos por categoria (reconciliando nomes legados/canônicos)
   const spentMap = new Map<string, number>()
 
   if (Array.isArray(categorySpendData) && categorySpendData.length > 0) {
@@ -2559,7 +2650,8 @@ export function computeCategoryBudgets(
       // É uma lista { category, amount } (ex: summary.byCategory)
       for (const item of categorySpendData as Array<{ category: string; amount: number }>) {
         if (item.category) {
-          spentMap.set(item.category, (spentMap.get(item.category) || 0) + (Number(item.amount) || 0))
+          const key = resolveKey(item.category)
+          spentMap.set(key, (spentMap.get(key) || 0) + (Number(item.amount) || 0))
         }
       }
     } else if (uid) {
@@ -2570,10 +2662,52 @@ export function computeCategoryBudgets(
         if (tx.type === 'expense') {
           const impact = impactFor(tx, uid, all)
           if (impact > 0 && tx.category) {
-            spentMap.set(tx.category, (spentMap.get(tx.category) || 0) + impact)
+            const key = resolveKey(tx.category)
+            spentMap.set(key, (spentMap.get(key) || 0) + impact)
           }
         }
       }
+    }
+  }
+
+  // Consolida o mapa de orçamentos brutos sob as mesmas chaves reconciliadas
+  const rawLimitsMap = new Map<string, number>()
+  for (const [cat, val] of Object.entries(rawBudgetsInput)) {
+    const num = round2(Math.max(0, Number(val) || 0))
+    if (num > 0) {
+      const key = resolveKey(cat)
+      rawLimitsMap.set(key, round2((rawLimitsMap.get(key) || 0) + num))
+    }
+  }
+
+  const rawTotalBudgeted = round2([...rawLimitsMap.values()].reduce((acc, v) => acc + v, 0))
+  const validExpectedIncome = round2(Math.max(0, Number(expectedIncome) || 0))
+  const isCappedToIncome = validExpectedIncome > 0 && rawTotalBudgeted > validExpectedIncome
+
+  // Se o orçamento bruto ultrapassar a entrada prevista do mês, calibra proporcionalmente
+  // para que o orçamento total NUNCA seja maior que o esperado entrar naquele mês.
+  const effectiveLimitsMap = new Map<string, number>()
+  if (isCappedToIncome && rawTotalBudgeted > 0) {
+    const ratio = validExpectedIncome / rawTotalBudgeted
+    let sumScaled = 0
+    let maxKey = ''
+    let maxVal = -1
+    for (const [k, rawLim] of rawLimitsMap.entries()) {
+      const scaled = round2(rawLim * ratio)
+      effectiveLimitsMap.set(k, scaled)
+      sumScaled = round2(sumScaled + scaled)
+      if (scaled > maxVal) {
+        maxVal = scaled
+        maxKey = k
+      }
+    }
+    const diff = round2(validExpectedIncome - sumScaled)
+    if (maxKey && Math.abs(diff) >= 0.01) {
+      effectiveLimitsMap.set(maxKey, round2(Math.max(0, (effectiveLimitsMap.get(maxKey) || 0) + diff)))
+    }
+  } else {
+    for (const [k, rawLim] of rawLimitsMap.entries()) {
+      effectiveLimitsMap.set(k, rawLim)
     }
   }
 
@@ -2591,10 +2725,7 @@ export function computeCategoryBudgets(
   const daysRemaining = Math.max(0, totalDays - currentDay)
 
   // 3. Monta lista de categorias a avaliar (todas com orçamento + qualquer uma com gasto expressivo > 0)
-  const budgetedCategories = Object.keys(categoryBudgets || {}).filter(
-    (cat) => (Number(categoryBudgets[cat]) || 0) > 0,
-  )
-  const allCategoriesSet = new Set<string>([...budgetedCategories, ...spentMap.keys()])
+  const allCategoriesSet = new Set<string>([...effectiveLimitsMap.keys(), ...spentMap.keys()])
 
   const items: CategoryBudgetStatus[] = []
   let totalBudgeted = 0
@@ -2603,12 +2734,14 @@ export function computeCategoryBudgets(
   let warningCount = 0
 
   for (const category of allCategoriesSet) {
-    const limit = round2(Math.max(0, Number(categoryBudgets[category]) || 0))
+    const rawLimit = round2(Math.max(0, rawLimitsMap.get(category) || 0))
+    const limit = round2(Math.max(0, effectiveLimitsMap.get(category) || 0))
     const spent = round2(Math.max(0, spentMap.get(category) || 0))
+    const canonCat = normalizeBudgetCategory(category)
 
     // Categorias patrimoniais ou de entrada (ex: Investimentos, Estorno) não devem gerar alerta
     // de "despesa sem teto", a menos que o usuário tenha criado um envelope explícito para ela.
-    if (limit <= 0 && NON_ENVELOPE_CATEGORIES.has(category)) continue
+    if (limit <= 0 && (NON_ENVELOPE_CATEGORIES.has(category) || NON_ENVELOPE_CATEGORIES.has(canonCat))) continue
 
     const remaining = round2(limit - spent)
 
@@ -2616,7 +2749,7 @@ export function computeCategoryBudgets(
     if (limit <= 0 && spent <= 0) continue
 
     const percentage = limit > 0 ? round2((spent / limit) * 100) : (spent > 0 ? 100 : 0)
-    const isFixedCategory = FIXED_MONTHLY_CATEGORIES.has(category)
+    const isFixedCategory = FIXED_MONTHLY_CATEGORIES.has(category) || FIXED_MONTHLY_CATEGORIES.has(canonCat)
 
     let status: 'ok' | 'warning' | 'danger' = 'ok'
     if (limit > 0) {
@@ -2662,6 +2795,7 @@ export function computeCategoryBudgets(
     items.push({
       category,
       limit,
+      rawLimit,
       spent,
       remaining,
       percentage,
@@ -2696,10 +2830,17 @@ export function computeCategoryBudgets(
   else if (overallPercentage >= 80) overallStatus = 'warning'
 
   const topOverspentCategory = items.find((i) => i.status === 'danger' || i.burnRateStatus === 'critical')
+  const incomeUsagePercentage = validExpectedIncome > 0 ? round2((totalBudgeted / validExpectedIncome) * 100) : 0
+  const unallocatedIncome = validExpectedIncome > 0 ? round2(Math.max(0, validExpectedIncome - totalBudgeted)) : 0
 
   return {
     items,
     totalBudgeted,
+    rawTotalBudgeted,
+    expectedIncome: validExpectedIncome,
+    isCappedToIncome,
+    incomeUsagePercentage,
+    unallocatedIncome,
     totalSpent,
     totalRemaining,
     overallPercentage,
@@ -2711,8 +2852,9 @@ export function computeCategoryBudgets(
 }
 
 /**
- * Analisa as transações dos últimos 3 meses para sugerir tetos orçamentários realistas.
- * Inclui uma margem de segurança de 10% arredondada para dezenas inteiras.
+ * Analisa as transações dos últimos 3 meses e do mês selecionado para sugerir tetos
+ * orçamentários realistas, garantindo que o orçamento total sugerido NUNCA ultrapasse
+ * a entrada prevista daquele mês (expectedIncome).
  */
 export function suggestCategoryBudgets(
   allTransactions: Transaction[],
@@ -2724,6 +2866,8 @@ export function suggestCategoryBudgets(
   totalSuggested: number
   incomeCoveragePct: number
   categoryAverages: Record<string, number>
+  expectedIncome?: number
+  isCappedToIncome?: boolean
 } {
   const previousMonths = [
     shiftMonth(referenceMonth, -1),
@@ -2738,32 +2882,54 @@ export function suggestCategoryBudgets(
 
   const all = Array.isArray(allTransactions) ? allTransactions : []
   let matchingCount = 0
+  let referenceMonthIncome = 0
+  let referenceMonthInvested = 0
+  const curMonthExpenseMap = new Map<string, number>()
 
   for (const tx of all) {
-    if (tx.type !== 'expense') continue
     const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
-    if (!previousMonths.includes(m)) continue
-
     const impact = impactFor(tx, uid, all)
+
+    if (m === referenceMonth) {
+      if (tx.type === 'income' && Math.abs(impact) > 0) {
+        const isResgate =
+          tx.category === 'Investimentos' ||
+          (tx.category === 'Rendimentos & Investimentos' && Boolean(tx.subcategory && /resgate/i.test(tx.subcategory)))
+        if (!isResgate) {
+          referenceMonthIncome += Math.abs(impact)
+        } else {
+          referenceMonthInvested -= Math.abs(impact)
+        }
+      } else if (tx.type === 'expense' && impact > 0 && tx.category) {
+        const canonCat = normalizeBudgetCategory(tx.category)
+        if (canonCat === 'Investimentos') {
+          referenceMonthInvested += impact
+        } else {
+          curMonthExpenseMap.set(canonCat, (curMonthExpenseMap.get(canonCat) || 0) + impact)
+        }
+      }
+    }
+
+    if (tx.type !== 'expense' || !previousMonths.includes(m)) continue
     if (impact <= 0 || !tx.category) continue
 
+    const canonCat = normalizeBudgetCategory(tx.category)
     const catMap = monthCategoryTotals.get(m)!
-    catMap.set(tx.category, (catMap.get(tx.category) || 0) + impact)
+    catMap.set(canonCat, (catMap.get(canonCat) || 0) + impact)
     matchingCount++
   }
 
+  referenceMonthIncome = round2(Math.max(0, referenceMonthIncome))
+  referenceMonthInvested = round2(Math.max(0, referenceMonthInvested))
+
+  // Usa o que é esperado entrar no mês selecionado (referenceMonthIncome); se não houver receitas lançadas no mês, usa monthlyIncome passado
+  const effectiveExpectedIncome = referenceMonthIncome > 0
+    ? referenceMonthIncome
+    : round2(Math.max(0, Number(monthlyIncome) || 0))
+
   // Se não houver dados nos meses anteriores, analisa o próprio referenceMonth
   if (matchingCount === 0) {
-    const curMap = new Map<string, number>()
-    for (const tx of all) {
-      if (tx.type !== 'expense') continue
-      const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
-      if (m !== referenceMonth) continue
-      const impact = impactFor(tx, uid, all)
-      if (impact <= 0 || !tx.category) continue
-      curMap.set(tx.category, (curMap.get(tx.category) || 0) + impact)
-    }
-    monthCategoryTotals.set(referenceMonth, curMap)
+    monthCategoryTotals.set(referenceMonth, curMonthExpenseMap)
   }
 
   const activeMonths = [...monthCategoryTotals.keys()].filter(
@@ -2779,6 +2945,13 @@ export function suggestCategoryBudgets(
     }
   }
 
+  // Inclui categorias que já possuem gastos compromissados no mês atual mas não estavam no histórico
+  for (const [cat, curAmt] of curMonthExpenseMap.entries()) {
+    if (!sumMap.has(cat) && curAmt >= 20) {
+      sumMap.set(cat, curAmt * divisor)
+    }
+  }
+
   const suggestedBudgets: Record<string, number> = {}
   const categoryAverages: Record<string, number> = {}
   let totalSuggested = 0
@@ -2788,21 +2961,78 @@ export function suggestCategoryBudgets(
     const avg = round2(sum / divisor)
     categoryAverages[cat] = avg
     if (avg >= 20) {
-      // Margem de segurança de 10%, arredondada para o múltiplo de 10 superior
-      const suggested = Math.max(50, Math.ceil((avg * 1.1) / 10) * 10)
+      const isFixed = FIXED_MONTHLY_CATEGORIES.has(cat)
+      const curCommitted = curMonthExpenseMap.get(cat) || 0
+      // Categorias fixas usam o valor real compromissado/médio arredondado em dezenas (sem inflar +10%);
+      // categorias variáveis recebem margem de segurança de 10%
+      const baseTarget = isFixed ? Math.max(avg, curCommitted) : avg * 1.1
+      const suggested = Math.max(50, Math.ceil(baseTarget / 10) * 10)
       suggestedBudgets[cat] = suggested
       totalSuggested += suggested
     }
   }
 
   totalSuggested = round2(totalSuggested)
-  const incomeCoveragePct = monthlyIncome > 0 ? round2((totalSuggested / monthlyIncome) * 100) : 0
+  let isCappedToIncome = false
+
+  // Teto rigoroso: o orçamento sugerido NUNCA pode ultrapassar a entrada prevista daquele mês
+  if (effectiveExpectedIncome > 0 && totalSuggested > 0) {
+    const maxEnvelopeCeiling =
+      referenceMonthInvested > 0 && referenceMonthInvested < effectiveExpectedIncome
+        ? round2(effectiveExpectedIncome - referenceMonthInvested)
+        : effectiveExpectedIncome
+
+    if (totalSuggested > maxEnvelopeCeiling && maxEnvelopeCeiling > 0) {
+      isCappedToIncome = true
+      const ratio = maxEnvelopeCeiling / totalSuggested
+      let newTotal = 0
+      let largestCat = ''
+      let largestVal = -1
+
+      for (const cat of Object.keys(suggestedBudgets)) {
+        const raw = suggestedBudgets[cat]
+        const scaled = maxEnvelopeCeiling >= 200
+          ? Math.max(10, Math.floor((raw * ratio) / 10) * 10)
+          : round2(raw * ratio)
+        suggestedBudgets[cat] = scaled
+        newTotal = round2(newTotal + scaled)
+        if (scaled > largestVal) {
+          largestVal = scaled
+          largestCat = cat
+        }
+      }
+
+      // Caso o piso de 10 ainda deixe newTotal > maxEnvelopeCeiling, aplica ajuste proporcional exato
+      if (newTotal > maxEnvelopeCeiling) {
+        const exactRatio = maxEnvelopeCeiling / newTotal
+        newTotal = 0
+        for (const cat of Object.keys(suggestedBudgets)) {
+          const scaled = round2(suggestedBudgets[cat] * exactRatio)
+          suggestedBudgets[cat] = scaled
+          newTotal = round2(newTotal + scaled)
+        }
+        const diff = round2(maxEnvelopeCeiling - newTotal)
+        if (largestCat && diff < 0) {
+          suggestedBudgets[largestCat] = round2(Math.max(0, suggestedBudgets[largestCat] + diff))
+          newTotal = round2(newTotal + diff)
+        }
+      }
+
+      totalSuggested = round2(newTotal)
+    }
+  }
+
+  const incomeCoveragePct = effectiveExpectedIncome > 0
+    ? round2((totalSuggested / effectiveExpectedIncome) * 100)
+    : 0
 
   return {
     suggestedBudgets,
     totalSuggested,
     incomeCoveragePct,
     categoryAverages,
+    expectedIncome: effectiveExpectedIncome,
+    isCappedToIncome,
   }
 }
 

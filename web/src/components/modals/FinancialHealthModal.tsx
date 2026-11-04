@@ -115,7 +115,7 @@ export function FinancialHealthModal({
         </DialogHeader>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-5 space-y-4">
           {/* Hero Score Card */}
           <div className="p-4 rounded-2xl bg-slate-900/80 border border-white/[0.08] flex flex-col sm:flex-row items-center gap-4">
             <div className="relative size-20 shrink-0 flex items-center justify-center">
@@ -201,6 +201,38 @@ export function FinancialHealthModal({
                     Carteira & Reserva
                   </Button>
                 )}
+              </div>
+            </div>
+          </div>
+
+          {/* Resumo Executivo do Mês */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+              <div className="text-[10px] text-slate-400">Entrada Prevista</div>
+              <div className="text-xs font-mono font-bold text-slate-100 mt-0.5">
+                {formatBRL(summary?.income || 0)}
+              </div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+              <div className="text-[10px] text-slate-400">Custo de Vida Líquido</div>
+              <div className="text-xs font-mono font-bold text-cyan-300 mt-0.5">
+                {formatBRL(livingCost)}
+              </div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+              <div className="text-[10px] text-slate-400">Investido no Mês</div>
+              <div className="text-xs font-mono font-bold text-emerald-400 mt-0.5">
+                {formatBRL(summary?.totalInvested || 0)}
+              </div>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900/50 border border-white/[0.06]">
+              <div className="text-[10px] text-slate-400">Saldo Livre Real</div>
+              <div
+                className={`text-xs font-mono font-bold mt-0.5 ${
+                  (summary?.freeBalance || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {formatBRL(summary?.freeBalance || 0)}
               </div>
             </div>
           </div>

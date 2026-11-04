@@ -2979,8 +2979,13 @@ class AndroidAgentToolsEngine(
         val user = repository.currentUser.value
         val month = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
         val summary = FinanceEngine.computeSummary(all, user.uid, month, cards, closures)
+        val expectedIncome = if (summary.income > 0.0) summary.income else user.monthlyIncome
         val currentBudgets = user.categoryBudgets.toMutableMap()
-        val report = FinanceEngine.computeCategoryBudgets(summary, currentBudgets)
+        val report = FinanceEngine.computeCategoryBudgets(
+            summary = summary,
+            categoryBudgets = currentBudgets,
+            expectedIncome = expectedIncome
+        )
         val emergencyReserve = FinanceEngine.resolveEmergencyReserveBalance(user, summary)
         val health = FinanceEngine.calculateFinancialHealthScore(summary, emergencyReserve, report)
 
@@ -3041,7 +3046,11 @@ class AndroidAgentToolsEngine(
                 }
                 repository.updateCategoryBudgets(currentBudgets)
 
-                val updatedReport = FinanceEngine.computeCategoryBudgets(summary, currentBudgets)
+                val updatedReport = FinanceEngine.computeCategoryBudgets(
+                    summary = summary,
+                    categoryBudgets = currentBudgets,
+                    expectedIncome = expectedIncome
+                )
                 val catStatus = updatedReport.categories.find { it.category.equals(catName, ignoreCase = true) }
                 val spent = catStatus?.spent ?: 0.0
                 val rem = cleanVal - spent
@@ -3129,12 +3138,12 @@ class AndroidAgentToolsEngine(
             }
 
             "sugerir_tetos" -> {
-                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income)
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome)
                 val suggested = suggestedResult.suggestedBudgets
                 if (suggested.isEmpty()) {
                     return ToolExecutionResult(text = "ℹ️ Ainda não há dados suficientes de renda ou despesas para sugerir tetos automaticamente.")
                 }
-                val totalSuggested = suggested.values.sum()
+                val totalSuggested = suggestedResult.totalSuggested
                 val lines = suggested.entries.sortedByDescending { it.value }.joinToString("\n") { (cat, lim) ->
                     val currentSpent = summary.byCategory.find { it.category == cat }?.amount ?: 0.0
                     val kind = if (FinanceEngine.isFixedBudgetCategory(cat)) "📌 Fixa" else "🔄 Variável"
@@ -3142,39 +3151,35 @@ class AndroidAgentToolsEngine(
                 }
 
                 ToolExecutionResult(
-                    text = "🤖 **Sugestão de Envelopes Inteligentes (Regra 50/30/20):**\n\n" +
-                        "Com base na sua renda de **${FinanceEngine.formatCurrency(summary.income)}** e no seu padrão real de gastos, sugiro um orçamento total de **${FinanceEngine.formatCurrency(totalSuggested)}**:\n\n" +
+                    text = "🤖 **Sugestão de Envelopes Inteligentes (Calibrados à Entrada Prevista do Mês):**\n\n" +
+                        "Com base na entrada esperada para ${FinanceEngine.formatMonthLabel(month)} de **${FinanceEngine.formatCurrency(expectedIncome)}** e no seu padrão real de gastos, sugiro um orçamento total de **${FinanceEngine.formatCurrency(totalSuggested)}** (${suggestedResult.incomeCoveragePct}% da entrada):\n\n" +
                         "$lines\n\n" +
                         "Deseja que eu aplique esses tetos agora? Basta dizer **\"Aplicar sugestão de tetos\"**!",
                     actionCard = ActionCardData(
-                        title = "Tetos Sugeridos pela IA (50/30/20)",
-                        description = "${suggested.size} categorias • Total: ${FinanceEngine.formatCurrency(totalSuggested)}",
+                        title = "Tetos Sugeridos pela IA (Entrada do Mês)",
+                        description = "${suggested.size} categorias • Total: ${FinanceEngine.formatCurrency(totalSuggested)} (${suggestedResult.incomeCoveragePct}% da entrada)",
                         detail = "Diga \"Aplicar sugestão de tetos\" para ativar com 1 clique"
                     )
                 )
             }
 
             "aplicar_sugestao_ia" -> {
-                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income)
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome)
                 val suggested = suggestedResult.suggestedBudgets
                 if (suggested.isEmpty()) {
                     return ToolExecutionResult(text = "⚠️ Não foi possível gerar tetos sugeridos sem receita ou histórico no mês.")
                 }
-                val merged = currentBudgets.toMutableMap()
-                for ((k, v) in suggested) {
-                    merged[k] = v
-                }
-                repository.updateCategoryBudgets(merged)
-                val totalSuggested = merged.values.sum()
+                repository.updateCategoryBudgets(suggested)
+                val totalSuggested = suggestedResult.totalSuggested
 
                 ToolExecutionResult(
                     text = "✅ **Envelopes Orçamentários IA ativados com sucesso!**\n\n" +
-                        "Configurei **${merged.size} categorias** somando **${FinanceEngine.formatCurrency(totalSuggested)}** em tetos inteligentes.\n" +
+                        "Configurei **${suggested.size} categorias** somando **${FinanceEngine.formatCurrency(totalSuggested)}** (calibrados para respeitar a entrada prevista de ${FinanceEngine.formatCurrency(expectedIncome)} no mês).\n" +
                         "Você já pode acompanhar o ritmo de cada envelope no Dashboard ou me perguntar a qualquer momento!",
                     actionCard = ActionCardData(
                         title = "Envelopes IA Ativados ✨",
-                        description = "${merged.size} categorias configuradas (${FinanceEngine.formatCurrency(totalSuggested)})",
-                        detail = "Bônus de disciplina ativo no Score de Saúde Financeira"
+                        description = "${suggested.size} categorias configuradas (${FinanceEngine.formatCurrency(totalSuggested)})",
+                        detail = "Calibrado à entrada prevista do mês (${FinanceEngine.formatCurrency(expectedIncome)})"
                     )
                 )
             }

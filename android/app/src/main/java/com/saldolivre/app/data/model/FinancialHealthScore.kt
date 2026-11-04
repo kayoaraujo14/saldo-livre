@@ -36,6 +36,7 @@ typealias BudgetBurnRateStatus = CategoryBudgetPaceStatus
 data class CategoryBudgetStatus(
     val category: String,
     val limit: Double,
+    val rawLimit: Double = limit,
     val spent: Double,
     val remaining: Double,
     val percentage: Double,
@@ -55,6 +56,11 @@ data class CategoryBudgetStatus(
 data class CategoryBudgetReport(
     val items: List<CategoryBudgetStatus> = emptyList(),
     val totalBudgeted: Double = 0.0,
+    val rawTotalBudgeted: Double = totalBudgeted,
+    val expectedIncome: Double = 0.0,
+    val isCappedToIncome: Boolean = false,
+    val incomeUsagePercentage: Double = 0.0,
+    val unallocatedIncome: Double = 0.0,
     val totalSpent: Double = 0.0,
     val totalRemaining: Double = 0.0,
     val overallPercentage: Double = 0.0,
@@ -90,6 +96,8 @@ data class SuggestedBudgetsResult(
     val suggestedBudgets: Map<String, Double> = emptyMap(),
     val totalSuggested: Double = 0.0,
     val incomeCoveragePct: Double = 0.0,
+    val expectedIncome: Double = 0.0,
+    val isCappedToIncome: Boolean = false,
     val categoryAverages: Map<String, Double> = emptyMap()
 )
 

@@ -43,3 +43,7 @@ android/local.properties
 *keystore*.txt
 google-services.json
 !google-services.json.example
+
+# UI/UX Automated Screenshots & Dumps
+.agents/screenshots/
+!.agents/screenshots/**/.gitkeep

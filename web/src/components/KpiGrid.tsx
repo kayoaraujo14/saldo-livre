@@ -46,6 +46,9 @@ export function KpiGrid({
   const consumptionPct = summary && summary.income > 0
     ? Math.round((summary.paid / summary.income) * 100)
     : 0
+  const committedPct = summary && summary.income > 0
+    ? Math.round(((summary.paid + summary.committed) / summary.income) * 100)
+    : 0
   const consumptionColor = consumptionPct > 100 ? 'rose' : consumptionPct > 80 ? 'amber' : 'emerald'
   const consumptionBadge = consumptionPct > 100 ? 'Alerta' : consumptionPct > 80 ? 'Atenção' : 'No Limite'
 
@@ -115,7 +118,7 @@ export function KpiGrid({
     return { total: round2(total), count, urgencyBadge, subtitle, isUrgent }
   }, [transactions, cards, month, me?.uid, formattedEndDate])
 
-  // 3. Maior Gasto (Top Categoria do Mês - Substitui o Termômetro Diário)
+  // 3. Maior Gasto (Top Categoria do Mês - Paridade 100% Web & Android)
   const topCategoryData = useMemo(() => {
     if (!summary || !summary.byCategory || summary.byCategory.length === 0) {
       return {
@@ -126,7 +129,13 @@ export function KpiGrid({
         subtitle: 'Nenhum gasto registrado',
       }
     }
-    const validCategories = summary.byCategory.filter((c) => c.amount > 0)
+    const nonInvestmentCategories = summary.byCategory.filter(
+      (c) => c.amount > 0 && !c.category.toLowerCase().includes('investimento'),
+    )
+    const validCategories =
+      nonInvestmentCategories.length > 0
+        ? nonInvestmentCategories
+        : summary.byCategory.filter((c) => c.amount > 0)
     const top = validCategories[0]
     if (!top) {
       return {
@@ -323,10 +332,10 @@ export function KpiGrid({
 
         <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-1.5 min-w-0 gap-1 border-t border-white/[0.04]">
           <span className="truncate min-w-0 text-slate-400">
-            Gasto: <strong className="text-slate-300 font-semibold">{formatBRL(summary.paid)}</strong>
+            Pago: <strong className="text-slate-300 font-semibold">{formatBRL(summary.paid)}</strong>
           </span>
-          <span className="truncate min-w-0 text-slate-500 hidden sm:inline">
-            pagos no mês
+          <span className="truncate min-w-0 text-slate-500 font-mono">
+            Comprom.: {committedPct}%
           </span>
         </div>
       </div>

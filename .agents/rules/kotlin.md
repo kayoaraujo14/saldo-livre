@@ -26,3 +26,8 @@ Ao desenvolver, manter ou refatorar código no diretório `/android`, você deve
 - Componentize as telas em funções `@Composable` pequenas, focadas, coesas e reutilizáveis.
 - Utilize observação de estado otimizada no Compose com `collectAsStateWithLifecycle()` ou `collectAsState()`.
 - Respeite o tema central do aplicativo (`MaterialTheme`) com suporte a Dark Mode e paletas semânticas.
+
+## 3. Validação Visual Obrigatória (Skill ui-ux-validator)
+- Sempre que houver criação, modificação ou refatoração em arquivos de interface do usuário (`android/app/src/main/java/com/saldolivre/app/ui/**`), é **obrigatório** acionar o protocolo da skill `.agents/skills/ui-ux-validator/SKILL.md`.
+- Execute a instalação no emulador/dispositivo (`./gradlew installDebug`), utilize `uiautomator dump` e `adb shell input` para navegação e bypass de autenticação (Modo Demo), e capture prints com `screencap` em `.agents/screenshots/android/`.
+- Inspecione as imagens com visão multimodal aplicando o Checklist de Auditoria Visual (espaçamentos, insets edge-to-edge, legibilidade monetária e contraste) e o Loop de Auto-correção antes de considerar a entrega finalizada.

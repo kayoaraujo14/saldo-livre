@@ -41,12 +41,20 @@ private val BUDGETABLE_EXPENSE_CATEGORIES = listOf(
     "Compras & Estilo de Vida",
     "Assinaturas & Serviços",
     "Educação & Desenvolvimento",
-    "Família & Dependentes",
-    "Pets",
-    "Financiamentos & Empréstimos",
+    "Cuidados Pessoais & Estética",
+    "Família & Pets",
+    "Financiamentos & Dívidas",
     "Impostos & Tributos",
+    "Doações & Presentes",
     "Outros"
 )
+
+private enum class EnvelopeFilterMode(val label: String) {
+    ALL("Todos"),
+    ALERTS("Em Alerta"),
+    VARIABLE("Variáveis"),
+    FIXED("Fixos")
+}
 
 @Composable
 fun CategoryBudgetsSectionCard(
@@ -58,7 +66,19 @@ fun CategoryBudgetsSectionCard(
     onAskCopilot: (String) -> Unit
 ) {
     var isExpanded by remember { mutableStateOf(false) }
-    val visibleItems = if (isExpanded) report.items else report.items.take(4)
+    var filterMode by remember { mutableStateOf(EnvelopeFilterMode.ALL) }
+
+    val filteredItems = remember(report.items, filterMode) {
+        when (filterMode) {
+            EnvelopeFilterMode.ALERTS -> report.items.filter {
+                it.status != CategoryBudgetAlertStatus.OK || it.burnRateStatus != CategoryBudgetPaceStatus.NORMAL
+            }
+            EnvelopeFilterMode.VARIABLE -> report.items.filter { !it.isFixedCategory }
+            EnvelopeFilterMode.FIXED -> report.items.filter { it.isFixedCategory }
+            EnvelopeFilterMode.ALL -> report.items
+        }
+    }
+    val visibleItems = if (isExpanded) filteredItems else filteredItems.take(4)
 
     val statusColor = when (report.status) {
         CategoryBudgetAlertStatus.DANGER -> Rose400
@@ -135,6 +155,20 @@ fun CategoryBudgetsSectionCard(
                                     color = statusColor
                                 )
                             }
+                            if (report.isCappedToIncome) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Cyan500.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Calibrado à Entrada",
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Cyan400
+                                    )
+                                }
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(2.dp))
@@ -154,11 +188,123 @@ fun CategoryBudgetsSectionCard(
                             )
                         } else {
                             Text(
-                                text = "Defina tetos por categoria para alertas inteligentes e compensação com IA.",
+                                text = "Defina tetos baseados na entrada prevista do mês para alertas inteligentes e IA.",
                                 fontSize = 10.sp,
                                 color = TextMuted
                             )
                         }
+                    }
+                }
+            }
+
+            // Painel Resumo de Execução vs Entrada Prevista do Mês
+            if (report.totalBudgeted > 0.0) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(DarkBackground.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            Text("Entrada Prevista", fontSize = 9.sp, color = TextMuted)
+                            Text(
+                                text = if (report.expectedIncome > 0.0) FinanceEngine.formatCurrency(report.expectedIncome) else "—",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text("100% teto máx.", fontSize = 8.sp, color = TextSecondary)
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            Text("Teto Orçado", fontSize = 9.sp, color = TextMuted)
+                            Text(
+                                text = FinanceEngine.formatCurrency(report.totalBudgeted),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Cyan400
+                            )
+                            Text(
+                                text = if (report.expectedIncome > 0.0) "${report.incomeUsagePercentage.roundToInt()}% da entrada" else "envelopes ativos",
+                                fontSize = 8.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            Text("Consumido", fontSize = 9.sp, color = TextMuted)
+                            Text(
+                                text = FinanceEngine.formatCurrency(report.totalSpent),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = statusColor
+                            )
+                            Text("${report.overallPercentage.roundToInt()}% do orçado", fontSize = 8.sp, color = TextSecondary)
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                .padding(8.dp)
+                        ) {
+                            Text(
+                                text = if (report.totalRemaining >= 0.0) "Folga nos Envelopes" else "Excesso nos Envelopes",
+                                fontSize = 9.sp,
+                                color = TextMuted
+                            )
+                            Text(
+                                text = FinanceEngine.formatCurrency(abs(report.totalRemaining)),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (report.totalRemaining >= 0.0) Emerald400 else Rose400
+                            )
+                            Text(
+                                text = if (report.unallocatedIncome > 0.0) {
+                                    "Livre p/ poupar: ${FinanceEngine.formatCurrency(report.unallocatedIncome)}"
+                                } else {
+                                    "100% da entrada alocada"
+                                },
+                                fontSize = 8.sp,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (report.isCappedToIncome && report.rawTotalBudgeted > report.totalBudgeted) {
+                        Text(
+                            text = "Calibrado automaticamente: os tetos originais (${FinanceEngine.formatCurrency(report.rawTotalBudgeted)}) superavam a entrada prevista deste mês (${FinanceEngine.formatCurrency(report.expectedIncome)}) e foram ajustados proporcionalmente.",
+                            fontSize = 9.sp,
+                            color = Cyan400
+                        )
                     }
                 }
             }
@@ -291,6 +437,38 @@ fun CategoryBudgetsSectionCard(
 
             // Envelope Items
             if (report.items.isNotEmpty()) {
+                // Quick Filter Chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for (mode in EnvelopeFilterMode.entries) {
+                        val isSelected = filterMode == mode
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isSelected) Emerald500.copy(alpha = 0.20f) else DarkBackground.copy(alpha = 0.6f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Emerald400.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { filterMode = mode }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = mode.label,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Emerald400 else TextSecondary
+                            )
+                        }
+                    }
+                }
+
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (item in visibleItems) {
                         val itemColor = when (item.status) {
@@ -317,6 +495,7 @@ fun CategoryBudgetsSectionCard(
                                 .fillMaxWidth()
                                 .background(DarkBackground.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
                                 .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                                .clickable { onOpenConfig() }
                                 .padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
@@ -371,7 +550,13 @@ fun CategoryBudgetsSectionCard(
                                     color = Color.White
                                 )
                                 Text(
-                                    text = if (item.limit > 0.0) "/ ${FinanceEngine.formatCurrency(item.limit)}" else "Sem teto",
+                                    text = if (item.limit > 0.0) {
+                                        if (report.isCappedToIncome && item.rawLimit > item.limit) {
+                                            "/ ${FinanceEngine.formatCurrency(item.limit)} (orig. ${FinanceEngine.formatCurrency(item.rawLimit)})"
+                                        } else {
+                                            "/ ${FinanceEngine.formatCurrency(item.limit)}"
+                                        }
+                                    } else "Sem teto",
                                     fontSize = 11.sp,
                                     color = TextSecondary
                                 )
@@ -428,7 +613,7 @@ fun CategoryBudgetsSectionCard(
                         }
                     }
 
-                    if (report.items.size > 4) {
+                    if (filteredItems.size > 4) {
                         TextButton(
                             onClick = { isExpanded = !isExpanded },
                             modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -441,7 +626,7 @@ fun CategoryBudgetsSectionCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isExpanded) "Recolher envelopes" else "Ver todos os ${report.items.size} envelopes",
+                                text = if (isExpanded) "Recolher envelopes" else "Ver todos os ${filteredItems.size} envelopes",
                                 fontSize = 11.sp,
                                 color = TextSecondary
                             )
@@ -696,6 +881,83 @@ fun FinancialHealthDialog(
                         }
                     }
 
+                    // Resumo Executivo do Mês
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(DarkSurface, RoundedCornerShape(12.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(DarkBackground.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Text("Entrada Prevista", fontSize = 9.sp, color = TextMuted)
+                                Text(
+                                    text = FinanceEngine.formatCurrency(summary.income),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(DarkBackground.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Text("Custo de Vida Líquido", fontSize = 9.sp, color = TextMuted)
+                                Text(
+                                    text = FinanceEngine.formatCurrency(livingCost),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Cyan400
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(DarkBackground.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Text("Investido no Mês", fontSize = 9.sp, color = TextMuted)
+                                Text(
+                                    text = FinanceEngine.formatCurrency(summary.totalInvested),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Emerald400
+                                )
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(DarkBackground.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Text("Saldo Livre Real", fontSize = 9.sp, color = TextMuted)
+                                Text(
+                                    text = FinanceEngine.formatCurrency(summary.freeBalance),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (summary.freeBalance >= 0.0) Emerald400 else Rose400
+                                )
+                            }
+                        }
+                    }
+
                     // 4 Pillars Breakdown
                     PillarRowCard(
                         title = "1. Poupança & Margem",
@@ -869,11 +1131,58 @@ fun ManageBudgetsDialog(
     var activeTab by remember { mutableIntStateOf(initialTab) }
     val budgetInputs = remember(currentBudgets) {
         mutableStateMapOf<String, String>().apply {
+            val normalizedCurrent = mutableMapOf<String, Double>()
+            for ((rawCat, valAmt) in currentBudgets) {
+                if (valAmt > 0.0) {
+                    val norm = FinanceEngine.normalizeBudgetCategory(rawCat)
+                    normalizedCurrent[norm] = FinanceEngine.round2((normalizedCurrent[norm] ?: 0.0) + valAmt)
+                }
+            }
             for (cat in BUDGETABLE_EXPENSE_CATEGORIES) {
-                val v = currentBudgets[cat] ?: 0.0
+                val norm = FinanceEngine.normalizeBudgetCategory(cat)
+                val v = currentBudgets[cat] ?: normalizedCurrent[norm] ?: 0.0
                 if (v > 0.0) {
                     put(cat, if (v % 1.0 == 0.0) v.toInt().toString() else v.toString())
                 }
+            }
+        }
+    }
+
+    val expectedIncome = if (report.expectedIncome > 0.0) report.expectedIncome else suggestedBudgets.expectedIncome
+    val formTotal = BUDGETABLE_EXPENSE_CATEGORIES.sumOf { cat ->
+        val clean = (budgetInputs[cat] ?: "").replace(",", ".").trim()
+        val v = clean.toDoubleOrNull() ?: 0.0
+        if (v > 0.0) v else 0.0
+    }
+    val isOverIncome = expectedIncome > 0.0 && formTotal > expectedIncome
+    val incomeUsagePct = if (expectedIncome > 0.0) ((formTotal / expectedIncome) * 100.0).roundToInt() else 0
+    val unallocatedIncome = if (expectedIncome > 0.0) FinanceEngine.round2(expectedIncome - formTotal) else 0.0
+
+    val calibrateInputsToIncome = {
+        if (expectedIncome > 0.0 && formTotal > expectedIncome) {
+            val scale = expectedIncome / formTotal
+            var running = 0.0
+            var maxCat = ""
+            var maxVal = -1.0
+            val nextVals = mutableMapOf<String, Double>()
+            for (cat in BUDGETABLE_EXPENSE_CATEGORIES) {
+                val raw = (budgetInputs[cat] ?: "").replace(",", ".").trim().toDoubleOrNull() ?: 0.0
+                if (raw > 0.0) {
+                    val scaled = kotlin.math.max(10.0, kotlin.math.floor((raw * scale) / 5.0) * 5.0)
+                    nextVals[cat] = scaled
+                    running += scaled
+                    if (scaled > maxVal) {
+                        maxVal = scaled
+                        maxCat = cat
+                    }
+                }
+            }
+            if (running > expectedIncome && maxCat.isNotEmpty()) {
+                val excess = running - expectedIncome
+                nextVals[maxCat] = kotlin.math.max(0.0, (nextVals[maxCat] ?: 0.0) - excess)
+            }
+            for ((cat, scaled) in nextVals) {
+                budgetInputs[cat] = if (scaled % 1.0 == 0.0) scaled.toInt().toString() else FinanceEngine.round2(scaled).toString()
             }
         }
     }
@@ -969,6 +1278,115 @@ fun ManageBudgetsDialog(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        // Termômetro ao Vivo de Alocação da Entrada Prevista do Mês
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isOverIncome) Rose500.copy(alpha = 0.12f) else DarkSurface,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isOverIncome) Rose400.copy(alpha = 0.40f) else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "ORÇAMENTO TOTAL VS ENTRADA DO MÊS",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextMuted
+                                    )
+                                    Text(
+                                        text = "${FinanceEngine.formatCurrency(formTotal)} / ${if (expectedIncome > 0.0) FinanceEngine.formatCurrency(expectedIncome) else "—"}",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = if (isOverIncome) Rose400 else Color.White
+                                    )
+                                }
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (isOverIncome) {
+                                        Button(
+                                            onClick = { calibrateInputsToIncome() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Rose500, contentColor = Color.White),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Text("Calibrar à Entrada", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                    if (formTotal > 0.0) {
+                                        OutlinedButton(
+                                            onClick = { budgetInputs.clear() },
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(28.dp)
+                                        ) {
+                                            Text("Limpar", fontSize = 10.sp, color = TextSecondary)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (expectedIncome > 0.0) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(Color.White.copy(alpha = 0.10f))
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(fraction = (incomeUsagePct / 100f).coerceIn(0f, 1f))
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(
+                                                when {
+                                                    isOverIncome -> Rose400
+                                                    incomeUsagePct > 85 -> Amber400
+                                                    else -> Emerald400
+                                                }
+                                            )
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = if (isOverIncome) {
+                                            "Excede a entrada em ${FinanceEngine.formatCurrency(abs(unallocatedIncome))} (será calibrado ao salvar)"
+                                        } else {
+                                            "$incomeUsagePct% da entrada alocada nos envelopes"
+                                        },
+                                        fontSize = 10.sp,
+                                        color = if (isOverIncome) Rose400 else TextSecondary
+                                    )
+                                    if (!isOverIncome) {
+                                        Text(
+                                            text = "Livre: ${FinanceEngine.formatCurrency(unallocatedIncome)}",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Emerald400
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // AI Suggestion Banner
                         if (suggestedBudgets.suggestedBudgets.isNotEmpty()) {
                             Row(
@@ -982,13 +1400,13 @@ fun ManageBudgetsDialog(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Sugestão Inteligente IA (Média 3M + 10%)",
+                                        text = "Sugestão IA Calibrada à Entrada do Mês",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Emerald400
                                     )
                                     Text(
-                                        text = "Total sugerido: ${FinanceEngine.formatCurrency(suggestedBudgets.totalSuggested)} (${suggestedBudgets.incomeCoveragePct.roundToInt()}% da renda)",
+                                        text = "Total sugerido: ${FinanceEngine.formatCurrency(suggestedBudgets.totalSuggested)} (${suggestedBudgets.incomeCoveragePct.roundToInt()}% da entrada prevista)",
                                         fontSize = 10.sp,
                                         color = TextSecondary
                                     )
@@ -1012,8 +1430,11 @@ fun ManageBudgetsDialog(
                         }
 
                         for (category in BUDGETABLE_EXPENSE_CATEGORIES) {
-                            val spentItem = report.items.find { it.category == category }
+                            val spentItem = report.items.find {
+                                FinanceEngine.normalizeBudgetCategory(it.category) == FinanceEngine.normalizeBudgetCategory(category)
+                            }
                             val avg3m = suggestedBudgets.categoryAverages[category] ?: 0.0
+                            val sugVal = suggestedBudgets.suggestedBudgets[category] ?: 0.0
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1031,7 +1452,7 @@ fun ManageBudgetsDialog(
                                     )
                                     val subInfo = buildString {
                                         if (spentItem != null && spentItem.spent > 0.0) {
-                                            append("Gasto atual: ${FinanceEngine.formatCurrency(spentItem.spent)}")
+                                            append("Gasto: ${FinanceEngine.formatCurrency(spentItem.spent)}")
                                         }
                                         if (avg3m > 0.0) {
                                             if (isNotEmpty()) append(" • ")
@@ -1040,6 +1461,19 @@ fun ManageBudgetsDialog(
                                     }
                                     if (subInfo.isNotEmpty()) {
                                         Text(text = subInfo, fontSize = 10.sp, color = TextMuted)
+                                    }
+                                    if (sugVal > 0.0 && budgetInputs[category] != sugVal.toInt().toString()) {
+                                        Text(
+                                            text = "Usar IA: ${FinanceEngine.formatCurrency(sugVal)}",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Emerald400,
+                                            modifier = Modifier
+                                                .padding(top = 2.dp)
+                                                .clickable {
+                                                    budgetInputs[category] = sugVal.toInt().toString()
+                                                }
+                                        )
                                     }
                                 }
 
@@ -1075,10 +1509,34 @@ fun ManageBudgetsDialog(
                         Button(
                             onClick = {
                                 val parsed = mutableMapOf<String, Double>()
+                                var totalTyped = 0.0
                                 for ((cat, raw) in budgetInputs) {
                                     val clean = raw.replace(",", ".").trim()
                                     val v = clean.toDoubleOrNull() ?: 0.0
-                                    if (v > 0.0) parsed[cat] = v
+                                    if (v > 0.0) {
+                                        parsed[cat] = FinanceEngine.round2(v)
+                                        totalTyped += v
+                                    }
+                                }
+                                // Garante que o orçamento salvo nunca exceda a entrada prevista do mês
+                                if (expectedIncome > 0.0 && totalTyped > expectedIncome) {
+                                    val scale = expectedIncome / totalTyped
+                                    var running = 0.0
+                                    var maxCat = ""
+                                    var maxVal = -1.0
+                                    for (cat in parsed.keys.toList()) {
+                                        val scaled = FinanceEngine.round2((parsed[cat] ?: 0.0) * scale)
+                                        parsed[cat] = scaled
+                                        running = FinanceEngine.round2(running + scaled)
+                                        if (scaled > maxVal) {
+                                            maxVal = scaled
+                                            maxCat = cat
+                                        }
+                                    }
+                                    val diff = FinanceEngine.round2(expectedIncome - running)
+                                    if (maxCat.isNotEmpty() && abs(diff) > 0.0 && (parsed[maxCat] ?: 0.0) + diff >= 0.0) {
+                                        parsed[maxCat] = FinanceEngine.round2((parsed[maxCat] ?: 0.0) + diff)
+                                    }
                                 }
                                 onSaveBudgets(parsed)
                                 onDismiss()
@@ -1088,7 +1546,10 @@ fun ManageBudgetsDialog(
                         ) {
                             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Salvar Envelopes", fontWeight = FontWeight.Bold)
+                            Text(
+                                text = if (isOverIncome) "Calibrar & Salvar" else "Salvar Envelopes",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 } else {

@@ -2301,6 +2301,7 @@ object FinanceEngine {
         "Educação & Desenvolvimento",
         "Financiamentos",
         "Financiamentos & Dívidas",
+        "Financiamentos & Empréstimos",
         "Impostos",
         "Impostos & Tributos"
     )
@@ -2317,6 +2318,44 @@ object FinanceEngine {
         "Benefícios"
     )
 
+    private val CATEGORY_CANONICAL_MAP = mapOf(
+        "assinaturas" to "Assinaturas & Serviços",
+        "assinaturas & servicos" to "Assinaturas & Serviços",
+        "assinaturas & serviços" to "Assinaturas & Serviços",
+        "educacao" to "Educação & Desenvolvimento",
+        "educação" to "Educação & Desenvolvimento",
+        "educacao & desenvolvimento" to "Educação & Desenvolvimento",
+        "educação & desenvolvimento" to "Educação & Desenvolvimento",
+        "lazer" to "Lazer & Entretenimento",
+        "lazer & entretenimento" to "Lazer & Entretenimento",
+        "compras" to "Compras & Estilo de Vida",
+        "compras & estilo de vida" to "Compras & Estilo de Vida",
+        "cuidados pessoais" to "Cuidados Pessoais & Estética",
+        "cuidados pessoais & estetica" to "Cuidados Pessoais & Estética",
+        "cuidados pessoais & estética" to "Cuidados Pessoais & Estética",
+        "financiamentos" to "Financiamentos & Dívidas",
+        "financiamentos & dividas" to "Financiamentos & Dívidas",
+        "financiamentos & dívidas" to "Financiamentos & Dívidas",
+        "financiamentos & emprestimos" to "Financiamentos & Dívidas",
+        "financiamentos & empréstimos" to "Financiamentos & Dívidas",
+        "impostos" to "Impostos & Tributos",
+        "impostos & tributos" to "Impostos & Tributos",
+        "alimentacao" to "Alimentação",
+        "alimentação" to "Alimentação",
+        "saude" to "Saúde",
+        "saúde" to "Saúde",
+        "familia & pets" to "Família & Pets",
+        "família & pets" to "Família & Pets",
+        "doacoes & presentes" to "Doações & Presentes",
+        "doações & presentes" to "Doações & Presentes"
+    )
+
+    fun normalizeBudgetCategory(category: String): String {
+        val trimmed = category.trim()
+        if (trimmed.isEmpty()) return trimmed
+        return CATEGORY_CANONICAL_MAP[trimmed.lowercase()] ?: trimmed
+    }
+
     /**
      * Calcula o Score do Termômetro de Saúde Financeira (0 a 100).
      * Avalia 4 pilares integrados da metodologia Saldo Livre com 100% de paridade com a Web:
@@ -2325,17 +2364,23 @@ object FinanceEngine {
      * 3. Cobertura da Reserva de Emergência (até 30 pts)
      * 4. Sinergia e Disciplina nos Envelopes Orçamentários (+4 a -8 pts)
      */
-    fun isFixedBudgetCategory(category: String): Boolean = category in FIXED_MONTHLY_CATEGORIES
+    fun isFixedBudgetCategory(category: String): Boolean =
+        category in FIXED_MONTHLY_CATEGORIES || normalizeBudgetCategory(category) in FIXED_MONTHLY_CATEGORIES
 
     fun resolveEmergencyReserveBalance(profile: UserProfile?, summary: MonthSummary?): Double {
         if (profile != null && profile.investmentAssetBalances.isNotEmpty()) {
             val explicit = profile.investmentAssetBalances["Reserva de Emergência"]
-                ?: profile.investmentAssetBalances.entries.firstOrNull { it.key.contains("Reserva", ignoreCase = true) }?.value
-            if (explicit != null && explicit > 0.0) return explicit
-            val totalAssets = profile.investmentAssetBalances.values.sum()
-            if (totalAssets > 0.0) return totalAssets
+                ?: profile.investmentAssetBalances.entries.firstOrNull {
+                    it.key.contains("Reserva", ignoreCase = true) && it.value > 0.0
+                }?.value
+            if (explicit != null && explicit > 0.0) return round2(explicit)
+            val totalAssets = profile.investmentAssetBalances.values.filter { it > 0.0 }.sum()
+            if (totalAssets > 0.0) return round2(totalAssets)
         }
-        return summary?.totalInvestedAccumulated ?: 0.0
+        if (profile != null && profile.emergencyReserveBalance > 0.0) {
+            return round2(profile.emergencyReserveBalance)
+        }
+        return round2(kotlin.math.max(0.0, summary?.totalInvestedAccumulated ?: 0.0))
     }
 
     fun calculateFinancialHealthScore(
@@ -2366,9 +2411,15 @@ object FinanceEngine {
 
         val income = summary.income
         val rawTotalOutflow = when {
+            summary.paid > 0.0 || summary.committed > 0.0 -> {
+                if (summary.paid == summary.committed && summary.committedEstimated == 0.0 && summary.committedPending == 0.0) {
+                    summary.committed
+                } else {
+                    summary.paid + summary.committed
+                }
+            }
             summary.byCategory.isNotEmpty() -> summary.byCategory.sumOf { it.amount }
-            summary.paid == summary.committed && summary.committedEstimated == 0.0 && summary.committedPending == 0.0 -> summary.committed
-            else -> summary.paid + summary.committed
+            else -> 0.0
         }
         val totalInvested = kotlin.math.max(0.0, summary.totalInvested)
         val positiveFreeBalance = kotlin.math.max(0.0, summary.freeBalance)
@@ -2580,14 +2631,17 @@ object FinanceEngine {
     fun computeCategoryBudgets(
         summary: MonthSummary,
         categoryBudgets: Map<String, Double> = emptyMap(),
-        referenceDate: String = todayKey()
+        referenceDate: String = todayKey(),
+        expectedIncome: Double = summary.income
     ): CategoryBudgetReport {
         val mKey = summary.monthKey.ifBlank { currentMonthKey() }
+        val resolvedIncome = if (expectedIncome > 0.0) expectedIncome else summary.income
         return computeCategoryBudgets(
             byCategory = summary.byCategory,
             categoryBudgets = categoryBudgets,
             monthKey = mKey,
-            referenceDate = referenceDate
+            referenceDate = referenceDate,
+            expectedIncome = resolvedIncome
         )
     }
 
@@ -2595,7 +2649,8 @@ object FinanceEngine {
         byCategory: List<CategoryExpense>,
         categoryBudgets: Map<String, Double> = emptyMap(),
         monthKey: String = currentMonthKey(),
-        referenceDate: String = todayKey()
+        referenceDate: String = todayKey(),
+        expectedIncome: Double = 0.0
     ): CategoryBudgetReport {
         val spentMap = mutableMapOf<String, Double>()
         for (item in byCategory) {
@@ -2603,7 +2658,7 @@ object FinanceEngine {
                 spentMap[item.category] = (spentMap[item.category] ?: 0.0) + item.amount
             }
         }
-        return buildCategoryBudgetReport(spentMap, categoryBudgets, monthKey, referenceDate)
+        return buildCategoryBudgetReport(spentMap, categoryBudgets, monthKey, referenceDate, expectedIncome)
     }
 
     fun computeCategoryBudgetsFromTransactions(
@@ -2612,25 +2667,31 @@ object FinanceEngine {
         monthKey: String = currentMonthKey(),
         referenceDate: String = todayKey(),
         uid: String,
-        allTransactions: List<Transaction> = transactions
+        allTransactions: List<Transaction> = transactions,
+        expectedIncome: Double = 0.0
     ): CategoryBudgetReport {
         val spentMap = mutableMapOf<String, Double>()
+        var monthIncomeFromTx = 0.0
         for (tx in transactions) {
-            if (tx.type == TransactionType.EXPENSE && tx.competenceMonth == monthKey) {
+            if (tx.competenceMonth == monthKey) {
                 val impact = impactFor(tx, uid, allTransactions)
-                if (impact > 0.0 && tx.category.isNotBlank()) {
+                if (tx.type == TransactionType.EXPENSE && impact > 0.0 && tx.category.isNotBlank()) {
                     spentMap[tx.category] = (spentMap[tx.category] ?: 0.0) + impact
+                } else if (tx.type == TransactionType.INCOME && impact > 0.0) {
+                    monthIncomeFromTx += impact
                 }
             }
         }
-        return buildCategoryBudgetReport(spentMap, categoryBudgets, monthKey, referenceDate)
+        val resolvedIncome = if (expectedIncome > 0.0) expectedIncome else monthIncomeFromTx
+        return buildCategoryBudgetReport(spentMap, categoryBudgets, monthKey, referenceDate, resolvedIncome)
     }
 
     private fun buildCategoryBudgetReport(
         spentMap: Map<String, Double>,
         categoryBudgets: Map<String, Double>,
         monthKey: String,
-        referenceDate: String
+        referenceDate: String,
+        expectedIncome: Double = 0.0
     ): CategoryBudgetReport {
         val totalDays = daysInMonth(monthKey)
         var currentDay = totalDays
@@ -2644,10 +2705,70 @@ object FinanceEngine {
 
         val daysRemaining = kotlin.math.max(0, totalDays - currentDay)
 
-        val budgetedCategories = categoryBudgets.filter { it.value > 0.0 }.keys
+        // Reconcilia aliases de categorias (ex.: "Lazer" <-> "Lazer & Entretenimento")
+        val normalizedBudgetKeyMap = mutableMapOf<String, String>()
+        val consolidatedBudgets = linkedMapOf<String, Double>()
+        for ((rawCat, valAmt) in categoryBudgets) {
+            if (valAmt <= 0.0) continue
+            val norm = normalizeBudgetCategory(rawCat)
+            val displayKey = normalizedBudgetKeyMap[norm] ?: rawCat
+            normalizedBudgetKeyMap[norm] = displayKey
+            consolidatedBudgets[displayKey] = round2((consolidatedBudgets[displayKey] ?: 0.0) + valAmt)
+        }
+
+        val consolidatedSpentMap = linkedMapOf<String, Double>()
+        for ((rawCat, valAmt) in spentMap) {
+            if (valAmt <= 0.0) continue
+            val norm = normalizeBudgetCategory(rawCat)
+            val matchedBudgetKey = normalizedBudgetKeyMap[norm]
+            val targetKey = matchedBudgetKey ?: rawCat
+            consolidatedSpentMap[targetKey] = round2((consolidatedSpentMap[targetKey] ?: 0.0) + valAmt)
+        }
+
+        // Calibração automática pela Entrada Prevista do Mês:
+        // O orçamento total configurado nunca deve ultrapassar a entrada prevista daquele mês.
+        val effectiveExpectedIncome = round2(kotlin.math.max(0.0, expectedIncome))
+        val rawTotalBudgeted = round2(
+            consolidatedBudgets.values.filter { it > 0.0 }.sum()
+        )
+        val isCappedToIncome = effectiveExpectedIncome > 0.0 && rawTotalBudgeted > effectiveExpectedIncome
+        val scaleFactor = if (isCappedToIncome && rawTotalBudgeted > 0.0) {
+            effectiveExpectedIncome / rawTotalBudgeted
+        } else {
+            1.0
+        }
+
+        val effectiveBudgets = linkedMapOf<String, Double>()
+        if (isCappedToIncome) {
+            val entries = consolidatedBudgets.entries.filter { it.value > 0.0 }
+            var runningSum = 0.0
+            var maxCat = ""
+            var maxVal = -1.0
+            for ((cat, rawVal) in entries) {
+                val scaled = round2(rawVal * scaleFactor)
+                effectiveBudgets[cat] = scaled
+                runningSum = round2(runningSum + scaled)
+                if (scaled > maxVal) {
+                    maxVal = scaled
+                    maxCat = cat
+                }
+            }
+            val diff = round2(effectiveExpectedIncome - runningSum)
+            if (maxCat.isNotEmpty() && kotlin.math.abs(diff) > 0.0 && (effectiveBudgets[maxCat] ?: 0.0) + diff >= 0.0) {
+                effectiveBudgets[maxCat] = round2((effectiveBudgets[maxCat] ?: 0.0) + diff)
+            }
+        } else {
+            for ((cat, rawVal) in consolidatedBudgets) {
+                if (rawVal > 0.0) {
+                    effectiveBudgets[cat] = round2(rawVal)
+                }
+            }
+        }
+
+        val budgetedCategories = effectiveBudgets.filter { it.value > 0.0 }.keys
         val allCategoriesSet = linkedSetOf<String>().apply {
             addAll(budgetedCategories)
-            addAll(spentMap.keys)
+            addAll(consolidatedSpentMap.keys)
         }
 
         val items = mutableListOf<CategoryBudgetStatus>()
@@ -2657,15 +2778,16 @@ object FinanceEngine {
         var warningCount = 0
 
         for (category in allCategoriesSet) {
-            val limit = round2(kotlin.math.max(0.0, categoryBudgets[category] ?: 0.0))
-            val spent = round2(kotlin.math.max(0.0, spentMap[category] ?: 0.0))
+            val rawLimit = round2(kotlin.math.max(0.0, consolidatedBudgets[category] ?: 0.0))
+            val limit = round2(kotlin.math.max(0.0, effectiveBudgets[category] ?: 0.0))
+            val spent = round2(kotlin.math.max(0.0, consolidatedSpentMap[category] ?: 0.0))
 
-            if (limit <= 0.0 && category in NON_ENVELOPE_CATEGORIES) continue
+            if (limit <= 0.0 && (category in NON_ENVELOPE_CATEGORIES || normalizeBudgetCategory(category) in NON_ENVELOPE_CATEGORIES)) continue
             if (limit <= 0.0 && spent <= 0.0) continue
 
             val remaining = round2(limit - spent)
             val percentage = if (limit > 0.0) round2((spent / limit) * 100.0) else if (spent > 0.0) 100.0 else 0.0
-            val isFixedCategory = category in FIXED_MONTHLY_CATEGORIES
+            val isFixedCategory = isFixedBudgetCategory(category)
 
             val status = when {
                 limit > 0.0 && isFixedCategory -> {
@@ -2720,6 +2842,7 @@ object FinanceEngine {
                 CategoryBudgetStatus(
                     category = category,
                     limit = limit,
+                    rawLimit = rawLimit,
                     spent = spent,
                     remaining = remaining,
                     percentage = percentage,
@@ -2762,14 +2885,31 @@ object FinanceEngine {
             it.status == CategoryBudgetAlertStatus.DANGER || it.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL
         }
 
-        val unbudgetedCategories = spentMap.entries
-            .filter { (cat, amt) -> amt > 0.0 && (categoryBudgets[cat] ?: 0.0) <= 0.0 && cat !in NON_ENVELOPE_CATEGORIES }
+        val unbudgetedCategories = consolidatedSpentMap.entries
+            .filter { (cat, amt) ->
+                amt > 0.0 &&
+                    (effectiveBudgets[cat] ?: 0.0) <= 0.0 &&
+                    cat !in NON_ENVELOPE_CATEGORIES &&
+                    normalizeBudgetCategory(cat) !in NON_ENVELOPE_CATEGORIES
+            }
             .map { (cat, amt) -> CategoryExpense(category = cat, amount = round2(amt)) }
             .sortedByDescending { it.amount }
+
+        val incomeUsagePercentage = if (effectiveExpectedIncome > 0.0) {
+            round2((totalBudgeted / effectiveExpectedIncome) * 100.0)
+        } else 0.0
+        val unallocatedIncome = if (effectiveExpectedIncome > 0.0) {
+            round2(kotlin.math.max(0.0, effectiveExpectedIncome - totalBudgeted))
+        } else 0.0
 
         return CategoryBudgetReport(
             items = items,
             totalBudgeted = totalBudgeted,
+            rawTotalBudgeted = rawTotalBudgeted,
+            expectedIncome = effectiveExpectedIncome,
+            isCappedToIncome = isCappedToIncome,
+            incomeUsagePercentage = incomeUsagePercentage,
+            unallocatedIncome = unallocatedIncome,
             totalSpent = totalSpent,
             totalRemaining = totalRemaining,
             overallPercentage = overallPercentage,
@@ -2793,6 +2933,24 @@ object FinanceEngine {
             shiftMonth(referenceMonth, -3)
         )
 
+        // Calcula a entrada prevista real do mês de referência a partir dos lançamentos de receita
+        var referenceMonthIncome = 0.0
+        for (tx in allTransactions) {
+            if (tx.type != TransactionType.INCOME) continue
+            val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
+            if (m != referenceMonth) continue
+            val imp = impactFor(tx, uid, allTransactions)
+            if (imp > 0.0) referenceMonthIncome += imp
+        }
+        referenceMonthIncome = round2(referenceMonthIncome)
+
+        // Prioriza o que é esperado entrar no mês selecionado; usa monthlyIncome apenas se não houver receitas no mês
+        val effectiveExpectedIncome = if (referenceMonthIncome > 0.0) {
+            referenceMonthIncome
+        } else {
+            round2(kotlin.math.max(0.0, monthlyIncome))
+        }
+
         val monthCategoryTotals = mutableMapOf<String, MutableMap<String, Double>>()
         for (m in previousMonths) {
             monthCategoryTotals[m] = mutableMapOf()
@@ -2805,8 +2963,9 @@ object FinanceEngine {
             if (m !in previousMonths) continue
             val impact = impactFor(tx, uid, allTransactions)
             if (impact <= 0.0 || tx.category.isBlank()) continue
+            val canonicalCat = normalizeBudgetCategory(tx.category)
             val catMap = monthCategoryTotals.getOrPut(m) { mutableMapOf() }
-            catMap[tx.category] = (catMap[tx.category] ?: 0.0) + impact
+            catMap[canonicalCat] = (catMap[canonicalCat] ?: 0.0) + impact
             matchingCount++
         }
 
@@ -2818,7 +2977,8 @@ object FinanceEngine {
                 if (m != referenceMonth) continue
                 val impact = impactFor(tx, uid, allTransactions)
                 if (impact <= 0.0 || tx.category.isBlank()) continue
-                curMap[tx.category] = (curMap[tx.category] ?: 0.0) + impact
+                val canonicalCat = normalizeBudgetCategory(tx.category)
+                curMap[canonicalCat] = (curMap[canonicalCat] ?: 0.0) + impact
             }
             monthCategoryTotals[referenceMonth] = curMap
         }
@@ -2839,23 +2999,64 @@ object FinanceEngine {
         var totalSuggested = 0.0
 
         for ((cat, sum) in sumMap) {
-            if (cat in NON_ENVELOPE_CATEGORIES) continue
+            if (cat in NON_ENVELOPE_CATEGORIES || normalizeBudgetCategory(cat) in NON_ENVELOPE_CATEGORIES) continue
             val avg = round2(sum / divisor)
             categoryAverages[cat] = avg
             if (avg >= 20.0) {
-                val suggested = kotlin.math.max(50.0, kotlin.math.ceil((avg * 1.1) / 10.0) * 10.0)
+                // Categorias fixas mantêm o valor exato (arredondado para dezena); variáveis têm margem de +10%
+                val isFixed = isFixedBudgetCategory(cat)
+                val rawSuggested = if (isFixed) {
+                    kotlin.math.ceil(avg / 10.0) * 10.0
+                } else {
+                    kotlin.math.ceil((avg * 1.1) / 10.0) * 10.0
+                }
+                val suggested = kotlin.math.max(50.0, rawSuggested)
                 suggestedBudgets[cat] = suggested
                 totalSuggested += suggested
             }
         }
 
-        totalSuggested = round2(totalSuggested)
-        val incomeCoveragePct = if (monthlyIncome > 0.0) round2((totalSuggested / monthlyIncome) * 100.0) else 0.0
+        var isCappedToIncome = false
+        // Calibração estrita: o orçamento sugerido nunca pode exceder a entrada prevista do mês
+        if (effectiveExpectedIncome > 0.0 && totalSuggested > effectiveExpectedIncome) {
+            isCappedToIncome = true
+            val scale = effectiveExpectedIncome / totalSuggested
+            var newTotal = 0.0
+            var maxCat = ""
+            var maxVal = -1.0
+
+            for (cat in suggestedBudgets.keys.toList()) {
+                val rawVal = suggestedBudgets[cat] ?: 0.0
+                val scaled = kotlin.math.max(10.0, kotlin.math.floor((rawVal * scale) / 5.0) * 5.0)
+                val roundedScaled = round2(scaled)
+                suggestedBudgets[cat] = roundedScaled
+                newTotal = round2(newTotal + roundedScaled)
+                if (roundedScaled > maxVal) {
+                    maxVal = roundedScaled
+                    maxCat = cat
+                }
+            }
+
+            if (newTotal > effectiveExpectedIncome && maxCat.isNotEmpty()) {
+                val excess = round2(newTotal - effectiveExpectedIncome)
+                suggestedBudgets[maxCat] = round2(kotlin.math.max(0.0, (suggestedBudgets[maxCat] ?: 0.0) - excess))
+                newTotal = round2(newTotal - excess)
+            }
+            totalSuggested = round2(newTotal)
+        } else {
+            totalSuggested = round2(totalSuggested)
+        }
+
+        val incomeCoveragePct = if (effectiveExpectedIncome > 0.0) {
+            round2((totalSuggested / effectiveExpectedIncome) * 100.0)
+        } else 0.0
 
         return SuggestedBudgetsResult(
             suggestedBudgets = suggestedBudgets,
             totalSuggested = totalSuggested,
             incomeCoveragePct = incomeCoveragePct,
+            expectedIncome = effectiveExpectedIncome,
+            isCappedToIncome = isCappedToIncome,
             categoryAverages = categoryAverages
         )
     }

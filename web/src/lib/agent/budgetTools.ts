@@ -21,9 +21,12 @@ export async function gerenciarEnvelopesOrcamentarios(
   const uid = env.me.uid
   const monthKey = env.monthKey
   const refDate = todayKey()
+  const rawMonthSummary = computeSummary(txs, uid, monthKey, [], env.getCards ? env.getCards() : [])
+  const expectedMonthIncome =
+    rawMonthSummary.income > 0 ? rawMonthSummary.income : (profile?.monthlyIncome || 0)
 
   if (acao === 'consultar') {
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid)
+    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
     const rebalance = suggestBudgetRebalance(report)
 
     const itensFormatados = report.items.map((i) => ({
@@ -122,7 +125,7 @@ export async function gerenciarEnvelopesOrcamentarios(
       await env.updateProfile({ categoryBudgets: currentBudgets })
     }
 
-    const updatedReport = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid)
+    const updatedReport = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
     const item = updatedReport.items.find((i) => i.category === categoria)
 
     return {
@@ -208,7 +211,7 @@ export async function gerenciarEnvelopesOrcamentarios(
   }
 
   if (acao === 'rebalancear_automatico') {
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid)
+    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
     const rebalance = suggestBudgetRebalance(report)
 
     if (!rebalance.canRebalance || rebalance.suggestions.length === 0) {
@@ -257,28 +260,30 @@ export async function gerenciarEnvelopesOrcamentarios(
   }
 
   if (acao === 'sugerir_tetos') {
-    const monthlyIncome = profile?.monthlyIncome || 0
+    const monthlyIncome = expectedMonthIncome
     const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome)
 
     return {
       response: {
         ok: true,
+        entradaPrevistaDoMes: formatBRL(monthlyIncome),
         totalSugerido: formatBRL(suggestion.totalSuggested),
-        coberturaRenda: `${suggestion.incomeCoveragePct}% da renda de ${formatBRL(monthlyIncome)}`,
+        coberturaRenda: `${suggestion.incomeCoveragePct}% da entrada prevista de ${formatBRL(monthlyIncome)}`,
         tetosRecomendados: Object.entries(suggestion.suggestedBudgets).map(([cat, lim]) => ({
           categoria: cat,
           mediaHistorica3Meses: formatBRL(suggestion.categoryAverages[cat] || 0),
-          tetoSugeridoComMargem10Pct: formatBRL(lim),
+          tetoSugerido: formatBRL(lim),
         })),
         orientacao:
           'Para aplicar todos esses tetos de uma só vez, chame acao="aplicar_sugestao_ia" ou peça "Aplicar tetos sugeridos pela IA".',
       },
       action: {
         kind: 'report',
-        title: 'Sugestão de Envelopes IA (Histórico 3M)',
+        title: 'Sugestão de Envelopes IA (Calibrado à Entrada)',
         lines: [
+          { label: 'Entrada Prevista do Mês', value: formatBRL(monthlyIncome) },
           { label: 'Total Orçado Sugerido', value: formatBRL(suggestion.totalSuggested) },
-          { label: 'Comprometimento da Renda', value: `${suggestion.incomeCoveragePct}%` },
+          { label: 'Alocação da Entrada', value: `${suggestion.incomeCoveragePct}%` },
           ...Object.entries(suggestion.suggestedBudgets)
             .slice(0, 4)
             .map(([cat, lim]) => ({
@@ -291,7 +296,7 @@ export async function gerenciarEnvelopesOrcamentarios(
   }
 
   if (acao === 'aplicar_sugestao_ia') {
-    const monthlyIncome = profile?.monthlyIncome || 0
+    const monthlyIncome = expectedMonthIncome
     const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome)
     const entries = Object.entries(suggestion.suggestedBudgets)
 
@@ -304,26 +309,28 @@ export async function gerenciarEnvelopesOrcamentarios(
       }
     }
 
+    const calibratedBudgets: Record<string, number> = {}
     for (const [cat, lim] of entries) {
-      currentBudgets[cat] = lim
+      calibratedBudgets[cat] = lim
     }
 
     if (env.updateProfile) {
-      await env.updateProfile({ categoryBudgets: currentBudgets })
+      await env.updateProfile({ categoryBudgets: calibratedBudgets })
     }
 
     return {
       response: {
         ok: true,
-        mensagem: `Apliquei os tetos inteligentes sugeridos pela IA para ${entries.length} categorias, totalizando ${formatBRL(suggestion.totalSuggested)} (${suggestion.incomeCoveragePct}% da sua renda).`,
+        mensagem: `Apliquei os tetos inteligentes sugeridos pela IA para ${entries.length} categorias, totalizando ${formatBRL(suggestion.totalSuggested)} (${suggestion.incomeCoveragePct}% da entrada prevista do mês de ${formatBRL(monthlyIncome)}).`,
         tetosAplicados: entries.map(([cat, lim]) => ({ categoria: cat, teto: formatBRL(lim) })),
       },
       action: {
         kind: 'updated',
         title: `Envelopes IA Configurados (${entries.length} categorias)`,
         lines: [
+          { label: 'Entrada Prevista do Mês', value: formatBRL(monthlyIncome) },
           { label: 'Orçamento Total', value: formatBRL(suggestion.totalSuggested), tone: 'positive' },
-          { label: 'Cobertura da Renda', value: `${suggestion.incomeCoveragePct}%` },
+          { label: 'Alocação da Entrada', value: `${suggestion.incomeCoveragePct}%` },
           ...entries.slice(0, 4).map(([cat, lim]) => ({
             label: cat,
             value: formatBRL(lim),
@@ -344,14 +351,14 @@ export async function gerenciarEnvelopesOrcamentarios(
     }
 
     const valorParcela = round2(valorCompra / parcelas)
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid)
+    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
     const envelope = report.items.find((i) => i.category === categoria)
 
     const tetoAtual = envelope?.limit || 0
     const gastoAtual = envelope?.spent || 0
     const sobraAtual = envelope?.remaining || 0
 
-    const rawSummary = computeSummary(txs, uid, monthKey, [], env.getCards ? env.getCards() : [])
+    const rawSummary = rawMonthSummary
     const effectiveFreeBalance =
       rawSummary.income > 0
         ? rawSummary.freeBalance
@@ -412,7 +419,7 @@ export async function gerenciarEnvelopesOrcamentarios(
   }
 
   if (acao === 'diagnostico_saude_financeira') {
-    const rawSummary = computeSummary(txs, uid, monthKey, [], env.getCards ? env.getCards() : [])
+    const rawSummary = rawMonthSummary
     const summary =
       rawSummary.income === 0 && (profile?.monthlyIncome || 0) > 0
         ? {
@@ -421,7 +428,7 @@ export async function gerenciarEnvelopesOrcamentarios(
             freeBalance: round2(profile!.monthlyIncome! - rawSummary.paid - rawSummary.committed),
           }
         : rawSummary
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid)
+    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, summary.income)
     const rebalance = suggestBudgetRebalance(report)
     const reserveBalance = resolveEmergencyReserveBalance(profile, summary)
     const health = calculateFinancialHealthScore(summary, reserveBalance, report)

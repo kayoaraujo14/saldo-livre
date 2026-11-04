@@ -1035,6 +1035,7 @@ class FirestoreFinanceRepository(
             displayName = doc.getString("displayName") ?: "Meu Perfil",
             photoURL = doc.getString("photoURL"),
             monthlyIncome = doc.getDouble("monthlyIncome") ?: 5000.0,
+            emergencyReserveBalance = doc.getDouble("emergencyReserveBalance") ?: 0.0,
             investmentMonthlyTarget = doc.getDouble("investmentMonthlyTarget") ?: 1000.0,
             investmentAssetBalances = assetBalances,
             categoryBudgets = budgetsMap,

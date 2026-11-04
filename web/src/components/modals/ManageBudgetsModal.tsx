@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -11,8 +11,13 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
 import { EXPENSE_CATEGORIES, getCategoryDetail } from '@/types'
-import { formatBRL, round2 } from '@/lib/utils'
-import { suggestCategoryBudgets, suggestBudgetRebalance } from '@/lib/finance'
+import { formatBRL, monthLabel, round2 } from '@/lib/utils'
+import {
+  suggestCategoryBudgets,
+  suggestBudgetRebalance,
+  normalizeBudgetCategory,
+  FIXED_MONTHLY_CATEGORIES,
+} from '@/lib/finance'
 import {
   Target,
   Sparkles,
@@ -20,6 +25,8 @@ import {
   CheckCircle2,
   RotateCcw,
   Sliders,
+  AlertTriangle,
+  Scale,
 } from 'lucide-react'
 
 interface ManageBudgetsModalProps {
@@ -35,6 +42,7 @@ export function ManageBudgetsModal({
 }: ManageBudgetsModalProps) {
   const {
     profile,
+    summary,
     month,
     transactions,
     me,
@@ -48,29 +56,57 @@ export function ManageBudgetsModal({
   const [isSaving, setIsSaving] = useState(false)
   const [rebalanceSuccessMsg, setRebalanceSuccessMsg] = useState<string | null>(null)
 
-  // Inicializa o formulário com os valores atuais do perfil quando o modal abrir
+  const expectedIncome = useMemo(() => {
+    if (summary?.income && summary.income > 0) return summary.income
+    return profile?.monthlyIncome || 0
+  }, [summary?.income, profile?.monthlyIncome])
+
+  // Inicializa o formulário com os valores atuais calibrados quando o modal abrir
   const currentBudgets = useMemo(() => profile?.categoryBudgets || {}, [profile?.categoryBudgets])
 
-  // Inicialização controlada ao abrir
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) {
+  useEffect(() => {
+    if (open) {
+      setActiveTab(initialTab)
       const initial: Record<string, string> = {}
-      for (const cat of EXPENSE_CATEGORIES) {
-        if (currentBudgets[cat] && currentBudgets[cat] > 0) {
-          initial[cat] = String(currentBudgets[cat])
+      // Usa os limites efetivos (já calibrados pela entrada prevista do mês se aplicável)
+      for (const item of categoryBudgetReport.items) {
+        if (item.limit > 0) {
+          const canon = normalizeBudgetCategory(item.category)
+          initial[canon] = String(round2((Number(initial[canon]) || 0) + item.limit))
+        }
+      }
+      if (Object.keys(initial).length === 0) {
+        for (const [rawCat, val] of Object.entries(currentBudgets)) {
+          if (val && val > 0) {
+            const canon = normalizeBudgetCategory(rawCat)
+            initial[canon] = String(round2((Number(initial[canon]) || 0) + val))
+          }
         }
       }
       setBudgetsState(initial)
       setRebalanceSuccessMsg(null)
     }
+  }, [open, initialTab, categoryBudgetReport.items, currentBudgets])
+
+  const handleOpenChange = (nextOpen: boolean) => {
     onOpenChange(nextOpen)
   }
 
-  // Sugestão da IA
+  // Sugestão da IA calibrada pela entrada prevista do mês selecionado
   const aiSuggestion = useMemo(() => {
     if (!open) return null
-    return suggestCategoryBudgets(transactions, me?.uid || '', month, profile?.monthlyIncome || 0)
-  }, [open, transactions, me?.uid, month, profile?.monthlyIncome])
+    return suggestCategoryBudgets(transactions, me?.uid || '', month, expectedIncome)
+  }, [open, transactions, me?.uid, month, expectedIncome])
+
+  // Mapa de gastos reais do mês por categoria canônica
+  const currentMonthSpentMap = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const item of categoryBudgetReport.items) {
+      const canon = normalizeBudgetCategory(item.category)
+      map.set(canon, round2((map.get(canon) || 0) + item.spent))
+    }
+    return map
+  }, [categoryBudgetReport.items])
 
   // Oportunidades de rebalanceamento
   const rebalanceInfo = useMemo(() => {
@@ -82,7 +118,46 @@ export function ManageBudgetsModal({
     if (!aiSuggestion) return
     const nextState: Record<string, string> = {}
     for (const [cat, limit] of Object.entries(aiSuggestion.suggestedBudgets)) {
-      nextState[cat] = String(limit)
+      nextState[normalizeBudgetCategory(cat)] = String(limit)
+    }
+    setBudgetsState(nextState)
+  }
+
+  // Soma dos limites no formulário
+  const formTotal = useMemo(() => {
+    let sum = 0
+    for (const val of Object.values(budgetsState)) {
+      const num = parseFloat(String(val).replace(',', '.'))
+      if (!isNaN(num) && num > 0) sum += num
+    }
+    return round2(sum)
+  }, [budgetsState])
+
+  // Calibra proporcionalmente os valores digitados para caberem exatamente na entrada prevista do mês
+  const handleCalibrateToExpectedIncome = () => {
+    if (expectedIncome <= 0 || formTotal <= expectedIncome || formTotal <= 0) return
+    const ratio = expectedIncome / formTotal
+    const nextState: Record<string, string> = {}
+    let sumScaled = 0
+    let maxCat = ''
+    let maxVal = -1
+
+    for (const [cat, val] of Object.entries(budgetsState)) {
+      const num = parseFloat(String(val).replace(',', '.'))
+      if (!isNaN(num) && num > 0) {
+        const scaled = round2(num * ratio)
+        nextState[cat] = String(scaled)
+        sumScaled = round2(sumScaled + scaled)
+        if (scaled > maxVal) {
+          maxVal = scaled
+          maxCat = cat
+        }
+      }
+    }
+    const diff = round2(expectedIncome - sumScaled)
+    if (maxCat && Math.abs(diff) >= 0.01) {
+      const adjusted = round2(Math.max(0, (parseFloat(nextState[maxCat]) || 0) + diff))
+      nextState[maxCat] = String(adjusted)
     }
     setBudgetsState(nextState)
   }
@@ -94,18 +169,45 @@ export function ManageBudgetsModal({
     }
   }
 
-  // Salva no perfil
+  // Salva no perfil (garantindo que nunca exceda a entrada prevista do mês se houver entrada prevista > 0)
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      const sanitized: Record<string, number> = {}
+      const rawSanitized: Record<string, number> = {}
+      let rawSum = 0
       for (const [cat, val] of Object.entries(budgetsState)) {
-        const num = parseFloat(val.replace(',', '.'))
+        const num = parseFloat(String(val).replace(',', '.'))
         if (!isNaN(num) && num > 0) {
-          sanitized[cat] = round2(num)
+          const rounded = round2(num)
+          rawSanitized[cat] = rounded
+          rawSum = round2(rawSum + rounded)
         }
       }
-      await setCategoryBudgets(sanitized)
+
+      const finalBudgets: Record<string, number> = {}
+      if (expectedIncome > 0 && rawSum > expectedIncome && rawSum > 0) {
+        const ratio = expectedIncome / rawSum
+        let sumScaled = 0
+        let maxCat = ''
+        let maxVal = -1
+        for (const [cat, num] of Object.entries(rawSanitized)) {
+          const scaled = round2(num * ratio)
+          finalBudgets[cat] = scaled
+          sumScaled = round2(sumScaled + scaled)
+          if (scaled > maxVal) {
+            maxVal = scaled
+            maxCat = cat
+          }
+        }
+        const diff = round2(expectedIncome - sumScaled)
+        if (maxCat && Math.abs(diff) >= 0.01) {
+          finalBudgets[maxCat] = round2(Math.max(0, finalBudgets[maxCat] + diff))
+        }
+      } else {
+        Object.assign(finalBudgets, rawSanitized)
+      }
+
+      await setCategoryBudgets(finalBudgets)
       onOpenChange(false)
     } finally {
       setIsSaving(false)
@@ -125,15 +227,9 @@ export function ManageBudgetsModal({
     setTimeout(() => setRebalanceSuccessMsg(null), 4000)
   }
 
-  // Soma dos limites no formulário
-  const formTotal = useMemo(() => {
-    let sum = 0
-    for (const val of Object.values(budgetsState)) {
-      const num = parseFloat(val.replace(',', '.'))
-      if (!isNaN(num) && num > 0) sum += num
-    }
-    return round2(sum)
-  }, [budgetsState])
+  const isOverExpectedIncome = expectedIncome > 0 && formTotal > expectedIncome
+  const allocationPct = expectedIncome > 0 ? Math.round((formTotal / expectedIncome) * 100) : 0
+  const unallocatedMargin = expectedIncome > 0 ? round2(expectedIncome - formTotal) : 0
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -149,11 +245,11 @@ export function ManageBudgetsModal({
                 <DialogTitle className="text-base font-bold text-white flex items-center gap-2">
                   Envelopes Orçamentários
                   <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-300 border-emerald-500/20">
-                    Copiloto IA
+                    {monthLabel(month)}
                   </Badge>
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-400">
-                  Defina tetos por categoria e conte com a IA para rebalancear imprevistos.
+                  Calibre seus tetos usando a entrada prevista do mês e conte com a IA para rebalancear imprevistos.
                 </DialogDescription>
               </div>
             </div>
@@ -192,18 +288,113 @@ export function ManageBudgetsModal({
         </DialogHeader>
 
         {/* Conteúdo scrollável */}
-        <div className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
+        <div className="p-5 overflow-y-auto overscroll-contain flex-1 space-y-4 text-xs">
           {activeTab === 'budgets' && (
             <>
+              {/* Termômetro de Alocação da Entrada Prevista do Mês */}
+              <div
+                className={`rounded-xl p-3.5 border space-y-2.5 ${
+                  isOverExpectedIncome
+                    ? 'bg-rose-950/25 border-rose-500/35'
+                    : 'bg-slate-900/70 border-white/[0.08]'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">
+                      Entrada Prevista em {monthLabel(month)}
+                    </span>
+                    <strong className="font-mono text-sm text-white">
+                      {formatBRL(expectedIncome)}
+                    </strong>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">
+                      Total Orçado ({allocationPct}%)
+                    </span>
+                    <strong
+                      className={`font-mono text-sm ${
+                        isOverExpectedIncome ? 'text-rose-400' : 'text-emerald-400'
+                      }`}
+                    >
+                      {formatBRL(formTotal)}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Barra de Alocação da Entrada */}
+                {expectedIncome > 0 && (
+                  <div className="space-y-1">
+                    <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-white/[0.06]">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          isOverExpectedIncome
+                            ? 'bg-rose-500'
+                            : allocationPct > 85
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(0, allocationPct))}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>
+                        {unallocatedMargin >= 0 ? (
+                          <>
+                            Margem Livre p/ Poupança:{' '}
+                            <strong className="text-emerald-300 font-mono">
+                              {formatBRL(unallocatedMargin)}
+                            </strong>
+                          </>
+                        ) : (
+                          <span className="text-rose-300 font-medium">
+                            Excede a entrada prevista em {formatBRL(Math.abs(unallocatedMargin))}
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleClearAll}
+                        className="text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer"
+                      >
+                        <RotateCcw className="size-3" />
+                        Zerar Tudo
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isOverExpectedIncome && (
+                  <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-rose-500/20 text-[11px] text-rose-200">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className="size-3.5 text-rose-400 shrink-0" />
+                      <span>
+                        O orçamento nunca deve superar a entrada prevista do mês ({formatBRL(expectedIncome)}).
+                      </span>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleCalibrateToExpectedIncome}
+                      className="h-7 text-[11px] bg-rose-600 hover:bg-rose-500 text-white shrink-0 px-2.5"
+                    >
+                      <Scale className="size-3 mr-1" />
+                      Calibrar à Entrada ({formatBRL(expectedIncome)})
+                    </Button>
+                  </div>
+                )}
+              </div>
+
               {/* Banner da Sugestão com IA */}
               <div className="glass-card rounded-xl p-3.5 border border-emerald-500/25 bg-emerald-950/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-emerald-300 text-xs">
                     <Sparkles className="size-3.5" />
-                    Sugerir Orçamento com IA
+                    Sugerir Orçamento com IA (Teto: {formatBRL(aiSuggestion?.totalSuggested || 0)})
                   </div>
                   <p className="text-[11px] text-slate-300 leading-relaxed">
-                    A IA analisa a média dos seus últimos 3 meses e propõe tetos realistas com 10% de folga preventiva.
+                    Analisa seu histórico de 3 meses e os compromissos de {monthLabel(month)}, limitando o orçamento total à entrada prevista do mês ({aiSuggestion?.incomeCoveragePct || 0}% da entrada).
                   </p>
                 </div>
                 <Button
@@ -218,58 +409,78 @@ export function ManageBudgetsModal({
                 </Button>
               </div>
 
-              {/* Barra de resumo de limites configurados */}
-              <div className="flex items-center justify-between px-1 text-[11px] text-slate-400">
-                <span>
-                  Total Orçado: <strong className="text-white font-mono">{formatBRL(formTotal)}</strong>
-                  {profile?.monthlyIncome ? (
-                    <span className="text-slate-500 ml-1">
-                      ({Math.round((formTotal / profile.monthlyIncome) * 100)}% da renda de {formatBRL(profile.monthlyIncome)})
-                    </span>
-                  ) : null}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleClearAll}
-                  className="text-slate-500 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  <RotateCcw className="size-3" />
-                  Zerar Tudo
-                </button>
-              </div>
-
-              {/* Lista de Categorias com Inputs */}
+              {/* Lista de Categorias com Inputs Acessíveis */}
               <div className="space-y-2">
                 {EXPENSE_CATEGORIES.map((cat) => {
                   const detail = getCategoryDetail(cat)
                   const currentVal = budgetsState[cat] ?? ''
                   const avg = aiSuggestion?.categoryAverages[cat]
+                  const suggestedVal = aiSuggestion?.suggestedBudgets[cat]
+                  const spentNow = currentMonthSpentMap.get(cat) || 0
+                  const isFixed = FIXED_MONTHLY_CATEGORIES.has(cat)
+                  const inputId = `budget-input-${cat.replace(/[^a-zA-Z0-9]/g, '-')}`
 
                   return (
                     <div
                       key={cat}
                       className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.06] hover:border-white/[0.12] transition-colors"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <div
                           className="size-3 rounded-full shrink-0"
                           style={{ backgroundColor: detail.color || '#10b981' }}
                         />
-                        <div className="min-w-0">
-                          <span className="font-semibold text-slate-200 block truncate text-xs">
-                            {cat}
-                          </span>
-                          {avg && avg > 0 ? (
-                            <span className="text-[10px] text-slate-400 block truncate">
-                              Média recente: {formatBRL(avg)}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <label
+                              htmlFor={inputId}
+                              className="font-semibold text-slate-200 truncate text-xs cursor-pointer"
+                            >
+                              {cat}
+                            </label>
+                            <span
+                              className={`text-[9px] px-1.5 py-0 rounded font-mono ${
+                                isFixed
+                                  ? 'bg-cyan-500/15 text-cyan-300'
+                                  : 'bg-slate-800 text-slate-400'
+                              }`}
+                            >
+                              {isFixed ? 'Fixo' : 'Variável'}
                             </span>
-                          ) : null}
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-400 mt-0.5">
+                            {spentNow > 0 && (
+                              <span>
+                                Gasto no mês: <strong className="text-slate-300 font-mono">{formatBRL(spentNow)}</strong>
+                              </span>
+                            )}
+                            {avg && avg > 0 ? (
+                              <span>
+                                • Média 3M: <strong className="text-slate-300 font-mono">{formatBRL(avg)}</strong>
+                              </span>
+                            ) : null}
+                            {suggestedVal && suggestedVal > 0 && String(suggestedVal) !== currentVal ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setBudgetsState((prev) => ({
+                                    ...prev,
+                                    [cat]: String(suggestedVal),
+                                  }))
+                                }
+                                className="text-emerald-400 hover:text-emerald-300 underline font-mono cursor-pointer"
+                              >
+                                Usar IA: {formatBRL(suggestedVal)}
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0 w-36">
                         <span className="text-slate-500 text-[11px]">R$</span>
                         <Input
+                          id={inputId}
                           type="number"
                           step="10"
                           min="0"
@@ -308,7 +519,7 @@ export function ManageBudgetsModal({
                   Diagnóstico de Compensação Inteligente
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Quando uma categoria estoura devido a um gasto imprevisto, o Copiloto IA encontra envelopes discricionários com sobra positiva para compensar o desvio sem comprometer seu Saldo Livre.
+                  Quando uma categoria estoura devido a um gasto imprevisto, o Copiloto IA encontra envelopes discricionários com sobra positiva para compensar o desvio sem aumentar seu orçamento total e sem comprometer seu Saldo Livre.
                 </p>
                 <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/[0.06] text-[11px]">
                   <div>
@@ -392,7 +603,7 @@ export function ManageBudgetsModal({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-white/[0.08] bg-slate-900/60 flex items-center justify-end gap-2">
+        <div className="p-4 border-t border-white/[0.08] bg-slate-900/60 flex items-center justify-between gap-2">
           <Button
             type="button"
             variant="ghost"
@@ -410,7 +621,11 @@ export function ManageBudgetsModal({
               onClick={handleSave}
               className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4"
             >
-              {isSaving ? 'Salvando...' : 'Salvar Envelopes'}
+              {isSaving
+                ? 'Salvando...'
+                : isOverExpectedIncome
+                  ? `Salvar Calibrado (${formatBRL(expectedIncome)})`
+                  : 'Salvar Envelopes'}
             </Button>
           )}
         </div>

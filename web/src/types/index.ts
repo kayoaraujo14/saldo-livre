@@ -706,6 +706,7 @@ export type CategoryBudgetPaceStatus = 'normal' | 'fast' | 'critical'
 export interface CategoryBudgetStatus {
   category: string
   limit: number
+  rawLimit?: number
   spent: number
   remaining: number
   percentage: number
@@ -724,6 +725,11 @@ export interface CategoryBudgetStatus {
 export interface CategoryBudgetReport {
   items: CategoryBudgetStatus[]
   totalBudgeted: number
+  rawTotalBudgeted?: number
+  expectedIncome?: number
+  isCappedToIncome?: boolean
+  incomeUsagePercentage?: number
+  unallocatedIncome?: number
   totalSpent: number
   totalRemaining: number
   overallPercentage: number

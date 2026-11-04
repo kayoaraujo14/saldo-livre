@@ -32,12 +32,12 @@ class MockFinanceRepository(
         displayName = "Kayo Araújo",
         monthlyIncome = 8500.0,
         categoryBudgets = mapOf(
-            "Moradia" to 2100.0,
             "Alimentação" to 1200.0,
+            "Moradia" to 2500.0,
             "Transporte" to 500.0,
-            "Lazer" to 400.0,
-            "Assinaturas" to 150.0,
-            "Saúde" to 300.0
+            "Lazer & Entretenimento" to 400.0,
+            "Assinaturas & Serviços" to 200.0,
+            "Compras & Estilo de Vida" to 600.0
         )
     )
 
@@ -47,9 +47,10 @@ class MockFinanceRepository(
         displayName = "Marina Costa",
         monthlyIncome = 6200.0,
         categoryBudgets = mapOf(
+            "Alimentação" to 1000.0,
             "Moradia" to 1800.0,
-            "Alimentação" to 900.0,
-            "Lazer" to 350.0
+            "Transporte" to 350.0,
+            "Lazer & Entretenimento" to 300.0
         )
     )
 
@@ -62,12 +63,28 @@ class MockFinanceRepository(
 
     override val allUsers: List<UserProfile> = listOf(userKayo, userMarina, userLucas)
 
+    private fun hydrateDemoUser(base: UserProfile): UserProfile {
+        val savedIncome = prefs?.getString("demo_income_${base.uid}", null)?.toDoubleOrNull()
+        val savedBudgetsJson = prefs?.getString("demo_budgets_${base.uid}", null)
+        val savedBudgets: Map<String, Double>? = if (!savedBudgetsJson.isNullOrBlank()) {
+            try {
+                val type = object : TypeToken<Map<String, Double>>() {}.type
+                gson.fromJson<Map<String, Double>>(savedBudgetsJson, type)
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+        return base.copy(
+            monthlyIncome = savedIncome ?: base.monthlyIncome,
+            categoryBudgets = savedBudgets ?: base.categoryBudgets
+        )
+    }
+
     private val _currentUser = MutableStateFlow(
         run {
             val savedUid = prefs?.getString(PREF_KEY_CURRENT_USER, null)
             val base = allUsers.find { it.uid == savedUid } ?: userKayo
-            val savedIncome = prefs?.getString("demo_income_${base.uid}", null)?.toDoubleOrNull()
-            if (savedIncome != null) base.copy(monthlyIncome = savedIncome) else base
+            hydrateDemoUser(base)
         }
     )
     override val currentUser: StateFlow<UserProfile> = _currentUser.asStateFlow()
@@ -229,9 +246,7 @@ class MockFinanceRepository(
 
     override fun switchUser(uid: String) {
         val baseTarget = allUsers.find { it.uid == uid } ?: return
-        val savedIncome = prefs?.getString("demo_income_${baseTarget.uid}", null)?.toDoubleOrNull()
-        val target = if (savedIncome != null) baseTarget.copy(monthlyIncome = savedIncome) else baseTarget
-        _currentUser.value = target
+        _currentUser.value = hydrateDemoUser(baseTarget)
         prefs?.edit()?.putString(PREF_KEY_CURRENT_USER, uid)?.apply()
     }
 
