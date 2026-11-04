@@ -27,6 +27,7 @@ import {
   calculateCardInvoiceDates,
   canUserEditTransaction,
   clampPct,
+  computeCategoryBudgets,
   computeSummary,
   estimateRecurring,
   friendPctOf,
@@ -40,7 +41,7 @@ import {
 } from '@/lib/finance'
 import * as fb from '@/lib/firebase'
 import { createToolExecutor, getLearnedRules, saveLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
-import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, daysInMonth, monthLabel, formatInstallmentDesc, stripInstallmentSuffix } from '@/lib/utils'
+import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, daysInMonth, monthLabel, formatInstallmentDesc, stripInstallmentSuffix, todayKey } from '@/lib/utils'
 import type {
   AutoLaunchedNotice,
   DemoState,
@@ -572,6 +573,17 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     if (!currentUid) return null
     return computeSummary(transactions, currentUid, month, monthClosures, cards)
   }, [transactions, currentUid, month, monthClosures, cards])
+
+  const categoryBudgetReport = useMemo(() => {
+    return computeCategoryBudgets(
+      summary?.byCategory || [],
+      profile?.categoryBudgets || {},
+      month,
+      todayKey(),
+      currentUid || undefined,
+      transactions,
+    )
+  }, [summary?.byCategory, profile?.categoryBudgets, month, currentUid, transactions])
 
   const [closureModalOpen, setClosureModalOpen] = useState(false)
   const [closureDismissed, setClosureDismissed] = useState(false)
@@ -1714,6 +1726,47 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     [profile, mode, commitDemo],
   )
 
+  const setCategoryBudget = useCallback(
+    async (category: string, limit: number) => {
+      const current = { ...(profile?.categoryBudgets || {}) }
+      if (limit > 0) {
+        current[category] = round2(limit)
+      } else {
+        delete current[category]
+      }
+      await updateProfile({ categoryBudgets: current })
+    },
+    [profile?.categoryBudgets, updateProfile],
+  )
+
+  const setCategoryBudgets = useCallback(
+    async (budgets: Record<string, number>) => {
+      const sanitized: Record<string, number> = {}
+      for (const [cat, lim] of Object.entries(budgets || {})) {
+        const n = Number(lim)
+        if (n > 0) sanitized[cat] = round2(n)
+      }
+      await updateProfile({ categoryBudgets: sanitized })
+    },
+    [updateProfile],
+  )
+
+  const rebalanceCategoryBudgets = useCallback(
+    async (fromCategory: string, toCategory: string, amount: number) => {
+      const amt = round2(Number(amount) || 0)
+      if (amt <= 0) return
+      const current = { ...(profile?.categoryBudgets || {}) }
+      const fromVal = current[fromCategory] || 0
+      const toVal = current[toCategory] || 0
+      const newFrom = Math.max(0, round2(fromVal - amt))
+      const newTo = round2(toVal + amt)
+      current[fromCategory] = newFrom
+      current[toCategory] = newTo
+      await updateProfile({ categoryBudgets: current })
+    },
+    [profile?.categoryBudgets, updateProfile],
+  )
+
   const lookupUserByEmail = useCallback(async (email: string) => {
     return fb.lookupUserByEmail(email)
   }, [])
@@ -1743,6 +1796,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           getRecurring: () => (mode === 'demo' ? demoRef.current.recurring : agentEnvRef.current.recurring),
           getFriends: () => friends,
           getProfile: () => profile,
+          updateProfile: async (patch) => updateProfile(patch),
           getClosures: () => monthClosures,
           getPendingTransactions: () => pendingBatchRef.current,
           setPendingTransactions: (txs) => {
@@ -1812,7 +1866,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           }
         }
       }),
-    [mode, friends, profile, monthClosures, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction, commitDemo, sendFriendRequest, respondFriendRequest],
+    [mode, friends, profile, updateProfile, monthClosures, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction, commitDemo, sendFriendRequest, respondFriendRequest],
   )
 
   const rules = useMemo(() => {
@@ -1900,6 +1954,10 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     deleteRecurring,
     updateProfile,
     lookupUserByEmail,
+    categoryBudgetReport,
+    setCategoryBudget,
+    setCategoryBudgets,
+    rebalanceCategoryBudgets,
     monthClosures,
     saveMonthClosure,
     deleteMonthClosure,

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
 import { FinanceProvider, useFinance } from '@/store/FinanceContext'
 import { Header } from '@/components/Header'
 import { KpiGrid } from '@/components/KpiGrid'
+import { CategoryBudgetsCard } from '@/components/CategoryBudgetsCard'
 import { TransactionTable } from '@/components/TransactionTable'
 import { GeminiChat } from '@/components/GeminiChat'
 import { ScrollToTop } from '@/components/ui/ScrollToTop'
@@ -209,10 +210,13 @@ function MainDashboard() {
         <div className={isExpandedView ? 'hidden lg:flex lg:flex-col flex-1 min-h-0' : 'hidden lg:block space-y-3'}>
           {/* KPI Dashboard (Compact Metric Ribbon) - Oculto no modo expandido */}
           {desktopView === 'chat_focus' && (
-            <KpiGrid
-              onOpenReceivables={() => setReceivablesModalOpen(true)}
-              onOpenInvestments={() => setInvestmentsModalOpen(true)}
-            />
+            <div className="space-y-3">
+              <KpiGrid
+                onOpenReceivables={() => setReceivablesModalOpen(true)}
+                onOpenInvestments={() => setInvestmentsModalOpen(true)}
+              />
+              <CategoryBudgetsCard />
+            </div>
           )}
 
           {/* Flexible Main Workspace Grid (Height optimized with compact KPIs) */}
@@ -281,6 +285,9 @@ function MainDashboard() {
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
                 onOpenInvestments={() => setInvestmentsModalOpen(true)}
               />
+
+              {/* Envelopes Orçamentários */}
+              <CategoryBudgetsCard />
 
               {/* Banner de Lançamento Automático / Próximos Vencimentos (Mobile) */}
               <AutoLaunchNoticeBanner onGoToTransactions={() => handleSelectMobileTab('transactions')} />

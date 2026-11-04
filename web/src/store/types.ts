@@ -16,6 +16,7 @@ import type {
   Transaction,
   TransactionStatus,
   UserProfile,
+  CategoryBudgetReport,
 } from '@/types'
 import type { Party } from '@/lib/finance'
 import type { ToolExecutor } from '@/lib/gemini'
@@ -136,6 +137,11 @@ export interface FinanceContextValue {
   deleteRecurring: (id: string) => Promise<void>
   updateProfile: (patch: Partial<UserProfile>) => Promise<void>
   lookupUserByEmail: (email: string) => Promise<UserProfile | null>
+  // Envelopes Orçamentários
+  categoryBudgetReport: CategoryBudgetReport
+  setCategoryBudget: (category: string, limit: number) => Promise<void>
+  setCategoryBudgets: (budgets: Record<string, number>) => Promise<void>
+  rebalanceCategoryBudgets: (fromCategory: string, toCategory: string, amount: number) => Promise<void>
   monthClosures: MonthClosure[]
   saveMonthClosure: (closure: MonthClosure) => Promise<void>
   deleteMonthClosure: (closedMonth: string) => Promise<void>

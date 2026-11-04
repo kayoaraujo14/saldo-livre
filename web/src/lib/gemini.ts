@@ -217,6 +217,7 @@ export type ToolName =
   | 'gerenciarAmizades'
   | 'gerenciarRegrasEMemoria'
   | 'gerarGraficoFinanceiro'
+  | 'gerenciarEnvelopesOrcamentarios'
 
 export interface ToolResult {
   response: Record<string, unknown>
@@ -662,6 +663,51 @@ export const functionDeclarations: FunctionDeclaration[] = [
         },
       },
       required: ['tipo', 'titulo', 'dados'],
+    },
+  },
+  {
+    name: 'gerenciarEnvelopesOrcamentarios',
+    description:
+      'Consulta o consumo dos envelopes orçamentários por categoria, define tetos mensais, analisa o ritmo de gastos, sugere rebalanceamento inteligente entre categorias com folga para compensar imprevistos e simula compras à vista ou parceladas.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        acao: {
+          type: Type.STRING,
+          enum: ['consultar', 'definir_teto', 'rebalancear', 'sugerir_tetos', 'simular_compra'],
+          description:
+            'Ação a realizar: "consultar" (ver status dos envelopes e ritmo do mês), "definir_teto" (configurar limite mensal para uma categoria), "rebalancear" (transferir saldo entre envelopes), "sugerir_tetos" (gerar proposta com base no histórico de 3 meses), ou "simular_compra" (avaliar se uma compra à vista ou parcelada cabe no orçamento).',
+        },
+        categoria: {
+          type: Type.STRING,
+          description: 'Nome da categoria (ex: Alimentação, Transporte, Lazer & Entretenimento, Compras & Estilo de Vida).',
+        },
+        limite: {
+          type: Type.NUMBER,
+          description: 'Valor do teto mensal em reais para a categoria (usado em "definir_teto").',
+        },
+        categoriaOrigem: {
+          type: Type.STRING,
+          description: 'Categoria de onde será retirado o saldo para rebalancear (usado em "rebalancear").',
+        },
+        categoriaDestino: {
+          type: Type.STRING,
+          description: 'Categoria que receberá o saldo adicional (usado em "rebalancear").',
+        },
+        valorTransferencia: {
+          type: Type.NUMBER,
+          description: 'Valor em reais a transferir entre os envelopes (usado em "rebalancear").',
+        },
+        valorCompra: {
+          type: Type.NUMBER,
+          description: 'Valor total da compra a ser simulada (usado em "simular_compra").',
+        },
+        parcelas: {
+          type: Type.INTEGER,
+          description: 'Número de parcelas da compra simulada (1 = à vista).',
+        },
+      },
+      required: ['acao'],
     },
   },
 ]

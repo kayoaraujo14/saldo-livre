@@ -23,6 +23,10 @@ import type {
   LaunchTrigger,
   PendingRecurringCandidate,
   FinancialHealthScore,
+  BudgetRebalanceSuggestion,
+  CategoryBudgetPaceStatus,
+  CategoryBudgetReport,
+  CategoryBudgetStatus,
 } from '@/types'
 import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
 import { buildCardInvoice } from './invoices'
@@ -2358,5 +2362,320 @@ export function calculateFinancialHealthScore(
     savingsRatePercentage,
     spendingRatioPercentage,
     emergencyCoverageMonths: coverageMonths,
+  }
+}
+
+// ------------------------------------------------------------------
+// Envelopes Orçamentários Inteligentes & Análise de Gastos (IA-Ready)
+// ------------------------------------------------------------------
+
+/**
+ * Calcula o consumo, ritmo diário, projeção de fechamento e alertas de estouro
+ * para envelopes orçamentários por categoria.
+ */
+export function computeCategoryBudgets(
+  categorySpendData: Array<{ category: string; amount: number }> | Transaction[],
+  categoryBudgets: Record<string, number> = {},
+  monthKey: string = currentMonthKey(),
+  referenceDate: string = todayKey(),
+  uid?: string,
+  allTransactions?: Transaction[],
+): CategoryBudgetReport {
+  // 1. Extrai ou computa o mapa de gastos por categoria
+  const spentMap = new Map<string, number>()
+
+  if (Array.isArray(categorySpendData) && categorySpendData.length > 0) {
+    const first = categorySpendData[0] as any
+    if (typeof first?.category === 'string' && typeof first?.amount === 'number') {
+      // É uma lista { category, amount } (ex: summary.byCategory)
+      for (const item of categorySpendData as Array<{ category: string; amount: number }>) {
+        if (item.category) {
+          spentMap.set(item.category, (spentMap.get(item.category) || 0) + (Number(item.amount) || 0))
+        }
+      }
+    } else if (uid) {
+      // É uma lista de Transaction[]
+      const txs = categorySpendData as Transaction[]
+      const all = allTransactions || txs
+      for (const tx of txs) {
+        if (tx.type === 'expense') {
+          const impact = impactFor(tx, uid, all)
+          if (impact > 0 && tx.category) {
+            spentMap.set(tx.category, (spentMap.get(tx.category) || 0) + impact)
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Parâmetros temporais para ritmo e projeção
+  const totalDays = daysInMonth(monthKey)
+  let currentDay = totalDays
+
+  if (referenceDate.startsWith(monthKey)) {
+    const dayParsed = parseInt(referenceDate.split('-')[2], 10)
+    currentDay = Math.min(totalDays, Math.max(1, isNaN(dayParsed) ? 1 : dayParsed))
+  } else if (referenceDate < monthKey) {
+    currentDay = 1
+  }
+
+  const daysRemaining = Math.max(0, totalDays - currentDay)
+
+  // 3. Monta lista de categorias a avaliar (todas com orçamento + qualquer uma com gasto expressivo > 0)
+  const budgetedCategories = Object.keys(categoryBudgets || {}).filter(
+    (cat) => (Number(categoryBudgets[cat]) || 0) > 0,
+  )
+  const allCategoriesSet = new Set<string>([...budgetedCategories, ...spentMap.keys()])
+
+  const items: CategoryBudgetStatus[] = []
+  let totalBudgeted = 0
+  let totalSpent = 0
+  let criticalCount = 0
+  let warningCount = 0
+
+  for (const category of allCategoriesSet) {
+    const limit = round2(Math.max(0, Number(categoryBudgets[category]) || 0))
+    const spent = round2(Math.max(0, spentMap.get(category) || 0))
+    const remaining = round2(limit - spent)
+
+    // Se a categoria não tem orçamento e não teve gastos, pula
+    if (limit <= 0 && spent <= 0) continue
+
+    const percentage = limit > 0 ? round2((spent / limit) * 100) : (spent > 0 ? 100 : 0)
+
+    let status: 'ok' | 'warning' | 'danger' = 'ok'
+    if (limit > 0) {
+      if (percentage >= 100) status = 'danger'
+      else if (percentage >= 80) status = 'warning'
+    } else if (spent > 0) {
+      status = 'warning' // Sem teto mas com gasto
+    }
+
+    const dailyPace = currentDay > 0 ? round2(spent / currentDay) : 0
+    const projectedSpent = round2(dailyPace * totalDays)
+    const projectedPercentage = limit > 0 ? round2((projectedSpent / limit) * 100) : (projectedSpent > 0 ? 100 : 0)
+    const recommendedDailyRemaining = remaining > 0 && daysRemaining > 0 ? round2(remaining / daysRemaining) : 0
+
+    let burnRateStatus: CategoryBudgetPaceStatus = 'normal'
+    if (status === 'danger' || (limit > 0 && projectedPercentage >= 115)) {
+      burnRateStatus = 'critical'
+      criticalCount++
+    } else if (status === 'warning' || (limit > 0 && projectedPercentage >= 95)) {
+      burnRateStatus = 'fast'
+      warningCount++
+    }
+
+    if (limit > 0) {
+      totalBudgeted += limit
+      totalSpent += spent
+    }
+
+    items.push({
+      category,
+      limit,
+      spent,
+      remaining,
+      percentage,
+      status,
+      dailyPace,
+      projectedSpent,
+      projectedPercentage,
+      recommendedDailyRemaining,
+      burnRateStatus,
+      daysRemaining,
+      currentDay,
+      totalDays,
+    })
+  }
+
+  // Ordena por criticidade (perigo primeiro) e depois por valor gasto decrescente
+  items.sort((a, b) => {
+    const priority = { danger: 3, warning: 2, ok: 1 }
+    const pDiff = priority[b.status] - priority[a.status]
+    if (pDiff !== 0) return pDiff
+    return b.spent - a.spent
+  })
+
+  totalBudgeted = round2(totalBudgeted)
+  totalSpent = round2(totalSpent)
+  const totalRemaining = round2(totalBudgeted - totalSpent)
+  const overallPercentage = totalBudgeted > 0 ? round2((totalSpent / totalBudgeted) * 100) : 0
+
+  let overallStatus: 'ok' | 'warning' | 'danger' = 'ok'
+  if (overallPercentage >= 100 || criticalCount > 0) overallStatus = 'danger'
+  else if (overallPercentage >= 80) overallStatus = 'warning'
+
+  const topOverspentCategory = items.find((i) => i.status === 'danger' || i.burnRateStatus === 'critical')
+
+  return {
+    items,
+    totalBudgeted,
+    totalSpent,
+    totalRemaining,
+    overallPercentage,
+    status: overallStatus,
+    criticalCount,
+    warningCount,
+    topOverspentCategory,
+  }
+}
+
+/**
+ * Analisa as transações dos últimos 3 meses para sugerir tetos orçamentários realistas.
+ * Inclui uma margem de segurança de 10% arredondada para dezenas inteiras.
+ */
+export function suggestCategoryBudgets(
+  allTransactions: Transaction[],
+  uid: string,
+  referenceMonth: string = currentMonthKey(),
+  monthlyIncome: number = 0,
+): {
+  suggestedBudgets: Record<string, number>
+  totalSuggested: number
+  incomeCoveragePct: number
+  categoryAverages: Record<string, number>
+} {
+  const previousMonths = [
+    shiftMonth(referenceMonth, -1),
+    shiftMonth(referenceMonth, -2),
+    shiftMonth(referenceMonth, -3),
+  ]
+
+  const monthCategoryTotals = new Map<string, Map<string, number>>()
+  for (const m of previousMonths) {
+    monthCategoryTotals.set(m, new Map())
+  }
+
+  const all = Array.isArray(allTransactions) ? allTransactions : []
+  let matchingCount = 0
+
+  for (const tx of all) {
+    if (tx.type !== 'expense') continue
+    const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
+    if (!previousMonths.includes(m)) continue
+
+    const impact = impactFor(tx, uid, all)
+    if (impact <= 0 || !tx.category) continue
+
+    const catMap = monthCategoryTotals.get(m)!
+    catMap.set(tx.category, (catMap.get(tx.category) || 0) + impact)
+    matchingCount++
+  }
+
+  // Se não houver dados nos meses anteriores, analisa o próprio referenceMonth
+  if (matchingCount === 0) {
+    const curMap = new Map<string, number>()
+    for (const tx of all) {
+      if (tx.type !== 'expense') continue
+      const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
+      if (m !== referenceMonth) continue
+      const impact = impactFor(tx, uid, all)
+      if (impact <= 0 || !tx.category) continue
+      curMap.set(tx.category, (curMap.get(tx.category) || 0) + impact)
+    }
+    monthCategoryTotals.set(referenceMonth, curMap)
+  }
+
+  const activeMonths = [...monthCategoryTotals.keys()].filter(
+    (m) => (monthCategoryTotals.get(m)?.size || 0) > 0,
+  )
+  const divisor = Math.max(1, activeMonths.length)
+
+  const sumMap = new Map<string, number>()
+  for (const m of activeMonths) {
+    const catMap = monthCategoryTotals.get(m)!
+    for (const [cat, amt] of catMap.entries()) {
+      sumMap.set(cat, (sumMap.get(cat) || 0) + amt)
+    }
+  }
+
+  const suggestedBudgets: Record<string, number> = {}
+  const categoryAverages: Record<string, number> = {}
+  let totalSuggested = 0
+
+  for (const [cat, sum] of sumMap.entries()) {
+    const avg = round2(sum / divisor)
+    categoryAverages[cat] = avg
+    if (avg >= 20) {
+      // Margem de segurança de 10%, arredondada para o múltiplo de 10 superior
+      const suggested = Math.max(50, Math.ceil((avg * 1.1) / 10) * 10)
+      suggestedBudgets[cat] = suggested
+      totalSuggested += suggested
+    }
+  }
+
+  totalSuggested = round2(totalSuggested)
+  const incomeCoveragePct = monthlyIncome > 0 ? round2((totalSuggested / monthlyIncome) * 100) : 0
+
+  return {
+    suggestedBudgets,
+    totalSuggested,
+    incomeCoveragePct,
+    categoryAverages,
+  }
+}
+
+/**
+ * Detecta categorias estouradas e encontra categorias com saldo sobrando no mês para compensar.
+ */
+export function suggestBudgetRebalance(
+  report: CategoryBudgetReport,
+): {
+  canRebalance: boolean
+  deficitTotal: number
+  surplusTotal: number
+  suggestions: BudgetRebalanceSuggestion[]
+} {
+  const overspent = report.items.filter((i) => i.limit > 0 && i.spent > i.limit)
+  const surplus = report.items.filter((i) => i.limit > 0 && i.remaining > 20)
+
+  const deficitTotal = round2(overspent.reduce((acc, i) => acc + (i.spent - i.limit), 0))
+  const surplusTotal = round2(surplus.reduce((acc, i) => acc + i.remaining, 0))
+
+  const suggestions: BudgetRebalanceSuggestion[] = []
+
+  if (overspent.length === 0 || surplus.length === 0) {
+    return {
+      canRebalance: false,
+      deficitTotal,
+      surplusTotal,
+      suggestions: [],
+    }
+  }
+
+  // Cópia dos saldos remanescentes para alocação gananciosa (greedy allocation)
+  const remainingSurplusMap = new Map<string, number>()
+  for (const s of surplus) {
+    remainingSurplusMap.set(s.category, s.remaining)
+  }
+
+  for (const o of overspent) {
+    let needed = round2(o.spent - o.limit)
+
+    for (const s of surplus) {
+      if (needed <= 0) break
+      const avail = remainingSurplusMap.get(s.category) || 0
+      if (avail <= 0) continue
+
+      const transfer = round2(Math.min(needed, avail))
+      if (transfer >= 5) {
+        suggestions.push({
+          overspentCategory: o.category,
+          overspentAmount: round2(o.spent - o.limit),
+          compensateFrom: s.category,
+          availableSurplus: avail,
+          suggestedTransfer: transfer,
+        })
+        needed = round2(needed - transfer)
+        remainingSurplusMap.set(s.category, round2(avail - transfer))
+      }
+    }
+  }
+
+  return {
+    canRebalance: suggestions.length > 0,
+    deficitTotal,
+    surplusTotal,
+    suggestions,
   }
 }

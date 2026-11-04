@@ -15,6 +15,14 @@ export const DEMO_USERS: UserProfile[] = [
     displayName: 'Kayo Araújo',
     photoURL: null,
     monthlyIncome: 8500,
+    categoryBudgets: {
+      'Alimentação': 1200,
+      'Moradia': 2500,
+      'Transporte': 500,
+      'Lazer & Entretenimento': 400,
+      'Assinaturas & Serviços': 200,
+      'Compras & Estilo de Vida': 600,
+    },
   },
   {
     uid: 'demo-marina',
@@ -22,6 +30,12 @@ export const DEMO_USERS: UserProfile[] = [
     displayName: 'Marina Costa',
     photoURL: null,
     monthlyIncome: 6200,
+    categoryBudgets: {
+      'Alimentação': 1000,
+      'Moradia': 1800,
+      'Transporte': 350,
+      'Lazer & Entretenimento': 300,
+    },
   },
 ]
 

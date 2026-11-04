@@ -686,6 +686,7 @@ class FirestoreFinanceRepository(
                     "monthlyIncome" to profile.monthlyIncome,
                     "investmentMonthlyTarget" to profile.investmentMonthlyTarget,
                     "investmentAssetBalances" to profile.investmentAssetBalances,
+                    "categoryBudgets" to profile.categoryBudgets,
                     "resolvedRecurring" to profile.resolvedRecurring
                 ),
                 com.google.firebase.firestore.SetOptions.merge()
@@ -1012,6 +1013,14 @@ class FirestoreFinanceRepository(
                 assetBalances[k.toString()] = num
             }
         }
+        val rawBudgets = doc.get("categoryBudgets") as? Map<*, *>
+        val budgetsMap = mutableMapOf<String, Double>()
+        rawBudgets?.forEach { (k, v) ->
+            if (k != null) {
+                val num = (v as? Number)?.toDouble() ?: 0.0
+                budgetsMap[k.toString()] = num
+            }
+        }
         return UserProfile(
             uid = doc.id,
             email = doc.getString("email") ?: "",
@@ -1020,6 +1029,7 @@ class FirestoreFinanceRepository(
             monthlyIncome = doc.getDouble("monthlyIncome") ?: 5000.0,
             investmentMonthlyTarget = doc.getDouble("investmentMonthlyTarget") ?: 1000.0,
             investmentAssetBalances = assetBalances,
+            categoryBudgets = budgetsMap,
             resolvedRecurring = resolvedMap
         )
     }

@@ -693,6 +693,50 @@ export interface UserProfile {
   resolvedRecurring?: Record<string, string[]>
   investmentMonthlyTarget?: number
   investmentAssetBalances?: Record<string, number>
+  categoryBudgets?: Record<string, number>
+}
+
+// ============================================================
+// Envelopes Orçamentários Inteligentes & Análise de Gastos
+// ============================================================
+
+export type CategoryBudgetPaceStatus = 'normal' | 'fast' | 'critical'
+
+export interface CategoryBudgetStatus {
+  category: string
+  limit: number
+  spent: number
+  remaining: number
+  percentage: number
+  status: 'ok' | 'warning' | 'danger'
+  dailyPace: number
+  projectedSpent: number
+  projectedPercentage: number
+  recommendedDailyRemaining: number
+  burnRateStatus: CategoryBudgetPaceStatus
+  daysRemaining: number
+  currentDay: number
+  totalDays: number
+}
+
+export interface CategoryBudgetReport {
+  items: CategoryBudgetStatus[]
+  totalBudgeted: number
+  totalSpent: number
+  totalRemaining: number
+  overallPercentage: number
+  status: 'ok' | 'warning' | 'danger'
+  criticalCount: number
+  warningCount: number
+  topOverspentCategory?: CategoryBudgetStatus
+}
+
+export interface BudgetRebalanceSuggestion {
+  overspentCategory: string
+  overspentAmount: number
+  compensateFrom: string
+  availableSurplus: number
+  suggestedTransfer: number
 }
 
 export interface SharedUser {

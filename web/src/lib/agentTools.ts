@@ -20,6 +20,7 @@ import {
 } from './agent/managementTools'
 import { gerenciarRegras } from './agent/rules'
 import { gerarGrafico } from './agent/chartTools'
+import { gerenciarEnvelopesOrcamentarios } from './agent/budgetTools'
 
 // Re-exporta tipos, regras e helpers para manter paridade e compatibilidade 100%
 export type { AgentEnv, UserRule }
@@ -69,6 +70,8 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
         return consultar(env, args)
       case 'gerarGraficoFinanceiro':
         return gerarGrafico(env, args)
+      case 'gerenciarEnvelopesOrcamentarios':
+        return gerenciarEnvelopesOrcamentarios(env, args)
       default:
         return { response: { ok: false, erro: `Ferramenta desconhecida: ${name}` } }
     }

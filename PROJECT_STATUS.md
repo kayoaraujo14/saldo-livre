@@ -88,6 +88,59 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-04] Orçamento Inteligente & Envelopes de Gastos com IA — Etapa 3: Integração Copiloto Gemini & Function Calling (Conclusão Integral):**
+  - **Nova Ferramenta do Copiloto (`gerenciarEnvelopesOrcamentarios`):**
+    - Adicionada ao catálogo de ferramentas do Gemini em `gemini.ts` e despachada para o módulo especializado `agent/budgetTools.ts`.
+    - Suporte a 5 ações de tomada de decisão com IA:
+      1. `consultar`: Análise do progresso, velocidade de queima de cada envelope e saldo disponível.
+      2. `definir_teto`: Ajuste de limites orçamentários por texto ou voz.
+      3. `rebalancear`: Compensação de gastos imprevistos transferindo saldo entre envelopes.
+      4. `sugerir_tetos`: Proposta de orçamento fundamentada na média real de 3 meses com 10% de folga.
+      5. `simular_compra`: Resposta consultiva se uma despesa à vista ou parcelada cabe no envelope e no Saldo Livre do usuário.
+  - **Expansão de Testes Unitários:**
+    - Suíte `budgets.test.ts` expandida com testes ponta a ponta do executor de ferramentas (`ToolExecutor`).
+  - **Validação Global:**
+    - Linter: **0 avisos e 0 erros** em 72 arquivos (`oxlint`).
+    - Testes Unitários: **89 testes verdes** (`vitest`).
+    - Build Web: **`tsc -b && vite build` aprovado em 2.31s**.
+    - Android: **`compileDebugKotlin` aprovado com sucesso em 35s**.
+
+- **[2026-11-04] Orçamento Inteligente & Envelopes de Gastos com IA — Etapa 2: Interface Visual no Dashboard & Modais (Conclusão Integral):**
+  - **Componente de Envelopes no Dashboard (`CategoryBudgetsCard.tsx`):**
+    - Métrica agregada de tetos: Total Orçado, Consumido, % de execução e Sobra/Déficit.
+    - Barra de progresso global dinâmica com transição suave de cores (verde, âmbar e rosa).
+    - Grid responsivo de cartões individuais por envelope de categoria com ícones e cores oficiais (`getCategoryDetail`).
+    - Badges de ritmo inteligentes (`Flame` Crítico / `AlertTriangle` Acelerado / Normal) informando a velocidade diária de consumo.
+    - Alerta preventivo da IA inline com atalho de 1 clique para acionar o rebalanceamento dinâmico.
+    - Botão de expansão para visualização completa de todos os envelopes e empty state amigável.
+  - **Modal de Gestão & Rebalanceamento com IA (`ManageBudgetsModal.tsx`):**
+    - Aba **"Configurar Tetos"**: Ajuste de valores monetários por categoria com atalho **"Preencher com IA"** que analisa o histórico dos últimos 3 meses e sugere tetos automáticos com 10% de folga.
+    - Aba **"Rebalanceamento IA"**: Diagnóstico de compensação de imprevistos com sugestões calculadas pela IA (`Lazer ➔ Alimentação`) e execução com 1 clique (`rebalanceCategoryBudgets`).
+  - **Integração no Layout (`App.tsx`):**
+    - Posicionamento orgânico no Dashboard Desktop (abaixo de `KpiGrid`) e no Mobile (na aba Início).
+  - **Validação Global:**
+    - Linter: **0 avisos e 0 erros** em 71 arquivos (`oxlint`).
+    - Testes Unitários: **88 testes verdes** (`vitest`).
+    - Build Web: **`tsc -b && vite build` aprovado em 958ms**.
+    - Android: **`compileDebugKotlin` aprovado com sucesso**.
+
+- **[2026-11-04] Orçamento Inteligente & Envelopes de Gastos com IA — Etapa 1: Modelagem & Motor de Cálculo (Conclusão Integral):**
+  - **Modelagem de Dados & Paridade Web/Mobile:**
+    - Adicionado suporte nativo a `categoryBudgets` no `UserProfile` tanto na Web (`web/src/types/index.ts`) quanto no Android (`UserProfile.kt` e `FirestoreFinanceRepository.kt` com parsing e salvamento merge no Firestore).
+    - Criados os contratos tipados `CategoryBudgetStatus`, `CategoryBudgetReport`, `CategoryBudgetPaceStatus` e `BudgetRebalanceSuggestion`.
+    - Inicialização de dados demonstrativos realistas em `mockData.ts` para modo Demo imediato.
+  - **Motor Financeiro Puro (`web/src/lib/finance.ts`):**
+    - `computeCategoryBudgets`: Cálculo do consumo real por categoria (respeitando cotas e divisões entre amigos), ritmo diário (`dailyPace`), projeção de fechamento (`projectedSpent`), dias restantes, limite diário recomendado e status de burn-rate (`normal`, `fast`, `critical`).
+    - `suggestCategoryBudgets`: Analisador preditivo de histórico (janela de 3 meses) que sugere tetos fundamentados com margem de segurança de 10% e métrica de cobertura da renda.
+    - `suggestBudgetRebalance`: Algoritmo guloso de compensação que detecta estouros em categorias e calcula transferências automáticas a partir de envelopes com saldo positivo.
+  - **Estado Reativo Global (`FinanceContext.tsx` & `store/types.ts`):**
+    - Exposição do relatório `categoryBudgetReport` memoizado e das ações `setCategoryBudget`, `setCategoryBudgets` e `rebalanceCategoryBudgets`.
+  - **Validação Global:**
+    - Testes Unitários: Nova suíte `web/src/lib/__tests__/budgets.test.ts` com 7 novos testes (**88 testes unitários passando 100% no Vitest**).
+    - Linter: **0 avisos e 0 erros** em 69 arquivos (`oxlint`).
+    - Build Web: **`tsc -b && vite build` concluído com sucesso**.
+    - Android: **Compilação Kotlin aprovada** (`compileDebugKotlin`).
+
 - **[2026-11-04] Prioridade 3 — Otimização Android: Modernização Java 17, Minificação R8/ProGuard & Validação da Suíte de Testes (Conclusão Integral):**
   - **Modernização do Java Toolchain (Java 17):**
     - Atualização de `compileOptions` para `JavaVersion.VERSION_17` (source e target) e `kotlinOptions.jvmTarget = "17"` em `android/app/build.gradle.kts`.

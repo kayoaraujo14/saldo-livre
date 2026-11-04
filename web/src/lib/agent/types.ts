@@ -16,6 +16,7 @@ export interface AgentEnv {
   getRecurring?: () => RecurringBill[]
   getFriends?: () => Array<{ uid: string; name: string; email?: string }>
   getProfile?: () => UserProfile | null
+  updateProfile?: (patch: Partial<UserProfile>) => Promise<void>
   getClosures?: () => MonthClosure[]
   getPendingTransactions?: () => PendingBatchTransaction[] | undefined
   setPendingTransactions?: (txs: PendingBatchTransaction[]) => void

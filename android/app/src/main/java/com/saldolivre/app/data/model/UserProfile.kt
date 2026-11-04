@@ -8,5 +8,6 @@ data class UserProfile(
     val monthlyIncome: Double = 0.0,
     val resolvedRecurring: Map<String, List<String>> = emptyMap(),
     val investmentMonthlyTarget: Double = 1000.0,
-    val investmentAssetBalances: Map<String, Double> = emptyMap()
+    val investmentAssetBalances: Map<String, Double> = emptyMap(),
+    val categoryBudgets: Map<String, Double> = emptyMap()
 )
