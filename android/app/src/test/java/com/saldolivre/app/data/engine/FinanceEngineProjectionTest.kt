@@ -250,13 +250,13 @@ class FinanceEngineProjectionTest {
             budgetReport = report
         )
 
-        // Custo de vida deve descontar Investimentos (8000 - 3000 = 5000 -> 50% da renda -> 35/35 pts)
+        // Custo de vida deve descontar Investimentos (8000 - 3000 = 5000 -> 50% da renda -> 30/30 pts)
         assertEquals(5000.0, health.monthlyLivingCost, 0.01)
         assertEquals(50, health.spendingRatioPercentage)
-        assertEquals(35, health.spendingLimitScore)
-        assertEquals(35, health.savingsScore)
-        assertEquals(30, health.emergencyReserveScore)
-        assertEquals(100, health.budgetAdherenceScore)
+        assertEquals(30, health.spendingLimitScore)
+        assertEquals(30, health.savingsScore)
+        assertEquals(25, health.emergencyReserveScore)
+        assertEquals(15, health.envelopeScore)
         assertEquals(100, health.score)
         assertEquals(FinancialHealthClassification.EXCELLENT, health.classification)
         assertTrue(health.actionableTips.isNotEmpty())
