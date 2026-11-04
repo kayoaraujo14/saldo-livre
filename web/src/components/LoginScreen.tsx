@@ -161,7 +161,7 @@ export function LoginScreen() {
               className="w-full sm:w-auto h-12 px-6 border-white/10 bg-slate-900/70 hover:bg-slate-800 text-slate-200 font-semibold text-sm rounded-xl gap-2 cursor-pointer transition-all hover:border-emerald-500/30"
             >
               <Sparkles className="size-4 text-emerald-400" />
-              <span>Testar Modo Demonstração</span>
+              <span>Experimentar Modo Demonstração (Sem Login)</span>
               <ArrowRight className="size-3.5 text-slate-400" />
             </Button>
           </div>

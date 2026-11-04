@@ -678,6 +678,312 @@ fun CategoryBudgetsSectionCard(
 }
 
 @Composable
+fun CompactFinancialHealthCard(
+    health: FinancialHealthScore,
+    onOpenDetails: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val healthColor = when (health.classification) {
+        FinancialHealthClassification.EXCELLENT -> Emerald400
+        FinancialHealthClassification.HEALTHY -> Cyan400
+        FinancialHealthClassification.WARNING -> Amber400
+        FinancialHealthClassification.CRITICAL -> Rose400
+    }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpenDetails),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier.size(36.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        progress = { (health.score / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxSize(),
+                        color = healthColor,
+                        trackColor = Color.White.copy(alpha = 0.10f),
+                        strokeWidth = 3.dp
+                    )
+                    Text(
+                        text = "${health.score}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "SAÚDE FINANCEIRA",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                            color = TextSecondary
+                        )
+                        Box(
+                            modifier = Modifier
+                                .background(healthColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                        ) {
+                            Text(
+                                text = health.label,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = healthColor
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = health.actionableTips.firstOrNull() ?: health.description,
+                        fontSize = 10.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = "Raio-X",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Emerald400
+                )
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = Emerald400,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun FullFinancialHealthCard(
+    health: FinancialHealthScore,
+    onOpenDetails: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val healthColor = when (health.classification) {
+        FinancialHealthClassification.EXCELLENT -> Emerald400
+        FinancialHealthClassification.HEALTHY -> Cyan400
+        FinancialHealthClassification.WARNING -> Amber400
+        FinancialHealthClassification.CRITICAL -> Rose400
+    }
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onOpenDetails),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier.size(40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            progress = { (health.score / 100f).coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxSize(),
+                            color = healthColor,
+                            trackColor = Color.White.copy(alpha = 0.10f),
+                            strokeWidth = 3.5.dp
+                        )
+                        Text(
+                            text = "${health.score}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "SAÚDE FINANCEIRA",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp,
+                                color = TextSecondary
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .background(healthColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = health.label,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = healthColor
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = health.actionableTips.firstOrNull() ?: health.description,
+                            fontSize = 10.sp,
+                            color = TextMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Text(
+                    text = "Raio-X →",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Emerald400
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "POUPANÇA",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = "${health.savingsScore}/35 (${health.savingsRatePercentage}%)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(20.dp)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "CUSTO VIDA",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = "${health.spendingLimitScore}/35 (${health.spendingRatioPercentage}%)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(20.dp)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "RESERVA",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = "${health.emergencyReserveScore}/30 (${health.emergencyCoverageMonths}m)",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(20.dp)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "ENVELOPES",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = if (health.budgetConfiguredCount > 0) "${health.budgetAdherenceScore}%" else "Config.",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (health.budgetOverspentCount > 0) Rose400 else Emerald400
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun FinancialHealthDialog(
     health: FinancialHealthScore,
     summary: MonthSummary,

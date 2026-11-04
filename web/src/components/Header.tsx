@@ -1,4 +1,4 @@
-﻿import { Button } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,7 +17,6 @@ import {
   Plus,
   CreditCard,
   RefreshCw,
-  KeyRound,
   Sparkles,
   LogOut,
   CalendarRange,
@@ -26,6 +25,7 @@ import {
   History,
   TrendingUp,
   Receipt,
+  PieChart,
 } from 'lucide-react'
 
 interface HeaderProps {
@@ -38,6 +38,7 @@ interface HeaderProps {
   onOpenRecentActivity: () => void
   onOpenInvestments?: () => void
   onOpenInvoices?: () => void
+  onOpenBudgets?: () => void
 }
 
 export function Header({
@@ -50,6 +51,7 @@ export function Header({
   onOpenRecentActivity,
   onOpenInvestments,
   onOpenInvoices,
+  onOpenBudgets,
 }: HeaderProps) {
   const {
     mode,
@@ -66,6 +68,7 @@ export function Header({
   } = useFinance()
 
   const isCurrentMonth = month === currentMonthKey()
+  const isDemo = mode === 'demo'
   const hasGeminiKey = Boolean(getGeminiApiKey())
   const activeModel = getSelectedGeminiModel()
   const modelLabel = hasGeminiKey
@@ -89,11 +92,13 @@ export function Header({
   return (
     <header className="border-b border-white/5 bg-slate-950/80 backdrop-blur-md sticky top-0 z-40 transition-all pt-[max(0.4rem,env(safe-area-inset-top,0px))]">
       <div className="max-w-[1720px] mx-auto px-3 sm:px-6 py-2 sm:py-2.5">
-        <div className="flex items-center justify-between gap-2 sm:gap-3">
-          {/* 1. Left: Brand & Month Navigator */}
-          <div className="flex items-center gap-2 sm:gap-5 min-w-0 shrink">
+        <div className="flex items-center justify-between gap-2 sm:gap-4">
+          {/* ============================================================ */}
+          {/* 1. ZONA ESQUERDA: Logo / Marca & Seletor de Mês em Pill       */}
+          {/* ============================================================ */}
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0 min-w-0">
             {/* Logo */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
               <div className="size-8 sm:size-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-0.5 shadow-[0_0_20px_-3px_rgba(16,185,129,0.5)] flex items-center justify-center shrink-0">
                 <div className="size-full bg-[#0b101b] rounded-[10px] flex items-center justify-center">
                   <Sparkles className="size-3.5 sm:size-4 text-emerald-400" />
@@ -109,7 +114,7 @@ export function Header({
               </div>
             </div>
 
-            {/* Month Navigator (Pill) */}
+            {/* Seletor de Mês (Pill elegante com < Mês > Hoje) */}
             <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-900/60 border border-white/5 p-0.5 sm:p-1 rounded-xl shadow-inner shrink-0 transition-colors">
               <Button
                 variant="ghost"
@@ -137,7 +142,7 @@ export function Header({
                 <button
                   type="button"
                   onClick={handleToday}
-                  className="text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer font-medium"
+                  className="text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors cursor-pointer font-medium"
                 >
                   Hoje
                 </button>
@@ -145,31 +150,35 @@ export function Header({
             </div>
           </div>
 
-          {/* 2. Right: Action Buttons & Menus */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
-            {/* Botão de Adicionar Lançamento (Exclusivo no Cabeçalho - Entrada ou Despesa) */}
-            <Button
-              size="sm"
-              onClick={onOpenNewTx}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-7 sm:h-8 px-2.5 sm:px-3.5 gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer flex items-center rounded-xl transition-all active:scale-95 shrink-0"
-              title="Adicionar lançamento (entrada ou despesa)"
-            >
-              <Plus className="size-3.5 stroke-[2.5]" />
-              <span className="hidden sm:inline">Novo Lançamento</span>
-              <span className="sm:hidden">Novo</span>
-            </Button>
+          {/* ============================================================ */}
+          {/* 2. ZONA CENTRO: Atalhos Contextuais (Faturas & Amigos)       */}
+          {/* ============================================================ */}
+          <div className="hidden md:flex items-center gap-1.5 bg-slate-900/40 border border-white/5 p-1 rounded-xl">
+            {/* Atalho de Faturas Consolidadas */}
+            {onOpenInvoices && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onOpenInvoices}
+                className="text-xs h-7 px-2.5 gap-1.5 text-slate-300 hover:text-cyan-300 hover:bg-slate-800/60 cursor-pointer rounded-lg transition-all"
+                title="Acompanhamento consolidado de faturas por cartão"
+              >
+                <Receipt className="size-3.5 text-cyan-400" />
+                <span>Faturas</span>
+              </Button>
+            )}
 
-            {/* Friends Button (Desktop: visible with badge; Mobile: accessible via Menu & top alert banner) */}
+            {/* Atalho de Amigos & Compartilhamento */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={onOpenFriends}
-              className={`text-xs h-8 gap-1.5 transition-all relative cursor-pointer rounded-xl hidden lg:flex ${
+              className={`text-xs h-7 px-2.5 gap-1.5 cursor-pointer rounded-lg transition-all ${
                 totalAlerts > 0
-                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25 font-semibold'
-                  : 'bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300'
+                  ? 'text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 font-semibold'
+                  : 'text-slate-300 hover:text-violet-300 hover:bg-slate-800/60'
               }`}
-              title="Rede de amigos, parceiro e aprovações no cartão"
+              title="Rede de amigos, parceiro(a) e solicitações de divisão"
             >
               <Users2 className="size-3.5 text-violet-400" />
               <span>Amigos</span>
@@ -179,55 +188,58 @@ export function Header({
                 </span>
               )}
             </Button>
+          </div>
 
-            {/* Invoices Quick Button (Desktop LG+) */}
-            {onOpenInvoices && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onOpenInvoices}
-                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300 hover:text-cyan-300 cursor-pointer rounded-xl hidden lg:flex transition-all"
-                title="Acompanhamento de faturas por cartão"
-              >
-                <Receipt className="size-3.5 text-cyan-400" />
-                <span>Faturas</span>
-              </Button>
-            )}
+          {/* ============================================================ */}
+          {/* 3. ZONA DIREITA: Novo Lançamento, Gestão/Menu & Perfil       */}
+          {/* ============================================================ */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 ml-auto md:ml-0">
+            {/* Botão de Ação Primária: + Novo Lançamento */}
+            <Button
+              size="sm"
+              onClick={onOpenNewTx}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs h-7 sm:h-8 px-2.5 sm:px-3.5 gap-1.5 shadow-md shadow-emerald-950/60 cursor-pointer flex items-center rounded-xl transition-all active:scale-95 shrink-0"
+              title="Adicionar novo lançamento (entrada ou despesa)"
+            >
+              <Plus className="size-3.5 stroke-[2.5]" />
+              <span className="hidden sm:inline">Novo Lançamento</span>
+              <span className="sm:hidden">Novo</span>
+            </Button>
 
-            {/* Investments Quick Button (Desktop XL) */}
-            {onOpenInvestments && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onOpenInvestments}
-                className="text-xs h-8 gap-1.5 bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300 hover:text-purple-300 cursor-pointer rounded-xl hidden xl:flex transition-all"
-                title="Controle de Investimentos e Patrimônio"
-              >
-                <TrendingUp className="size-3.5 text-purple-400" />
-                <span>Investimentos</span>
-              </Button>
-            )}
-
-            {/* Consolidated "Recursos" Dropdown (Desktop: handy dropdown; Mobile: accessible via bottom Menu dock) */}
-            <div className="hidden lg:block">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-xs h-8 gap-1.5 bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300 cursor-pointer rounded-xl transition-all"
-                    title="Acessar ferramentas, projeções e configurações de cartões"
-                  >
-                    <SlidersHorizontal className="size-3.5 text-cyan-400" />
-                    <span>Recursos</span>
-                    <ChevronDown className="size-3 text-slate-400" />
-                  </Button>
-                </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 bg-slate-950 border border-slate-800 shadow-2xl p-1.5">
-                <DropdownMenuLabel className="text-[11px] font-semibold text-slate-400 px-2 py-1">
-                  Ferramentas Financeiras
+            {/* Menu Suspenso Consolidado: Gestão & Ferramentas */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 sm:h-8 gap-1.5 bg-slate-900/60 border-white/5 hover:border-white/10 hover:bg-slate-900 text-slate-300 cursor-pointer rounded-xl transition-all"
+                  title="Acessar ferramentas de gestão financeira e planejamento"
+                >
+                  <SlidersHorizontal className="size-3.5 text-cyan-400" />
+                  <span className="hidden sm:inline">Gestão & Ferramentas</span>
+                  <span className="sm:hidden">Menu</span>
+                  <ChevronDown className="size-3 text-slate-400" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 bg-slate-950 border border-slate-800 shadow-2xl p-1.5">
+                {/* 1. Planejamento */}
+                <DropdownMenuLabel className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-2 py-1">
+                  Planejamento
                 </DropdownMenuLabel>
-                
+
+                {onOpenBudgets && (
+                  <DropdownMenuItem
+                    onClick={onOpenBudgets}
+                    className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
+                  >
+                    <PieChart className="size-3.5 text-emerald-400" />
+                    <div className="flex flex-col">
+                      <span className="font-medium">Orçamentos por Categoria</span>
+                      <span className="text-[10px] text-slate-400">Envelopes mensais e tetos de gastos</span>
+                    </div>
+                  </DropdownMenuItem>
+                )}
+
                 <DropdownMenuItem
                   onClick={onOpenProjection}
                   className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
@@ -235,18 +247,7 @@ export function Header({
                   <CalendarRange className="size-3.5 text-cyan-400" />
                   <div className="flex flex-col">
                     <span className="font-medium">Projeção de Fluxo (6m)</span>
-                    <span className="text-[10px] text-slate-500">Previsão dos próximos meses</span>
-                  </div>
-                </DropdownMenuItem>
-
-                <DropdownMenuItem
-                  onClick={onOpenRecentActivity}
-                  className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
-                >
-                  <History className="size-3.5 text-sky-400" />
-                  <div className="flex flex-col">
-                    <span className="font-medium">Histórico Recente</span>
-                    <span className="text-[10px] text-slate-500">Últimas cadastradas ou recebidas</span>
+                    <span className="text-[10px] text-slate-400">Previsão e fluxo dos próximos meses</span>
                   </div>
                 </DropdownMenuItem>
 
@@ -258,15 +259,16 @@ export function Header({
                     <TrendingUp className="size-3.5 text-purple-400" />
                     <div className="flex flex-col">
                       <span className="font-medium">Investimentos & Patrimônio</span>
-                      <span className="text-[10px] text-slate-500">Aportes, classes de ativos e simulador</span>
+                      <span className="text-[10px] text-slate-400">Aportes, classes de ativos e simulador</span>
                     </div>
                   </DropdownMenuItem>
                 )}
 
                 <DropdownMenuSeparator className="bg-slate-800 my-1" />
-                
-                <DropdownMenuLabel className="text-[11px] font-semibold text-slate-400 px-2 py-1">
-                  Cadastros & Automações
+
+                {/* 2. Cadastros */}
+                <DropdownMenuLabel className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-2 py-1">
+                  Cadastros
                 </DropdownMenuLabel>
 
                 <DropdownMenuItem
@@ -276,7 +278,7 @@ export function Header({
                   <CreditCard className="size-3.5 text-violet-400" />
                   <div className="flex flex-col">
                     <span className="font-medium">Cartões de Crédito</span>
-                    <span className="text-[10px] text-slate-500">Limites, fechamento e cartões</span>
+                    <span className="text-[10px] text-slate-400">Limites, fechamento e cartões</span>
                   </div>
                 </DropdownMenuItem>
 
@@ -287,72 +289,82 @@ export function Header({
                   <RefreshCw className="size-3.5 text-amber-400" />
                   <div className="flex flex-col">
                     <span className="font-medium">Contas Fixas & Renda</span>
-                    <span className="text-[10px] text-slate-500">Assinaturas e renda fixa</span>
+                    <span className="text-[10px] text-slate-400">Assinaturas, salários e contas mensais</span>
                   </div>
                 </DropdownMenuItem>
+
+                <DropdownMenuSeparator className="bg-slate-800 my-1" />
+
+                {/* 3. Configurações & IA */}
+                <DropdownMenuLabel className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-2 py-1">
+                  Configurações & IA
+                </DropdownMenuLabel>
 
                 <DropdownMenuItem
                   onClick={onOpenApiKey}
                   className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
                 >
-                  <KeyRound className="size-3.5 text-emerald-400" />
+                  <Sparkles className="size-3.5 text-emerald-400" />
                   <div className="flex flex-col">
-                    <span className="font-medium">Chave Gemini IA</span>
+                    <span className="font-medium">Copiloto Gemini IA</span>
                     <span className="text-[10px] text-emerald-400 font-mono">{modelLabel}</span>
+                  </div>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem
+                  onClick={onOpenRecentActivity}
+                  className="flex items-center gap-2.5 px-2.5 py-2 text-xs text-slate-200 hover:text-white hover:bg-slate-900 rounded-lg cursor-pointer"
+                >
+                  <History className="size-3.5 text-sky-400" />
+                  <div className="flex flex-col">
+                    <span className="font-medium">Histórico Recente</span>
+                    <span className="text-[10px] text-slate-400">Últimas cadastradas ou recebidas</span>
                   </div>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            </div>
 
-            {mode === 'demo' && (
-              <button
-                type="button"
-                onClick={exitDemo}
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold hover:bg-amber-500/25 transition-all cursor-pointer"
-                title="Modo demonstração com dados simulados. Clique para conectar sua conta Google real"
-              >
-                <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
-                <span>Modo Demo</span>
-                <span className="text-[10px] text-amber-200/80 font-normal">· Conectar Google</span>
-              </button>
-            )}
-
-            {/* User Profile Dropdown Menu */}
+            {/* Perfil do Usuário Moderno */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex items-center gap-1 sm:gap-2 bg-slate-900/60 border border-white/5 h-7 sm:h-8 px-1.5 sm:px-2 rounded-xl hover:border-white/10 hover:bg-slate-900 transition-all cursor-pointer outline-none shrink-0"
-                  title="Abrir opções de perfil e usuário"
+                  className="flex items-center gap-1.5 sm:gap-2 bg-slate-900/60 border border-white/5 h-7 sm:h-8 pl-1 sm:pl-1.5 pr-2 sm:pr-2.5 rounded-xl hover:border-white/10 hover:bg-slate-900 transition-all cursor-pointer outline-none shrink-0 group"
+                  title="Perfil e conexões"
                 >
-                  <div className="size-5 sm:size-6 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center justify-center font-bold text-[9px] sm:text-[10px] shrink-0">
+                  <div
+                    className={`size-5 sm:size-6 rounded-full flex items-center justify-center font-bold text-[9px] sm:text-[10px] shrink-0 ring-2 transition-all ${
+                      isDemo
+                        ? 'bg-amber-500/20 text-amber-300 ring-amber-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 ring-emerald-500/40'
+                    }`}
+                  >
                     {profile?.displayName?.charAt(0) ?? 'U'}
                   </div>
-                  <span className="text-xs font-semibold text-slate-200 hidden md:inline truncate max-w-[100px]">
+                  <span className="text-xs font-semibold text-slate-200 hidden md:inline truncate max-w-[90px]">
                     {profile?.displayName?.split(' ')[0] ?? 'Usuário'}
                   </span>
-                  <ChevronDown className="size-3 text-slate-400 hidden sm:inline shrink-0" />
+                  <ChevronDown className="size-3 text-slate-400 group-hover:text-slate-200 transition-colors shrink-0" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-60 bg-slate-950 border border-slate-800 shadow-2xl p-1.5">
+              <DropdownMenuContent align="end" className="w-64 bg-slate-950 border border-slate-800 shadow-2xl p-1.5">
                 <div className="px-2.5 py-2">
                   <p className="text-xs font-semibold text-white truncate">{profile?.displayName ?? 'Usuário'}</p>
                   <p className="text-[11px] text-slate-400 truncate">{profile?.email || 'Conta Pessoal'}</p>
-                  {mode === 'demo' ? (
-                    <div className="mt-1.5 flex items-center gap-1 text-[10px] text-amber-400 bg-amber-950/40 border border-amber-500/30 rounded px-1.5 py-0.5">
-                      <span className="size-1.5 rounded-full bg-amber-400" />
-                      <span>Modo Demonstração Ativo</span>
+                  {isDemo ? (
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-300 bg-amber-950/40 border border-amber-500/30 rounded-lg px-2 py-1">
+                      <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+                      <span className="font-medium">Modo Demonstração Ativo</span>
                     </div>
                   ) : (
-                    <div className="mt-1.5 flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 rounded px-1.5 py-0.5">
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] text-emerald-300 bg-emerald-950/40 border border-emerald-500/30 rounded-lg px-2 py-1">
                       <span className="size-1.5 rounded-full bg-emerald-400" />
-                      <span>Nuvem Firebase Conectada</span>
+                      <span className="font-medium">Nuvem Firebase Conectada</span>
                     </div>
                   )}
                 </div>
 
-                {mode === 'demo' && (
+                {isDemo && (
                   <>
                     <DropdownMenuSeparator className="bg-slate-800 my-1" />
                     <DropdownMenuItem
@@ -365,7 +377,7 @@ export function Header({
                   </>
                 )}
 
-                {mode === 'demo' && users.length > 1 && (
+                {isDemo && users.length > 1 && (
                   <>
                     <DropdownMenuSeparator className="bg-slate-800 my-1" />
                     <DropdownMenuLabel className="text-[10px] font-semibold text-violet-300 uppercase px-2 py-1 flex items-center gap-1">
@@ -397,7 +409,7 @@ export function Header({
 
                 <DropdownMenuItem
                   onClick={signOut}
-                  className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg cursor-pointer"
+                  className="flex items-center gap-2 px-2.5 py-2 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-lg cursor-pointer"
                 >
                   <LogOut className="size-3.5" />
                   <span>Sair da Conta</span>

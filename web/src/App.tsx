@@ -48,6 +48,11 @@ function getInitialPwaAction(): string | null {
 function MainDashboard() {
   const [initialAction] = useState(() => getInitialPwaAction())
 
+  // Ensure scroll is at the top upon mounting the dashboard
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+  }, [])
+
   const {
     month,
     setMonth,
@@ -158,6 +163,7 @@ function MainDashboard() {
         onOpenFriends={() => setFriendsModalOpen(true)}
         onOpenRecentActivity={() => setRecentActivityModalOpen(true)}
         onOpenInvestments={() => setInvestmentsModalOpen(true)}
+        onOpenBudgets={() => setBudgetsModalOpen(true)}
         onOpenInvoices={() => {
           setInvoicesInitialCardId(null)
           setInvoicesModalOpen(true)
@@ -487,6 +493,12 @@ function MainDashboard() {
 function MainContent() {
   const { isAuthenticated, authLoading } = useFinance()
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+    }
+  }, [isAuthenticated])
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[#090d16] flex items-center justify-center text-slate-400">
@@ -510,6 +522,13 @@ function MainContent() {
 }
 
 export default function App() {
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual'
+    }
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+  }, [])
+
   return (
     <FinanceProvider>
       <MainContent />

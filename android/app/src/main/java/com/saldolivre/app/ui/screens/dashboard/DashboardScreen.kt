@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.CategoryBudgetAlertStatus
 import com.saldolivre.app.data.model.FinancialHealthClassification
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.ui.components.DashboardSkeleton
@@ -77,6 +79,7 @@ fun DashboardScreen(
     var showFinancialHealthDialog by remember { mutableStateOf(false) }
     var showManageBudgetsDialog by remember { mutableStateOf(false) }
     var budgetsDialogTab by remember { mutableIntStateOf(0) }
+    var selectedDashboardTab by remember { mutableIntStateOf(0) }
     val summary = uiState.summary
 
     val formattedIncome = remember(summary.income) { FinanceEngine.formatCurrency(summary.income) }
@@ -165,8 +168,97 @@ fun DashboardScreen(
                 }
             }
 
-            // 2. Hero KPI Card: Saldo Livre Real & Limite Diário Seguro
-            item(key = "hero_free_balance", contentType = "hero_free_balance") {
+            // 1.2 Segmented Tab Selector (Aba 1: Visão Geral | Aba 2: Orçamentos & Saúde)
+            item(key = "dashboard_tabs", contentType = "dashboard_tabs") {
+                TabRow(
+                    selectedTabIndex = selectedDashboardTab,
+                    containerColor = DarkBackground,
+                    contentColor = Emerald400,
+                    indicator = { tabPositions ->
+                        if (selectedDashboardTab < tabPositions.size) {
+                            Box(
+                                Modifier
+                                    .tabIndicatorOffset(tabPositions[selectedDashboardTab])
+                                    .height(3.dp)
+                                    .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                                    .background(Emerald400)
+                            )
+                        }
+                    },
+                    divider = {
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                    }
+                ) {
+                    Tab(
+                        selected = selectedDashboardTab == 0,
+                        onClick = { selectedDashboardTab = 0 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Dashboard,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (selectedDashboardTab == 0) Emerald400 else TextMuted
+                                )
+                                Text(
+                                    text = "Visão Geral",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedDashboardTab == 0) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selectedDashboardTab == 0) Color.White else TextMuted
+                                )
+                            }
+                        }
+                    )
+
+                    Tab(
+                        selected = selectedDashboardTab == 1,
+                        onClick = { selectedDashboardTab = 1 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PieChart,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (selectedDashboardTab == 1) Emerald400 else TextMuted
+                                )
+                                Text(
+                                    text = "Orçamentos & Saúde",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedDashboardTab == 1) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selectedDashboardTab == 1) Color.White else TextMuted
+                                )
+                                val hasAlerts = uiState.pendingRecurringLaunches.isNotEmpty() ||
+                                        uiState.categoryBudgetReport.status != CategoryBudgetAlertStatus.OK
+                                if (hasAlerts) {
+                                    val alertCount = uiState.pendingRecurringLaunches.size.coerceAtLeast(1)
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Amber500, RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = if (uiState.pendingRecurringLaunches.isNotEmpty()) "$alertCount" else "!",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.Black
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
+            if (selectedDashboardTab == 0) {
+                // 2. Hero KPI Card: Saldo Livre Real & Limite Diário Seguro
+                item(key = "hero_free_balance", contentType = "hero_free_balance") {
                 val isNegative = summary.freeBalance < 0
                 val incomeRemainingPct = if (summary.income > 0.0) {
                     ((summary.freeBalance / summary.income) * 100.0).roundToInt()
@@ -480,198 +572,87 @@ fun DashboardScreen(
                 }
             }
 
-            // 3.1 Termômetro de Saúde Financeira (Score 0 a 100 com 4 Pilares)
-            item(key = "financial_health_score", contentType = "financial_health_score") {
-                val health = uiState.financialHealth
-                val healthColor = when (health.classification) {
-                    FinancialHealthClassification.EXCELLENT -> Emerald400
-                    FinancialHealthClassification.HEALTHY -> Cyan400
-                    FinancialHealthClassification.WARNING -> Amber400
-                    FinancialHealthClassification.CRITICAL -> Rose400
-                }
+            // 3.1 Card Compacto de Saúde Financeira
+            item(key = "compact_financial_health", contentType = "compact_financial_health") {
+                CompactFinancialHealthCard(
+                    health = uiState.financialHealth,
+                    onOpenDetails = { showFinancialHealthDialog = true }
+                )
+            }
 
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { showFinancialHealthDialog = true },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+            // 4. Cabeçalho da Seção: Últimos Lançamentos
+            item(key = "recent_header", contentType = "recent_header") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier.size(40.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        progress = { (health.score / 100f).coerceIn(0f, 1f) },
-                                        modifier = Modifier.fillMaxSize(),
-                                        color = healthColor,
-                                        trackColor = Color.White.copy(alpha = 0.10f),
-                                        strokeWidth = 3.5.dp
-                                    )
-                                    Text(
-                                        text = "${health.score}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color.White
-                                    )
-                                }
+                    Text(
+                        text = "Últimos Lançamentos",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = "SAÚDE FINANCEIRA",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.8.sp,
-                                            color = TextSecondary
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .background(healthColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = health.label,
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = healthColor
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = health.actionableTips.firstOrNull() ?: health.description,
-                                        fontSize = 10.sp,
-                                        color = TextMuted,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Raio-X →",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Emerald400
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "POUPANÇA",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextMuted
-                                )
-                                Text(
-                                    text = "${health.savingsScore}/35 (${health.savingsRatePercentage}%)",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(20.dp)
-                                    .background(Color.White.copy(alpha = 0.08f))
-                            )
-
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "CUSTO VIDA",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextMuted
-                                )
-                                Text(
-                                    text = "${health.spendingLimitScore}/35 (${health.spendingRatioPercentage}%)",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(20.dp)
-                                    .background(Color.White.copy(alpha = 0.08f))
-                            )
-
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "RESERVA",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextMuted
-                                )
-                                Text(
-                                    text = "${health.emergencyReserveScore}/30 (${health.emergencyCoverageMonths}m)",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(20.dp)
-                                    .background(Color.White.copy(alpha = 0.08f))
-                            )
-
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "ENVELOPES",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextMuted
-                                )
-                                Text(
-                                    text = if (health.budgetConfiguredCount > 0) "${health.budgetAdherenceScore}%" else "Config.",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (health.budgetOverspentCount > 0) Rose400 else Emerald400
-                                )
-                            }
-                        }
-                    }
+                    Text(
+                        text = "Ver todos",
+                        style = Typography.labelLarge,
+                        color = Emerald400,
+                        modifier = Modifier.clickable(onClick = onNavigateToTransactions)
+                    )
                 }
             }
 
-            // 3.2 Envelopes Orçamentários Inteligentes
+            // 5. Lista de Lançamentos Recentes
+            if (uiState.recentTransactions.isEmpty()) {
+                item(key = "recent_empty", contentType = "recent_empty") {
+                    EmptyState(
+                        icon = Icons.Default.ReceiptLong,
+                        title = "Nenhum lançamento no mês",
+                        description = "Nenhum gasto ou receita registrado neste mês. Cadastre uma despesa para acompanhar seu saldo livre.",
+                        buttonText = "Ver Transações",
+                        buttonIcon = Icons.Default.ArrowForward,
+                        onButtonClick = onNavigateToTransactions
+                    )
+                }
+            } else {
+                items(
+                    items = uiState.recentTransactions,
+                    key = { it.id },
+                    contentType = { "recent_transaction_item" }
+                ) { tx ->
+                    val onItemClick = remember(tx) {
+                        {
+                            if (tx.id.startsWith("invoice_")) {
+                                onNavigateToCards()
+                            } else {
+                                selectedTxForDetails = tx
+                            }
+                        }
+                    }
+                    TransactionItem(
+                        transaction = tx,
+                        currentUserId = uiState.currentUser.uid,
+                        allTransactions = uiState.recentTransactions,
+                        showDate = true,
+                        onClick = onItemClick,
+                        onStatusClick = { viewModel.toggleTransactionStatus(tx.id) }
+                    )
+                }
+            }
+        } else {
+            // ==========================================
+            // ABA 2: "Orçamentos & Saúde"
+            // ==========================================
+            // 1. Termômetro de Saúde Financeira (Score 0 a 100 com 4 Pilares)
+            item(key = "full_financial_health", contentType = "full_financial_health") {
+                FullFinancialHealthCard(
+                    health = uiState.financialHealth,
+                    onOpenDetails = { showFinancialHealthDialog = true }
+                )
+            }
+
+            // 2. Envelopes Orçamentários Inteligentes
             item(key = "category_budgets", contentType = "category_budgets") {
                 CategoryBudgetsSectionCard(
                     report = uiState.categoryBudgetReport,
@@ -694,7 +675,7 @@ fun DashboardScreen(
                 )
             }
 
-            // 4. Central de Lançamentos Recorrentes Programados (Confirmação inteligente)
+            // 3. Central de Lançamentos Recorrentes Programados (Confirmação inteligente)
             if (uiState.pendingRecurringLaunches.isNotEmpty()) {
                 item(key = "pending_launches_banner", contentType = "pending_launches_banner") {
                     Card(
@@ -925,71 +906,11 @@ fun DashboardScreen(
                     }
                 }
             }
+        }
 
-            // 5. Cabeçalho da Seção: Últimos Lançamentos
-            item(key = "recent_header", contentType = "recent_header") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Últimos Lançamentos",
-                        style = Typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-
-                    Text(
-                        text = "Ver todos",
-                        style = Typography.labelLarge,
-                        color = Emerald400,
-                        modifier = Modifier.clickable(onClick = onNavigateToTransactions)
-                    )
-                }
-            }
-
-            // 5. Lista de Lançamentos Recentes
-            if (uiState.recentTransactions.isEmpty()) {
-                item(key = "recent_empty", contentType = "recent_empty") {
-                    EmptyState(
-                        icon = Icons.Default.ReceiptLong,
-                        title = "Nenhum lançamento no mês",
-                        description = "Nenhum gasto ou receita registrado neste mês. Cadastre uma despesa para acompanhar seu saldo livre.",
-                        buttonText = "Ver Transações",
-                        buttonIcon = Icons.Default.ArrowForward,
-                        onButtonClick = onNavigateToTransactions
-                    )
-                }
-            } else {
-                items(
-                    items = uiState.recentTransactions,
-                    key = { it.id },
-                    contentType = { "recent_transaction_item" }
-                ) { tx ->
-                    val onItemClick = remember(tx) {
-                        {
-                            if (tx.id.startsWith("invoice_")) {
-                                onNavigateToCards()
-                            } else {
-                                selectedTxForDetails = tx
-                            }
-                        }
-                    }
-                    TransactionItem(
-                        transaction = tx,
-                        currentUserId = uiState.currentUser.uid,
-                        allTransactions = uiState.recentTransactions,
-                        showDate = true,
-                        onClick = onItemClick,
-                        onStatusClick = { viewModel.toggleTransactionStatus(tx.id) }
-                    )
-                }
-            }
-
-            item(key = "bottom_spacer", contentType = "bottom_spacer") {
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+        item(key = "bottom_spacer", contentType = "bottom_spacer") {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
         }
         }
     }
