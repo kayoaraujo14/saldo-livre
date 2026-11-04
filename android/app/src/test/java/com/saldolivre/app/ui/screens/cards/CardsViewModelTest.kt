@@ -110,11 +110,13 @@ class CardsViewModelTest {
         // Abrir modal de criação de cartão
         viewModel.openNewCard()
         assertTrue(viewModel.uiState.value.isFormOpen)
-        assertNull(viewModel.uiState.value.editingCard)
+        assertNotNull(viewModel.uiState.value.editingCard)
+        assertTrue(viewModel.uiState.value.editingCard!!.id.startsWith("new_"))
 
         // Fechar formulário
         viewModel.closeForm()
         assertFalse(viewModel.uiState.value.isFormOpen)
+        assertNull(viewModel.uiState.value.editingCard)
 
         // Abrir para edição de cartão existente
         viewModel.editCard(sampleCard)
