@@ -96,6 +96,12 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+    testOptions {
+        unitTests.all {
+            it.jvmArgs("-Dfile.encoding=UTF-8")
+        }
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {

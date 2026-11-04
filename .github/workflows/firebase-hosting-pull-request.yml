@@ -10,7 +10,6 @@ on:
       - 'firestore.rules'
       - 'firestore.indexes.json'
       - 'firebase.json'
-      - '.github/workflows/firebase-hosting-*.yml'
 
 jobs:
   test_and_preview:
