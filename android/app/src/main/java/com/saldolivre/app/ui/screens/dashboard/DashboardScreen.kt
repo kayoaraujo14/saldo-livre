@@ -355,39 +355,19 @@ fun DashboardScreen(
 
                             // Contexto de Receitas e Despesas (e sobra/déficit)
                             val totalExpenses = summary.paid + summary.committed
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "Receitas: $formattedIncome • Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
-                                    fontSize = 11.sp,
-                                    color = TextSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-
-                                if (summary.carryoverAmount > 0.0) {
-                                    Text(
-                                        text = "• + ${FinanceEngine.formatCurrency(summary.carryoverAmount)} sobra",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Cyan400,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                } else if (summary.previousMonthDeficit > 0.0) {
-                                    Text(
-                                        text = "• - ${FinanceEngine.formatCurrency(summary.previousMonthDeficit)} déficit",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Rose400,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                            val carryText = when {
+                                summary.carryoverAmount > 0.0 -> " • +${FinanceEngine.formatCurrency(summary.carryoverAmount)} sobra"
+                                summary.previousMonthDeficit > 0.0 -> " • -${FinanceEngine.formatCurrency(summary.previousMonthDeficit)} déficit"
+                                else -> ""
                             }
+                            Text(
+                                text = "Receitas: $formattedIncome • Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}$carryText",
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                                color = TextSecondary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
 
                             // Badge permanente de Fechamento do Mês Anterior (Permite Desfazer a qualquer momento)
                             val prevClosure = summary.previousMonthClosure
@@ -668,9 +648,6 @@ fun DashboardScreen(
                     onQuickApplyAiBudgets = {
                         com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
                         viewModel.applyAiSuggestedBudgets(uiState.selectedMonth)
-                    },
-                    onAskCopilot = { prompt ->
-                        onNavigateToChatWithPrompt(prompt)
                     }
                 )
             }

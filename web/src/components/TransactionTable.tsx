@@ -1119,10 +1119,10 @@ export function TransactionTable({
       {/* Main Table (Visible on md and above) */}
       <div className="hidden md:block flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-left text-xs border-collapse">
-          <thead className="sticky top-0 bg-[#0f172a] text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-white/[0.06] z-10 select-none">
+          <thead className="sticky top-0 bg-slate-950/95 backdrop-blur-md text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-white/[0.08] z-10 select-none shadow-xs">
             <tr>
               {/* 1. Status Column */}
-              <th className="py-2 px-2.5 w-28">
+              <th className="py-2.5 px-2.5 w-24">
                 <div className="flex items-center justify-between gap-1">
                   <span>Status</span>
                   <Popover>
@@ -1195,7 +1195,7 @@ export function TransactionTable({
               </th>
 
               {/* 2. Date Column */}
-              <th className="py-2 px-2.5 w-28">
+              <th className="py-2.5 px-2 w-20">
                 <div className="flex items-center justify-between gap-1">
                   <div
                     onClick={() => setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
@@ -1324,7 +1324,7 @@ export function TransactionTable({
               </th>
 
               {/* 3. Description Column */}
-              <th className="py-2 px-2.5 min-w-[150px]">
+              <th className="py-2.5 px-2.5 min-w-[140px]">
                 <div className="flex items-center justify-between gap-1">
                   <span>Descrição</span>
                   <Popover>
@@ -1367,7 +1367,7 @@ export function TransactionTable({
               </th>
 
               {/* 4. Category Column */}
-              <th className="py-2 px-2.5 w-32">
+              <th className="py-2.5 px-2.5 w-28">
                 <div className="flex items-center justify-between gap-1">
                   <span>Categoria</span>
                   <Popover>
@@ -1454,7 +1454,7 @@ export function TransactionTable({
               </th>
 
               {/* 5. Division / Responsible Column */}
-              <th className="py-2 px-2.5 w-44">
+              <th className="py-2.5 px-2.5 w-36">
                 <div className="flex items-center justify-between gap-1">
                   <span>Divisão / Responsável</span>
                   <Popover>
@@ -1604,7 +1604,7 @@ export function TransactionTable({
               </th>
 
               {/* 6. Amount & Impact Column */}
-              <th className="py-2 px-2.5 w-40 text-right">
+              <th className="py-2.5 px-2.5 w-36 text-right">
                 <div className="flex items-center justify-end gap-1">
                   <span>Valor & Impacto</span>
                   <Popover>
@@ -2224,8 +2224,8 @@ export function TransactionTable({
                               }
                             }}
                           >
-                            <SelectTrigger size="inline" className="h-5 px-1 py-0 text-[10px] text-emerald-400/90 hover:text-emerald-300 font-medium border-transparent bg-transparent hover:bg-slate-800/60 max-w-[130px] justify-start gap-1">
-                              <span className="truncate">› {tx.subcategory || 'Sem subgrupo'}</span>
+                            <SelectTrigger size="inline" className="h-4 px-1 py-0 text-[10px] text-emerald-400/80 hover:text-emerald-300 font-medium border-transparent bg-transparent hover:bg-slate-800/60 max-w-[110px] justify-start gap-1">
+                              <span className="truncate">{tx.subcategory ? `› ${tx.subcategory}` : '› Definir'}</span>
                             </SelectTrigger>
                             <SelectContent>
                               {getCategoryDetail(tx.category).subcategories.map((sub) => (
@@ -2290,21 +2290,13 @@ export function TransactionTable({
                                   // Case A: Multi-person custom allocations or rateio (SHARED_50_50 / allocations)
                                   if (txPersons.length > 1) {
                                     return (
-                                      <div className="flex flex-wrap gap-1 max-w-[240px]">
-                                        {txPersons.map((p, idx) => (
-                                          <span
-                                            key={idx}
-                                            className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-800/90 border border-slate-700/80 text-slate-200 font-medium inline-flex items-center gap-1 shadow-2xs"
-                                            title={`${p.name}: ${formatBRL(p.amount)}`}
-                                          >
-                                            <span className="text-slate-400 truncate max-w-[65px]">
-                                              {p.name === '100% Meu' ? 'Meu' : p.name}:
-                                            </span>
-                                            <strong className="text-emerald-400 font-mono font-bold">
-                                              {formatBRL(p.amount)}
-                                            </strong>
-                                          </span>
-                                        ))}
+                                      <div className="flex items-center gap-1 max-w-[130px]">
+                                        <span
+                                          className="text-[10px] px-2 py-0.5 rounded-full bg-violet-950/60 border border-violet-800/80 text-violet-300 font-semibold inline-flex items-center gap-1 shadow-2xs truncate"
+                                          title={txPersons.map((p) => `${p.name}: ${formatBRL(p.amount)}`).join(' | ')}
+                                        >
+                                          <span>🤝 Rateio ({txPersons.length})</span>
+                                        </span>
                                       </div>
                                     )
                                   }

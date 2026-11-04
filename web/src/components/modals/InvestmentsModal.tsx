@@ -623,7 +623,7 @@ export function InvestmentsModal({ open, onOpenChange, onOpenNewTx: _onOpenNewTx
                               className="size-3 rounded-full shrink-0 shadow-sm"
                               style={{ backgroundColor: asset.color }}
                             />
-                            <h5 className="text-sm font-bold text-white truncate" title={asset.subcategory}>
+                            <h5 className="text-xs sm:text-sm font-bold text-white leading-tight" title={asset.subcategory}>
                               {asset.subcategory}
                             </h5>
                           </div>
@@ -708,7 +708,7 @@ export function InvestmentsModal({ open, onOpenChange, onOpenNewTx: _onOpenNewTx
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5">
                   {riskAssets.map((asset) => (
                     <div
                       key={asset.subcategory}
@@ -721,7 +721,7 @@ export function InvestmentsModal({ open, onOpenChange, onOpenNewTx: _onOpenNewTx
                               className="size-3 rounded-full shrink-0 shadow-sm"
                               style={{ backgroundColor: asset.color }}
                             />
-                            <h5 className="text-sm font-bold text-white truncate" title={asset.subcategory}>
+                            <h5 className="text-xs sm:text-sm font-bold text-white leading-tight" title={asset.subcategory}>
                               {asset.subcategory}
                             </h5>
                           </div>

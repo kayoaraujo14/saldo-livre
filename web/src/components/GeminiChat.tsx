@@ -1814,6 +1814,89 @@ Atenção crítica:
           </div>
         ))}
 
+        {/* Smart Interactive Starter Suggestions (When in fresh conversation) */}
+        {messages.length === 1 && messages[0].id === 'msg_welcome' && !loading && (
+          <div className="my-3 space-y-2 animate-in fade-in duration-300">
+            <p className="text-[11px] font-semibold text-slate-400 px-1 flex items-center gap-1.5">
+              <Sparkles className="size-3 text-emerald-400" />
+              Ações rápidas e diagnósticos inteligentes:
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleSend('Quanto posso gastar hoje sem estourar o mês?')}
+                className="text-left p-3 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-white/[0.06] hover:border-emerald-500/30 transition-all cursor-pointer group shadow-sm"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1 rounded-md bg-emerald-500/15 text-emerald-400 group-hover:scale-110 transition-transform">
+                    💡
+                  </span>
+                  <span className="text-xs font-semibold text-slate-200 group-hover:text-emerald-300">
+                    Quanto posso gastar hoje?
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">
+                  Margem segura até o fim do mês considerando faturas e contas.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSend('Faça um diagnóstico completo da minha Saúde Financeira')}
+                className="text-left p-3 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-white/[0.06] hover:border-cyan-500/30 transition-all cursor-pointer group shadow-sm"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1 rounded-md bg-cyan-500/15 text-cyan-400 group-hover:scale-110 transition-transform">
+                    📊
+                  </span>
+                  <span className="text-xs font-semibold text-slate-200 group-hover:text-cyan-300">
+                    Diagnóstico 4 Pilares
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">
+                  Avalia reserva, taxa de poupança, faturas e envelopes.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSend('Mostre o resumo das minhas faturas de cartão de crédito deste mês')}
+                className="text-left p-3 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-white/[0.06] hover:border-violet-500/30 transition-all cursor-pointer group shadow-sm"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1 rounded-md bg-violet-500/15 text-violet-400 group-hover:scale-110 transition-transform">
+                    💳
+                  </span>
+                  <span className="text-xs font-semibold text-slate-200 group-hover:text-violet-300">
+                    Resumo dos Cartões
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">
+                  Limites, vencimentos e rateios de compras com parceiro(a).
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSend('Onde posso economizar R$ 200 este mês sem cortar essenciais?')}
+                className="text-left p-3 rounded-xl bg-slate-900/70 hover:bg-slate-800/80 border border-white/[0.06] hover:border-amber-500/30 transition-all cursor-pointer group shadow-sm"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="p-1 rounded-md bg-amber-500/15 text-amber-400 group-hover:scale-110 transition-transform">
+                    ✂️
+                  </span>
+                  <span className="text-xs font-semibold text-slate-200 group-hover:text-amber-300">
+                    Simular Economia
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">
+                  Identifica despesas supérfluas e envelopes que podem ser calibrados.
+                </p>
+              </button>
+            </div>
+          </div>
+        )}
+
         {loading && (
           <div className="flex gap-2.5 justify-start">
             <div className="size-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">

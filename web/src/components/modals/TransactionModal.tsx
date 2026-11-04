@@ -630,9 +630,9 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl w-full max-h-[92vh] overflow-y-auto p-4 sm:p-6 bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <DialogHeader className="space-y-1 pb-1 border-b border-white/[0.06]">
+      <DialogContent className="sm:max-w-2xl w-full max-h-[90vh] flex flex-col p-0 overflow-hidden bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <DialogHeader className="p-4 sm:p-5 pb-3 border-b border-white/[0.08] shrink-0 bg-[#0a0f1d]/90 backdrop-blur-md">
             <DialogTitle className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
               <div
                 className={`size-8 rounded-xl border flex items-center justify-center ${
@@ -658,6 +658,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             </DialogDescription>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
           {/* Aviso se o lançamento for de outra pessoa (rateio recebido) */}
           {!canEdit && (
             <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2.5 text-xs text-amber-300">
@@ -1535,9 +1536,10 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
               <span>{errorMessage}</span>
             </div>
           )}
+          </div>
 
-          {/* Footer com Ações */}
-          <DialogFooter className="flex-col-reverse sm:flex-row items-center justify-between gap-2 pt-3 border-t border-white/[0.06]">
+          {/* Footer com Ações (Sempre fixado na base do modal) */}
+          <DialogFooter className="p-3 sm:p-4 border-t border-white/[0.08] shrink-0 bg-[#0a0f1d]/90 backdrop-blur-md flex-col-reverse sm:flex-row items-center justify-between gap-2">
             {editingTx && canEdit && (
               <Button
                 type="button"

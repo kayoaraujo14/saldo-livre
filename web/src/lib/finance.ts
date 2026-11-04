@@ -946,6 +946,7 @@ export function computeSummary(
   let receivableFromFriends = 0
   let payableToOthers = 0
   let totalInvested = 0
+  let grossInvested = 0
   const cat = new Map<string, number>()
   const subcat = new Map<string, { category: string; subcategory: string; amount: number; count: number }>()
   const investSubcat = new Map<string, number>()
@@ -1003,6 +1004,7 @@ export function computeSummary(
 
       const isAporte = tx.category === 'Investimentos' || /investimento/i.test(tx.category)
       if (isAporte) {
+        grossInvested += impact
         totalInvested += impact
         const subName = tx.subcategory || 'Outros Investimentos'
         investSubcat.set(subName, (investSubcat.get(subName) ?? 0) + impact)
@@ -1172,7 +1174,7 @@ export function computeSummary(
     receivableFromFriends: round2(receivableFromFriends),
     receivableTotal: round2(receivableFromPartner + receivableFromExternal + receivableFromFriends),
     payableToOthers: round2(payableToOthers),
-    totalInvested: round2(totalInvested),
+    totalInvested: round2(Math.max(grossInvested, totalInvested)),
     totalInvestedAccumulated: round2(totalInvestedAccumulated),
     byInvestmentSubcategory: [...investSubcat.entries()]
       .map(([subcategory, amount]) => ({
@@ -2492,7 +2494,13 @@ export function calculateFinancialHealthScore(
   if (budgetReport && budgetReport.totalBudgeted > 0) {
     const configuredItems = budgetReport.items.filter((i) => i.limit > 0)
     budgetConfiguredCount = configuredItems.length
-    const overspentItems = configuredItems.filter((i) => i.spent > i.limit)
+    const overspentItems = configuredItems.filter(
+      (i) =>
+        !/investimento/i.test(i.category) &&
+        i.spent > i.limit &&
+        i.spent - i.limit > 2 &&
+        (i.limit <= 0 || (i.spent - i.limit) / i.limit > 0.01),
+    )
     budgetOverspentCount = overspentItems.length
 
     if (budgetConfiguredCount > 0) {
@@ -2775,13 +2783,19 @@ export function computeCategoryBudgets(
     const percentage = limit > 0 ? round2((spent / limit) * 100) : (spent > 0 ? 100 : 0)
     const isFixedCategory = FIXED_MONTHLY_CATEGORIES.has(category) || FIXED_MONTHLY_CATEGORIES.has(canonCat)
 
+    const isInvestmentCategory = category === 'Investimentos' || /investimento/i.test(category)
+    const excessAmount = spent - limit
+    const isMicroExcess = excessAmount > 0.001 && (excessAmount <= 2.0 || (limit > 0 && excessAmount / limit <= 0.01))
+
     let status: 'ok' | 'warning' | 'danger' = 'ok'
-    if (limit > 0) {
+    if (isInvestmentCategory) {
+      status = 'ok'
+    } else if (limit > 0) {
       if (isFixedCategory) {
-        if (spent > limit) status = 'danger'
+        if (spent > limit && !isMicroExcess) status = 'danger'
         else status = 'ok'
       } else {
-        if (percentage >= 100) status = 'danger'
+        if (percentage >= 100 && !isMicroExcess) status = 'danger'
         else if (percentage >= 80) status = 'warning'
       }
     } else if (spent > 0) {
@@ -2798,12 +2812,14 @@ export function computeCategoryBudgets(
     const recommendedDailyRemaining = remaining > 0 && daysRemaining > 0 ? round2(remaining / daysRemaining) : 0
 
     let burnRateStatus: CategoryBudgetPaceStatus = 'normal'
-    if (isFixedCategory) {
-      if (limit > 0 && spent > limit) {
+    if (isInvestmentCategory) {
+      burnRateStatus = 'normal'
+    } else if (isFixedCategory) {
+      if (limit > 0 && spent > limit && !isMicroExcess) {
         burnRateStatus = 'critical'
         criticalCount++
       }
-    } else if (status === 'danger' || (limit > 0 && projectedPercentage >= 115)) {
+    } else if (status === 'danger' || (limit > 0 && projectedPercentage >= 115 && !isMicroExcess)) {
       burnRateStatus = 'critical'
       criticalCount++
     } else if (status === 'warning' || (limit > 0 && projectedPercentage >= 95)) {
@@ -2853,7 +2869,9 @@ export function computeCategoryBudgets(
   if (overallPercentage >= 100 || criticalCount > 0) overallStatus = 'danger'
   else if (overallPercentage >= 80) overallStatus = 'warning'
 
-  const topOverspentCategory = items.find((i) => i.status === 'danger' || i.burnRateStatus === 'critical')
+  const topOverspentCategory = items.find(
+    (i) => !/investimento/i.test(i.category) && (i.status === 'danger' || i.burnRateStatus === 'critical'),
+  )
   const incomeUsagePercentage = validExpectedIncome > 0 ? round2((totalBudgeted / validExpectedIncome) * 100) : 0
   const unallocatedIncome = validExpectedIncome > 0 ? round2(Math.max(0, validExpectedIncome - totalBudgeted)) : 0
 
@@ -3108,8 +3126,12 @@ export function suggestBudgetRebalance(
   surplusTotal: number
   suggestions: BudgetRebalanceSuggestion[]
 } {
-  const overspent = report.items.filter((i) => i.limit > 0 && i.spent > i.limit)
-  const surplus = report.items.filter((i) => i.limit > 0 && i.remaining > 20)
+  const overspent = report.items.filter(
+    (i) => i.limit > 0 && i.spent - i.limit > 2 && !/investimento/i.test(i.category),
+  )
+  const surplus = report.items.filter(
+    (i) => i.limit > 0 && i.remaining > 20 && !i.isFixedCategory && !/investimento/i.test(i.category),
+  )
 
   const deficitTotal = round2(overspent.reduce((acc, i) => acc + (i.spent - i.limit), 0))
   const surplusTotal = round2(surplus.reduce((acc, i) => acc + i.remaining, 0))

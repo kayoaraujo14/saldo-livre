@@ -32,7 +32,7 @@ const ManageBudgetsModal = lazy(() => import('@/components/modals/ManageBudgetsM
 const CardInvoicesModal = lazy(() => import('@/components/modals/CardInvoicesModal').then((m) => ({ default: m.CardInvoicesModal })))
 const MonthClosureModal = lazy(() => import('@/components/modals/MonthClosureModal').then((m) => ({ default: m.MonthClosureModal })))
 
-type DesktopViewMode = 'chat_focus' | 'chat_full' | 'table_full'
+type DesktopViewMode = 'table_focus' | 'balanced' | 'chat_focus' | 'table_full' | 'chat_full'
 
 function getInitialPwaAction(): string | null {
   if (typeof window === 'undefined') return null
@@ -88,18 +88,18 @@ function MainDashboard() {
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
   const [mobileTab, setMobileTab] = useState<MobileTab>(() => (initialAction === 'chat' ? 'chat' : 'home'))
 
-  // Desktop view layout mode: 'chat_focus' (60/40) | 'equal' (50/50) | 'chat_full' (100%) | 'table_full' (100%)
+  // Desktop view layout mode: 'table_focus' (70/30) | 'balanced' (50/50) | 'chat_focus' (30/70) | 'table_full' (100%) | 'chat_full' (100%)
   const [desktopView, setDesktopView] = useState<DesktopViewMode>(() =>
-    initialAction === 'chat' ? 'chat_full' : 'chat_focus'
+    initialAction === 'chat' ? 'chat_full' : 'table_focus'
   )
 
   // ESC shortcut to return from full-screen view mode
   useEffect(() => {
-    if (desktopView === 'chat_focus') return
+    if (desktopView === 'table_focus' || desktopView === 'balanced' || desktopView === 'chat_focus') return
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setDesktopView('chat_focus')
+        setDesktopView('table_focus')
       }
     }
 
@@ -110,7 +110,7 @@ function MainDashboard() {
   useEffect(() => {
     const onAskCopilot = () => {
       if (desktopView === 'table_full') {
-        setDesktopView('chat_focus')
+        setDesktopView('table_focus')
       }
       if (typeof window !== 'undefined' && window.innerWidth < 1024) {
         setMobileTab('chat')
@@ -140,7 +140,7 @@ function MainDashboard() {
     setTxModalOpen(true)
   }
 
-  const isExpandedView = desktopView !== 'chat_focus'
+  const isExpandedView = desktopView === 'table_full' || desktopView === 'chat_full'
 
   const totalPendingNotifications = pendingChargeGroups.length + pendingFriendRequests.length
   const currentUid = me?.uid ?? ''
@@ -173,7 +173,7 @@ function MainDashboard() {
       {/* 2. Main Content Area */}
       <main className={`flex-1 min-h-0 max-w-[1720px] w-full mx-auto px-3 sm:px-6 py-3.5 sm:py-4 ${isExpandedView ? 'lg:flex lg:flex-col' : 'space-y-4'}`}>
         {/* Top Notification Banner if there are pending actions */}
-        {totalPendingNotifications > 0 && desktopView === 'chat_focus' && (
+        {totalPendingNotifications > 0 && !isExpandedView && (
           <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-violet-500/15 to-transparent border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in slide-in-from-top-1">
             <div className="flex items-center gap-2.5 text-amber-200">
               <span className="size-2.5 rounded-full bg-amber-400 animate-ping shrink-0" />
@@ -201,7 +201,7 @@ function MainDashboard() {
         )}
 
         {/* Banner de Sobra Pendente do Mês Anterior */}
-        {summary?.pendingClosureSurplus && summary.pendingClosureSurplus > 0 && desktopView === 'chat_focus' && (
+        {summary?.pendingClosureSurplus && summary.pendingClosureSurplus > 0 && !isExpandedView && (
           <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-teal-500/15 to-transparent border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in slide-in-from-top-1">
             <div className="flex items-center gap-2.5 text-emerald-200">
               <span className="size-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
@@ -232,7 +232,7 @@ function MainDashboard() {
         {/* ============================================================== */}
         <div className={isExpandedView ? 'hidden lg:flex lg:flex-col flex-1 min-h-0' : 'hidden lg:block space-y-3'}>
           {/* KPI Dashboard (Compact Metric Ribbon) - Oculto no modo expandido */}
-          {desktopView === 'chat_focus' && (
+          {!isExpandedView && (
             <div className="space-y-3">
               <KpiGrid
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
@@ -243,12 +243,64 @@ function MainDashboard() {
             </div>
           )}
 
+          {/* Desktop Workspace Mode Selector Bar */}
+          {!isExpandedView && (
+            <div className="hidden lg:flex items-center justify-between pt-1 pb-0.5 px-0.5 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <ReceiptText className="size-3.5 text-emerald-400" />
+                  Painel de Controle Financeiro
+                </span>
+              </div>
+              <div className="flex items-center gap-1 bg-slate-950/70 p-1 rounded-xl border border-white/[0.08] shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setDesktopView('table_focus')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    desktopView === 'table_focus'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                  title="Foco no Extrato (70% Tabela, 30% Copiloto)"
+                >
+                  <ReceiptText className="size-3" />
+                  <span>Extrato Ampliado</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDesktopView('balanced')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    desktopView === 'balanced'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                  title="Divisão Equilibrada (50% Tabela, 50% Copiloto)"
+                >
+                  <span>Equilibrado (50/50)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDesktopView('chat_focus')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    desktopView === 'chat_focus'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  }`}
+                  title="Foco no Copiloto (30% Tabela, 70% Copiloto)"
+                >
+                  <Sparkles className="size-3" />
+                  <span>Foco na IA</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Flexible Main Workspace Grid (Height optimized with compact KPIs) */}
           <div
             className={
               isExpandedView
                 ? 'grid grid-cols-12 flex-1 min-h-0'
-                : 'grid grid-cols-12 gap-3.5 h-[calc(100vh-260px)] min-h-[520px]'
+                : 'grid grid-cols-12 gap-3.5 h-[calc(100vh-275px)] min-h-[520px]'
             }
           >
             {/* Left Panel: Financial Table */}
@@ -258,7 +310,11 @@ function MainDashboard() {
                   ? 'col-span-12 h-full min-h-0 flex flex-col animate-in fade-in duration-200'
                   : desktopView === 'chat_full'
                     ? 'hidden'
-                    : 'col-span-5 xl:col-span-5 h-full min-h-0 flex flex-col transition-all duration-200'
+                    : desktopView === 'table_focus'
+                      ? 'col-span-12 lg:col-span-8 xl:col-span-8 h-full min-h-0 flex flex-col transition-all duration-200'
+                      : desktopView === 'balanced'
+                        ? 'col-span-12 lg:col-span-6 xl:col-span-6 h-full min-h-0 flex flex-col transition-all duration-200'
+                        : 'col-span-12 lg:col-span-5 xl:col-span-5 h-full min-h-0 flex flex-col transition-all duration-200'
               }`}
             >
               <TransactionTable
@@ -268,7 +324,7 @@ function MainDashboard() {
                   setInvoicesModalOpen(true)
                 }}
                 onToggleExpand={() =>
-                  setDesktopView((prev) => (prev === 'table_full' ? 'chat_focus' : 'table_full'))
+                  setDesktopView((prev) => (prev === 'table_full' ? 'table_focus' : 'table_full'))
                 }
                 isExpanded={desktopView === 'table_full'}
               />
@@ -281,13 +337,17 @@ function MainDashboard() {
                   ? 'col-span-12 h-full min-h-0 flex flex-col animate-in fade-in duration-200'
                   : desktopView === 'table_full'
                     ? 'hidden'
-                    : 'col-span-7 xl:col-span-7 h-full min-h-0 flex flex-col transition-all duration-200'
+                    : desktopView === 'table_focus'
+                      ? 'col-span-12 lg:col-span-4 xl:col-span-4 h-full min-h-0 flex flex-col transition-all duration-200'
+                      : desktopView === 'balanced'
+                        ? 'col-span-12 lg:col-span-6 xl:col-span-6 h-full min-h-0 flex flex-col transition-all duration-200'
+                        : 'col-span-12 lg:col-span-7 xl:col-span-7 h-full min-h-0 flex flex-col transition-all duration-200'
               }`}
             >
               <GeminiChat
                 onOpenApiKey={() => setApiKeyModalOpen(true)}
                 onToggleExpand={() =>
-                  setDesktopView((prev) => (prev === 'chat_full' ? 'chat_focus' : 'chat_full'))
+                  setDesktopView((prev) => (prev === 'chat_full' ? 'table_focus' : 'chat_full'))
                 }
                 isExpanded={desktopView === 'chat_full'}
               />

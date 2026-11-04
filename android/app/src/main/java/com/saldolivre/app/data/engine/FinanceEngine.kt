@@ -1039,6 +1039,7 @@ object FinanceEngine {
         var receivableFromFriends = 0.0
         var payableToOthers = 0.0
         var totalInvested = 0.0
+        var grossInvested = 0.0
 
         val categoryMap = mutableMapOf<String, Double>()
         val investSubcatMap = mutableMapOf<String, Double>()
@@ -1100,6 +1101,7 @@ object FinanceEngine {
 
                 val isAporte = tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)
                 if (isAporte) {
+                    grossInvested += impact
                     totalInvested += impact
                     val sub = tx.subcategory ?: "Outros Investimentos"
                     investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) + impact
@@ -1113,7 +1115,7 @@ object FinanceEngine {
                     tx.category.contains("investimento", ignoreCase = true) ||
                     (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
                 if (isResgate) {
-                    totalInvested -= impact
+                    // Resgates de investimento no mês
                     val sub = tx.subcategory ?: "Outros Investimentos"
                     investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) - impact
                 }
@@ -1304,7 +1306,7 @@ object FinanceEngine {
             receivableFromExternal = round2(receivableFromExternal),
             receivableFromFriends = round2(receivableFromFriends),
             payableToOthers = round2(payableToOthers),
-            totalInvested = round2(totalInvested),
+            totalInvested = round2(kotlin.math.max(grossInvested, totalInvested)),
             totalInvestedAccumulated = totalInvestedAccumulated,
             byCategory = byCategory,
             byInvestmentSubcategory = byInvestSub,
@@ -2508,7 +2510,12 @@ object FinanceEngine {
         if (budgetReport != null && budgetReport.totalBudgeted > 0.0) {
             val configuredItems = budgetReport.items.filter { it.limit > 0.0 }
             budgetConfiguredCount = configuredItems.size
-            val overspentItems = configuredItems.filter { it.spent > it.limit }
+            val overspentItems = configuredItems.filter {
+                !it.category.contains("investimento", ignoreCase = true) &&
+                it.spent > it.limit &&
+                (it.spent - it.limit) > 2.0 &&
+                (it.limit <= 0.0 || ((it.spent - it.limit) / it.limit) > 0.01)
+            }
             budgetOverspentCount = overspentItems.size
 
             if (budgetConfiguredCount > 0) {
@@ -2798,12 +2805,20 @@ object FinanceEngine {
             val percentage = if (limit > 0.0) round2((spent / limit) * 100.0) else if (spent > 0.0) 100.0 else 0.0
             val isFixedCategory = isFixedBudgetCategory(category)
 
+            val isInvestmentCategory = category == "Investimentos" || category.contains("investimento", ignoreCase = true)
+            val excessAmount = spent - limit
+            val isMicroExcess = excessAmount in 0.001..2.0 || (limit > 0.0 && (excessAmount / limit) <= 0.01)
+
             val status = when {
+                isInvestmentCategory -> {
+                    // Investimentos é categoria de poupança/patrimônio: bater ou superar a meta é sucesso, nunca perigo!
+                    CategoryBudgetAlertStatus.OK
+                }
                 limit > 0.0 && isFixedCategory -> {
-                    if (spent > limit) CategoryBudgetAlertStatus.DANGER
+                    if (spent > limit && !isMicroExcess) CategoryBudgetAlertStatus.DANGER
                     else CategoryBudgetAlertStatus.OK
                 }
-                limit > 0.0 && percentage >= 100.0 -> CategoryBudgetAlertStatus.DANGER
+                limit > 0.0 && percentage >= 100.0 && !isMicroExcess -> CategoryBudgetAlertStatus.DANGER
                 limit > 0.0 && percentage >= 80.0 -> CategoryBudgetAlertStatus.WARNING
                 limit <= 0.0 && spent > 0.0 -> CategoryBudgetAlertStatus.WARNING
                 else -> CategoryBudgetAlertStatus.OK
@@ -2823,15 +2838,18 @@ object FinanceEngine {
             } else 0.0
 
             val burnRateStatus = when {
+                isInvestmentCategory -> {
+                    CategoryBudgetPaceStatus.NORMAL
+                }
                 isFixedCategory -> {
-                    if (limit > 0.0 && spent > limit) {
+                    if (limit > 0.0 && spent > limit && !isMicroExcess) {
                         criticalCount++
                         CategoryBudgetPaceStatus.CRITICAL
                     } else {
                         CategoryBudgetPaceStatus.NORMAL
                     }
                 }
-                status == CategoryBudgetAlertStatus.DANGER || (limit > 0.0 && projectedPercentage >= 115.0) -> {
+                status == CategoryBudgetAlertStatus.DANGER || (limit > 0.0 && projectedPercentage >= 115.0 && !isMicroExcess) -> {
                     criticalCount++
                     CategoryBudgetPaceStatus.CRITICAL
                 }
@@ -2891,7 +2909,8 @@ object FinanceEngine {
         }
 
         val topOverspentCategory = items.firstOrNull {
-            it.status == CategoryBudgetAlertStatus.DANGER || it.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL
+            !it.category.contains("investimento", ignoreCase = true) &&
+            (it.status == CategoryBudgetAlertStatus.DANGER || it.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL)
         }
 
         val unbudgetedCategories = consolidatedSpentMap.entries
@@ -3133,8 +3152,14 @@ object FinanceEngine {
     }
 
     fun suggestBudgetRebalance(report: CategoryBudgetReport): BudgetRebalanceResult {
-        val overspent = report.items.filter { it.limit > 0.0 && it.spent > it.limit }
-        val surplus = report.items.filter { it.limit > 0.0 && it.remaining > 20.0 }
+        // Exclui Investimentos (investir a mais é meta superada, não estouro) e micro-diferenças (<= R$ 2,00)
+        val overspent = report.items.filter {
+            it.limit > 0.0 && (it.spent - it.limit) > 2.0 && !it.category.contains("investimento", ignoreCase = true)
+        }
+        // Exclui categorias fixas (Moradia, Dívidas etc. não devem ceder folga temporária) e Investimentos
+        val surplus = report.items.filter {
+            it.limit > 0.0 && it.remaining > 20.0 && !it.isFixedCategory && !it.category.contains("investimento", ignoreCase = true)
+        }
 
         val deficitTotal = round2(overspent.sumOf { it.spent - it.limit })
         val surplusTotal = round2(surplus.sumOf { it.remaining })

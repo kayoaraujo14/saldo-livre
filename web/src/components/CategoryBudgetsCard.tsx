@@ -34,7 +34,7 @@ export function CategoryBudgetsCard() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTab, setModalTab] = useState<'budgets' | 'rebalance'>('budgets')
   const [isExpanded, setIsExpanded] = useState(false)
-  const [isCardCollapsed, setIsCardCollapsed] = useState(false)
+  const [isCardCollapsed, setIsCardCollapsed] = useState(true)
   const [activeFilter, setActiveFilter] = useState<EnvelopeFilter>('all')
 
   const {
@@ -187,6 +187,34 @@ export function CategoryBudgetsCard() {
             </div>
           </div>
 
+          {/* Inline compact progress when collapsed */}
+          {isCardCollapsed && totalBudgeted > 0 && (
+            <div className="hidden xl:flex items-center gap-3 px-3 py-1 rounded-xl bg-slate-950/60 border border-white/[0.06] text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-400">Consumido:</span>
+                <strong className="font-mono text-slate-100">{formatBRL(totalSpent)}</strong>
+                <span className="text-slate-500 font-mono">/ {formatBRL(totalBudgeted)}</span>
+              </div>
+              <div className="w-24 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${
+                    overallPercentage >= 100
+                      ? 'bg-rose-500'
+                      : overallPercentage >= 80
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                  }`}
+                  style={{ width: `${Math.min(100, overallPercentage)}%` }}
+                />
+              </div>
+              <span className={`text-[11px] font-mono font-bold ${
+                totalRemaining >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              }`}>
+                {Math.round(overallPercentage)}% ({totalRemaining >= 0 ? `+${formatBRL(totalRemaining)} livre` : `-${formatBRL(Math.abs(totalRemaining))}`})
+              </span>
+            </div>
+          )}
+
           {/* Botões de Ação */}
           <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto flex-wrap">
             {topOverspentCategory && (
@@ -227,10 +255,11 @@ export function CategoryBudgetsCard() {
               size="sm"
               variant="ghost"
               onClick={() => setIsCardCollapsed((prev) => !prev)}
-              title={isCardCollapsed ? 'Expandir envelopes' : 'Recolher envelopes'}
-              className="h-7 w-7 p-0 text-slate-400 hover:text-white hover:bg-white/[0.06] cursor-pointer"
+              title={isCardCollapsed ? 'Expandir envelopes detalhados' : 'Recolher envelopes'}
+              className="h-7 px-2 text-xs text-slate-400 hover:text-white hover:bg-white/[0.06] cursor-pointer flex items-center gap-1 rounded-lg"
             >
-              {isCardCollapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+              <span className="hidden sm:inline text-[11px] font-medium">{isCardCollapsed ? 'Ver Todos' : 'Recolher'}</span>
+              {isCardCollapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />}
             </Button>
           </div>
         </div>

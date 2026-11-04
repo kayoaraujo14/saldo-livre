@@ -406,7 +406,7 @@ export function CardInvoicesModal({
                           }
                         }
                       }}
-                      className={`snap-start shrink-0 w-[220px] text-left rounded-2xl p-3.5 border transition-all cursor-pointer ${active
+                      className={`snap-start shrink-0 min-w-[240px] flex-1 max-w-[280px] text-left rounded-2xl p-3.5 border transition-all cursor-pointer ${active
                           ? `ring-2 ${t.ring} border-white/20 bg-gradient-to-br ${t.gradient} to-slate-950 scale-[1.01] shadow-lg`
                           : 'border-white/[0.08] bg-slate-900/40 opacity-75 hover:opacity-100 hover:border-white/20'
                         }`}
@@ -864,7 +864,7 @@ export function CardInvoicesModal({
                     </h4>
 
                     {/* Filtros em abas */}
-                    <div className="flex gap-1 rounded-xl bg-slate-950/60 p-1 border border-white/[0.06] overflow-x-auto">
+                    <div className="flex flex-wrap gap-1 rounded-xl bg-slate-950/60 p-1 border border-white/[0.06]">
                       {(
                         [
                           ['all', 'Todos'],

@@ -63,8 +63,7 @@ fun CategoryBudgetsSectionCard(
     rebalance: BudgetRebalanceResult,
     onOpenConfig: () -> Unit,
     onOpenRebalance: () -> Unit,
-    onQuickApplyAiBudgets: () -> Unit,
-    onAskCopilot: (String) -> Unit
+    onQuickApplyAiBudgets: () -> Unit
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     var filterMode by remember { mutableStateOf(EnvelopeFilterMode.ALL) }
@@ -79,7 +78,7 @@ fun CategoryBudgetsSectionCard(
             EnvelopeFilterMode.ALL -> report.items
         }
     }
-    val visibleItems = if (isExpanded) filteredItems else filteredItems.take(4)
+    val visibleItems = if (isExpanded) filteredItems else filteredItems.take(5)
 
     val statusColor = when (report.status) {
         CategoryBudgetAlertStatus.DANGER -> Rose400
@@ -101,14 +100,14 @@ fun CategoryBudgetsSectionCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -117,7 +116,7 @@ fun CategoryBudgetsSectionCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(36.dp)
                             .background(Emerald500.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                             .border(1.dp, Emerald500.copy(alpha = 0.25f), RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center
@@ -126,53 +125,37 @@ fun CategoryBudgetsSectionCard(
                             imageVector = Icons.Default.TrackChanges,
                             contentDescription = null,
                             tint = Emerald400,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
                                 text = "ENVELOPES ORÇAMENTÁRIOS",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.7.sp,
+                                letterSpacing = 0.8.sp,
                                 color = TextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Box(
                                 modifier = Modifier
-                                    .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 7.dp, vertical = 2.5.dp)
                             ) {
                                 Text(
                                     text = statusText,
-                                    fontSize = 9.sp,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = statusColor
                                 )
                             }
-                            if (report.isCappedToIncome) {
-                                Box(
-                                    modifier = Modifier
-                                        .background(Cyan500.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "Calibrado à Entrada",
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Cyan400
-                                    )
-                                }
-                            }
                         }
-
-                        Spacer(modifier = Modifier.height(2.dp))
 
                         if (report.totalBudgeted > 0.0) {
                             val remText = if (report.totalRemaining >= 0.0) {
@@ -182,15 +165,15 @@ fun CategoryBudgetsSectionCard(
                             }
                             Text(
                                 text = "Orçado: ${FinanceEngine.formatCurrency(report.totalBudgeted)} • Gasto: ${FinanceEngine.formatCurrency(report.totalSpent)} (${report.overallPercentage.roundToInt()}%) • $remText",
-                                fontSize = 10.sp,
+                                fontSize = 11.5.sp,
                                 color = TextSecondary,
                                 maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                lineHeight = 15.sp
                             )
                         } else {
                             Text(
-                                text = "Defina tetos baseados na entrada prevista do mês para alertas inteligentes e IA.",
-                                fontSize = 10.sp,
+                                text = "Defina tetos baseados na entrada prevista do mês para controle e IA.",
+                                fontSize = 11.sp,
                                 color = TextMuted
                             )
                         }
@@ -198,176 +181,128 @@ fun CategoryBudgetsSectionCard(
                 }
             }
 
-            // Painel Resumo de Execução vs Entrada Prevista do Mês
+            // Painel Resumo de Execução vs Entrada Prevista do Mês (Sem balões dentro de balões)
             if (report.totalBudgeted > 0.0) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(DarkBackground.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
-                        .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .background(Color.White.copy(alpha = 0.035f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Coluna Esquerda: Entrada Prevista e Teto Orçado
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
-                                .padding(8.dp)
-                        ) {
-                            Text("Entrada Prevista", fontSize = 9.sp, color = TextMuted)
-                            Text(
-                                text = if (report.expectedIncome > 0.0) FinanceEngine.formatCurrency(report.expectedIncome) else "—",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text("100% teto máx.", fontSize = 8.sp, color = TextSecondary)
-                        }
-
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
-                                .padding(8.dp)
-                        ) {
-                            Text("Teto Orçado", fontSize = 9.sp, color = TextMuted)
-                            Text(
-                                text = FinanceEngine.formatCurrency(report.totalBudgeted),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Cyan400
-                            )
-                            Text(
-                                text = if (report.expectedIncome > 0.0) "${report.incomeUsagePercentage.roundToInt()}% da entrada" else "envelopes ativos",
-                                fontSize = 8.sp,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
-                                .padding(8.dp)
-                        ) {
-                            Text("Consumido", fontSize = 9.sp, color = TextMuted)
-                            Text(
-                                text = FinanceEngine.formatCurrency(report.totalSpent),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = statusColor
-                            )
-                            Text("${report.overallPercentage.roundToInt()}% do orçado", fontSize = 8.sp, color = TextSecondary)
-                        }
-
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(DarkSurface.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
-                                .padding(8.dp)
-                        ) {
-                            Text(
-                                text = if (report.totalRemaining >= 0.0) "Folga nos Envelopes" else "Excesso nos Envelopes",
-                                fontSize = 9.sp,
-                                color = TextMuted
-                            )
-                            Text(
-                                text = FinanceEngine.formatCurrency(abs(report.totalRemaining)),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (report.totalRemaining >= 0.0) Emerald400 else Rose400
-                            )
-                            Text(
-                                text = if (report.unallocatedIncome > 0.0) {
-                                    "Livre p/ poupar: ${FinanceEngine.formatCurrency(report.unallocatedIncome)}"
-                                } else {
-                                    "100% da entrada alocada"
-                                },
-                                fontSize = 8.sp,
-                                color = TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    if (report.isCappedToIncome && report.rawTotalBudgeted > report.totalBudgeted) {
                         Text(
-                            text = "Calibrado automaticamente: os tetos originais (${FinanceEngine.formatCurrency(report.rawTotalBudgeted)}) superavam a entrada prevista deste mês (${FinanceEngine.formatCurrency(report.expectedIncome)}) e foram ajustados proporcionalmente.",
-                            fontSize = 9.sp,
+                            text = "ENTRADA PREVISTA",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextMuted,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = if (report.expectedIncome > 0.0) FinanceEngine.formatCurrency(report.expectedIncome) else "—",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Teto Orçado: ${FinanceEngine.formatCurrency(report.totalBudgeted)} (${report.incomeUsagePercentage.roundToInt()}%)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
                             color = Cyan400
                         )
                     }
+
+                    // Divisor Vertical Discreto
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .width(1.dp)
+                            .height(44.dp)
+                            .background(Color.White.copy(alpha = 0.08f))
+                    )
+
+                    // Coluna Direita: Consumido e Folga
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "TOTAL CONSUMIDO",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextMuted,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = FinanceEngine.formatCurrency(report.totalSpent),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = statusColor
+                        )
+                        val folgaText = if (report.totalRemaining >= 0.0) {
+                            "Folga: ${FinanceEngine.formatCurrency(report.totalRemaining)}"
+                        } else {
+                            "Excesso: ${FinanceEngine.formatCurrency(abs(report.totalRemaining))}"
+                        }
+                        Text(
+                            text = folgaText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (report.totalRemaining >= 0.0) Emerald400 else Rose400
+                        )
+                    }
                 }
             }
 
-            // Action Buttons Bar
+            // Action Buttons Bar (Removido botão redundante "Analisar no Chat")
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (report.topOverspentCategory != null || rebalance.canRebalance) {
+                if (rebalance.canRebalance && rebalance.suggestions.isNotEmpty()) {
                     OutlinedButton(
                         onClick = onOpenRebalance,
-                        modifier = Modifier.height(30.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, Purple400.copy(alpha = 0.4f)),
+                        modifier = Modifier.height(34.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Purple400.copy(alpha = 0.5f)),
                         colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = Purple500.copy(alpha = 0.12f),
+                            containerColor = Purple500.copy(alpha = 0.14f),
                             contentColor = Purple400
                         )
                     ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(13.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Compensar IA", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Compensar IA", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
+                } else {
+                    Spacer(modifier = Modifier.width(1.dp))
                 }
-
-                OutlinedButton(
-                    onClick = {
-                        onAskCopilot("Analise o ritmo dos meus Envelopes Orçamentários deste mês, indique se há categorias em risco e sugira ajustes ou rebalanceamentos.")
-                    },
-                    modifier = Modifier.height(30.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.35f)),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Emerald500.copy(alpha = 0.10f),
-                        contentColor = Emerald400
-                    )
-                ) {
-                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Analisar no Chat", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
 
                 OutlinedButton(
                     onClick = onOpenConfig,
-                    modifier = Modifier.height(30.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                    modifier = Modifier.height(34.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = DarkSurfaceVariant,
                         contentColor = TextPrimary
                     )
                 ) {
-                    Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (report.totalBudgeted > 0.0) "Ajustar" else "Configurar", fontSize = 11.sp)
+                    Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (report.totalBudgeted > 0.0) "Ajustar Tetos" else "Configurar Tetos",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
 
@@ -390,29 +325,29 @@ fun CategoryBudgetsSectionCard(
                 }
             }
 
-            // Preventive AI Alert Banner
+            // Preventive AI Alert Banner (Apenas para despesas reais, sem quebrar com reticências)
             val topOver = report.topOverspentCategory
-            if (topOver != null) {
+            if (topOver != null && !topOver.category.contains("investimento", ignoreCase = true)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Purple500.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
-                        .border(1.dp, Purple400.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
+                        .background(Purple500.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+                        .border(1.dp, Purple400.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                         .clickable { onOpenRebalance() }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(
                             imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
                             tint = Purple400,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Text(
                             text = if (topOver.status == CategoryBudgetAlertStatus.DANGER) {
@@ -420,15 +355,16 @@ fun CategoryBudgetsSectionCard(
                             } else {
                                 "Projeção de estouro em \"${topOver.category}\" até o fim do mês."
                             },
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
                             color = TextPrimary,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                     Text(
                         text = "Rebalancear",
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Purple400,
                         modifier = Modifier.padding(start = 8.dp)
@@ -441,7 +377,7 @@ fun CategoryBudgetsSectionCard(
                 // Quick Filter Chips
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     for (mode in EnvelopeFilterMode.entries) {
@@ -450,7 +386,7 @@ fun CategoryBudgetsSectionCard(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(
-                                    if (isSelected) Emerald500.copy(alpha = 0.20f) else DarkBackground.copy(alpha = 0.6f)
+                                    if (isSelected) Emerald500.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.04f)
                                 )
                                 .border(
                                     1.dp,
@@ -458,11 +394,11 @@ fun CategoryBudgetsSectionCard(
                                     RoundedCornerShape(8.dp)
                                 )
                                 .clickable { filterMode = mode }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = mode.label,
-                                fontSize = 10.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) Emerald400 else TextSecondary
                             )
@@ -470,36 +406,47 @@ fun CategoryBudgetsSectionCard(
                     }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     for (item in visibleItems) {
-                        val itemColor = when (item.status) {
-                            CategoryBudgetAlertStatus.DANGER -> Rose400
-                            CategoryBudgetAlertStatus.WARNING -> Amber400
-                            CategoryBudgetAlertStatus.OK -> Emerald400
+                        val isInvest = item.category.contains("investimento", ignoreCase = true)
+                        val itemColor = when {
+                            isInvest -> Emerald400
+                            item.status == CategoryBudgetAlertStatus.DANGER -> Rose400
+                            item.status == CategoryBudgetAlertStatus.WARNING -> Amber400
+                            else -> Emerald400
                         }
+
                         val paceBadgeText = when {
+                            isInvest && item.limit > 0.0 && item.spent >= item.limit -> {
+                                if (item.spent > item.limit) "Meta Superada" else "Meta Atingida"
+                            }
+                            isInvest -> "Aporte"
                             item.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL && item.limit > 0.0 && item.spent > item.limit -> "Estourado"
                             item.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL -> "Crítico"
                             item.burnRateStatus == CategoryBudgetPaceStatus.FAST -> "Acelerado"
                             item.isFixedCategory -> "Fixo Mensal"
-                            else -> "Normal"
+                            else -> "Dentro da Meta"
                         }
                         val paceBadgeColor = when {
+                            isInvest -> Emerald400
+                            item.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL && item.limit > 0.0 && item.spent > item.limit -> Rose400
                             item.burnRateStatus == CategoryBudgetPaceStatus.CRITICAL -> Rose400
                             item.burnRateStatus == CategoryBudgetPaceStatus.FAST -> Amber400
                             item.isFixedCategory -> Cyan400
                             else -> Emerald400
                         }
 
+                        // Card Individual do Envelope (Design Moderno & Sem reticências)
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(DarkBackground.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                                .background(DarkSurfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
                                 .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
                                 .clickable { onOpenConfig() }
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // Topo: Nome da Categoria e Badge
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -507,66 +454,90 @@ fun CategoryBudgetsSectionCard(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(8.dp)
+                                            .size(9.dp)
                                             .background(itemColor, CircleShape)
                                     )
                                     Text(
                                         text = item.category,
-                                        fontSize = 12.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = TextPrimary,
-                                        maxLines = 1,
+                                        maxLines = 2,
+                                        lineHeight = 18.sp,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
                                 Box(
                                     modifier = Modifier
-                                        .background(paceBadgeColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .background(paceBadgeColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
                                         text = paceBadgeText,
-                                        fontSize = 9.sp,
+                                        fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = paceBadgeColor
                                     )
                                 }
                             }
 
+                            // Linha de Valores: Gasto vs Teto e Diferença
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.Bottom
                             ) {
+                                Row(
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = FinanceEngine.formatCurrency(item.spent),
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = if (item.limit > 0.0) "/ ${FinanceEngine.formatCurrency(item.limit)}" else "Sem teto",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary,
+                                        modifier = Modifier.padding(bottom = 1.dp)
+                                    )
+                                }
+
+                                val diffText = when {
+                                    isInvest && item.limit > 0.0 && item.spent >= item.limit -> {
+                                        "+${FinanceEngine.formatCurrency(item.spent - item.limit)}"
+                                    }
+                                    item.remaining > 0.0 -> "+${FinanceEngine.formatCurrency(item.remaining)}"
+                                    item.remaining < 0.0 -> "-${FinanceEngine.formatCurrency(abs(item.remaining))}"
+                                    else -> "No limite"
+                                }
+                                val diffColor = when {
+                                    isInvest && item.limit > 0.0 && item.spent >= item.limit -> Emerald400
+                                    item.remaining > 0.0 -> Emerald400
+                                    item.remaining < 0.0 -> Rose400
+                                    else -> TextSecondary
+                                }
                                 Text(
-                                    text = FinanceEngine.formatCurrency(item.spent),
+                                    text = diffText,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                                Text(
-                                    text = if (item.limit > 0.0) {
-                                        if (report.isCappedToIncome && item.rawLimit > item.limit) {
-                                            "/ ${FinanceEngine.formatCurrency(item.limit)} (orig. ${FinanceEngine.formatCurrency(item.rawLimit)})"
-                                        } else {
-                                            "/ ${FinanceEngine.formatCurrency(item.limit)}"
-                                        }
-                                    } else "Sem teto",
-                                    fontSize = 11.sp,
-                                    color = TextSecondary
+                                    color = diffColor
                                 )
                             }
 
+                            // Barra de Progresso
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(5.dp)
+                                    .height(6.dp)
                                     .clip(RoundedCornerShape(3.dp))
                                     .background(Color.White.copy(alpha = 0.08f))
                             ) {
@@ -579,42 +550,40 @@ fun CategoryBudgetsSectionCard(
                                 )
                             }
 
+                            // Rodapé: Ritmo e Meta Diária
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                val rhythmText = when {
+                                    isInvest && item.limit > 0.0 -> "${item.percentage.roundToInt()}% da meta de aporte"
+                                    !item.isFixedCategory && item.remaining > 0.0 && item.limit > 0.0 -> {
+                                        "Meta: ${FinanceEngine.formatCurrency(item.recommendedDailyRemaining)}/dia • ${item.percentage.roundToInt()}% gasto"
+                                    }
+                                    item.isFixedCategory -> "Compromisso fixo do mês"
+                                    else -> "${item.percentage.roundToInt()}% gasto"
+                                }
                                 Text(
-                                    text = if (!item.isFixedCategory && item.remaining > 0.0 && item.limit > 0.0) {
-                                        "Meta: ${FinanceEngine.formatCurrency(item.recommendedDailyRemaining)}/dia"
-                                    } else {
-                                        "${item.percentage.roundToInt()}% gasto"
-                                    },
-                                    fontSize = 10.sp,
-                                    color = TextSecondary
+                                    text = rhythmText,
+                                    fontSize = 11.5.sp,
+                                    color = TextSecondary,
+                                    maxLines = 2
                                 )
 
-                                val remLabel = when {
-                                    item.remaining > 0.0 -> "+${FinanceEngine.formatCurrency(item.remaining)}"
-                                    item.remaining < 0.0 -> "-${FinanceEngine.formatCurrency(abs(item.remaining))}"
-                                    else -> "No limite"
+                                if (isInvest && item.spent > item.limit && item.limit > 0.0) {
+                                    Text(
+                                        text = "Aporte excedente",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Emerald400
+                                    )
                                 }
-                                val remColor = when {
-                                    item.remaining > 0.0 -> Emerald400
-                                    item.remaining < 0.0 -> Rose400
-                                    else -> TextMuted
-                                }
-                                Text(
-                                    text = remLabel,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = remColor
-                                )
                             }
                         }
                     }
 
-                    if (filteredItems.size > 4) {
+                    if (filteredItems.size > 5) {
                         TextButton(
                             onClick = { isExpanded = !isExpanded },
                             modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -622,14 +591,15 @@ fun CategoryBudgetsSectionCard(
                             Icon(
                                 imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                 contentDescription = null,
-                                tint = TextSecondary,
-                                modifier = Modifier.size(16.dp)
+                                tint = Emerald400,
+                                modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (isExpanded) "Recolher envelopes" else "Ver todos os ${filteredItems.size} envelopes",
-                                fontSize = 11.sp,
-                                color = TextSecondary
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Emerald400
                             )
                         }
                     }
@@ -639,37 +609,25 @@ fun CategoryBudgetsSectionCard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(DarkBackground.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                        .padding(14.dp),
+                        .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(12.dp))
+                        .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Nenhum envelope definido neste mês. Ative tetos automáticos em 1 clique baseados na sua média histórica!",
-                        fontSize = 11.sp,
-                        color = TextSecondary
+                        text = "Nenhum envelope definido neste mês. Ative tetos automáticos em 1 clique baseados na sua média histórica e na Regra 50/30/20!",
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = onQuickApplyAiBudgets,
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600, contentColor = Color.White),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Ativar Tetos com IA", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                        OutlinedButton(
-                            onClick = onOpenConfig,
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.height(32.dp),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
-                        ) {
-                            Text("Personalizar", fontSize = 11.sp, color = TextPrimary)
-                        }
+                    Button(
+                        onClick = onQuickApplyAiBudgets,
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600, contentColor = Color.White),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Criar Envelopes Inteligentes", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }
@@ -758,9 +716,10 @@ fun CompactFinancialHealthCard(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = health.actionableTips.firstOrNull() ?: health.description,
-                        fontSize = 10.sp,
-                        color = TextMuted,
-                        maxLines = 1,
+                        fontSize = 11.5.sp,
+                        lineHeight = 15.sp,
+                        color = TextSecondary,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -873,9 +832,10 @@ fun FullFinancialHealthCard(
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = health.actionableTips.firstOrNull() ?: health.description,
-                            fontSize = 10.sp,
-                            color = TextMuted,
-                            maxLines = 1,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            color = TextSecondary,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -901,13 +861,13 @@ fun FullFinancialHealthCard(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "POUPANÇA",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = TextMuted
                     )
                     Text(
                         text = "${health.savingsScore}/35 (${health.savingsRatePercentage}%)",
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -923,13 +883,13 @@ fun FullFinancialHealthCard(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "CUSTO VIDA",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = TextMuted
                     )
                     Text(
                         text = "${health.spendingLimitScore}/35 (${health.spendingRatioPercentage}%)",
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -945,13 +905,13 @@ fun FullFinancialHealthCard(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "RESERVA",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = TextMuted
                     )
                     Text(
                         text = "${health.emergencyReserveScore}/30 (${health.emergencyCoverageMonths}m)",
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
@@ -967,13 +927,13 @@ fun FullFinancialHealthCard(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "ENVELOPES",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
                         color = TextMuted
                     )
                     Text(
                         text = if (health.budgetConfiguredCount > 0) "${health.budgetAdherenceScore}%" else "Config.",
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (health.budgetOverspentCount > 0) Rose400 else Emerald400
                     )
@@ -1467,29 +1427,61 @@ fun ManageBudgetsDialog(
 
     val calibrateInputsToIncome = {
         if (expectedIncome > 0.0 && formTotal > expectedIncome) {
-            val scale = expectedIncome / formTotal
-            var running = 0.0
-            var maxCat = ""
-            var maxVal = -1.0
-            val nextVals = mutableMapOf<String, Double>()
+            val parsedVals = mutableMapOf<String, Double>()
             for (cat in BUDGETABLE_EXPENSE_CATEGORIES) {
                 val raw = (budgetInputs[cat] ?: "").replace(",", ".").trim().toDoubleOrNull() ?: 0.0
-                if (raw > 0.0) {
-                    val scaled = kotlin.math.max(10.0, kotlin.math.floor((raw * scale) / 5.0) * 5.0)
-                    nextVals[cat] = scaled
-                    running += scaled
-                    if (scaled > maxVal) {
-                        maxVal = scaled
-                        maxCat = cat
+                if (raw > 0.0) parsedVals[cat] = raw
+            }
+
+            // Piso inegociável por categoria: o que já foi gasto no mês ou custo fixo contratual
+            val floorVals = mutableMapOf<String, Double>()
+            for ((cat, raw) in parsedVals) {
+                val spentItem = report.items.find {
+                    FinanceEngine.normalizeBudgetCategory(it.category) == FinanceEngine.normalizeBudgetCategory(cat)
+                }
+                val spentSoFar = spentItem?.spent ?: 0.0
+                val isFixed = FinanceEngine.isFixedBudgetCategory(cat)
+                floorVals[cat] = if (isFixed) raw else spentSoFar
+            }
+
+            val fixedCategories = parsedVals.keys.filter { FinanceEngine.isFixedBudgetCategory(it) }
+            val flexCategories = parsedVals.keys.filter { !FinanceEngine.isFixedBudgetCategory(it) }
+            val fixedSum = fixedCategories.sumOf { parsedVals[it] ?: 0.0 }
+            val availableForFlex = expectedIncome - fixedSum
+
+            if (availableForFlex > 0.0 && flexCategories.isNotEmpty()) {
+                val flexFloorsSum = flexCategories.sumOf { floorVals[it] ?: 0.0 }
+                if (availableForFlex >= flexFloorsSum) {
+                    val discretionaryPool = availableForFlex - flexFloorsSum
+                    val currentDiscretionarySum = flexCategories.sumOf {
+                        kotlin.math.max(0.0, (parsedVals[it] ?: 0.0) - (floorVals[it] ?: 0.0))
+                    }
+                    for (cat in flexCategories) {
+                        val floor = floorVals[cat] ?: 0.0
+                        val excess = kotlin.math.max(0.0, (parsedVals[cat] ?: 0.0) - floor)
+                        val share = if (currentDiscretionarySum > 0.0) {
+                            (excess / currentDiscretionarySum) * discretionaryPool
+                        } else {
+                            discretionaryPool / flexCategories.size
+                        }
+                        val calibrated = kotlin.math.floor((floor + share) / 5.0) * 5.0
+                        budgetInputs[cat] = if (calibrated % 1.0 == 0.0) calibrated.toInt().toString() else FinanceEngine.round2(calibrated).toString()
+                    }
+                } else {
+                    // Entrada não cobre nem os pisos já gastos das categorias flexíveis; fixa no piso gasto
+                    for (cat in flexCategories) {
+                        val floor = floorVals[cat] ?: 0.0
+                        val calibrated = kotlin.math.max(10.0, kotlin.math.floor(floor / 5.0) * 5.0)
+                        budgetInputs[cat] = if (calibrated % 1.0 == 0.0) calibrated.toInt().toString() else FinanceEngine.round2(calibrated).toString()
                     }
                 }
-            }
-            if (running > expectedIncome && maxCat.isNotEmpty()) {
-                val excess = running - expectedIncome
-                nextVals[maxCat] = kotlin.math.max(0.0, (nextVals[maxCat] ?: 0.0) - excess)
-            }
-            for ((cat, scaled) in nextVals) {
-                budgetInputs[cat] = if (scaled % 1.0 == 0.0) scaled.toInt().toString() else FinanceEngine.round2(scaled).toString()
+            } else {
+                // Se as despesas fixas sozinhas já consomem a renda prevista, mantém os fixos e ajusta flexíveis para o mínimo
+                for (cat in flexCategories) {
+                    val floor = floorVals[cat] ?: 0.0
+                    val minVal = if (floor > 0.0) floor else 10.0
+                    budgetInputs[cat] = if (minVal % 1.0 == 0.0) minVal.toInt().toString() else FinanceEngine.round2(minVal).toString()
+                }
             }
         }
     }
@@ -1675,7 +1667,7 @@ fun ManageBudgetsDialog(
                                 ) {
                                     Text(
                                         text = if (isOverIncome) {
-                                            "Excede a entrada em ${FinanceEngine.formatCurrency(abs(unallocatedIncome))} (será calibrado ao salvar)"
+                                            "Teto total excede a entrada em ${FinanceEngine.formatCurrency(abs(unallocatedIncome))}"
                                         } else {
                                             "$incomeUsagePct% da entrada alocada nos envelopes"
                                         },
@@ -1817,33 +1809,11 @@ fun ManageBudgetsDialog(
                         Button(
                             onClick = {
                                 val parsed = mutableMapOf<String, Double>()
-                                var totalTyped = 0.0
                                 for ((cat, raw) in budgetInputs) {
                                     val clean = raw.replace(",", ".").trim()
                                     val v = clean.toDoubleOrNull() ?: 0.0
                                     if (v > 0.0) {
                                         parsed[cat] = FinanceEngine.round2(v)
-                                        totalTyped += v
-                                    }
-                                }
-                                // Garante que o orçamento salvo nunca exceda a entrada prevista do mês
-                                if (expectedIncome > 0.0 && totalTyped > expectedIncome) {
-                                    val scale = expectedIncome / totalTyped
-                                    var running = 0.0
-                                    var maxCat = ""
-                                    var maxVal = -1.0
-                                    for (cat in parsed.keys.toList()) {
-                                        val scaled = FinanceEngine.round2((parsed[cat] ?: 0.0) * scale)
-                                        parsed[cat] = scaled
-                                        running = FinanceEngine.round2(running + scaled)
-                                        if (scaled > maxVal) {
-                                            maxVal = scaled
-                                            maxCat = cat
-                                        }
-                                    }
-                                    val diff = FinanceEngine.round2(expectedIncome - running)
-                                    if (maxCat.isNotEmpty() && abs(diff) > 0.0 && (parsed[maxCat] ?: 0.0) + diff >= 0.0) {
-                                        parsed[maxCat] = FinanceEngine.round2((parsed[maxCat] ?: 0.0) + diff)
                                     }
                                 }
                                 onSaveBudgets(parsed)
@@ -1855,7 +1825,7 @@ fun ManageBudgetsDialog(
                             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isOverIncome) "Calibrar & Salvar" else "Salvar Envelopes",
+                                text = "Salvar Envelopes",
                                 fontWeight = FontWeight.Bold
                             )
                         }

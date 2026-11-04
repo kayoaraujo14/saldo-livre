@@ -250,8 +250,11 @@ class DashboardViewModel(
                     )
                 }
 
-                // 4. Saúde de Investimentos (Sem repetições de Meta: 20% vs 0% vs R$ 0)
-                val invested = summary.totalInvested
+                // 4. Saúde de Investimentos (Garante alinhamento total com o envelope de Investimentos e aportes do mês)
+                val investExpense = summary.byCategory.firstOrNull {
+                    it.category == "Investimentos" || it.category.contains("investimento", ignoreCase = true)
+                }?.amount ?: summary.totalInvested
+                val invested = kotlin.math.max(summary.totalInvested, investExpense)
                 val investIncomePct = if (summary.income > 0.0) {
                     ((invested / summary.income) * 100.0).roundToInt()
                 } else 0
