@@ -589,6 +589,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const categoryBudgetReport = useMemo(() => {
     const expectedIncome =
       summary?.income && summary.income > 0 ? summary.income : (profile?.monthlyIncome || 0)
+    const carryover = summary?.carryoverAmount || 0
+    const deficit = summary?.previousMonthDeficit || 0
     return computeCategoryBudgets(
       summary?.byCategory || [],
       currentMonthBudgets,
@@ -597,8 +599,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       currentUid || undefined,
       transactions,
       expectedIncome,
+      carryover,
+      deficit,
+      recurring,
     )
-  }, [summary?.byCategory, summary?.income, currentMonthBudgets, profile?.monthlyIncome, month, currentUid, transactions])
+  }, [summary?.byCategory, summary?.income, summary?.carryoverAmount, summary?.previousMonthDeficit, currentMonthBudgets, profile?.monthlyIncome, month, currentUid, transactions, recurring])
 
   const [closureModalOpen, setClosureModalOpen] = useState(false)
   const [closureDismissed, setClosureDismissed] = useState(false)

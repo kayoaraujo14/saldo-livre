@@ -38,9 +38,16 @@ data class CategoryBudgetStatus(
     val limit: Double,
     val rawLimit: Double = limit,
     val spent: Double,
+    val spentAmount: Double = spent,
+    val pendingAmount: Double = 0.0,
+    val committedAmount: Double = spent,
     val remaining: Double,
+    val realRemaining: Double = remaining,
     val percentage: Double,
+    val pendingPercentage: Double = 0.0,
+    val totalPercentage: Double = percentage,
     val status: CategoryBudgetAlertStatus = CategoryBudgetAlertStatus.OK,
+    val badgeLabel: String = "Sob Controle",
     val dailyPace: Double = 0.0,
     val projectedSpent: Double = 0.0,
     val projectedPercentage: Double = 0.0,
@@ -58,21 +65,30 @@ data class CategoryBudgetReport(
     val totalBudgeted: Double = 0.0,
     val rawTotalBudgeted: Double = totalBudgeted,
     val expectedIncome: Double = 0.0,
+    val carryoverAmount: Double = 0.0,
+    val previousMonthDeficit: Double = 0.0,
     val isCappedToIncome: Boolean = false,
     val incomeUsagePercentage: Double = 0.0,
     val unallocatedIncome: Double = 0.0,
     val totalSpent: Double = 0.0,
+    val totalPending: Double = 0.0,
+    val totalCommitted: Double = totalSpent,
     val totalRemaining: Double = 0.0,
+    val totalRealRemaining: Double = totalRemaining,
     val overallPercentage: Double = 0.0,
     val status: CategoryBudgetAlertStatus = CategoryBudgetAlertStatus.OK,
     val criticalCount: Int = 0,
     val warningCount: Int = 0,
     val topOverspentCategory: CategoryBudgetStatus? = null,
-    val unbudgetedCategories: List<CategoryExpense> = emptyList()
+    val unbudgetedCategories: List<CategoryExpense> = emptyList(),
+    val investmentTarget: Double = 0.0,
+    val investmentSpent: Double = 0.0,
+    val investmentPercentage: Double = 0.0
 ) {
+    val totalAvailableIncome: Double get() = kotlin.math.max(0.0, expectedIncome + carryoverAmount - previousMonthDeficit)
     val categories: List<CategoryBudgetStatus> get() = items
     val totalSpentInBudgeted: Double get() = totalSpent
-    val overspentCount: Int get() = items.count { it.limit > 0.0 && it.spent > it.limit }
+    val overspentCount: Int get() = items.count { it.limit > 0.0 && ((it.committedAmount - it.limit) >= 0.01) }
     val safeCount: Int get() = items.count { it.limit > 0.0 && it.status == CategoryBudgetAlertStatus.OK }
 }
 
@@ -124,6 +140,7 @@ data class FinancialHealthScore(
     val savingsScore: Int = 0,
     val spendingLimitScore: Int = 0,
     val emergencyReserveScore: Int = 0,
+    val envelopeScore: Int = 0,
     val savingsRatePercentage: Int = 0,
     val spendingRatioPercentage: Int = 0,
     val emergencyCoverageMonths: Double = 0.0,
@@ -133,4 +150,23 @@ data class FinancialHealthScore(
     val monthlyLivingCost: Double = 0.0,
     val potentialSavingsRatePercentage: Int = 0,
     val actionableTips: List<String> = emptyList()
+)
+
+@Immutable
+data class SmartBudgetAllocation(
+    val category: String,
+    val suggestedLimit: Double,
+    val reason: String = ""
+)
+
+@Immutable
+data class SmartBudgetPlan(
+    val summaryInsight: String = "",
+    val allocations: List<SmartBudgetAllocation> = emptyList()
+)
+
+@Immutable
+data class FinancialHealthAiDiagnosis(
+    val overallAssessment: String = "",
+    val actionPlan: List<String> = emptyList()
 )

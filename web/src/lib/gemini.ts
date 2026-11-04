@@ -12,6 +12,9 @@ import type {
   ChatAttachment,
   FinancialHealthScore,
   PendingBatchTransaction,
+  SmartBudgetPlan,
+  SmartBudgetAllocation,
+  FinancialHealthAiDiagnosis,
 } from '@/types'
 import { CATEGORIES } from '@/types'
 
@@ -1737,5 +1740,232 @@ export async function transcribeAudioWithGemini(opts: {
 
   if (lastError) throw lastError
   return ''
+}
+
+// ------------------------------------------------------------------
+// Gemini Smart Budget & Health Diagnosis
+// ------------------------------------------------------------------
+
+export interface SmartBudgetPlanParams {
+  monthlyIncome: number
+  carryoverAmount?: number
+  spentByCategory: Record<string, number>
+  pendingByCategory: Record<string, number>
+  history3mAverages: Record<string, number>
+  existingLimits?: Record<string, number>
+}
+
+/**
+ * Sugere um plano de orçamento de envelopes inteligente utilizando o Gemini com structured JSON output.
+ * NUNCA gera centavos quebrados (sempre inteiros múltiplos de R$ 10 ou R$ 50) e NUNCA sugere teto
+ * menor do que o que já está comprometido (pago + contas a vencer).
+ */
+export async function generateSmartBudgetPlan(
+  params: SmartBudgetPlanParams,
+): Promise<SmartBudgetPlan> {
+  const keys = getGeminiApiKeys()
+  const income = Math.max(0, Number(params.monthlyIncome) || 0)
+
+  const categoriesSet = new Set<string>([
+    ...Object.keys(params.spentByCategory || {}),
+    ...Object.keys(params.pendingByCategory || {}),
+    ...Object.keys(params.history3mAverages || {}),
+    ...Object.keys(params.existingLimits || {}),
+  ])
+
+  const categoryContext = Array.from(categoriesSet)
+    .filter((cat) => cat && !/rendimento|sal[áa]rio/i.test(cat))
+    .map((cat) => {
+      const spent = params.spentByCategory[cat] || 0
+      const pending = params.pendingByCategory[cat] || 0
+      const committed = spent + pending
+      const histAvg = params.history3mAverages[cat] || 0
+      const curLim = params.existingLimits?.[cat] || 0
+      return `- ${cat}: pago = R$ ${spent.toFixed(2)}, a vencer = R$ ${pending.toFixed(2)} (comprometido total = R$ ${committed.toFixed(2)}), média 3 meses = R$ ${histAvg.toFixed(2)}, teto atual = R$ ${curLim.toFixed(2)}`
+    })
+    .join('\n')
+
+  const prompt = `Você é um planejador financeiro pessoal de elite e especialista na Regra 50/30/20.
+Sua missão é sugerir um plano de orçamento mensal (envelopes) realista, disciplinado e seguro para o usuário.
+
+DADOS DO MÊS:
+- Receita líquida prevista: R$ ${income.toFixed(2)}
+- Gastos e compromissos por categoria:
+${categoryContext || 'Nenhum dado prévio.'}
+
+REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
+1. NUNCA sugira um teto menor do que o total comprometido (já pago + contas a vencer) de uma categoria. O usuário não pode ter um teto menor do que o que ele já gastou ou já tem de boleto/fatura agendada!
+2. A soma de todos os tetos de despesas sugeridos NÃO DEVE ultrapassar a receita prevista do mês (R$ ${income.toFixed(2)}). Se a receita for maior que os gastos, reserve pelo menos 15-20% para "Investimentos" (Futuro/Aportes).
+3. "Investimentos" NÃO é despesa de consumo; é meta de aporte da regra 50/30/20.
+4. ARREDONDAMENTO OBRIGATÓRIO: NUNCA sugira valores com centavos quebrados (como R$ 499,08 ou R$ 338,38). Todos os valores de "suggestedLimit" DEVEM ser inteiros múltiplos de R$ 10,00 ou R$ 50,00 (ex: 150, 400, 750, 1200).
+5. Cada alocação deve ter uma justificativa curta ("reason") de 1 frase explicando a escolha com base nos dados.
+6. Retorne estritamente um JSON no seguinte formato:
+{
+  "summaryInsight": "Resumo executivo curto de 1-2 frases explicando a estratégia adotada (ex: Regra 50/30/20 adaptada protegendo R$ 1.280 em contas a vencer com folga real garantida).",
+  "allocations": [
+    {
+      "category": "Alimentação",
+      "suggestedLimit": 700,
+      "reason": "Baseado na sua média de R$ 620 com margem de segurança de 10% cobrindo o que já foi gasto."
+    }
+  ]
+}`
+
+  if (keys.length > 0) {
+    for (const key of keys) {
+      const ai = new GoogleGenAI({ apiKey: key })
+      for (const model of ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest']) {
+        try {
+          const res = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+            },
+          })
+          const text = (res.text || '').trim()
+          if (text) {
+            const parsed = JSON.parse(text) as SmartBudgetPlan
+            if (parsed && Array.isArray(parsed.allocations) && parsed.allocations.length > 0) {
+              const sanitizedAllocations = parsed.allocations.map((a) => {
+                const spent = params.spentByCategory[a.category] || 0
+                const pending = params.pendingByCategory[a.category] || 0
+                const minFloor = Math.ceil((spent + pending) / 10) * 10
+                const rawSuggested = Math.ceil((Number(a.suggestedLimit) || minFloor) / 10) * 10
+                return {
+                  category: a.category,
+                  suggestedLimit: Math.max(minFloor, rawSuggested, 50),
+                  reason: a.reason || 'Sugerido com base no histórico recente e compromissos.',
+                }
+              })
+              return {
+                summaryInsight: parsed.summaryInsight || 'Plano de envelopes gerado pelo Gemini com base no seu padrão de gastos e contas a vencer.',
+                allocations: sanitizedAllocations,
+              }
+            }
+          }
+        } catch (err) {
+          console.warn(`Falha no Gemini Smart Budget com modelo ${model}:`, err)
+        }
+      }
+    }
+  }
+
+  // Fallback determinístico inteligente
+  const fallbackAllocations: SmartBudgetAllocation[] = []
+  for (const cat of categoriesSet) {
+    if (!cat || /rendimento|sal[áa]rio/i.test(cat)) continue
+    const spent = params.spentByCategory[cat] || 0
+    const pending = params.pendingByCategory[cat] || 0
+    const committed = spent + pending
+    const histAvg = params.history3mAverages[cat] || 0
+    const minFloor = Math.ceil(committed / 10) * 10
+    const isFixed = /moradia|financiamento|assinatura/i.test(cat)
+    const baseTarget = isFixed ? Math.max(histAvg, committed) : Math.max(histAvg * 1.1, committed)
+    const limit = Math.max(50, minFloor, Math.ceil(baseTarget / 10) * 10)
+
+    fallbackAllocations.push({
+      category: cat,
+      suggestedLimit: limit,
+      reason: pending > 0
+        ? `Protegendo R$ ${pending.toFixed(2)} em contas a vencer e cobrindo média de R$ ${histAvg.toFixed(2)}.`
+        : `Margem de segurança calculada sobre sua média histórica de R$ ${histAvg.toFixed(2)}.`,
+    })
+  }
+
+  const totalPending = Object.values(params.pendingByCategory || {}).reduce((a, b) => a + b, 0)
+  return {
+    summaryInsight: `Plano inteligente calculado com Regra 50/30/20 protegendo R$ ${totalPending.toFixed(2)} em contas a vencer com tetos arredondados.`,
+    allocations: fallbackAllocations,
+  }
+}
+
+export interface FinancialHealthDiagnosisParams {
+  score: number
+  classification: string
+  savingsScore: number
+  spendingLimitScore: number
+  emergencyReserveScore: number
+  envelopeScore: number
+  savingsRatePercentage: number
+  spendingRatioPercentage: number
+  emergencyCoverageMonths: number
+  monthlyLivingCost: number
+  monthlyIncome: number
+  actionableTips?: string[]
+}
+
+/**
+ * Gera um diagnóstico financeiro rápido e acionável com 3 recomendações práticas do Gemini.
+ */
+export async function generateFinancialHealthAiDiagnosis(
+  params: FinancialHealthDiagnosisParams,
+): Promise<FinancialHealthAiDiagnosis> {
+  const keys = getGeminiApiKeys()
+  const prompt = `Você é um consultor financeiro pessoal sênior de fintech.
+Analise os 4 pilares do Score de Saúde Financeira do usuário (0 a 100 pontos):
+- Score Total: ${params.score}/100 (${params.classification.toUpperCase()})
+- Pilar 1: Poupança/Investimentos = ${params.savingsScore}/30 pts (Taxa: ${params.savingsRatePercentage}% da renda)
+- Pilar 2: Custo de Vida / Comprometimento = ${params.spendingLimitScore}/30 pts (${params.spendingRatioPercentage}% da renda, Custo: R$ ${params.monthlyLivingCost.toFixed(2)})
+- Pilar 3: Reserva de Emergência = ${params.emergencyReserveScore}/25 pts (Cobre ${params.emergencyCoverageMonths.toFixed(1)} meses de custo)
+- Pilar 4: Controle de Envelopes = ${params.envelopeScore}/15 pts
+
+Gere um diagnóstico ultra objetivo e um plano de ação estritamente no formato JSON:
+{
+  "overallAssessment": "1 a 2 frases avaliando a saúde financeira atual de forma direta e motivadora.",
+  "actionPlan": [
+    "Dica prática 1 com emoji, métrica exata em R$ e ganho estimado de pontos",
+    "Dica prática 2 com emoji, métrica exata em R$ e ganho estimado de pontos",
+    "Dica prática 3 com emoji, métrica exata em R$ e ganho estimado de pontos"
+  ]
+}`
+
+  if (keys.length > 0) {
+    for (const key of keys) {
+      const ai = new GoogleGenAI({ apiKey: key })
+      for (const model of ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest']) {
+        try {
+          const res = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              responseMimeType: 'application/json',
+              temperature: 0.2,
+            },
+          })
+          const text = (res.text || '').trim()
+          if (text) {
+            const parsed = JSON.parse(text) as FinancialHealthAiDiagnosis
+            if (parsed && parsed.overallAssessment && Array.isArray(parsed.actionPlan)) {
+              return parsed
+            }
+          }
+        } catch (err) {
+          console.warn(`Falha no Gemini Health Diagnosis com modelo ${model}:`, err)
+        }
+      }
+    }
+  }
+
+  // Fallback determinístico caso offline
+  const fallbackTips = params.actionableTips && params.actionableTips.length > 0
+    ? params.actionableTips.slice(0, 3)
+    : [
+        params.savingsScore < 20
+          ? '📈 Direcione pelo menos 20% da sua renda para a categoria Investimentos para elevar seu Score em até +15 pts.'
+          : '📈 Mantenha sua constância de aportes mensais para consolidar o pilar de Poupança.',
+        params.emergencyReserveScore < 20
+          ? `🛡️ Aumente sua Reserva de Emergência para cobrir ao menos 3 meses do seu custo de vida (R$ ${(params.monthlyLivingCost * 3).toFixed(2)}).`
+          : '🛡️ Sua reserva está em patamar seguro. Mantenha os recursos com liquidez diária.',
+        params.envelopeScore < 12
+          ? '📦 Reequilibre suas categorias variáveis que estão acima de 90% para recuperar pontos no controle de envelopes.'
+          : '📦 Parabéns! Suas categorias orçadas estão disciplinadas dentro do teto.',
+      ]
+
+  return {
+    overallAssessment: `Seu Score de Saúde Financeira é de ${params.score}/100 pontos (${params.classification}). O foco deve ser otimizar os pilares com maior potencial de ganho.`,
+    actionPlan: fallbackTips,
+  }
 }
 

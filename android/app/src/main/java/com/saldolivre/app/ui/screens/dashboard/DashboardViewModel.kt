@@ -2,6 +2,8 @@ package com.saldolivre.app.ui.screens.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.saldolivre.app.SaldoLivreApplication
+import com.saldolivre.app.data.ai.GeminiLoadBalancer
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.engine.InvoiceStatus
@@ -16,6 +18,8 @@ import com.saldolivre.app.data.model.FinancialHealthScore
 import com.saldolivre.app.data.model.CategoryBudgetReport
 import com.saldolivre.app.data.model.BudgetRebalanceResult
 import com.saldolivre.app.data.model.SuggestedBudgetsResult
+import com.saldolivre.app.data.model.SmartBudgetPlan
+import com.saldolivre.app.data.model.FinancialHealthAiDiagnosis
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -84,12 +88,18 @@ data class DashboardUiState(
     val isLoading: Boolean = false,
     val showClosureDialog: Boolean = false,
     val closureDialogDismissed: Boolean = false,
-    val autoLaunchNotice: AutoLaunchNotice? = null
+    val autoLaunchNotice: AutoLaunchNotice? = null,
+    val isGeneratingSmartBudget: Boolean = false,
+    val smartBudgetPlan: SmartBudgetPlan? = null,
+    val isGeneratingHealthAiDiagnosis: Boolean = false,
+    val healthAiDiagnosis: FinancialHealthAiDiagnosis? = null
 )
 
 class DashboardViewModel(
     private val repository: FinanceRepository
 ) : ViewModel() {
+
+    private val geminiLoadBalancer by lazy { GeminiLoadBalancer(SaldoLivreApplication.instance) }
 
     private val _uiState = MutableStateFlow(DashboardUiState(isLoading = true))
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
@@ -278,19 +288,26 @@ class DashboardViewModel(
                 val expectedMonthIncome = if (summary.income > 0.0) summary.income else user.monthlyIncome
                 val monthBudgets = user.monthlyCategoryBudgets[month]?.takeIf { it.isNotEmpty() }
                     ?: if (month == FinanceEngine.currentMonthKey() || user.monthlyCategoryBudgets.isEmpty()) user.categoryBudgets else emptyMap()
-                val categoryBudgetReport = FinanceEngine.computeCategoryBudgets(
-                    byCategory = summary.byCategory,
+                val categoryBudgetReport = FinanceEngine.computeCategoryBudgetsFromTransactions(
+                    transactions = allTxs,
                     categoryBudgets = monthBudgets,
                     monthKey = month,
                     referenceDate = todayStr,
-                    expectedIncome = expectedMonthIncome
+                    uid = user.uid,
+                    allTransactions = allTxs,
+                    expectedIncome = expectedMonthIncome,
+                    carryoverAmount = summary.carryoverAmount,
+                    previousMonthDeficit = summary.previousMonthDeficit,
+                    recurringBills = bills
                 )
                 val budgetRebalance = FinanceEngine.suggestBudgetRebalance(categoryBudgetReport)
                 val suggestedBudgets = FinanceEngine.suggestCategoryBudgets(
                     allTransactions = allTxs,
                     uid = user.uid,
                     referenceMonth = month,
-                    monthlyIncome = expectedMonthIncome
+                    monthlyIncome = expectedMonthIncome,
+                    carryoverAmount = summary.carryoverAmount,
+                    previousMonthDeficit = summary.previousMonthDeficit
                 )
 
                 val reserveBalance = FinanceEngine.resolveEmergencyReserveBalance(user, summary)
@@ -320,7 +337,11 @@ class DashboardViewModel(
                     isLoading = false,
                     showClosureDialog = shouldShowPopup || _uiState.value.showClosureDialog,
                     closureDialogDismissed = _uiState.value.closureDialogDismissed,
-                    autoLaunchNotice = _uiState.value.autoLaunchNotice
+                    autoLaunchNotice = _uiState.value.autoLaunchNotice,
+                    isGeneratingSmartBudget = _uiState.value.isGeneratingSmartBudget,
+                    smartBudgetPlan = _uiState.value.smartBudgetPlan,
+                    isGeneratingHealthAiDiagnosis = _uiState.value.isGeneratingHealthAiDiagnosis,
+                    healthAiDiagnosis = _uiState.value.healthAiDiagnosis
                 )
             }.collect { newState ->
                 _uiState.value = newState
@@ -600,19 +621,30 @@ class DashboardViewModel(
 
     private fun calibrateMapToIncome(budgets: Map<String, Double>): Map<String, Double> {
         val cleaned = budgets.filterValues { it > 0.0 }.mapValues { FinanceEngine.round2(it.value) }.toMutableMap()
-        val expectedIncome = if ((_uiState.value.summary?.income ?: 0.0) > 0.0) {
-            _uiState.value.summary!!.income
+        val summary = _uiState.value.summary
+        val baseIncome = if ((summary?.income ?: 0.0) > 0.0) {
+            summary!!.income
         } else {
             _uiState.value.currentUser.monthlyIncome
         }
-        val rawSum = cleaned.values.sum()
-        if (expectedIncome > 0.0 && rawSum > expectedIncome) {
-            val scale = expectedIncome / rawSum
+        val carryover = summary?.carryoverAmount ?: 0.0
+        val deficit = summary?.previousMonthDeficit ?: 0.0
+        val effectiveIncome = FinanceEngine.round2(kotlin.math.max(0.0, baseIncome + carryover - deficit))
+
+        // Exclui Investimentos do teto de consumo
+        val expenseSum = cleaned.entries
+            .filter { !it.key.contains("investimento", ignoreCase = true) && it.key != "Investimentos" }
+            .sumOf { it.value }
+
+        if (effectiveIncome > 0.0 && expenseSum > effectiveIncome) {
+            val scale = effectiveIncome / expenseSum
             var running = 0.0
             var maxCat = ""
             var maxVal = -1.0
             for (cat in cleaned.keys.toList()) {
-                val scaled = FinanceEngine.round2((cleaned[cat] ?: 0.0) * scale)
+                if (cat.contains("investimento", ignoreCase = true) || cat == "Investimentos") continue
+                val rawVal = cleaned[cat] ?: 0.0
+                val scaled = kotlin.math.floor((rawVal * scale) / 10.0) * 10.0
                 cleaned[cat] = scaled
                 running = FinanceEngine.round2(running + scaled)
                 if (scaled > maxVal) {
@@ -620,8 +652,8 @@ class DashboardViewModel(
                     maxCat = cat
                 }
             }
-            val diff = FinanceEngine.round2(expectedIncome - running)
-            if (maxCat.isNotEmpty() && kotlin.math.abs(diff) > 0.0 && (cleaned[maxCat] ?: 0.0) + diff >= 0.0) {
+            val diff = kotlin.math.floor((effectiveIncome - running) / 10.0) * 10.0
+            if (maxCat.isNotEmpty() && diff >= 10.0) {
                 cleaned[maxCat] = FinanceEngine.round2((cleaned[maxCat] ?: 0.0) + diff)
             }
         }
@@ -651,6 +683,70 @@ class DashboardViewModel(
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao aplicar sugestão de envelopes IA", e)
+            }
+        }
+    }
+
+    fun generateSmartBudgetPlan() {
+        val user = _uiState.value.currentUser
+        val report = _uiState.value.categoryBudgetReport
+        val summary = _uiState.value.summary
+        val expectedIncome = if ((summary?.income ?: 0.0) > 0.0) summary!!.income else user.monthlyIncome
+
+        val spentMap = report.items.associate { it.category to it.spentAmount }
+        val pendingMap = report.items.associate { it.category to it.pendingAmount }
+        val histAverages = _uiState.value.suggestedBudgets.categoryAverages
+        val currentLimits = report.items.associate { it.category to it.limit }
+
+        _uiState.update { it.copy(isGeneratingSmartBudget = true) }
+        viewModelScope.launch {
+            try {
+                val plan = geminiLoadBalancer.generateSmartBudgetPlan(
+                    monthlyIncome = expectedIncome,
+                    spentByCategory = spentMap,
+                    pendingByCategory = pendingMap,
+                    history3mAverages = histAverages,
+                    existingLimits = currentLimits
+                )
+                _uiState.update { it.copy(isGeneratingSmartBudget = false, smartBudgetPlan = plan) }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao gerar Smart Budget Plan com Gemini", e)
+                _uiState.update { it.copy(isGeneratingSmartBudget = false) }
+            }
+        }
+    }
+
+    fun clearSmartBudgetPlan() {
+        _uiState.update { it.copy(smartBudgetPlan = null) }
+    }
+
+    fun applySmartBudgetPlan(targetMonth: String? = null) {
+        val plan = _uiState.value.smartBudgetPlan ?: return
+        val monthToSave = targetMonth ?: _uiState.value.selectedMonth
+        val budgetMap = plan.allocations.associate { it.category to it.suggestedLimit }
+        if (budgetMap.isNotEmpty()) {
+            updateCategoryBudgets(budgetMap, monthToSave)
+            _uiState.update { it.copy(smartBudgetPlan = null) }
+        }
+    }
+
+    fun generateFinancialHealthDiagnosis() {
+        val health = _uiState.value.financialHealth
+        val summary = _uiState.value.summary
+        val user = _uiState.value.currentUser
+        val expectedIncome = if ((summary?.income ?: 0.0) > 0.0) summary!!.income else user.monthlyIncome
+
+        _uiState.update { it.copy(isGeneratingHealthAiDiagnosis = true) }
+        viewModelScope.launch {
+            try {
+                val diagnosis = geminiLoadBalancer.generateFinancialHealthAiDiagnosis(
+                    healthScore = health,
+                    monthlyIncome = expectedIncome
+                )
+                _uiState.update { it.copy(isGeneratingHealthAiDiagnosis = false, healthAiDiagnosis = diagnosis) }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao gerar Diagnóstico de Saúde com Gemini", e)
+                _uiState.update { it.copy(isGeneratingHealthAiDiagnosis = false) }
             }
         }
     }

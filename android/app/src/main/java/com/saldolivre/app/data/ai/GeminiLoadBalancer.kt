@@ -9,7 +9,12 @@ import com.google.ai.client.generativeai.type.generationConfig
 import com.saldolivre.app.BuildConfig
 import com.saldolivre.app.data.model.ChatMessage
 import com.saldolivre.app.data.model.MessageSender
+import com.saldolivre.app.data.model.SmartBudgetAllocation
+import com.saldolivre.app.data.model.SmartBudgetPlan
+import com.saldolivre.app.data.model.FinancialHealthAiDiagnosis
+import com.saldolivre.app.data.model.FinancialHealthScore
 import kotlinx.coroutines.delay
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -343,5 +348,219 @@ class GeminiLoadBalancer(
             mimeType = mimeType
         )
         return result.responseText.trim()
+    }
+
+    suspend fun generateSmartBudgetPlan(
+        monthlyIncome: Double,
+        spentByCategory: Map<String, Double>,
+        pendingByCategory: Map<String, Double>,
+        history3mAverages: Map<String, Double>,
+        existingLimits: Map<String, Double>
+    ): SmartBudgetPlan {
+        val income = kotlin.math.max(0.0, monthlyIncome)
+        val categoriesSet = linkedSetOf<String>().apply {
+            addAll(spentByCategory.keys)
+            addAll(pendingByCategory.keys)
+            addAll(history3mAverages.keys)
+            addAll(existingLimits.keys)
+        }
+
+        val categoryContext = categoriesSet
+            .filter { it.isNotBlank() && !it.contains("rendimento", ignoreCase = true) && !it.contains("salário", ignoreCase = true) && !it.contains("salario", ignoreCase = true) }
+            .joinToString("\n") { cat ->
+                val spent = spentByCategory[cat] ?: 0.0
+                val pending = pendingByCategory[cat] ?: 0.0
+                val committed = spent + pending
+                val histAvg = history3mAverages[cat] ?: 0.0
+                val curLim = existingLimits[cat] ?: 0.0
+                "- $cat: pago = R$ ${String.format(Locale.US, "%.2f", spent)}, a vencer = R$ ${String.format(Locale.US, "%.2f", pending)} (comprometido total = R$ ${String.format(Locale.US, "%.2f", committed)}), média 3 meses = R$ ${String.format(Locale.US, "%.2f", histAvg)}, teto atual = R$ ${String.format(Locale.US, "%.2f", curLim)}"
+            }
+
+        val prompt = """
+            Você é um planejador financeiro pessoal de elite e especialista na Regra 50/30/20.
+            Sua missão é sugerir um plano de orçamento mensal (envelopes) realista, disciplinado e seguro para o usuário.
+
+            DADOS DO MÊS:
+            - Receita líquida prevista: R$ ${String.format(Locale.US, "%.2f", income)}
+            - Gastos e compromissos por categoria:
+            ${categoryContext.ifBlank { "Nenhum dado prévio." }}
+
+            REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
+            1. NUNCA sugira um teto menor do que o total comprometido (já pago + contas a vencer) de uma categoria. O usuário não pode ter um teto menor do que o que ele já gastou ou já tem de boleto/fatura agendada!
+            2. A soma de todos os tetos de despesas sugeridos NÃO DEVE ultrapassar a receita prevista do mês (R$ ${String.format(Locale.US, "%.2f", income)}). Se a receita for maior que os gastos, reserve pelo menos 15-20% para "Investimentos" (Futuro/Aportes).
+            3. "Investimentos" NÃO é despesa de consumo; é meta de aporte da regra 50/30/20.
+            4. ARREDONDAMENTO OBRIGATÓRIO: NUNCA sugira valores com centavos quebrados (como R$ 499,08 ou R$ 338,38). Todos os valores de "suggestedLimit" DEVEM ser inteiros múltiplos de R$ 10,00 ou R$ 50,00 (ex: 150, 400, 750, 1200).
+            5. Cada alocação deve ter uma justificativa curta ("reason") de 1 frase explicando a escolha com base nos dados.
+            6. Retorne estritamente um JSON no seguinte formato:
+            {
+              "summaryInsight": "Resumo executivo curto de 1-2 frases explicando a estratégia adotada (ex: Regra 50/30/20 adaptada protegendo R$ 1.280 em contas a vencer com folga real garantida).",
+              "allocations": [
+                {
+                  "category": "Alimentação",
+                  "suggestedLimit": 700,
+                  "reason": "Baseado na sua média de R$ 620 com margem de segurança de 10% cobrindo o que já foi gasto."
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val keys = getApiKeys()
+        if (keys.isNotEmpty()) {
+            for (key in keys) {
+                for (model in listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest")) {
+                    try {
+                        val generativeModel = GenerativeModel(
+                            modelName = model,
+                            apiKey = key,
+                            generationConfig = generationConfig {
+                                temperature = 0.2f
+                            }
+                        )
+                        val res = generativeModel.generateContent(prompt)
+                        val text = res.text?.trim()
+                        if (!text.isNullOrBlank()) {
+                            val cleanJson = text.replace("```json", "").replace("```", "").trim()
+                            val json = org.json.JSONObject(cleanJson)
+                            val summary = json.optString("summaryInsight", "")
+                            val allocArray = json.optJSONArray("allocations")
+                            if (allocArray != null && allocArray.length() > 0) {
+                                val list = mutableListOf<SmartBudgetAllocation>()
+                                for (i in 0 until allocArray.length()) {
+                                    val obj = allocArray.getJSONObject(i)
+                                    val cat = obj.getString("category")
+                                    val spent = spentByCategory[cat] ?: 0.0
+                                    val pending = pendingByCategory[cat] ?: 0.0
+                                    val minFloor = (kotlin.math.ceil((spent + pending) / 10.0) * 10.0)
+                                    val rawLimit = obj.optDouble("suggestedLimit", minFloor)
+                                    val lim = kotlin.math.max(minFloor, kotlin.math.max(50.0, kotlin.math.ceil(rawLimit / 10.0) * 10.0))
+                                    val reason = obj.optString("reason", "Sugerido com base no histórico recente e compromissos.")
+                                    list.add(SmartBudgetAllocation(category = cat, suggestedLimit = lim, reason = reason))
+                                }
+                                return SmartBudgetPlan(
+                                    summaryInsight = summary.ifBlank { "Plano de envelopes gerado pelo Gemini com base no seu padrão de gastos e contas a vencer." },
+                                    allocations = list
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("GeminiLB", "Falha Smart Budget com modelo $model: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        // Fallback determinístico inteligente
+        val fallbackAllocations = mutableListOf<SmartBudgetAllocation>()
+        for (cat in categoriesSet) {
+            if (cat.isBlank() || cat.contains("rendimento", ignoreCase = true) || cat.contains("salário", ignoreCase = true) || cat.contains("salario", ignoreCase = true)) continue
+            val spent = spentByCategory[cat] ?: 0.0
+            val pending = pendingByCategory[cat] ?: 0.0
+            val committed = spent + pending
+            val histAvg = history3mAverages[cat] ?: 0.0
+            val minFloor = (kotlin.math.ceil(committed / 10.0) * 10.0)
+            val isFixed = cat.contains("moradia", ignoreCase = true) || cat.contains("financiamento", ignoreCase = true) || cat.contains("assinatura", ignoreCase = true)
+            val baseTarget = if (isFixed) kotlin.math.max(histAvg, committed) else kotlin.math.max(histAvg * 1.1, committed)
+            val limit = kotlin.math.max(50.0, kotlin.math.max(minFloor, kotlin.math.ceil(baseTarget / 10.0) * 10.0))
+
+            val reason = if (pending > 0.0) {
+                "Protegendo R$ ${String.format(Locale.US, "%.2f", pending)} em contas a vencer e cobrindo média de R$ ${String.format(Locale.US, "%.2f", histAvg)}."
+            } else {
+                "Margem de segurança calculada sobre sua média histórica de R$ ${String.format(Locale.US, "%.2f", histAvg)}."
+            }
+            fallbackAllocations.add(SmartBudgetAllocation(category = cat, suggestedLimit = limit, reason = reason))
+        }
+
+        val totalPending = pendingByCategory.values.sum()
+        return SmartBudgetPlan(
+            summaryInsight = "Plano inteligente calculado com Regra 50/30/20 protegendo R$ ${String.format(Locale.US, "%.2f", totalPending)} em contas a vencer com tetos arredondados.",
+            allocations = fallbackAllocations
+        )
+    }
+
+    suspend fun generateFinancialHealthAiDiagnosis(
+        healthScore: FinancialHealthScore,
+        monthlyIncome: Double
+    ): FinancialHealthAiDiagnosis {
+        val prompt = """
+            Você é um consultor financeiro pessoal sênior de fintech.
+            Analise os 4 pilares do Score de Saúde Financeira do usuário (0 a 100 pontos):
+            - Score Total: ${healthScore.score}/100 (${healthScore.label.uppercase()})
+            - Pilar 1: Poupança/Investimentos = ${healthScore.savingsScore}/30 pts (Taxa: ${healthScore.savingsRatePercentage}% da renda)
+            - Pilar 2: Custo de Vida / Comprometimento = ${healthScore.spendingLimitScore}/30 pts (${healthScore.spendingRatioPercentage}% da renda, Custo: R$ ${String.format(Locale.US, "%.2f", healthScore.monthlyLivingCost)})
+            - Pilar 3: Reserva de Emergência = ${healthScore.emergencyReserveScore}/25 pts (Cobre ${String.format(Locale.US, "%.1f", healthScore.emergencyCoverageMonths)} meses de custo)
+            - Pilar 4: Controle de Envelopes = ${healthScore.envelopeScore}/15 pts
+
+            Gere um diagnóstico ultra objetivo e um plano de ação estritamente no formato JSON:
+            {
+              "overallAssessment": "1 a 2 frases avaliando a saúde financeira atual de forma direta e motivadora.",
+              "actionPlan": [
+                "Dica prática 1 com emoji, métrica exata em R$ e ganho estimado de pontos",
+                "Dica prática 2 com emoji, métrica exata em R$ e ganho estimado de pontos",
+                "Dica prática 3 com emoji, métrica exata em R$ e ganho estimado de pontos"
+              ]
+            }
+        """.trimIndent()
+
+        val keys = getApiKeys()
+        if (keys.isNotEmpty()) {
+            for (key in keys) {
+                for (model in listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest")) {
+                    try {
+                        val generativeModel = GenerativeModel(
+                            modelName = model,
+                            apiKey = key,
+                            generationConfig = generationConfig {
+                                temperature = 0.2f
+                            }
+                        )
+                        val res = generativeModel.generateContent(prompt)
+                        val text = res.text?.trim()
+                        if (!text.isNullOrBlank()) {
+                            val cleanJson = text.replace("```json", "").replace("```", "").trim()
+                            val json = org.json.JSONObject(cleanJson)
+                            val overall = json.optString("overallAssessment", "")
+                            val planArray = json.optJSONArray("actionPlan")
+                            val plan = mutableListOf<String>()
+                            if (planArray != null) {
+                                for (i in 0 until planArray.length()) {
+                                    plan.add(planArray.getString(i))
+                                }
+                            }
+                            if (overall.isNotBlank() && plan.isNotEmpty()) {
+                                return FinancialHealthAiDiagnosis(
+                                    overallAssessment = overall,
+                                    actionPlan = plan
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("GeminiLB", "Falha Health Diagnosis com modelo $model: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        // Fallback determinístico
+        val tips = mutableListOf<String>()
+        if (healthScore.savingsScore < 20) {
+            tips.add("💡 Guarde pelo menos 15% a 20% da sua renda antes de iniciar gastos supérfluos (+10 pts no score).")
+        }
+        if (healthScore.spendingLimitScore < 20) {
+            tips.add("✂️ Seus custos fixos consom mais de 70% da renda. Renegocie assinaturas e despesas não essenciais (+10 pts).")
+        }
+        if (healthScore.emergencyReserveScore < 15) {
+            tips.add("🛡️ Aporte R$ 300/mês na reserva até atingir pelo menos 3 meses do seu custo de vida (+10 pts).")
+        }
+        if (healthScore.envelopeScore < 10) {
+            tips.add("🎯 Monitore envelopes com 'Quase no Limite' para não estourar os gastos variáveis da semana (+5 pts).")
+        }
+        if (tips.isEmpty()) {
+            tips.add("⭐ Parabéns! Continue mantendo seus gastos sob controle e reinvestindo os dividendos.")
+        }
+
+        return FinancialHealthAiDiagnosis(
+            overallAssessment = "Diagnóstico estruturado: seu score é ${healthScore.score}/100 com classificação ${healthScore.label}.",
+            actionPlan = tips.take(3)
+        )
     }
 }

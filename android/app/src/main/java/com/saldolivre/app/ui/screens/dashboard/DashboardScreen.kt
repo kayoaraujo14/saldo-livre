@@ -648,6 +648,22 @@ fun DashboardScreen(
                     onQuickApplyAiBudgets = {
                         com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
                         viewModel.applyAiSuggestedBudgets(uiState.selectedMonth)
+                    },
+                    onAdjustBudget = { category, delta ->
+                        val currentSelectedMonthBudgets = uiState.currentUser.monthlyCategoryBudgets[uiState.selectedMonth]?.takeIf { it.isNotEmpty() }
+                            ?: uiState.currentUser.categoryBudgets
+                        val currentCeiling = currentSelectedMonthBudgets[category]
+                            ?: uiState.categoryBudgetReport.items.find { it.category == category }?.limit
+                            ?: 0.0
+                        val newCeiling = kotlin.math.max(0.0, currentCeiling + delta)
+                        val updatedMap = currentSelectedMonthBudgets.toMutableMap()
+                        if (newCeiling > 0.0) {
+                            updatedMap[category] = newCeiling
+                        } else {
+                            updatedMap.remove(category)
+                        }
+                        com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
+                        viewModel.updateCategoryBudgets(updatedMap, uiState.selectedMonth)
                     }
                 )
             }
@@ -1067,6 +1083,11 @@ fun DashboardScreen(
             health = uiState.financialHealth,
             summary = summary,
             monthKey = uiState.selectedMonth,
+            diagnosis = uiState.healthAiDiagnosis,
+            isGeneratingDiagnosis = uiState.isGeneratingHealthAiDiagnosis,
+            onGenerateDiagnosis = {
+                viewModel.generateFinancialHealthDiagnosis()
+            },
             onDismiss = { showFinancialHealthDialog = false },
             onOpenBudgets = {
                 showFinancialHealthDialog = false
@@ -1094,6 +1115,11 @@ fun DashboardScreen(
             suggestedBudgets = uiState.suggestedBudgets,
             report = uiState.categoryBudgetReport,
             rebalance = uiState.budgetRebalance,
+            smartBudgetPlan = uiState.smartBudgetPlan,
+            isGeneratingSmartBudget = uiState.isGeneratingSmartBudget,
+            onGenerateSmartBudget = {
+                viewModel.generateSmartBudgetPlan()
+            },
             onSaveBudgets = { newBudgets ->
                 com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
                 viewModel.updateCategoryBudgets(newBudgets, uiState.selectedMonth)
@@ -1102,7 +1128,10 @@ fun DashboardScreen(
                 com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
                 viewModel.applyBudgetRebalance(fromCat, toCat, amount, uiState.selectedMonth)
             },
-            onDismiss = { showManageBudgetsDialog = false }
+            onDismiss = {
+                viewModel.clearSmartBudgetPlan()
+                showManageBudgetsDialog = false
+            }
         )
     }
 }

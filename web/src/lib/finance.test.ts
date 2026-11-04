@@ -101,9 +101,10 @@ describe('calculateFinancialHealthScore', () => {
 
     expect(result.score).toBe(100)
     expect(result.classification).toBe('excellent')
-    expect(result.savingsScore).toBe(35)
-    expect(result.spendingLimitScore).toBe(35)
-    expect(result.emergencyReserveScore).toBe(30)
+    expect(result.savingsScore).toBe(30)
+    expect(result.spendingLimitScore).toBe(30)
+    expect(result.emergencyReserveScore).toBe(25)
+    expect(result.envelopeScore).toBe(15)
   })
 
   it('returns critical score (0) when expenses exceed 110% of income with no savings or reserve', () => {
@@ -121,6 +122,7 @@ describe('calculateFinancialHealthScore', () => {
     expect(result.savingsScore).toBe(0)
     expect(result.spendingLimitScore).toBe(0)
     expect(result.emergencyReserveScore).toBe(0)
+    expect(result.envelopeScore).toBe(0)
   })
 
   it('handles null/undefined gracefully with fallback score 50 and warning classification', () => {

@@ -705,14 +705,32 @@ export interface UserProfile {
 
 export type CategoryBudgetPaceStatus = 'normal' | 'fast' | 'critical'
 
+export type CategoryBudgetBadgeLabel =
+  | 'Estourado'
+  | 'Vai Estourar'
+  | 'Quase no Limite'
+  | 'Ritmo Rápido'
+  | 'Sob Controle'
+  | 'Fixo em Dia'
+  | 'No Limite'
+  | 'Quitado / Dentro do Previsto'
+  | 'Definir Teto'
+
 export interface CategoryBudgetStatus {
   category: string
   limit: number
   rawLimit?: number
-  spent: number
-  remaining: number
-  percentage: number
+  spent: number // alias de spentAmount para compatibilidade
+  spentAmount: number // valor já pago / efetivado
+  pendingAmount: number // comprometido a vencer (pendente + recorrentes ativas não lançadas)
+  committedAmount: number // spentAmount + pendingAmount
+  remaining: number // limit - committedAmount (assinado)
+  realRemaining: number // Math.max(0, limit - committedAmount)
+  percentage: number // consumo pago (spentAmount / limit * 100)
+  pendingPercentage: number // comprometimento a vencer (pendingAmount / limit * 100)
+  totalPercentage: number // consumo total comprometido ((spentAmount + pendingAmount) / limit * 100)
   status: 'ok' | 'warning' | 'danger'
+  badgeLabel: CategoryBudgetBadgeLabel
   dailyPace: number
   projectedSpent: number
   projectedPercentage: number
@@ -729,16 +747,26 @@ export interface CategoryBudgetReport {
   totalBudgeted: number
   rawTotalBudgeted?: number
   expectedIncome?: number
+  carryoverAmount?: number
+  previousMonthDeficit?: number
+  totalAvailableIncome?: number
   isCappedToIncome?: boolean
   incomeUsagePercentage?: number
   unallocatedIncome?: number
   totalSpent: number
+  totalPending: number
+  totalCommitted: number
   totalRemaining: number
+  totalRealRemaining: number
   overallPercentage: number
   status: 'ok' | 'warning' | 'danger'
   criticalCount: number
   warningCount: number
   topOverspentCategory?: CategoryBudgetStatus
+  // Meta de Investimentos / 50-30-20 isolada dos envelopes de despesas
+  investmentTarget?: number
+  investmentSpent?: number
+  investmentPercentage?: number
 }
 
 export interface BudgetRebalanceSuggestion {
@@ -991,9 +1019,10 @@ export interface FinancialHealthScore {
   classification: FinancialHealthClassification
   label: string // 'Crítico' | 'Atenção' | 'Saudável' | 'Excelente'
   description: string
-  savingsScore: number // 0 a 35
-  spendingLimitScore: number // 0 a 35
-  emergencyReserveScore: number // 0 a 30
+  savingsScore: number // 0 a 30 (meta >= 20% da renda)
+  spendingLimitScore: number // 0 a 30 (despesas totais vs receita)
+  emergencyReserveScore: number // 0 a 25 (meta 3 a 6 meses do custo de vida)
+  envelopeScore: number // 0 a 15 (disciplina e aderência aos envelopes)
   savingsRatePercentage: number // % poupada da renda
   spendingRatioPercentage: number // % despesas sobre a renda
   emergencyCoverageMonths: number // meses de cobertura da reserva
@@ -1003,6 +1032,22 @@ export interface FinancialHealthScore {
   monthlyLivingCost?: number
   potentialSavingsRatePercentage?: number
   actionableTips?: string[]
+}
+
+export interface SmartBudgetAllocation {
+  category: string
+  suggestedLimit: number
+  reason: string
+}
+
+export interface SmartBudgetPlan {
+  summaryInsight: string
+  allocations: SmartBudgetAllocation[]
+}
+
+export interface FinancialHealthAiDiagnosis {
+  overallAssessment: string
+  actionPlan: string[]
 }
 
 export interface ProjectedCategoryItem {

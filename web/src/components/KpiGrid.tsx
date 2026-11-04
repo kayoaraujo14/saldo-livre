@@ -583,12 +583,12 @@ export function KpiGrid({
             </div>
           </div>
 
-          {/* Lado Direito: Os 4 Pilares Fundamentais */}
+          {/* Lado Direito: Os 4 Pilares Fundamentais (Soma Exata: 100 pts) */}
           <div className="grid grid-cols-4 gap-2 sm:flex sm:items-center sm:gap-4 text-center sm:text-right shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-white/[0.04]">
             <div className="flex flex-col sm:items-end">
               <span className="text-[9px] uppercase tracking-wider text-slate-500">Poupança</span>
               <span className="text-[11px] font-mono font-bold text-slate-200">
-                {healthScore.savingsScore}<span className="text-slate-500 text-[9px]">/35</span>
+                {healthScore.savingsScore}<span className="text-slate-500 text-[9px]">/30</span>
                 <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.savingsRatePercentage}%)</span>
               </span>
             </div>
@@ -596,7 +596,7 @@ export function KpiGrid({
             <div className="flex flex-col sm:items-end">
               <span className="text-[9px] uppercase tracking-wider text-slate-500">Custo Vida</span>
               <span className="text-[11px] font-mono font-bold text-slate-200">
-                {healthScore.spendingLimitScore}<span className="text-slate-500 text-[9px]">/35</span>
+                {healthScore.spendingLimitScore}<span className="text-slate-500 text-[9px]">/30</span>
                 <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.spendingRatioPercentage}%)</span>
               </span>
             </div>
@@ -604,7 +604,7 @@ export function KpiGrid({
             <div className="flex flex-col sm:items-end">
               <span className="text-[9px] uppercase tracking-wider text-slate-500">Reserva</span>
               <span className="text-[11px] font-mono font-bold text-slate-200">
-                {healthScore.emergencyReserveScore}<span className="text-slate-500 text-[9px]">/30</span>
+                {healthScore.emergencyReserveScore}<span className="text-slate-500 text-[9px]">/25</span>
                 <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.emergencyCoverageMonths}m)</span>
               </span>
             </div>
@@ -620,9 +620,7 @@ export function KpiGrid({
                       : 'text-slate-400'
                 }`}
               >
-                {(healthScore.budgetConfiguredCount ?? 0) > 0
-                  ? `${healthScore.budgetAdherenceScore ?? 100}%`
-                  : '—'}
+                {healthScore.envelopeScore}<span className="text-slate-500 text-[9px]">/15</span>
               </span>
             </div>
           </div>

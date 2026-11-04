@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,8 @@ import {
   calculateFinancialHealthScore,
   resolveEmergencyReserveBalance,
 } from '@/lib/finance'
+import { generateFinancialHealthAiDiagnosis } from '@/lib/gemini'
+import type { FinancialHealthAiDiagnosis } from '@/types'
 import {
   ShieldCheck,
   TrendingUp,
@@ -21,9 +23,9 @@ import {
   Target,
   Sparkles,
   CheckCircle2,
-  AlertTriangle,
   ArrowRight,
   Sliders,
+  Loader2,
 } from 'lucide-react'
 
 interface FinancialHealthModalProps {
@@ -40,6 +42,8 @@ export function FinancialHealthModal({
   onOpenBudgets,
 }: FinancialHealthModalProps) {
   const { summary, profile, month, categoryBudgetReport } = useFinance()
+  const [aiDiagnosis, setAiDiagnosis] = useState<FinancialHealthAiDiagnosis | null>(null)
+  const [isLoadingAi, setIsLoadingAi] = useState(false)
 
   const reserveBalance = useMemo(
     () => resolveEmergencyReserveBalance(profile, summary),
@@ -50,6 +54,45 @@ export function FinancialHealthModal({
     () => calculateFinancialHealthScore(summary, reserveBalance, categoryBudgetReport),
     [summary, reserveBalance, categoryBudgetReport],
   )
+
+  const livingCost = health.monthlyLivingCost ?? (summary ? summary.paid + summary.committed : 0)
+  const targetReserve6m = livingCost * 6
+  const targetReserve3m = livingCost * 3
+  const configuredEnvelopes = health.budgetConfiguredCount ?? 0
+  const overspentEnvelopes = health.budgetOverspentCount ?? 0
+
+  useEffect(() => {
+    if (open) {
+      let isMounted = true
+      setIsLoadingAi(true)
+      generateFinancialHealthAiDiagnosis({
+        score: health.score,
+        classification: health.classification,
+        savingsScore: health.savingsScore,
+        spendingLimitScore: health.spendingLimitScore,
+        emergencyReserveScore: health.emergencyReserveScore,
+        envelopeScore: health.envelopeScore,
+        savingsRatePercentage: health.savingsRatePercentage,
+        spendingRatioPercentage: health.spendingRatioPercentage,
+        emergencyCoverageMonths: health.emergencyCoverageMonths,
+        monthlyLivingCost: livingCost,
+        monthlyIncome: summary?.income || 0,
+        actionableTips: health.actionableTips,
+      })
+        .then((res) => {
+          if (isMounted) setAiDiagnosis(res)
+        })
+        .catch((err) => {
+          console.warn('Erro ao carregar diagnóstico IA:', err)
+        })
+        .finally(() => {
+          if (isMounted) setIsLoadingAi(false)
+        })
+      return () => {
+        isMounted = false
+      }
+    }
+  }, [open, health.score, livingCost, summary?.income])
 
   const handleAskCopilot = () => {
     onOpenChange(false)
@@ -71,12 +114,6 @@ export function FinancialHealthModal({
         : health.classification === 'warning'
           ? 'amber'
           : 'rose'
-
-  const livingCost = health.monthlyLivingCost ?? (summary ? summary.paid + summary.committed : 0)
-  const targetReserve6m = livingCost * 6
-  const configuredEnvelopes = health.budgetConfiguredCount ?? 0
-  const overspentEnvelopes = health.budgetOverspentCount ?? 0
-  const adherencePct = health.budgetAdherenceScore ?? 100
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -237,74 +274,76 @@ export function FinancialHealthModal({
             </div>
           </div>
 
-          {/* Grid dos 4 Pilares */}
+          {/* Grid dos 4 Pilares (Pesos Transparentes: 30 + 30 + 25 + 15 = 100 pts) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Pilar 1: Poupança & Margem */}
+            {/* Pilar 1: Poupança & Investimentos (0 a 30 pts) */}
             <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/[0.07] space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                   <TrendingUp className="size-3.5 text-emerald-400" />
-                  1. Poupança & Margem
+                  1. Poupança & Investimentos
                 </span>
                 <span className="font-mono text-xs font-extrabold text-emerald-400">
-                  {health.savingsScore}/35 pts
+                  {health.savingsScore}/30 pts
                 </span>
               </div>
               <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden">
                 <div
                   className="bg-emerald-500 h-full rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (health.savingsScore / 35) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (health.savingsScore / 30) * 100)}%` }}
                 />
               </div>
               <div className="text-[11px] text-slate-400 space-y-0.5">
                 <div>
-                  Investido no mês:{' '}
+                  Aporte no mês:{' '}
                   <strong className="text-slate-200 font-mono">
                     {formatBRL(summary?.totalInvested || 0)} ({health.savingsRatePercentage}%)
                   </strong>
                 </div>
                 <div>
-                  Potencial c/ Saldo Livre:{' '}
-                  <strong className="text-emerald-300 font-mono">
-                    {health.potentialSavingsRatePercentage ?? health.savingsRatePercentage}% da renda
-                  </strong>{' '}
-                  (Meta: 20%)
+                  Meta Regra 50/30/20:{' '}
+                  <strong className="text-emerald-300 font-mono">&gt;= 20% da renda</strong>
+                  {summary?.income && summary.income > 0 && health.savingsRatePercentage < 20 && (
+                    <span className="text-slate-400 font-mono text-[10px]">
+                      {' '}(faltam {formatBRL(Math.max(0, summary.income * 0.20 - (summary?.totalInvested || 0)))})
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Pilar 2: Custo de Vida Real */}
+            {/* Pilar 2: Custo de Vida / Comprometimento (0 a 30 pts) */}
             <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/[0.07] space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                   <Home className="size-3.5 text-cyan-400" />
-                  2. Custo de Vida Real
+                  2. Custo de Vida / Comprometimento
                 </span>
                 <span className="font-mono text-xs font-extrabold text-cyan-400">
-                  {health.spendingLimitScore}/35 pts
+                  {health.spendingLimitScore}/30 pts
                 </span>
               </div>
               <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden">
                 <div
                   className="bg-cyan-500 h-full rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (health.spendingLimitScore / 35) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (health.spendingLimitScore / 30) * 100)}%` }}
                 />
               </div>
               <div className="text-[11px] text-slate-400 space-y-0.5">
                 <div>
-                  Custo líquido (sem aportes):{' '}
+                  Despesas de consumo (sem aportes):{' '}
                   <strong className="text-slate-200 font-mono">
                     {formatBRL(livingCost)} ({health.spendingRatioPercentage}%)
                   </strong>
                 </div>
                 <div>
-                  Teto saudável recomendado:{' '}
+                  Teto recomendado:{' '}
                   <strong className="text-cyan-300 font-mono">Até 70% da renda</strong>
                 </div>
               </div>
             </div>
 
-            {/* Pilar 3: Reserva de Emergência */}
+            {/* Pilar 3: Reserva de Emergência (0 a 25 pts) */}
             <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/[0.07] space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
@@ -312,50 +351,47 @@ export function FinancialHealthModal({
                   3. Reserva de Emergência
                 </span>
                 <span className="font-mono text-xs font-extrabold text-amber-400">
-                  {health.emergencyReserveScore}/30 pts
+                  {health.emergencyReserveScore}/25 pts
                 </span>
               </div>
               <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden">
                 <div
                   className="bg-amber-500 h-full rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (health.emergencyReserveScore / 30) * 100)}%` }}
+                  style={{ width: `${Math.min(100, (health.emergencyReserveScore / 25) * 100)}%` }}
                 />
               </div>
               <div className="text-[11px] text-slate-400 space-y-0.5">
                 <div>
                   Reserva acumulada:{' '}
                   <strong className="text-slate-200 font-mono">
-                    {formatBRL(reserveBalance)} ({health.emergencyCoverageMonths} meses)
+                    {formatBRL(reserveBalance)} ({health.emergencyCoverageMonths.toFixed(1)} meses)
                   </strong>
                 </div>
                 <div>
-                  Meta de blindagem (6 meses):{' '}
-                  <strong className="text-amber-300 font-mono">{formatBRL(targetReserve6m)}</strong>
+                  {health.emergencyCoverageMonths < 3 ? (
+                    <span>
+                      Faltam <strong className="text-amber-300 font-mono">{formatBRL(Math.max(0, targetReserve3m - reserveBalance))}</strong> para 3 meses de proteção
+                    </span>
+                  ) : health.emergencyCoverageMonths < 6 ? (
+                    <span>
+                      Faltam <strong className="text-amber-300 font-mono">{formatBRL(Math.max(0, targetReserve6m - reserveBalance))}</strong> para 6 meses de proteção sólida
+                    </span>
+                  ) : (
+                    <span className="text-emerald-400 font-medium">Meta máxima de 6 meses atingida!</span>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Pilar 4: Disciplina nos Envelopes */}
+            {/* Pilar 4: Controle de Envelopes (0 a 15 pts) */}
             <div className="p-3.5 rounded-xl bg-slate-900/60 border border-white/[0.07] space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                   <Target className="size-3.5 text-purple-400" />
-                  4. Disciplina nos Envelopes
+                  4. Controle de Envelopes
                 </span>
-                <span
-                  className={`font-mono text-xs font-extrabold ${
-                    overspentEnvelopes === 0 && configuredEnvelopes > 0
-                      ? 'text-emerald-400'
-                      : overspentEnvelopes > 0
-                        ? 'text-rose-400'
-                        : 'text-slate-400'
-                  }`}
-                >
-                  {configuredEnvelopes > 0
-                    ? overspentEnvelopes === 0
-                      ? '+4 pts Bônus'
-                      : `-${Math.min(8, overspentEnvelopes * 3)} pts`
-                    : 'Não configurado'}
+                <span className="font-mono text-xs font-extrabold text-purple-400">
+                  {health.envelopeScore}/15 pts
                 </span>
               </div>
               <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden">
@@ -363,43 +399,53 @@ export function FinancialHealthModal({
                   className={`h-full rounded-full transition-all ${
                     overspentEnvelopes > 0 ? 'bg-rose-500' : 'bg-purple-500'
                   }`}
-                  style={{ width: `${configuredEnvelopes > 0 ? adherencePct : 0}%` }}
+                  style={{ width: `${Math.min(100, (health.envelopeScore / 15) * 100)}%` }}
                 />
               </div>
               <div className="text-[11px] text-slate-400 space-y-0.5">
                 <div>
-                  Aderência orçamentária:{' '}
+                  Aderência aos tetos:{' '}
                   <strong className="text-slate-200 font-mono">
-                    {configuredEnvelopes > 0 ? `${adherencePct}%` : '—'}
-                  </strong>{' '}
-                  ({configuredEnvelopes} categorias)
+                    {configuredEnvelopes > 0 ? `${health.budgetAdherenceScore ?? 100}%` : 'Sem envelopes'}
+                  </strong>
+                  {configuredEnvelopes > 0 && <span> ({configuredEnvelopes} categorias)</span>}
                 </div>
                 <div>
-                  Status:{' '}
-                  <strong className="text-purple-300">
-                    {configuredEnvelopes === 0
-                      ? 'Configure tetos para ganhar até +4 pts'
-                      : overspentEnvelopes === 0
-                        ? 'Todos os envelopes dentro do teto!'
-                        : `${overspentEnvelopes} envelope(s) acima do teto`}
-                  </strong>
+                  {configuredEnvelopes === 0 ? (
+                    <span className="text-purple-300">Defina tetos com IA para pontuação máxima</span>
+                  ) : overspentEnvelopes === 0 ? (
+                    <span className="text-emerald-400">100% das categorias dentro do orçamento!</span>
+                  ) : (
+                    <span className="text-rose-400">{overspentEnvelopes} categoria(s) com estouro real</span>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Alavancas Práticas para Subir o Score */}
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/35 via-slate-900/90 to-slate-900 border border-emerald-500/25 space-y-2.5">
+          {/* Plano de Ação Gemini AI */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-950/40 via-slate-900/90 to-slate-900 border border-purple-500/30 space-y-2.5">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
-                <Sparkles className="size-3.5 text-emerald-400" />
-                Alavancas Práticas para Subir seu Score
+              <h4 className="text-xs font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
+                <Sparkles className="size-3.5 text-purple-400" />
+                Plano de Ação Gemini AI ✨
               </h4>
-              <span className="text-[10px] text-slate-400">Coach IA</span>
+              {isLoadingAi && (
+                <div className="flex items-center gap-1 text-[10px] text-purple-300 font-mono">
+                  <Loader2 className="size-3 animate-spin text-purple-400" />
+                  Gerando recomendações...
+                </div>
+              )}
             </div>
 
-            <div className="space-y-2">
-              {(health.actionableTips || []).map((tip, idx) => (
+            {aiDiagnosis?.overallAssessment && (
+              <p className="text-xs text-purple-200/90 italic bg-purple-900/20 p-2.5 rounded-xl border border-purple-500/20 leading-relaxed">
+                "{aiDiagnosis.overallAssessment}"
+              </p>
+            )}
+
+            <div className="space-y-2 pt-1">
+              {(aiDiagnosis?.actionPlan || health.actionableTips || []).slice(0, 3).map((tip, idx) => (
                 <div
                   key={idx}
                   className="p-2.5 rounded-xl bg-slate-950/70 border border-white/[0.06] flex items-start gap-2.5 text-xs text-slate-200"
@@ -407,7 +453,7 @@ export function FinancialHealthModal({
                   {tip.includes('Parabéns') ? (
                     <CheckCircle2 className="size-4 text-emerald-400 shrink-0 mt-0.5" />
                   ) : (
-                    <AlertTriangle className="size-4 text-amber-400 shrink-0 mt-0.5" />
+                    <Sparkles className="size-4 text-amber-400 shrink-0 mt-0.5" />
                   )}
                   <span className="leading-relaxed">{tip}</span>
                 </div>

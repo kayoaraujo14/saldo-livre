@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
 import { EXPENSE_CATEGORIES, getCategoryDetail } from '@/types'
+import type { SmartBudgetPlan } from '@/types'
 import { formatBRL, monthLabel, round2, shiftMonth } from '@/lib/utils'
 import {
   suggestCategoryBudgets,
@@ -18,6 +19,7 @@ import {
   normalizeBudgetCategory,
   FIXED_MONTHLY_CATEGORIES,
 } from '@/lib/finance'
+import { generateSmartBudgetPlan } from '@/lib/gemini'
 import {
   Target,
   Sparkles,
@@ -27,6 +29,9 @@ import {
   Sliders,
   AlertTriangle,
   Scale,
+  Loader2,
+  Plus,
+  Minus,
 } from 'lucide-react'
 
 interface ManageBudgetsModalProps {
@@ -55,11 +60,20 @@ export function ManageBudgetsModal({
   const [budgetsState, setBudgetsState] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
   const [rebalanceSuccessMsg, setRebalanceSuccessMsg] = useState<string | null>(null)
+  const [geminiPlan, setGeminiPlan] = useState<SmartBudgetPlan | null>(null)
+  const [isLoadingGemini, setIsLoadingGemini] = useState(false)
 
   const expectedIncome = useMemo(() => {
     if (summary?.income && summary.income > 0) return summary.income
     return profile?.monthlyIncome || 0
   }, [summary?.income, profile?.monthlyIncome])
+
+  const carryoverAmount = summary?.carryoverAmount || 0
+  const previousMonthDeficit = summary?.previousMonthDeficit || 0
+
+  const totalAvailableIncome = useMemo(() => {
+    return round2(Math.max(0, expectedIncome + carryoverAmount - previousMonthDeficit))
+  }, [expectedIncome, carryoverAmount, previousMonthDeficit])
 
   // Inicializa o formulário com os valores atuais calibrados quando o modal abrir
   const currentBudgets = useMemo(() => {
@@ -71,11 +85,25 @@ export function ManageBudgetsModal({
     return profile?.monthlyCategoryBudgets?.[previousMonth] || null
   }, [profile?.monthlyCategoryBudgets, previousMonth])
 
+  // Mapa detalhado de gastos pagos e comprometidos a vencer
+  const committedByCategory = useMemo(() => {
+    const spentMap: Record<string, number> = {}
+    const pendingMap: Record<string, number> = {}
+    const totalCommittedMap: Record<string, number> = {}
+
+    for (const item of categoryBudgetReport.items) {
+      const canon = normalizeBudgetCategory(item.category)
+      spentMap[canon] = item.spentAmount
+      pendingMap[canon] = item.pendingAmount
+      totalCommittedMap[canon] = item.committedAmount
+    }
+    return { spentMap, pendingMap, totalCommittedMap }
+  }, [categoryBudgetReport.items])
+
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab)
       const initial: Record<string, string> = {}
-      // Usa os limites efetivos (já calibrados pela entrada prevista do mês se aplicável)
       for (const item of categoryBudgetReport.items) {
         if (item.limit > 0) {
           const canon = normalizeBudgetCategory(item.category)
@@ -92,6 +120,7 @@ export function ManageBudgetsModal({
       }
       setBudgetsState(initial)
       setRebalanceSuccessMsg(null)
+      setGeminiPlan(null)
     }
   }, [open, initialTab, categoryBudgetReport.items, currentBudgets])
 
@@ -99,20 +128,26 @@ export function ManageBudgetsModal({
     onOpenChange(nextOpen)
   }
 
-  // Sugestão da IA calibrada pela entrada prevista do mês selecionado
+  // Sugestão da IA calibrada pela capacidade disponível do mês selecionado
   const aiSuggestion = useMemo(() => {
     if (!open) return null
-    return suggestCategoryBudgets(transactions, me?.uid || '', month, expectedIncome)
-  }, [open, transactions, me?.uid, month, expectedIncome])
+    return suggestCategoryBudgets(
+      transactions,
+      me?.uid || '',
+      month,
+      expectedIncome,
+      carryoverAmount,
+      previousMonthDeficit,
+    )
+  }, [open, transactions, me?.uid, month, expectedIncome, carryoverAmount, previousMonthDeficit])
 
   // Mapa de gastos reais do mês por categoria canônica
   const currentMonthSpentMap = useMemo(() => {
     const map = new Map<string, number>()
     for (const item of categoryBudgetReport.items) {
       const canon = normalizeBudgetCategory(item.category)
-      map.set(canon, round2((map.get(canon) || 0) + item.spent))
+      map.set(canon, round2((map.get(canon) || 0) + item.spentAmount))
     }
-    // Garante que aportes em Investimentos sejam sempre puxados do mês
     const totalInvestedThisMonth = summary?.totalInvested || 0
     if (totalInvestedThisMonth > 0) {
       map.set('Investimentos', round2(Math.max(map.get('Investimentos') || 0, totalInvestedThisMonth)))
@@ -125,7 +160,42 @@ export function ManageBudgetsModal({
     return suggestBudgetRebalance(categoryBudgetReport)
   }, [categoryBudgetReport])
 
-  // Preenche formulário com as sugestões da IA
+  // Gera plano de orçamento com Gemini
+  const handleGenerateGeminiPlan = async () => {
+    setIsLoadingGemini(true)
+    try {
+      const existingLimitsObj: Record<string, number> = {}
+      for (const [cat, v] of Object.entries(budgetsState)) {
+        const num = parseFloat(String(v).replace(',', '.'))
+        if (!isNaN(num) && num > 0) existingLimitsObj[cat] = num
+      }
+
+      const plan = await generateSmartBudgetPlan({
+        monthlyIncome: totalAvailableIncome,
+        carryoverAmount,
+        spentByCategory: committedByCategory.spentMap,
+        pendingByCategory: committedByCategory.pendingMap,
+        history3mAverages: aiSuggestion?.categoryAverages || {},
+        existingLimits: existingLimitsObj,
+      })
+      setGeminiPlan(plan)
+    } finally {
+      setIsLoadingGemini(false)
+    }
+  }
+
+  // Aplica as sugestões geradas pelo Gemini
+  const handleApplyGeminiPlan = () => {
+    if (!geminiPlan) return
+    const nextState: Record<string, string> = { ...budgetsState }
+    for (const alloc of geminiPlan.allocations) {
+      const canon = normalizeBudgetCategory(alloc.category)
+      nextState[canon] = String(alloc.suggestedLimit)
+    }
+    setBudgetsState(nextState)
+  }
+
+  // Preenche formulário com as sugestões determinísticas da IA
   const applyAiSuggestions = () => {
     if (!aiSuggestion) return
     const nextState: Record<string, string> = {}
@@ -141,26 +211,27 @@ export function ManageBudgetsModal({
     const nextState: Record<string, string> = {}
     for (const [cat, limit] of Object.entries(previousMonthBudgets)) {
       if (limit > 0) {
-        nextState[normalizeBudgetCategory(cat)] = String(limit)
+        nextState[normalizeBudgetCategory(cat)] = String(Math.ceil(limit / 10) * 10)
       }
     }
     setBudgetsState(nextState)
   }
 
-  // Soma dos limites no formulário
+  // Soma dos limites no formulário (sempre arredondada)
   const formTotal = useMemo(() => {
     let sum = 0
     for (const val of Object.values(budgetsState)) {
       const num = parseFloat(String(val).replace(',', '.'))
       if (!isNaN(num) && num > 0) sum += num
     }
-    return round2(sum)
+    return Math.round(sum)
   }, [budgetsState])
 
-  // Calibra proporcionalmente os valores digitados para caberem exatamente na entrada prevista do mês
+  // Calibra proporcionalmente sem centavos quebrados
   const handleCalibrateToExpectedIncome = () => {
-    if (expectedIncome <= 0 || formTotal <= expectedIncome || formTotal <= 0) return
-    const ratio = expectedIncome / formTotal
+    if (totalAvailableIncome <= 0 || formTotal <= totalAvailableIncome || formTotal <= 0) return
+    const maxCeiling = Math.floor(totalAvailableIncome / 10) * 10
+    const ratio = maxCeiling / formTotal
     const nextState: Record<string, string> = {}
     let sumScaled = 0
     let maxCat = ''
@@ -169,19 +240,20 @@ export function ManageBudgetsModal({
     for (const [cat, val] of Object.entries(budgetsState)) {
       const num = parseFloat(String(val).replace(',', '.'))
       if (!isNaN(num) && num > 0) {
-        const scaled = round2(num * ratio)
+        const committed = committedByCategory.totalCommittedMap[cat] || 0
+        const minFloor = Math.ceil(committed / 10) * 10
+        const scaled = Math.max(minFloor, Math.floor((num * ratio) / 10) * 10)
         nextState[cat] = String(scaled)
-        sumScaled = round2(sumScaled + scaled)
+        sumScaled += scaled
         if (scaled > maxVal) {
           maxVal = scaled
           maxCat = cat
         }
       }
     }
-    const diff = round2(expectedIncome - sumScaled)
-    if (maxCat && Math.abs(diff) >= 0.01) {
-      const adjusted = round2(Math.max(0, (parseFloat(nextState[maxCat]) || 0) + diff))
-      nextState[maxCat] = String(adjusted)
+    const diff = Math.floor((maxCeiling - sumScaled) / 10) * 10
+    if (maxCat && diff > 0) {
+      nextState[maxCat] = String((parseFloat(nextState[maxCat]) || 0) + diff)
     }
     setBudgetsState(nextState)
   }
@@ -190,10 +262,11 @@ export function ManageBudgetsModal({
   const handleClearAll = () => {
     if (window.confirm('Deseja zerar todos os limites orçamentários definidos?')) {
       setBudgetsState({})
+      setGeminiPlan(null)
     }
   }
 
-  // Salva no perfil (garantindo que nunca exceda a entrada prevista do mês se houver entrada prevista > 0)
+  // Salva no perfil (garantindo que nunca gere centavos quebrados e respeite a capacidade disponível)
   const handleSave = async () => {
     setIsSaving(true)
     try {
@@ -202,30 +275,33 @@ export function ManageBudgetsModal({
       for (const [cat, val] of Object.entries(budgetsState)) {
         const num = parseFloat(String(val).replace(',', '.'))
         if (!isNaN(num) && num > 0) {
-          const rounded = round2(num)
-          rawSanitized[cat] = rounded
-          rawSum = round2(rawSum + rounded)
+          const roundedClean = Math.ceil(num / 10) * 10
+          rawSanitized[cat] = roundedClean
+          rawSum += roundedClean
         }
       }
 
       const finalBudgets: Record<string, number> = {}
-      if (expectedIncome > 0 && rawSum > expectedIncome && rawSum > 0) {
-        const ratio = expectedIncome / rawSum
+      if (totalAvailableIncome > 0 && rawSum > totalAvailableIncome && rawSum > 0) {
+        const maxCeiling = Math.floor(totalAvailableIncome / 10) * 10
+        const ratio = maxCeiling / rawSum
         let sumScaled = 0
         let maxCat = ''
         let maxVal = -1
         for (const [cat, num] of Object.entries(rawSanitized)) {
-          const scaled = round2(num * ratio)
+          const committed = committedByCategory.totalCommittedMap[cat] || 0
+          const minFloor = Math.ceil(committed / 10) * 10
+          const scaled = Math.max(minFloor, Math.floor((num * ratio) / 10) * 10)
           finalBudgets[cat] = scaled
-          sumScaled = round2(sumScaled + scaled)
+          sumScaled += scaled
           if (scaled > maxVal) {
             maxVal = scaled
             maxCat = cat
           }
         }
-        const diff = round2(expectedIncome - sumScaled)
-        if (maxCat && Math.abs(diff) >= 0.01) {
-          finalBudgets[maxCat] = round2(Math.max(0, finalBudgets[maxCat] + diff))
+        const diff = Math.floor((maxCeiling - sumScaled) / 10) * 10
+        if (maxCat && diff > 0) {
+          finalBudgets[maxCat] = finalBudgets[maxCat] + diff
         }
       } else {
         Object.assign(finalBudgets, rawSanitized)
@@ -251,9 +327,9 @@ export function ManageBudgetsModal({
     setTimeout(() => setRebalanceSuccessMsg(null), 4000)
   }
 
-  const isOverExpectedIncome = expectedIncome > 0 && formTotal > expectedIncome
-  const allocationPct = expectedIncome > 0 ? Math.round((formTotal / expectedIncome) * 100) : 0
-  const unallocatedMargin = expectedIncome > 0 ? round2(expectedIncome - formTotal) : 0
+  const isOverExpectedIncome = totalAvailableIncome > 0 && formTotal > totalAvailableIncome
+  const allocationPct = totalAvailableIncome > 0 ? Math.round((formTotal / totalAvailableIncome) * 100) : 0
+  const unallocatedMargin = totalAvailableIncome > 0 ? round2(totalAvailableIncome - formTotal) : 0
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -315,42 +391,62 @@ export function ManageBudgetsModal({
         <div className="p-5 overflow-y-auto overscroll-contain flex-1 space-y-4 text-xs">
           {activeTab === 'budgets' && (
             <>
-              {/* Termômetro de Alocação da Entrada Prevista do Mês */}
+              {/* Sticky Header com Renda do Mês, Total Alocado e Saldo Livre Não Alocado */}
               <div
-                className={`rounded-xl p-3.5 border space-y-2.5 ${
+                className={`sticky top-0 z-20 backdrop-blur-md rounded-xl p-3 border shadow-lg space-y-2.5 ${
                   isOverExpectedIncome
-                    ? 'bg-rose-950/25 border-rose-500/35'
-                    : 'bg-slate-900/70 border-white/[0.08]'
+                    ? 'bg-rose-950/90 border-rose-500/40'
+                    : 'bg-slate-900/90 border-white/[0.12]'
                 }`}
               >
-                <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="grid grid-cols-3 gap-2 text-center sm:text-left">
                   <div>
-                    <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">
-                      Entrada Prevista em {monthLabel(month)}
+                    <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400 block">
+                      Renda do Mês
                     </span>
-                    <strong className="font-mono text-sm text-white">
-                      {formatBRL(expectedIncome)}
+                    <strong className="font-mono text-xs sm:text-sm text-white">
+                      {formatBRL(totalAvailableIncome)}
                     </strong>
+                    {carryoverAmount > 0 && (
+                      <span className="text-[9px] text-emerald-400 block font-mono">
+                        +{formatBRL(carryoverAmount)} sobra
+                      </span>
+                    )}
                   </div>
 
-                  <div className="text-right">
-                    <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">
-                      Total Orçado ({allocationPct}%)
+                  <div className="border-x border-white/10 px-2">
+                    <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400 block">
+                      Total Alocado ({allocationPct}%)
                     </span>
                     <strong
-                      className={`font-mono text-sm ${
+                      className={`font-mono text-xs sm:text-sm ${
                         isOverExpectedIncome ? 'text-rose-400' : 'text-emerald-400'
                       }`}
                     >
                       {formatBRL(formTotal)}
                     </strong>
                   </div>
+
+                  <div>
+                    <span className="text-[9px] uppercase tracking-wider font-bold text-slate-400 block">
+                      Saldo Não Alocado
+                    </span>
+                    <strong
+                      className={`font-mono text-xs sm:text-sm ${
+                        unallocatedMargin >= 0 ? 'text-emerald-300' : 'text-rose-400'
+                      }`}
+                    >
+                      {unallocatedMargin >= 0
+                        ? formatBRL(unallocatedMargin)
+                        : `-${formatBRL(Math.abs(unallocatedMargin))}`}
+                    </strong>
+                  </div>
                 </div>
 
-                {/* Barra de Alocação da Entrada */}
-                {expectedIncome > 0 && (
+                {/* Barra de Progresso de Alocação da Renda */}
+                {totalAvailableIncome > 0 && (
                   <div className="space-y-1">
-                    <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-white/[0.06]">
+                    <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-white/[0.06]">
                       <div
                         className={`h-full rounded-full transition-all duration-300 ${
                           isOverExpectedIncome
@@ -362,30 +458,6 @@ export function ManageBudgetsModal({
                         style={{ width: `${Math.min(100, Math.max(0, allocationPct))}%` }}
                       />
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span>
-                        {unallocatedMargin >= 0 ? (
-                          <>
-                            Margem Livre p/ Poupança:{' '}
-                            <strong className="text-emerald-300 font-mono">
-                              {formatBRL(unallocatedMargin)}
-                            </strong>
-                          </>
-                        ) : (
-                          <span className="text-rose-300 font-medium">
-                            Excede a entrada prevista em {formatBRL(Math.abs(unallocatedMargin))}
-                          </span>
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleClearAll}
-                        className="text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer"
-                      >
-                        <RotateCcw className="size-3" />
-                        Zerar Tudo
-                      </button>
-                    </div>
                   </div>
                 )}
 
@@ -394,44 +466,96 @@ export function ManageBudgetsModal({
                     <div className="flex items-center gap-1.5">
                       <AlertTriangle className="size-3.5 text-rose-400 shrink-0" />
                       <span>
-                        O orçamento nunca deve superar a entrada prevista do mês ({formatBRL(expectedIncome)}).
+                        Orçamento supera a renda em {formatBRL(Math.abs(unallocatedMargin))}.
                       </span>
                     </div>
                     <Button
                       type="button"
                       size="sm"
                       onClick={handleCalibrateToExpectedIncome}
-                      className="h-7 text-[11px] bg-rose-600 hover:bg-rose-500 text-white shrink-0 px-2.5"
+                      className="h-6 text-[10px] bg-rose-600 hover:bg-rose-500 text-white shrink-0 px-2"
                     >
                       <Scale className="size-3 mr-1" />
-                      Calibrar à Entrada ({formatBRL(expectedIncome)})
+                      Calibrar à Renda ({formatBRL(totalAvailableIncome)})
                     </Button>
                   </div>
                 )}
               </div>
 
-              {/* Banner da Sugestão com IA & Cópia do Mês Anterior */}
-              <div className="glass-card rounded-xl p-3.5 border border-emerald-500/25 bg-emerald-950/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold text-emerald-300 text-xs">
-                    <Sparkles className="size-3.5" />
-                    Sugerir Orçamento com IA (Teto: {formatBRL(aiSuggestion?.totalSuggested || 0)})
+              {/* Botão e Preview "✨ Preencher Automaticamente com Gemini" */}
+              <div className="glass-card rounded-xl p-3.5 border border-purple-500/30 bg-purple-950/20 space-y-2.5">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5 font-bold text-purple-300 text-xs">
+                      <Sparkles className="size-3.5 text-purple-400" />
+                      ✨ Planejar Orçamento com Gemini AI
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      O Gemini analisa sua receita, gastos pagos e contas a vencer para calcular limites arredondados que blindam seus compromissos.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Analisa seu histórico de 3 meses e os gastos já efetuados em {monthLabel(month)}, garantindo que a sugestão nunca seja menor do que o que você já gastou e respeitando a entrada prevista ({aiSuggestion?.incomeCoveragePct || 0}% da entrada).
-                  </p>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={isLoadingGemini}
+                      onClick={handleGenerateGeminiPlan}
+                      className="bg-purple-600 hover:bg-purple-500 text-white text-xs h-8 px-3 shadow-md"
+                    >
+                      {isLoadingGemini ? (
+                        <>
+                          <Loader2 className="size-3 mr-1.5 animate-spin" />
+                          Consultando Gemini...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="size-3 mr-1.5 text-purple-200" />
+                          Sugerir com Gemini
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+
+                {/* Preview do Plano Gerado pelo Gemini */}
+                {geminiPlan && (
+                  <div className="p-3 rounded-lg bg-slate-900/80 border border-purple-500/30 space-y-2 animate-fadeIn">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-300 flex items-center gap-1">
+                        <Sparkles className="size-3 text-purple-400" />
+                        Estratégia Recomendada pelo Gemini
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleApplyGeminiPlan}
+                        className="h-6 text-[11px] bg-emerald-600 hover:bg-emerald-500 text-white px-2.5"
+                      >
+                        <CheckCircle2 className="size-3 mr-1" />
+                        Aplicar Sugestões da IA
+                      </Button>
+                    </div>
+                    <p className="text-xs text-purple-100 italic bg-purple-950/40 p-2 rounded border border-purple-500/20 leading-relaxed">
+                      "{geminiPlan.summaryInsight}"
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Botões Secundários: Copiar Mês Anterior e Zerar Tudo */}
+              <div className="flex items-center justify-between gap-2 flex-wrap text-[11px]">
+                <div className="flex items-center gap-2">
                   {previousMonthBudgets && Object.keys(previousMonthBudgets).length > 0 && (
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
                       onClick={handleCopyFromPreviousMonth}
-                      className="bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-white/[0.1] text-xs h-8"
+                      className="bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-white/[0.1] text-xs h-7 px-2.5"
                       title={`Copiar os envelopes configurados em ${monthLabel(previousMonth)}`}
                     >
-                      <RotateCcw className="size-3 mr-1.5" />
+                      <RotateCcw className="size-3 mr-1" />
                       Copiar {monthLabel(previousMonth).split(' ')[0]}
                     </Button>
                   )}
@@ -440,101 +564,183 @@ export function ManageBudgetsModal({
                     size="sm"
                     variant="outline"
                     onClick={applyAiSuggestions}
-                    className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40 text-xs h-8"
+                    className="bg-slate-900/80 hover:bg-slate-800 text-emerald-300 border-emerald-500/30 text-xs h-7 px-2.5"
                   >
-                    <Sparkles className="size-3.5 mr-1.5" />
-                    Preencher com IA
+                    Usar Histórico 3M
                   </Button>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  className="text-slate-400 hover:text-rose-400 transition-colors flex items-center gap-1 cursor-pointer text-xs"
+                >
+                  <RotateCcw className="size-3" />
+                  Zerar Todos os Tetos
+                </button>
               </div>
 
-              {/* Lista de Categorias com Inputs Acessíveis */}
-              <div className="space-y-2">
+              {/* Lista de Categorias com Sliders, Mínimo Comprometido e Chips Rápidos */}
+              <div className="space-y-3">
                 {EXPENSE_CATEGORIES.map((cat) => {
                   const detail = getCategoryDetail(cat)
-                  const currentVal = budgetsState[cat] ?? ''
-                  const avg = aiSuggestion?.categoryAverages[cat]
-                  const suggestedVal = aiSuggestion?.suggestedBudgets[cat]
-                  const spentNow = currentMonthSpentMap.get(cat) || 0
-                  const isFixed = FIXED_MONTHLY_CATEGORIES.has(cat)
+                  const canon = normalizeBudgetCategory(cat)
+                  const currentValStr = budgetsState[canon] ?? budgetsState[cat] ?? ''
+                  const currentValNum = parseFloat(currentValStr.replace(',', '.')) || 0
+
+                  const committed = committedByCategory.totalCommittedMap[canon] || currentMonthSpentMap.get(canon) || 0
+                  const spent = committedByCategory.spentMap[canon] || 0
+                  const pending = committedByCategory.pendingMap[canon] || 0
+                  const minFloor = Math.ceil(committed / 10) * 10
+
+                  const avg = aiSuggestion?.categoryAverages[cat] || aiSuggestion?.categoryAverages[canon] || 0
+                  const isFixed = FIXED_MONTHLY_CATEGORIES.has(cat) || FIXED_MONTHLY_CATEGORIES.has(canon)
                   const inputId = `budget-input-${cat.replace(/[^a-zA-Z0-9]/g, '-')}`
+
+                  const geminiReason = geminiPlan?.allocations.find(
+                    (a) => normalizeBudgetCategory(a.category) === canon,
+                  )?.reason
+
+                  const handleValChange = (newVal: number) => {
+                    const cleanVal = Math.max(minFloor, Math.round(newVal / 10) * 10)
+                    setBudgetsState((prev) => ({
+                      ...prev,
+                      [canon]: String(cleanVal),
+                    }))
+                  }
+
+                  const sliderMax = Math.max(minFloor + 1000, 2000, Math.ceil(totalAvailableIncome / 10) * 10)
 
                   return (
                     <div
                       key={cat}
-                      className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.06] hover:border-white/[0.12] transition-colors"
+                      className="p-3 rounded-xl bg-slate-900/60 border border-white/[0.06] hover:border-white/[0.12] transition-colors space-y-2.5"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <div
-                          className="size-3 rounded-full shrink-0"
-                          style={{ backgroundColor: detail.color || '#10b981' }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <label
-                              htmlFor={inputId}
-                              className="font-semibold text-slate-200 truncate text-xs cursor-pointer"
-                            >
-                              {cat}
-                            </label>
-                            <span
-                              className={`text-[9px] px-1.5 py-0 rounded font-mono ${
-                                isFixed
-                                  ? 'bg-cyan-500/15 text-cyan-300'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}
-                            >
-                              {isFixed ? 'Fixo' : 'Variável'}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-400 mt-0.5">
-                            {spentNow > 0 && (
-                              <span>
-                                {cat === 'Investimentos' ? 'Aportado no mês: ' : 'Gasto no mês: '}
-                                <strong className="text-slate-300 font-mono">{formatBRL(spentNow)}</strong>
-                              </span>
-                            )}
-                            {avg && avg > 0 ? (
-                              <span>
-                                • Média 3M: <strong className="text-slate-300 font-mono">{formatBRL(avg)}</strong>
-                              </span>
-                            ) : null}
-                            {suggestedVal && suggestedVal > 0 && String(suggestedVal) !== currentVal ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setBudgetsState((prev) => ({
-                                    ...prev,
-                                    [cat]: String(suggestedVal),
-                                  }))
-                                }
-                                className="text-emerald-400 hover:text-emerald-300 underline font-mono cursor-pointer"
-                              >
-                                Usar IA: {formatBRL(suggestedVal)}
-                              </button>
-                            ) : null}
-                          </div>
+                      {/* Top Row: Categoria, Tipo e Input Numérico */}
+                      <div className="flex items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            className="size-3 rounded-full shrink-0"
+                            style={{ backgroundColor: detail.color || '#10b981' }}
+                          />
+                          <label
+                            htmlFor={inputId}
+                            className="font-semibold text-slate-200 truncate text-xs cursor-pointer"
+                          >
+                            {cat}
+                          </label>
+                          <span
+                            className={`text-[9px] px-1.5 py-0 rounded font-mono shrink-0 ${
+                              isFixed
+                                ? 'bg-cyan-500/15 text-cyan-300'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {isFixed ? 'Fixo' : 'Variável'}
+                          </span>
+                        </div>
+
+                        {/* Campo de Valor com prefixo R$ */}
+                        <div className="flex items-center gap-1.5 shrink-0 w-32">
+                          <span className="text-slate-500 text-[11px] font-mono">R$</span>
+                          <Input
+                            id={inputId}
+                            type="number"
+                            step="10"
+                            min={minFloor}
+                            placeholder="0"
+                            value={currentValStr}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value.replace(',', '.'))
+                              setBudgetsState((prev) => ({
+                                ...prev,
+                                [canon]: isNaN(val) ? '' : String(val),
+                              }))
+                            }}
+                            className="h-7 text-xs font-mono text-right bg-slate-950/80 border-white/[0.1]"
+                          />
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0 w-36">
-                        <span className="text-slate-500 text-[11px]">R$</span>
-                        <Input
-                          id={inputId}
-                          type="number"
-                          step="10"
-                          min="0"
-                          placeholder="0,00"
-                          value={currentVal}
-                          onChange={(e) =>
-                            setBudgetsState((prev) => ({
-                              ...prev,
-                              [cat]: e.target.value,
-                            }))
-                          }
-                          className="h-8 text-xs font-mono text-right bg-slate-950/80 border-white/[0.1]"
+                      {/* Informações de Mínimo Comprometido e Média Histórica */}
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 gap-2 flex-wrap">
+                        <span title="Valor que já foi gasto ou já está comprometido para contas a vencer neste mês">
+                          Mínimo Comprometido:{' '}
+                          <strong className="text-slate-300 font-mono">{formatBRL(committed)}</strong>
+                          {pending > 0 && (
+                            <span className="text-amber-300/90 font-mono text-[9px] ml-1">
+                              ({formatBRL(spent)} pagos + {formatBRL(pending)} a vencer)
+                            </span>
+                          )}
+                        </span>
+                        {avg > 0 && (
+                          <span className="font-mono text-slate-400">
+                            Média 3M: <strong className="text-slate-300">{formatBRL(avg)}</strong>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Slider Intuitivo com piso no Mínimo Comprometido */}
+                      <div className="space-y-1">
+                        <input
+                          type="range"
+                          min={minFloor}
+                          max={sliderMax}
+                          step={10}
+                          value={currentValNum >= minFloor ? currentValNum : minFloor}
+                          onChange={(e) => handleValChange(parseFloat(e.target.value))}
+                          className="w-full accent-emerald-500 h-1.5 bg-slate-950 rounded-lg cursor-pointer"
                         />
                       </div>
+
+                      {/* Chips de Ajuste Rápido: Média 3M, -R$ 50, +R$ 50 */}
+                      <div className="flex items-center justify-between gap-1.5 pt-0.5 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {avg > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleValChange(Math.max(minFloor, Math.ceil(avg / 10) * 10))}
+                              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                              Média 3M ({formatBRL(Math.ceil(avg / 10) * 10)})
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleValChange(currentValNum - 50)}
+                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
+                          >
+                            <Minus className="size-2.5" />
+                            R$ 50
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleValChange(currentValNum + 50)}
+                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
+                          >
+                            <Plus className="size-2.5" />
+                            R$ 50
+                          </button>
+                        </div>
+
+                        {committed > 0 && currentValNum > 0 && (
+                          <span
+                            className={`text-[10px] font-mono ${
+                              currentValNum >= committed ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            Folga: {formatBRL(Math.max(0, currentValNum - committed))}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Justificativa da IA (Gemini Reason) se disponível */}
+                      {geminiReason && (
+                        <div className="text-[10px] text-purple-300 italic flex items-center gap-1.5 pt-1 border-t border-white/[0.04]">
+                          <Sparkles className="size-3 text-purple-400 shrink-0" />
+                          <span>{geminiReason}</span>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -664,7 +870,7 @@ export function ManageBudgetsModal({
               {isSaving
                 ? 'Salvando...'
                 : isOverExpectedIncome
-                  ? `Salvar Calibrado (${formatBRL(expectedIncome)})`
+                  ? `Salvar Calibrado (${formatBRL(totalAvailableIncome)})`
                   : 'Salvar Envelopes'}
             </Button>
           )}

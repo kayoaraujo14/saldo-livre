@@ -24,6 +24,7 @@ import type {
   PendingRecurringCandidate,
   FinancialHealthScore,
   BudgetRebalanceSuggestion,
+  CategoryBudgetBadgeLabel,
   CategoryBudgetPaceStatus,
   CategoryBudgetReport,
   CategoryBudgetStatus,
@@ -2391,6 +2392,7 @@ export function calculateFinancialHealthScore(
       savingsScore: 0,
       spendingLimitScore: 0,
       emergencyReserveScore: 0,
+      envelopeScore: 0,
       savingsRatePercentage: 0,
       spendingRatioPercentage: 0,
       emergencyCoverageMonths: 0,
@@ -2408,14 +2410,13 @@ export function calculateFinancialHealthScore(
   const totalInvested = Math.max(0, summary.totalInvested || 0)
   const positiveFreeBalance = Math.max(0, summary.freeBalance || 0)
 
-  // Se byCategory está presente e contém Investimentos, desconta os aportes do cálculo de custo de vida
-  // para nunca penalizar quem investe mais de 20% da renda.
+  // Desconta os aportes em Investimentos do custo de vida real para nunca penalizar quem investe
   const investedInByCategory = Array.isArray(summary.byCategory)
-    ? (summary.byCategory.find((c) => c.category === 'Investimentos')?.amount || 0)
+    ? (summary.byCategory.find((c) => c.category === 'Investimentos' || /investimento/i.test(c.category))?.amount || 0)
     : 0
   const totalExpenses = Math.max(0, round2(rawTotalOutflow - investedInByCategory))
 
-  // 1. Pilar de Poupança, Investimentos & Margem Livre (0 a 35 pontos)
+  // 1. Pilar de Poupança & Investimento (0 a 30 pontos) — Meta >= 20% da renda
   let savingsScore = 0
   let savingsRatePercentage = 0
   let potentialSavingsRatePercentage = 0
@@ -2428,13 +2429,13 @@ export function calculateFinancialHealthScore(
     )
 
     if (rate >= 0.20) {
-      savingsScore = 35
+      savingsScore = 30
     } else {
-      const baseInvestedPts = rate > 0 ? Math.round((rate / 0.20) * 35) : 0
-      // Reconhece parte do Saldo Livre positivo projetado como potencial real de poupança no mês (até +12 pts)
+      const baseInvestedPts = rate > 0 ? Math.round((rate / 0.20) * 30) : 0
+      // Reconhece a margem de Saldo Livre positivo projetado como capacidade real de aporte (até +10 pts)
       const freeMarginRate = positiveFreeBalance / income
-      const marginBonusPts = freeMarginRate > 0 ? Math.min(12, Math.round((freeMarginRate / 0.20) * 12)) : 0
-      savingsScore = Math.min(35, baseInvestedPts + marginBonusPts)
+      const marginBonusPts = freeMarginRate > 0 ? Math.min(10, Math.round((freeMarginRate / 0.20) * 10)) : 0
+      savingsScore = Math.min(30, baseInvestedPts + marginBonusPts)
     }
   } else if (totalInvested > 0) {
     savingsScore = 15
@@ -2442,30 +2443,30 @@ export function calculateFinancialHealthScore(
     potentialSavingsRatePercentage = 100
   }
 
-  // 2. Pilar de Controle de Custo de Vida / Teto de Gastos (0 a 35 pontos)
+  // 2. Pilar de Controle de Custo de Vida (0 a 30 pontos) — Despesas vs. Renda
   let spendingLimitScore = 0
   let spendingRatioPercentage = 0
   if (income > 0) {
     const ratio = totalExpenses / income
     spendingRatioPercentage = Math.round(ratio * 100)
     if (ratio <= 0.70) {
-      spendingLimitScore = 35
+      spendingLimitScore = 30
     } else if (ratio <= 1.00) {
-      spendingLimitScore = Math.max(10, Math.round(35 - ((ratio - 0.70) / 0.30) * 25))
+      spendingLimitScore = Math.max(8, Math.round(30 - ((ratio - 0.70) / 0.30) * 22))
     } else if (ratio <= 1.10) {
-      spendingLimitScore = 5
+      spendingLimitScore = 4
     } else {
       spendingLimitScore = 0
     }
   } else if (totalExpenses === 0) {
-    spendingLimitScore = 20
+    spendingLimitScore = 15
     spendingRatioPercentage = 0
   } else {
     spendingLimitScore = 0
     spendingRatioPercentage = 100
   }
 
-  // 3. Pilar de Cobertura da Reserva de Emergência (0 a 30 pontos)
+  // 3. Pilar de Reserva de Emergência (0 a 25 pontos) — Meta 3 a 6 meses de proteção
   let emergencyReserveScore = 0
   const baselineCost = totalExpenses > 0
     ? totalExpenses
@@ -2476,52 +2477,66 @@ export function calculateFinancialHealthScore(
     : 0
 
   if (coverageMonths >= 6.0) {
-    emergencyReserveScore = 30
+    emergencyReserveScore = 25
   } else if (coverageMonths >= 3.0) {
-    emergencyReserveScore = Math.round(20 + ((coverageMonths - 3.0) / 3.0) * 10)
+    emergencyReserveScore = Math.round(18 + ((coverageMonths - 3.0) / 3.0) * 7)
   } else if (coverageMonths >= 1.0) {
-    emergencyReserveScore = Math.round(10 + ((coverageMonths - 1.0) / 2.0) * 10)
+    emergencyReserveScore = Math.round(8 + ((coverageMonths - 1.0) / 2.0) * 10)
   } else if (coverageMonths > 0) {
-    emergencyReserveScore = Math.min(10, Math.round(coverageMonths * 10))
+    emergencyReserveScore = Math.min(8, Math.round(coverageMonths * 8))
   }
 
-  // 4. Sinergia com Envelopes Orçamentários (Aderência por Categoria)
+  // 4. Pilar de Controle de Envelopes Orçamentários (0 a 15 pontos)
   let budgetAdherenceScore = 0
   let budgetConfiguredCount = 0
   let budgetOverspentCount = 0
-  let envelopeScoreAdjustment = 0
+  let envelopeScore = 0
 
   if (budgetReport && budgetReport.totalBudgeted > 0) {
-    const configuredItems = budgetReport.items.filter((i) => i.limit > 0)
+    const configuredItems = budgetReport.items.filter(
+      (i) => i.limit > 0 && !/investimento/i.test(i.category),
+    )
     budgetConfiguredCount = configuredItems.length
     const overspentItems = configuredItems.filter(
-      (i) =>
-        !/investimento/i.test(i.category) &&
-        i.spent > i.limit &&
-        i.spent - i.limit > 2 &&
-        (i.limit <= 0 || (i.spent - i.limit) / i.limit > 0.01),
+      (i) => (i.spentAmount + (i.pendingAmount || 0)) - i.limit >= 0.01,
     )
     budgetOverspentCount = overspentItems.length
 
     if (budgetConfiguredCount > 0) {
       if (budgetOverspentCount === 0) {
+        envelopeScore = 15
         budgetAdherenceScore = 100
-        envelopeScoreAdjustment = 4 // Bônus de disciplina: 100% dos envelopes respeitados
       } else {
-        const overspentPenalty = Math.round((overspentItems.length / budgetConfiguredCount) * 70)
-        const globalOverPenalty = budgetReport.overallPercentage > 100
-          ? Math.min(30, Math.round(budgetReport.overallPercentage - 100))
-          : 0
-        budgetAdherenceScore = Math.max(0, Math.min(100, 100 - overspentPenalty - globalOverPenalty))
-        envelopeScoreAdjustment = -Math.min(8, budgetOverspentCount * 3)
+        const compliantCount = budgetConfiguredCount - budgetOverspentCount
+        const complianceRatio = compliantCount / budgetConfiguredCount
+        const isGlobalOver = (budgetReport.totalSpent + (budgetReport.totalPending || 0)) - budgetReport.totalBudgeted >= 0.01
+        const globalOverPenalty = isGlobalOver ? 3 : 0
+        envelopeScore = Math.max(0, Math.min(15, Math.round(complianceRatio * 15) - globalOverPenalty))
+        budgetAdherenceScore = Math.round((envelopeScore / 15) * 100)
       }
+    } else {
+      envelopeScore = 15
+      budgetAdherenceScore = 100
+    }
+  } else {
+    // Sem envelopes configurados: infere a disciplina orçamentária pelo comprometimento da renda
+    if (spendingRatioPercentage <= 70) {
+      envelopeScore = 15
+      budgetAdherenceScore = 100
+    } else if (spendingRatioPercentage >= 100) {
+      envelopeScore = 0
+      budgetAdherenceScore = 0
+    } else {
+      const ratio = (100 - spendingRatioPercentage) / 30
+      envelopeScore = Math.max(0, Math.min(15, Math.round(ratio * 15)))
+      budgetAdherenceScore = Math.round((envelopeScore / 15) * 100)
     }
   }
 
-  // Pontuação Total (0 a 100)
+  // Pontuação Total (0 a 100 pontos — soma exata e transparente dos 4 pilares)
   const totalScore = Math.min(
     100,
-    Math.max(0, savingsScore + spendingLimitScore + emergencyReserveScore + envelopeScoreAdjustment),
+    Math.max(0, savingsScore + spendingLimitScore + emergencyReserveScore + envelopeScore),
   )
 
   let classification: FinancialHealthScore['classification'] = 'critical'
@@ -2547,20 +2562,20 @@ export function calculateFinancialHealthScore(
 
   if (budgetConfiguredCount > 0 && budgetOverspentCount > 0 && budgetReport?.topOverspentCategory) {
     const topOver = budgetReport.topOverspentCategory
-    const excess = round2(Math.max(0, topOver.spent - topOver.limit))
+    const excess = round2(Math.max(0, (topOver.spentAmount + (topOver.pendingAmount || 0)) - topOver.limit))
     actionableTips.push(
-      `📦 Envelope de ${topOver.category} excedeu o teto em R$ ${excess.toFixed(2).replace('.', ',')}. Reequilibrar seus envelopes recupera +${Math.min(8, budgetOverspentCount * 3)} pts no Score.`,
+      `📦 Envelope de ${topOver.category} excedeu o teto em R$ ${excess.toFixed(2).replace('.', ',')}. Reequilibrar seus envelopes recupera +${15 - envelopeScore} pts no Score.`,
     )
   } else if (budgetConfiguredCount === 0 && income > 0) {
     actionableTips.push(
-      '📦 Ative os Envelopes Orçamentários com IA para blindar suas categorias variáveis e ganhar até +4 pts de bônus de disciplina.',
+      '📦 Ative os Envelopes Orçamentários com IA para blindar suas categorias variáveis e ganhar até +7 pts extras no Score.',
     )
   }
 
   if (income > 0 && savingsRatePercentage < 20) {
     const idealInvest = round2(income * 0.20)
     const missingInvest = round2(Math.max(0, idealInvest - totalInvested))
-    const potentialGain = Math.max(1, 35 - savingsScore)
+    const potentialGain = Math.max(1, 30 - savingsScore)
     if (positiveFreeBalance >= missingInvest && missingInvest > 0) {
       actionableTips.push(
         `📈 Você tem Saldo Livre suficiente para aportar mais R$ ${missingInvest.toFixed(2).replace('.', ',')} (atingindo 20% da renda) e ganhar +${potentialGain} pts.`,
@@ -2575,7 +2590,7 @@ export function calculateFinancialHealthScore(
   if (income > 0 && spendingRatioPercentage > 70) {
     const targetExpense = round2(income * 0.70)
     const excessExpense = round2(Math.max(0, totalExpenses - targetExpense))
-    const potentialGain = Math.max(1, 35 - spendingLimitScore)
+    const potentialGain = Math.max(1, 30 - spendingLimitScore)
     actionableTips.push(
       `🎯 Seu custo de vida consome ${spendingRatioPercentage}% da renda. Reduzir R$ ${excessExpense.toFixed(2).replace('.', ',')} em gastos variáveis destrava +${potentialGain} pts.`,
     )
@@ -2605,6 +2620,7 @@ export function calculateFinancialHealthScore(
     savingsScore,
     spendingLimitScore,
     emergencyReserveScore,
+    envelopeScore,
     savingsRatePercentage,
     spendingRatioPercentage,
     emergencyCoverageMonths: coverageMonths,
@@ -2634,6 +2650,9 @@ export function computeCategoryBudgets(
   uid?: string,
   allTransactions?: Transaction[],
   expectedIncome: number = 0,
+  carryoverAmount: number = 0,
+  previousMonthDeficit: number = 0,
+  recurringBills?: RecurringBill[],
 ): CategoryBudgetReport {
   const rawBudgetsInput = categoryBudgets || {}
   const resolveKey = (rawCat: string): string => {
@@ -2654,52 +2673,79 @@ export function computeCategoryBudgets(
     return canon
   }
 
-  // 1. Extrai ou computa o mapa de gastos por categoria (reconciliando nomes legados/canônicos)
-  const spentMap = new Map<string, number>()
+  // 1. Extrai ou computa mapa de gastos pagos (spentAmountMap) e comprometidos a vencer (pendingAmountMap)
+  const spentAmountMap = new Map<string, number>()
+  const pendingAmountMap = new Map<string, number>()
 
-  if (Array.isArray(categorySpendData) && categorySpendData.length > 0) {
-    const first = categorySpendData[0] as any
-    if (typeof first?.category === 'string' && typeof first?.amount === 'number') {
-      // É uma lista { category, amount } (ex: summary.byCategory)
-      for (const item of categorySpendData as Array<{ category: string; amount: number }>) {
-        if (item.category) {
-          const key = resolveKey(item.category)
-          spentMap.set(key, (spentMap.get(key) || 0) + (Number(item.amount) || 0))
-        }
-      }
-    } else if (uid) {
-      // É uma lista de Transaction[]
-      const txs = categorySpendData as Transaction[]
-      const all = allTransactions || txs
-      for (const tx of txs) {
+  const txList = Array.isArray(allTransactions) && allTransactions.length > 0
+    ? allTransactions
+    : (Array.isArray(categorySpendData) && categorySpendData.length > 0 && typeof (categorySpendData[0] as any)?.totalAmount === 'number'
+      ? (categorySpendData as Transaction[])
+      : [])
+
+  if (txList.length > 0 && uid) {
+    for (const tx of txList) {
+      const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
+      if (m === monthKey && (tx.visibleToUids || []).includes(uid)) {
         if (tx.type === 'expense') {
-          const impact = impactFor(tx, uid, all)
+          const impact = impactFor(tx, uid, txList)
           if (impact > 0 && tx.category) {
             const key = resolveKey(tx.category)
-            spentMap.set(key, (spentMap.get(key) || 0) + impact)
+            if (tx.status === 'paid') {
+              spentAmountMap.set(key, round2((spentAmountMap.get(key) || 0) + impact))
+            } else {
+              pendingAmountMap.set(key, round2((pendingAmountMap.get(key) || 0) + impact))
+            }
           }
+        }
+      }
+    }
+  } else if (Array.isArray(categorySpendData) && categorySpendData.length > 0) {
+    // É uma lista { category, amount } (ex: summary.byCategory)
+    for (const item of categorySpendData as Array<{ category: string; amount: number }>) {
+      if (item.category) {
+        const key = resolveKey(item.category)
+        spentAmountMap.set(key, round2((spentAmountMap.get(key) || 0) + (Number(item.amount) || 0)))
+      }
+    }
+  }
+
+  // Contas fixas e recorrentes ativas a vencer no mês que ainda não geraram lançamento
+  if (uid && Array.isArray(recurringBills) && recurringBills.length > 0) {
+    const activeBills = recurringBills.filter((b) => b.active && b.ownerUid === uid && b.type !== 'income')
+    for (const bill of activeBills) {
+      if (bill.startMonth && monthKey < bill.startMonth) continue
+      if (bill.endMonth && monthKey > bill.endMonth) continue
+
+      const hasTx = txList.some((t) => t.recurringBillId === bill.id && (t.competenceMonth === monthKey || (t.dueDate || '').startsWith(monthKey)))
+      const hasManual = findMatchingManualBill(txList, monthKey, bill)
+      if (!hasTx && !hasManual) {
+        const estimated = estimateRecurring(bill, txList, monthKey).amount
+        if (estimated > 0 && bill.category) {
+          const key = resolveKey(bill.category)
+          pendingAmountMap.set(key, round2((pendingAmountMap.get(key) || 0) + estimated))
         }
       }
     }
   }
 
-  // Reconcilia aportes de investimento no mês caso não tenham sido capturados na lista genérica
-  if (uid && Array.isArray(allTransactions) && allTransactions.length > 0) {
-    let investMonthSpent = 0
-    for (const tx of allTransactions) {
+  // Reconcilia aportes de investimento no mês caso não capturados
+  let investMonthSpent = 0
+  if (uid && txList.length > 0) {
+    for (const tx of txList) {
       const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
       if (m === monthKey && (tx.visibleToUids || []).includes(uid)) {
         const isAporte = (tx.category === 'Investimentos' || /investimento/i.test(tx.category)) && tx.type === 'expense'
         if (isAporte) {
-          const impact = impactFor(tx, uid, allTransactions)
+          const impact = impactFor(tx, uid, txList)
           if (impact > 0) investMonthSpent += impact
         }
       }
     }
-    if (investMonthSpent > 0) {
-      const existing = spentMap.get('Investimentos') || 0
-      spentMap.set('Investimentos', round2(Math.max(existing, investMonthSpent)))
-    }
+  }
+  if (investMonthSpent > 0) {
+    const existing = spentAmountMap.get('Investimentos') || 0
+    spentAmountMap.set('Investimentos', round2(Math.max(existing, investMonthSpent)))
   }
 
   // Consolida o mapa de orçamentos brutos sob as mesmas chaves reconciliadas
@@ -2712,30 +2758,45 @@ export function computeCategoryBudgets(
     }
   }
 
-  const rawTotalBudgeted = round2([...rawLimitsMap.values()].reduce((acc, v) => acc + v, 0))
-  const validExpectedIncome = round2(Math.max(0, Number(expectedIncome) || 0))
-  const isCappedToIncome = validExpectedIncome > 0 && rawTotalBudgeted > validExpectedIncome
+  // Exclui Investimentos do cálculo do total orçado de despesas
+  let rawExpenseBudgeted = 0
+  for (const [k, v] of rawLimitsMap.entries()) {
+    if (!/investimento/i.test(k)) {
+      rawExpenseBudgeted += v
+    }
+  }
+  rawExpenseBudgeted = round2(rawExpenseBudgeted)
 
-  // Se o orçamento bruto ultrapassar a entrada prevista do mês, calibra proporcionalmente
-  // para que o orçamento total NUNCA seja maior que o esperado entrar naquele mês.
+  const rawTotalBudgeted = rawExpenseBudgeted
+  const validExpectedIncome = round2(Math.max(0, Number(expectedIncome) || 0))
+  const validCarryover = round2(Math.max(0, Number(carryoverAmount) || 0))
+  const validDeficit = round2(Math.max(0, Number(previousMonthDeficit) || 0))
+  const totalAvailableIncome = round2(Math.max(0, validExpectedIncome + validCarryover - validDeficit))
+  const isCappedToIncome = totalAvailableIncome > 0 && rawTotalBudgeted > totalAvailableIncome
+
+  // Calibração proporcional sem centavos quebrados (arredonda em múltiplos de 10)
   const effectiveLimitsMap = new Map<string, number>()
   if (isCappedToIncome && rawTotalBudgeted > 0) {
-    const ratio = validExpectedIncome / rawTotalBudgeted
+    const ratio = totalAvailableIncome / rawTotalBudgeted
     let sumScaled = 0
     let maxKey = ''
     let maxVal = -1
     for (const [k, rawLim] of rawLimitsMap.entries()) {
-      const scaled = round2(rawLim * ratio)
+      if (/investimento/i.test(k)) {
+        effectiveLimitsMap.set(k, rawLim)
+        continue
+      }
+      const scaled = Math.floor((rawLim * ratio) / 10) * 10
       effectiveLimitsMap.set(k, scaled)
-      sumScaled = round2(sumScaled + scaled)
+      sumScaled += scaled
       if (scaled > maxVal) {
         maxVal = scaled
         maxKey = k
       }
     }
-    const diff = round2(validExpectedIncome - sumScaled)
-    if (maxKey && Math.abs(diff) >= 0.01) {
-      effectiveLimitsMap.set(maxKey, round2(Math.max(0, (effectiveLimitsMap.get(maxKey) || 0) + diff)))
+    const diff = Math.floor((totalAvailableIncome - sumScaled) / 10) * 10
+    if (maxKey && diff >= 10) {
+      effectiveLimitsMap.set(maxKey, (effectiveLimitsMap.get(maxKey) || 0) + diff)
     }
   } else {
     for (const [k, rawLim] of rawLimitsMap.entries()) {
@@ -2756,80 +2817,127 @@ export function computeCategoryBudgets(
 
   const daysRemaining = Math.max(0, totalDays - currentDay)
 
-  // 3. Monta lista de categorias a avaliar (todas com orçamento + qualquer uma com gasto expressivo > 0)
-  const allCategoriesSet = new Set<string>([...effectiveLimitsMap.keys(), ...spentMap.keys()])
+  // 3. Monta lista de categorias a avaliar
+  const allCategoriesSet = new Set<string>([...effectiveLimitsMap.keys(), ...spentAmountMap.keys(), ...pendingAmountMap.keys()])
 
   const items: CategoryBudgetStatus[] = []
   let totalBudgeted = 0
   let totalSpent = 0
+  let totalPending = 0
   let criticalCount = 0
   let warningCount = 0
 
   for (const category of allCategoriesSet) {
     const rawLimit = round2(Math.max(0, rawLimitsMap.get(category) || 0))
     const limit = round2(Math.max(0, effectiveLimitsMap.get(category) || 0))
-    const spent = round2(Math.max(0, spentMap.get(category) || 0))
+    const spentAmount = round2(Math.max(0, spentAmountMap.get(category) || 0))
+    const pendingAmount = round2(Math.max(0, pendingAmountMap.get(category) || 0))
+    const committedAmount = round2(spentAmount + pendingAmount)
+    const spent = committedAmount
+
     const canonCat = normalizeBudgetCategory(category)
-
-    // Categorias patrimoniais ou de entrada (ex: Investimentos, Estorno) não devem gerar alerta
-    // de "despesa sem teto", a menos que o usuário tenha criado um envelope explícito para ela.
-    if (limit <= 0 && (NON_ENVELOPE_CATEGORIES.has(category) || NON_ENVELOPE_CATEGORIES.has(canonCat))) continue
-
-    const remaining = round2(limit - spent)
-
-    // Se a categoria não tem orçamento e não teve gastos, pula
-    if (limit <= 0 && spent <= 0) continue
-
-    const percentage = limit > 0 ? round2((spent / limit) * 100) : (spent > 0 ? 100 : 0)
+    const isInvestmentCategory = category === 'Investimentos' || /investimento/i.test(category)
     const isFixedCategory = FIXED_MONTHLY_CATEGORIES.has(category) || FIXED_MONTHLY_CATEGORIES.has(canonCat)
 
-    const isInvestmentCategory = category === 'Investimentos' || /investimento/i.test(category)
-    const excessAmount = spent - limit
-    const isMicroExcess = excessAmount > 0.001 && (excessAmount <= 2.0 || (limit > 0 && excessAmount / limit <= 0.01))
+    // Categorias patrimoniais/entradas não geram envelopes a menos que explicitamente configuradas
+    if (limit <= 0 && (NON_ENVELOPE_CATEGORIES.has(category) || NON_ENVELOPE_CATEGORIES.has(canonCat))) continue
+    if (limit <= 0 && committedAmount <= 0) continue
+
+    const remaining = round2(limit - committedAmount)
+    const realRemaining = round2(Math.max(0, limit - committedAmount))
+    const percentage = limit > 0 ? round2((spentAmount / limit) * 100) : (spentAmount > 0 ? 100 : 0)
+    const pendingPercentage = limit > 0 ? round2((pendingAmount / limit) * 100) : 0
+    const totalPercentage = limit > 0 ? round2((committedAmount / limit) * 100) : (committedAmount > 0 ? 100 : 0)
+
+    const isPaidOverspent = limit > 0 && (spentAmount - limit >= 0.01)
+    const isCommittedOverspent = limit > 0 && (committedAmount - limit >= 0.01)
+    const isExactLimit = limit > 0 && Math.abs(committedAmount - limit) < 0.01
 
     let status: 'ok' | 'warning' | 'danger' = 'ok'
+    let badgeLabel: CategoryBudgetBadgeLabel = 'Sob Controle'
+
     if (isInvestmentCategory) {
       status = 'ok'
-    } else if (limit > 0) {
-      if (isFixedCategory) {
-        if (spent > limit && !isMicroExcess) status = 'danger'
-        else status = 'ok'
+      badgeLabel = 'Sob Controle'
+    } else if (limit <= 0) {
+      status = committedAmount > 0 ? 'warning' : 'ok'
+      badgeLabel = 'Definir Teto'
+      if (status === 'warning') warningCount++
+    } else if (isPaidOverspent) {
+      status = 'danger'
+      badgeLabel = 'Estourado'
+      criticalCount++
+    } else if (isCommittedOverspent) {
+      status = 'danger'
+      badgeLabel = 'Vai Estourar'
+      criticalCount++
+    } else if (isExactLimit) {
+      status = isFixedCategory ? 'ok' : 'warning'
+      badgeLabel = isFixedCategory ? 'Quitado / Dentro do Previsto' : 'No Limite'
+      if (status === 'warning') warningCount++
+    } else if (isFixedCategory) {
+      status = 'ok'
+      badgeLabel = 'Fixo em Dia'
+    } else {
+      // Gastos variáveis
+      if (totalPercentage >= 90) {
+        status = 'warning'
+        badgeLabel = 'Quase no Limite'
+        warningCount++
+      } else if (totalPercentage >= 80) {
+        status = 'warning'
+        badgeLabel = (currentDay > 7 && ((spent / currentDay) * totalDays) > limit) ? 'Ritmo Rápido' : 'Quase no Limite'
+        warningCount++
+      } else if (currentDay <= 7) {
+        if (totalPercentage > 65) {
+          status = 'ok'
+          badgeLabel = 'Ritmo Rápido'
+        } else {
+          status = 'ok'
+          badgeLabel = 'Sob Controle'
+        }
       } else {
-        if (percentage >= 100 && !isMicroExcess) status = 'danger'
-        else if (percentage >= 80) status = 'warning'
+        const dailyPaceCalc = currentDay > 0 ? spent / currentDay : 0
+        const projectedCalc = dailyPaceCalc * totalDays
+        if (projectedCalc >= limit * 0.95) {
+          status = 'ok'
+          badgeLabel = 'Ritmo Rápido'
+        } else {
+          status = 'ok'
+          badgeLabel = 'Sob Controle'
+        }
       }
-    } else if (spent > 0) {
-      status = 'warning' // Sem teto mas com gasto
     }
 
     const dailyPace = currentDay > 0 ? round2(spent / currentDay) : 0
-    // Para categorias mensais fixas (Moradia, Assinaturas, Educação, Financiamentos), o pagamento
-    // integral no início do mês não projeta repetição diária linear, evitando falsos alertas.
     const projectedSpent = isFixedCategory && limit > 0
-      ? round2(Math.max(spent, limit))
+      ? round2(Math.max(committedAmount, limit))
       : round2(dailyPace * totalDays)
     const projectedPercentage = limit > 0 ? round2((projectedSpent / limit) * 100) : (projectedSpent > 0 ? 100 : 0)
-    const recommendedDailyRemaining = remaining > 0 && daysRemaining > 0 ? round2(remaining / daysRemaining) : 0
+    const recommendedDailyRemaining = realRemaining > 0 && daysRemaining > 0 ? round2(realRemaining / daysRemaining) : 0
 
     let burnRateStatus: CategoryBudgetPaceStatus = 'normal'
-    if (isInvestmentCategory) {
-      burnRateStatus = 'normal'
-    } else if (isFixedCategory) {
-      if (limit > 0 && spent > limit && !isMicroExcess) {
+    if (isInvestmentCategory || isFixedCategory) {
+      burnRateStatus = (committedAmount - limit >= 0.01) ? 'critical' : 'normal'
+    } else if (currentDay <= 7) {
+      if (committedAmount - limit >= 0.01) burnRateStatus = 'critical'
+      else if (totalPercentage >= 90) burnRateStatus = 'critical'
+      else if (totalPercentage > 65) burnRateStatus = 'fast'
+      else burnRateStatus = 'normal'
+    } else {
+      if (committedAmount - limit >= 0.01 || projectedPercentage >= 115) {
         burnRateStatus = 'critical'
-        criticalCount++
+      } else if (projectedPercentage >= 95 || totalPercentage >= 90) {
+        burnRateStatus = 'fast'
+      } else {
+        burnRateStatus = 'normal'
       }
-    } else if (status === 'danger' || (limit > 0 && projectedPercentage >= 115 && !isMicroExcess)) {
-      burnRateStatus = 'critical'
-      criticalCount++
-    } else if (status === 'warning' || (limit > 0 && projectedPercentage >= 95)) {
-      burnRateStatus = 'fast'
-      warningCount++
     }
 
-    if (limit > 0) {
+    if (limit > 0 && !isInvestmentCategory) {
       totalBudgeted += limit
-      totalSpent += spent
+      totalSpent += spentAmount
+      totalPending += pendingAmount
     }
 
     items.push({
@@ -2837,9 +2945,16 @@ export function computeCategoryBudgets(
       limit,
       rawLimit,
       spent,
+      spentAmount,
+      pendingAmount,
+      committedAmount,
       remaining,
+      realRemaining,
       percentage,
+      pendingPercentage,
+      totalPercentage,
       status,
+      badgeLabel,
       dailyPace,
       projectedSpent,
       projectedPercentage,
@@ -2852,44 +2967,62 @@ export function computeCategoryBudgets(
     })
   }
 
-  // Ordena por criticidade (perigo primeiro) e depois por valor gasto decrescente
+  // Ordena: perigo primeiro, depois alerta, depois por valor comprometido decrescente
   items.sort((a, b) => {
     const priority = { danger: 3, warning: 2, ok: 1 }
     const pDiff = priority[b.status] - priority[a.status]
     if (pDiff !== 0) return pDiff
-    return b.spent - a.spent
+    return b.committedAmount - a.committedAmount
   })
 
   totalBudgeted = round2(totalBudgeted)
   totalSpent = round2(totalSpent)
-  const totalRemaining = round2(totalBudgeted - totalSpent)
+  totalPending = round2(totalPending)
+  const totalCommitted = round2(totalSpent + totalPending)
+  const totalRemaining = round2(totalBudgeted - totalCommitted)
+  const totalRealRemaining = round2(Math.max(0, totalBudgeted - totalCommitted))
   const overallPercentage = totalBudgeted > 0 ? round2((totalSpent / totalBudgeted) * 100) : 0
 
   let overallStatus: 'ok' | 'warning' | 'danger' = 'ok'
-  if (overallPercentage >= 100 || criticalCount > 0) overallStatus = 'danger'
-  else if (overallPercentage >= 80) overallStatus = 'warning'
+  if (totalCommitted > totalBudgeted + 0.01 || criticalCount > 0) overallStatus = 'danger'
+  else if (overallPercentage >= 80 || warningCount > 0) overallStatus = 'warning'
 
+  // Top categoria estourada só existe se committedAmount exceder limit em >= 0.01 (sem falsos estouros de R$ 0,00)
   const topOverspentCategory = items.find(
-    (i) => !/investimento/i.test(i.category) && (i.status === 'danger' || i.burnRateStatus === 'critical'),
+    (i) => !/investimento/i.test(i.category) && (i.status === 'danger' || (i.committedAmount - i.limit >= 0.01)),
   )
-  const incomeUsagePercentage = validExpectedIncome > 0 ? round2((totalBudgeted / validExpectedIncome) * 100) : 0
-  const unallocatedIncome = validExpectedIncome > 0 ? round2(Math.max(0, validExpectedIncome - totalBudgeted)) : 0
+
+  const incomeUsagePercentage = totalAvailableIncome > 0 ? round2((totalBudgeted / totalAvailableIncome) * 100) : 0
+  const unallocatedIncome = totalAvailableIncome > 0 ? round2(Math.max(0, totalAvailableIncome - totalBudgeted)) : 0
+
+  const investmentTarget = rawLimitsMap.get('Investimentos') || 0
+  const investmentSpent = spentAmountMap.get('Investimentos') || 0
+  const investmentPercentage = investmentTarget > 0 ? round2((investmentSpent / investmentTarget) * 100) : 0
 
   return {
     items,
     totalBudgeted,
     rawTotalBudgeted,
     expectedIncome: validExpectedIncome,
+    carryoverAmount: validCarryover,
+    previousMonthDeficit: validDeficit,
+    totalAvailableIncome,
     isCappedToIncome,
     incomeUsagePercentage,
     unallocatedIncome,
     totalSpent,
+    totalPending,
+    totalCommitted,
     totalRemaining,
+    totalRealRemaining,
     overallPercentage,
     status: overallStatus,
     criticalCount,
     warningCount,
     topOverspentCategory,
+    investmentTarget,
+    investmentSpent,
+    investmentPercentage,
   }
 }
 
@@ -2903,6 +3036,8 @@ export function suggestCategoryBudgets(
   uid: string,
   referenceMonth: string = currentMonthKey(),
   monthlyIncome: number = 0,
+  carryoverAmount: number = 0,
+  previousMonthDeficit: number = 0,
 ): {
   suggestedBudgets: Record<string, number>
   totalSuggested: number
@@ -2964,10 +3099,11 @@ export function suggestCategoryBudgets(
   referenceMonthIncome = round2(Math.max(0, referenceMonthIncome))
   referenceMonthInvested = round2(Math.max(0, referenceMonthInvested))
 
-  // Usa o que é esperado entrar no mês selecionado (referenceMonthIncome); se não houver receitas lançadas no mês, usa monthlyIncome passado
-  const effectiveExpectedIncome = referenceMonthIncome > 0
+  // Usa o que é esperado entrar no mês selecionado + sobra do mês anterior; se não houver receitas lançadas no mês, usa monthlyIncome passado
+  const baseIncome = referenceMonthIncome > 0
     ? referenceMonthIncome
     : round2(Math.max(0, Number(monthlyIncome) || 0))
+  const effectiveExpectedIncome = round2(Math.max(0, baseIncome + (carryoverAmount || 0) - (previousMonthDeficit || 0)))
 
   // Se não houver dados nos meses anteriores, analisa o próprio referenceMonth
   if (matchingCount === 0) {
@@ -3008,9 +3144,8 @@ export function suggestCategoryBudgets(
       // Categorias fixas usam o valor real compromissado/médio arredondado em dezenas (sem inflar +10%);
       // categorias variáveis recebem margem de segurança de 10%
       const baseTarget = isFixed ? Math.max(avg, curCommitted) : Math.max(avg * 1.1, curCommitted)
-      const rawSuggested = Math.max(50, Math.ceil(baseTarget / 10) * 10)
-      // O piso inegociável é o que já foi gasto no mês selecionado
-      const suggested = Math.max(curCommitted, rawSuggested)
+      // NUNCA gera centavos quebrados: arredonda sempre para múltiplos de R$ 10,00
+      const suggested = Math.max(50, Math.ceil(baseTarget / 10) * 10)
       suggestedBudgets[cat] = suggested
       totalSuggested += suggested
     }
@@ -3018,9 +3153,10 @@ export function suggestCategoryBudgets(
 
   // Se houver aportes de investimento no mês de referência e a categoria não estiver em suggestedBudgets
   if (referenceMonthInvested > 0 && !suggestedBudgets['Investimentos']) {
-    suggestedBudgets['Investimentos'] = referenceMonthInvested
-    categoryAverages['Investimentos'] = referenceMonthInvested
-    totalSuggested += referenceMonthInvested
+    const invSuggested = Math.max(50, Math.ceil(referenceMonthInvested / 10) * 10)
+    suggestedBudgets['Investimentos'] = invSuggested
+    categoryAverages['Investimentos'] = round2(referenceMonthInvested)
+    totalSuggested += invSuggested
   }
 
   totalSuggested = round2(totalSuggested)
@@ -3029,34 +3165,34 @@ export function suggestCategoryBudgets(
   // Teto rigoroso: o orçamento sugerido NUNCA pode ultrapassar a entrada prevista daquele mês
   // e NUNCA pode ser menor do que o que a pessoa já gastou no mês selecionado.
   if (effectiveExpectedIncome > 0 && totalSuggested > 0) {
-    const maxEnvelopeCeiling = effectiveExpectedIncome
+    const maxEnvelopeCeiling = Math.floor(effectiveExpectedIncome / 10) * 10
 
     if (totalSuggested > maxEnvelopeCeiling && maxEnvelopeCeiling > 0) {
       isCappedToIncome = true
 
-      // 1. Calcula a soma dos pisos inegociáveis (o que já foi gasto no mês em cada categoria)
+      // 1. Calcula a soma dos pisos inegociáveis (o que já foi gasto no mês em cada categoria arredondado em múltiplos de 10)
       let sumFloors = 0
       const floorsMap: Record<string, number> = {}
       for (const cat of Object.keys(suggestedBudgets)) {
-        const floor = curMonthExpenseMap.get(cat) || (cat === 'Investimentos' ? referenceMonthInvested : 0)
+        const rawFloor = curMonthExpenseMap.get(cat) || (cat === 'Investimentos' ? referenceMonthInvested : 0)
+        const floor = Math.ceil(rawFloor / 10) * 10
         floorsMap[cat] = floor
         sumFloors += floor
       }
-      sumFloors = round2(sumFloors)
 
       if (sumFloors >= maxEnvelopeCeiling) {
         // Cenário onde os gastos já realizados no mês já consom toda a renda prevista:
-        // Mantém cada categoria exatamente no seu gasto realizado (não inventa teto menor que o dinheiro já gasto)
+        // Mantém cada categoria exatamente no seu piso de segurança arredondado
         let newTotal = 0
         for (const cat of Object.keys(suggestedBudgets)) {
           const floor = floorsMap[cat] || 0
           suggestedBudgets[cat] = floor
-          newTotal = round2(newTotal + floor)
+          newTotal += floor
         }
         totalSuggested = newTotal
       } else {
         // Folga disponível para distribuir acima dos pisos gastos:
-        const availableFlex = round2(maxEnvelopeCeiling - sumFloors)
+        const availableFlex = maxEnvelopeCeiling - sumFloors
 
         // Margem desejada pela IA acima dos pisos para cada categoria:
         let sumDesiredFlex = 0
@@ -3067,7 +3203,6 @@ export function suggestCategoryBudgets(
           desiredFlexMap[cat] = desired
           sumDesiredFlex += desired
         }
-        sumDesiredFlex = round2(sumDesiredFlex)
 
         let newTotal = 0
         let largestFlexCat = ''
@@ -3079,9 +3214,9 @@ export function suggestCategoryBudgets(
           const scaledFlex = sumDesiredFlex > 0
             ? Math.floor(((desired / sumDesiredFlex) * availableFlex) / 10) * 10
             : 0
-          const finalVal = round2(floor + scaledFlex)
+          const finalVal = floor + scaledFlex
           suggestedBudgets[cat] = finalVal
-          newTotal = round2(newTotal + finalVal)
+          newTotal += finalVal
 
           if (desired > largestFlexVal) {
             largestFlexVal = desired
@@ -3090,10 +3225,10 @@ export function suggestCategoryBudgets(
         }
 
         // Distribui o resíduo da dezena na categoria com maior folga flexível
-        const diff = round2(maxEnvelopeCeiling - newTotal)
+        const diff = Math.floor((maxEnvelopeCeiling - newTotal) / 10) * 10
         if (largestFlexCat && diff > 0) {
-          suggestedBudgets[largestFlexCat] = round2(suggestedBudgets[largestFlexCat] + diff)
-          newTotal = round2(newTotal + diff)
+          suggestedBudgets[largestFlexCat] = suggestedBudgets[largestFlexCat] + diff
+          newTotal += diff
         }
 
         totalSuggested = newTotal
@@ -3117,6 +3252,8 @@ export function suggestCategoryBudgets(
 
 /**
  * Detecta categorias estouradas e encontra categorias com saldo sobrando no mês para compensar.
+ * Utiliza estritamente committedAmount (spent + pending) e realRemaining para nunca retirar
+ * valores que já estão comprometidos para contas a vencer.
  */
 export function suggestBudgetRebalance(
   report: CategoryBudgetReport,
@@ -3126,15 +3263,33 @@ export function suggestBudgetRebalance(
   surplusTotal: number
   suggestions: BudgetRebalanceSuggestion[]
 } {
-  const overspent = report.items.filter(
-    (i) => i.limit > 0 && i.spent - i.limit > 2 && !/investimento/i.test(i.category),
-  )
-  const surplus = report.items.filter(
-    (i) => i.limit > 0 && i.remaining > 20 && !i.isFixedCategory && !/investimento/i.test(i.category),
+  // Uma categoria só é elegível para socorro se tiver estouro real >= R$ 1,00
+  const overspent = report.items.filter((i) => {
+    if (i.limit <= 0 || /investimento/i.test(i.category)) return false
+    const committed = i.committedAmount ?? i.spent
+    return (committed - i.limit) >= 1.00
+  })
+
+  // Só retira de categorias variáveis que tenham folga real livre (realRemaining) >= R$ 10,00
+  const surplus = report.items.filter((i) => {
+    if (i.limit <= 0 || i.isFixedCategory || /investimento/i.test(i.category)) return false
+    const freeSurplus = i.realRemaining !== undefined ? i.realRemaining : Math.max(0, i.limit - i.spent)
+    return freeSurplus >= 10
+  })
+
+  const deficitTotal = round2(
+    overspent.reduce((acc, i) => {
+      const committed = i.committedAmount ?? i.spent
+      return acc + Math.max(0, committed - i.limit)
+    }, 0),
   )
 
-  const deficitTotal = round2(overspent.reduce((acc, i) => acc + (i.spent - i.limit), 0))
-  const surplusTotal = round2(surplus.reduce((acc, i) => acc + i.remaining, 0))
+  const surplusTotal = round2(
+    surplus.reduce((acc, i) => {
+      const freeSurplus = i.realRemaining !== undefined ? i.realRemaining : Math.max(0, i.limit - i.spent)
+      return acc + freeSurplus
+    }, 0),
+  )
 
   const suggestions: BudgetRebalanceSuggestion[] = []
 
@@ -3147,31 +3302,37 @@ export function suggestBudgetRebalance(
     }
   }
 
-  // Cópia dos saldos remanescentes para alocação gananciosa (greedy allocation)
+  // Cópia dos saldos remanescentes livres para alocação gananciosa (greedy allocation)
   const remainingSurplusMap = new Map<string, number>()
   for (const s of surplus) {
-    remainingSurplusMap.set(s.category, s.remaining)
+    const freeSurplus = s.realRemaining !== undefined ? s.realRemaining : Math.max(0, s.limit - s.spent)
+    remainingSurplusMap.set(s.category, freeSurplus)
   }
 
   for (const o of overspent) {
-    let needed = round2(o.spent - o.limit)
+    const committed = o.committedAmount ?? o.spent
+    let needed = round2(committed - o.limit)
 
     for (const s of surplus) {
       if (needed <= 0) break
       const avail = remainingSurplusMap.get(s.category) || 0
       if (avail <= 0) continue
 
-      const transfer = round2(Math.min(needed, avail))
-      if (transfer >= 5) {
+      // Arredonda a transferência para valor limpo (múltiplo de R$ 5,00 ou inteiro)
+      const rawTransfer = Math.min(needed, avail)
+      const transfer = Math.max(5, Math.ceil(rawTransfer / 5) * 5)
+      const safeTransfer = Math.min(transfer, avail)
+
+      if (safeTransfer >= 5) {
         suggestions.push({
           overspentCategory: o.category,
-          overspentAmount: round2(o.spent - o.limit),
+          overspentAmount: round2(committed - o.limit),
           compensateFrom: s.category,
-          availableSurplus: avail,
-          suggestedTransfer: transfer,
+          availableSurplus: round2(avail),
+          suggestedTransfer: round2(safeTransfer),
         })
-        needed = round2(needed - transfer)
-        remainingSurplusMap.set(s.category, round2(avail - transfer))
+        needed = round2(Math.max(0, needed - safeTransfer))
+        remainingSurplusMap.set(s.category, round2(Math.max(0, avail - safeTransfer)))
       }
     }
   }
