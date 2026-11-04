@@ -53,9 +53,12 @@ jobs:
           if [ -n "$GCP_SA_KEY" ]; then
             echo "$GCP_SA_KEY" > /tmp/sa-key.json
             export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa-key.json
-            npx firebase-tools deploy --only firestore:rules,firestore:indexes --project saldo-livre-c3ca3
+            if npx firebase-tools deploy --only firestore:rules,firestore:indexes --project saldo-livre-c3ca3 --non-interactive; then
+              echo "Regras e índices do Firestore publicados com sucesso."
+            else
+              echo "::warning::Deploy de regras/índices do Firestore não concluído. Verifique se a Service Account no secret FIREBASE_SERVICE_ACCOUNT_SALDO_LIVRE_C3CA3 possui os papéis 'Firebase Rules Admin' e 'Cloud Datastore Index Admin'."
+            fi
             rm -f /tmp/sa-key.json
-            echo "Regras e índices do Firestore publicados com sucesso."
           else
             echo "Service Account ausente. Ignorando deploy de regras."
           fi

@@ -7,8 +7,39 @@ on:
   workflow_dispatch:
 
 jobs:
+  detect-changes:
+    name: Detect Changed Subsystems
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+      android: ${{ steps.filter.outputs.android }}
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Filter Changed Paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            web:
+              - 'web/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/quality-gates.yml'
+            android:
+              - 'android/**'
+              - '.github/workflows/quality-gates.yml'
+            backend:
+              - 'backend/**'
+              - 'firebase.json'
+              - '.github/workflows/quality-gates.yml'
+
   web-quality:
     name: Web QA (Lint, Vitest & Build)
+    needs: detect-changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -39,6 +70,8 @@ jobs:
 
   android-quality:
     name: Android QA (Unit Tests & Kotlin Compile)
+    needs: detect-changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.android == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -54,11 +87,11 @@ jobs:
           java-version: '17'
 
       - name: Setup Gradle & Cache
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare Mock google-services.json
         run: |
-          cp "$GITHUB_WORKSPACE/android/app/google-services.json.example" "$GITHUB_WORKSPACE/android/app/google-services.json"
+          cp -f "$GITHUB_WORKSPACE/android/app/google-services.json.example" "$GITHUB_WORKSPACE/android/app/google-services.json"
           echo "GEMINI_API_KEY=dummy_ci_key" >> "$GITHUB_WORKSPACE/android/local.properties"
 
       - name: Grant Execute Permission for Gradlew
@@ -67,11 +100,10 @@ jobs:
       - name: Run Android Unit Tests (JVM)
         run: ./gradlew testDebugUnitTest --stacktrace
 
-      - name: Verify Android Kotlin Compilation
-        run: ./gradlew compileDebugKotlin --stacktrace
-
   backend-quality:
     name: Backend Serverless QA (TypeScript Build)
+    needs: detect-changes
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -90,3 +122,25 @@ jobs:
       - name: Verify Backend TypeScript Build
         run: npm --prefix backend run build
 
+  quality-gates-status:
+    name: Quality Gates Final Status
+    needs: [detect-changes, web-quality, android-quality, backend-quality]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate Quality Gates
+        run: |
+          WEB_RES="${{ needs.web-quality.result }}"
+          ANDROID_RES="${{ needs.android-quality.result }}"
+          BACKEND_RES="${{ needs.backend-quality.result }}"
+
+          echo "Web Quality: $WEB_RES"
+          echo "Android Quality: $ANDROID_RES"
+          echo "Backend Quality: $BACKEND_RES"
+
+          if [ "$WEB_RES" = "failure" ] || [ "$ANDROID_RES" = "failure" ] || [ "$BACKEND_RES" = "failure" ]; then
+            echo "❌ Pelo menos uma das etapas de qualidade falhou."
+            exit 1
+          fi
+
+          echo "✅ Todos os subsistemas alterados passaram com sucesso nos quality gates."

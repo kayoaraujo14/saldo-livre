@@ -257,6 +257,13 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
   - **Modelos de Perfil e Fechamento Atualizados:** adicionados `investmentMonthlyTarget` e `investmentAssetBalances` em `UserProfile` (Web e Android) e `investmentSubcategory` em `MonthClosure`, preparando a persistência das caixinhas e a destinação de sobras diretamente no Firestore.
   - **Paridade de Compilação:** `npm run build` (TypeScript e Vite) OK e `./gradlew.bat compileDebugKotlin` OK.
 
+- **[2026-11-03] Estabilização de CI/CD, Quality Gates & Dependabot (Concluída):**
+  - **Filtro Inteligente de Mudanças (Quality Gates):** Introdução de detecção seletiva de caminhos (`dorny/paths-filter@v3`) em `.github/workflows/quality-gates.yml`. PRs de documentação, Web ou Backend agora não disparam compilações desnecessárias do Android, e vice-versa, com consolidador de status `quality-gates-status`.
+  - **Dependabot Anti-Breakage:** Adição de regras de blindagem no `.github/dependabot.yml` com `ignore` para major version bumps de ferramentas de base Android (`gradle`, `com.android.application`, `org.jetbrains.kotlin.*`, `androidx.core:core-ktx`) e agrupamento de dependências (`androidx-compose`, `firebase`, `backend-deps`).
+  - **Firebase Hosting PR Preview Blindado:** Correção do `.github/workflows/firebase-hosting-pull-request.yml` para ignorar deploy de preview em PRs abertos pelo Dependabot (`github.actor != 'dependabot[bot]'`), contornando a restrição de segurança de secrets do GitHub.
+  - **Deploy Firestore Resiliente no Merge:** Ajuste no `.github/workflows/firebase-hosting-merge.yml` com `--non-interactive` e isolamento não bloqueante em caso de ausência de permissões IAM da Service Account, garantindo o deploy contínuo do canal Live do Web.
+  - **Atualização de Actions:** Upgrade de `gradle/actions/setup-gradle@v3` para `@v4` nos workflows Android.
+
 - **[2026-10-30] Fix de Compilação Release (Android):**
   - **Null Safety em `TransactionDetailDialog`:** corrigida chamada não segura `currentUser.displayName` para `currentUser?.displayName` na verificação de participantes do rateio, resolvendo erro do compilador Kotlin (`Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type UserProfile?`) na pipeline de Release.
   - Build: `./gradlew :app:compileReleaseKotlin` OK.

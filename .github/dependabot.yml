@@ -8,7 +8,7 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "America/Sao_Paulo"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     groups:
       dev-dependencies:
         patterns:
@@ -30,15 +30,43 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "America/Sao_Paulo"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    ignore:
+      # Não permitir updates 'major' automáticos de ferramentas base do Android,
+      # que exigem migração coordenada de compilador e plugins
+      - dependency-name: "gradle"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.android.application"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "androidx.core:core-ktx"
+        update-types: ["version-update:semver-major"]
     groups:
       androidx-compose:
         patterns:
           - "androidx.compose*"
           - "androidx.lifecycle*"
           - "androidx.navigation*"
+      firebase:
+        patterns:
+          - "com.google.firebase*"
 
-  # 3. GitHub Actions Workflows
+  # 3. Ecossistema Backend Serverless (npm / TypeScript / Cloud Functions)
+  - package-ecosystem: "npm"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Sao_Paulo"
+    open-pull-requests-limit: 3
+    groups:
+      backend-deps:
+        patterns:
+          - "*"
+
+  # 4. GitHub Actions Workflows
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -46,5 +74,4 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "America/Sao_Paulo"
-    open-pull-requests-limit: 5
-
+    open-pull-requests-limit: 3
