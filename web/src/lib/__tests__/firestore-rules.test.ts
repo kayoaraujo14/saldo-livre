@@ -296,4 +296,42 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       await assertFails(setDoc(bobTargetRef, { rule: 'Regra adulterada', active: false }))
     })
   })
+
+  describe('5. Coleção /users/{userId}/activity_logs (Logs de Atividades)', () => {
+    it('permite que o próprio usuário crie, leia, atualize e delete seus logs de atividade', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const logRef = doc(aliceDb, 'users', 'alice', 'activity_logs', 'log_1')
+
+      await assertSucceeds(
+        setDoc(logRef, {
+          title: 'Transação Criada',
+          timestamp: Date.now(),
+        })
+      )
+      await assertSucceeds(getDoc(logRef))
+      await assertSucceeds(updateDoc(logRef, { title: 'Transação Atualizada' }))
+      await assertSucceeds(deleteDoc(logRef))
+    })
+
+    it('impede que terceiros leiam ou manipulem os logs de outro usuário', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'users', 'alice', 'activity_logs', 'log_secret'), {
+          title: 'Segredo de Alice',
+        })
+      })
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const aliceLogRef = doc(bobDb, 'users', 'alice', 'activity_logs', 'log_secret')
+
+      await assertFails(getDoc(aliceLogRef))
+      await assertFails(setDoc(aliceLogRef, { title: 'Bob Espiando' }))
+      await assertFails(updateDoc(aliceLogRef, { title: 'Bob Hackeando' }))
+      await assertFails(deleteDoc(aliceLogRef))
+    })
+  })
 })
+

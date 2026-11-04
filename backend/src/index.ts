@@ -122,11 +122,30 @@ export const backupFirestoreScheduled = onSchedule(
   async () => {
     logger.info('Iniciando rotina diária de backup e telemetria do Firestore...')
     try {
-      const bucketName = process.env.BACKUP_STORAGE_BUCKET || 'gs://saldo-livre-backups'
-      logger.info(`Bucket de destino configurado: ${bucketName}`)
-      logger.info('Backup Firestore snapshot concluído com êxito.')
+      const projectId =
+        process.env.GCLOUD_PROJECT ||
+        process.env.GCP_PROJECT ||
+        admin.app().options.projectId ||
+        'saldo-livre-c3ca3'
+
+      const rawBucket = process.env.BACKUP_STORAGE_BUCKET || `gs://${projectId}-backups`
+      const bucketName = rawBucket.startsWith('gs://') ? rawBucket : `gs://${rawBucket}`
+
+      const firestoreAdmin = new (admin.firestore as any).v1.FirestoreAdminClient()
+      const databaseName = firestoreAdmin.databasePath(projectId, '(default)')
+
+      logger.info(`Disparando exportação para database: ${databaseName} no bucket: ${bucketName}`)
+
+      const [operation] = await firestoreAdmin.exportDocuments({
+        name: databaseName,
+        outputUriPrefix: bucketName,
+        collectionIds: [], // Coleções vazias exportam todas as coleções
+      })
+
+      logger.info(`Backup gerenciado do Firestore iniciado com sucesso. Operação: ${operation?.name || 'iniciada'}`)
     } catch (error) {
-      logger.error('Falha na rotina de backup agendado:', error)
+      logger.error('Falha crítica na rotina de backup agendado do Firestore:', error)
+      throw error
     }
   }
 )

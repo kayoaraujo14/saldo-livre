@@ -59,7 +59,6 @@ export type {
   ManualTransactionInput,
   Mode,
 }
-export { DEMO_KEY, FORCE_DEMO_KEY, freshDemo, loadDemo }
 
 const FinanceContext = createContext<FinanceContextValue | null>(null)
 
@@ -186,11 +185,26 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   }, [mode, authUser])
 
   // ---------------- Visão unificada ----------------
-  const transactions = mode === 'demo' ? (demo?.transactions || []) : (fbTx || [])
-  const cards = mode === 'demo' ? (demo?.cards || []) : (fbCards || [])
-  const recurring = mode === 'demo' ? (demo?.recurring || []) : (fbRecurring || [])
-  const friendships = mode === 'demo' ? (demo?.friendships || []) : (fbFriendships || [])
-  const monthClosures = mode === 'demo' ? (demo?.monthClosures || []) : (fbMonthClosures || [])
+  const transactions = useMemo(
+    () => (mode === 'demo' ? demo?.transactions || [] : fbTx || []),
+    [mode, demo?.transactions, fbTx],
+  )
+  const cards = useMemo(
+    () => (mode === 'demo' ? demo?.cards || [] : fbCards || []),
+    [mode, demo?.cards, fbCards],
+  )
+  const recurring = useMemo(
+    () => (mode === 'demo' ? demo?.recurring || [] : fbRecurring || []),
+    [mode, demo?.recurring, fbRecurring],
+  )
+  const friendships = useMemo(
+    () => (mode === 'demo' ? demo?.friendships || [] : fbFriendships || []),
+    [mode, demo?.friendships, fbFriendships],
+  )
+  const monthClosures = useMemo(
+    () => (mode === 'demo' ? demo?.monthClosures || [] : fbMonthClosures || []),
+    [mode, demo?.monthClosures, fbMonthClosures],
+  )
   const currentUid = mode === 'demo' ? sessionUid : (authUser?.uid ?? null)
 
   const users: UserProfile[] = useMemo(() => {
@@ -545,7 +559,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
       await fb.fsRespondChargeRequest(ids, accept)
     },
-    [mode, commitDemo, currentUid, partnerParty, friends],
+    [mode, commitDemo, currentUid],
   )
 
   // ---------------- Lançamentos do mês e resumo ----------------
@@ -649,7 +663,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         setClosureModalOpen(false)
       }
     },
-    [mode, commitDemo, currentUid, partnerParty, friends, profile],
+    [mode, commitDemo, currentUid, profile],
   )
 
   const deleteMonthClosure = useCallback(
@@ -898,7 +912,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
       await fb.fsDeleteTransaction(id)
     },
-    [mode, commitDemo, currentUid, partnerParty, friends],
+    [mode, commitDemo, currentUid],
   )
 
   const deleteInstallmentGroup = useCallback(
@@ -925,7 +939,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       await fb.fsDeleteTransactionsBatch(targetIds)
       return targetIds.length
     },
-    [mode, commitDemo, currentUid, partnerParty, friends],
+    [mode, commitDemo, currentUid],
   )
 
   const updateInstallmentGroup = useCallback(
@@ -1798,7 +1812,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           }
         }
       }),
-    [mode, friends, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction, commitDemo, sendFriendRequest, respondFriendRequest],
+    [mode, friends, profile, monthClosures, lookupUserByEmail, addTransaction, addMany, updateTransaction, deleteTransaction, commitDemo, sendFriendRequest, respondFriendRequest],
   )
 
   const rules = useMemo(() => {

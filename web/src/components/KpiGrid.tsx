@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { NumberTicker } from '@/components/ui/NumberTicker'
 import { useFinance } from '@/store/FinanceContext'
-import { formatBRL, monthLabel, shiftMonth, todayKey, round2 } from '@/lib/utils'
+import { formatBRL, monthLabel, shiftMonth, todayKey, nextWeekKey, round2 } from '@/lib/utils'
 import { buildCardInvoice, invoiceDates } from '@/lib/invoices'
 import { impactFor, calculateFinancialHealthScore } from '@/lib/finance'
 import {
@@ -31,20 +31,14 @@ export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) 
   const consumptionBadge = consumptionPct > 100 ? 'Alerta' : consumptionPct > 80 ? 'Atenção' : 'No Limite'
 
   // Formatação da data final da janela de 7 dias
-  const formattedEndDate = useMemo(() => {
-    const now = new Date()
-    const nextWeekDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7)
-    return `${String(nextWeekDate.getDate()).padStart(2, '0')}/${String(nextWeekDate.getMonth() + 1).padStart(2, '0')}`
-  }, [])
+  const formattedEndDate = useMemo(() => nextWeekKey(7).label, [])
 
   // 2. Radar 7 Dias (Sem repetições triplas de 'sem contas')
   const radarData = useMemo(() => {
     if (!transactions) return { total: 0, count: 0, urgencyBadge: 'Sem pendências', subtitle: `Até ${formattedEndDate} sem contas`, isUrgent: false }
 
     const today = todayKey()
-    const now = new Date()
-    const nextWeekDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7)
-    const nextWeekStr = `${nextWeekDate.getFullYear()}-${String(nextWeekDate.getMonth() + 1).padStart(2, '0')}-${String(nextWeekDate.getDate()).padStart(2, '0')}`
+    const nextWeekStr = nextWeekKey(7).dateStr
 
     // Despesas avulsas não vinculadas a fatura de cartão
     const nonCardTxs = transactions.filter((tx) => {
@@ -133,7 +127,7 @@ export function KpiGrid({ onOpenReceivables, onOpenInvestments }: KpiGridProps) 
       badgeText: `${catPct}% do total`,
       subtitle: 'Principal despesa do mês',
     }
-  }, [summary?.byCategory, summary?.paid, summary?.committed])
+  }, [summary])
 
   // 4. Saúde de Investimentos (Sem repetições de Meta 20% vs 0% vs R$ 0)
   const investmentData = useMemo(() => {

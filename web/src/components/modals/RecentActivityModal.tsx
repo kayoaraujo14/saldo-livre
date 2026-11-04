@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
 import { getThirdPartyInfo, impactFor, effectiveAmount } from '@/lib/finance'
-import { formatBRL, formatShortDate, formatCreatedAt, monthLabel } from '@/lib/utils'
+import { formatBRL, formatShortDate, formatCreatedAt, monthLabel, nowTimestamp } from '@/lib/utils'
 import type { Transaction } from '@/types'
 import {
   History,
@@ -60,7 +60,7 @@ export function RecentActivityModal({
 
   // Contadores para o cabeçalho
   const stats = useMemo(() => {
-    const now = Date.now()
+    const now = nowTimestamp()
     const sevenDaysAgo = now - 7 * 86400000
     let last7DaysCount = 0
     let withThirdPartyCount = 0

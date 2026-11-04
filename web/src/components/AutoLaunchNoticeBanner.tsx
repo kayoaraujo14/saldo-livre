@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useFinance } from '@/store/FinanceContext'
-import { formatBRL } from '@/lib/utils'
+import { formatBRL, currentDayOfMonth } from '@/lib/utils'
 import {
   Zap,
   Check,
@@ -75,7 +75,7 @@ export function AutoLaunchNoticeBanner({ onGoToTransactions }: AutoLaunchNoticeB
   }
 
   // Próximos vencimentos nos próximos 3 dias que ainda não viraram pendências
-  const currentDay = new Date().getDate()
+  const currentDay = currentDayOfMonth()
   const upcomingBills = (recurring || [])
     .filter((b) => b.active && b.ownerUid === me?.uid)
     .filter((b) => {

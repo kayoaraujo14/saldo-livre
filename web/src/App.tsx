@@ -31,7 +31,20 @@ const MonthClosureModal = lazy(() => import('@/components/modals/MonthClosureMod
 
 type DesktopViewMode = 'chat_focus' | 'chat_full' | 'table_full'
 
+function getInitialPwaAction(): string | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  const action = params.get('action')
+  if (action) {
+    const cleanUrl = window.location.pathname + window.location.hash
+    window.history.replaceState({}, '', cleanUrl)
+  }
+  return action
+}
+
 function MainDashboard() {
+  const [initialAction] = useState(() => getInitialPwaAction())
+
   const {
     month,
     setMonth,
@@ -53,20 +66,22 @@ function MainDashboard() {
   const [recurringModalOpen, setRecurringModalOpen] = useState(false)
   const [receivablesModalOpen, setReceivablesModalOpen] = useState(false)
   const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false)
-  const [txModalOpen, setTxModalOpen] = useState(false)
+  const [txModalOpen, setTxModalOpen] = useState(() => initialAction === 'new_expense')
   const [projectionModalOpen, setProjectionModalOpen] = useState(false)
   const [friendsModalOpen, setFriendsModalOpen] = useState(false)
   const [recentActivityModalOpen, setRecentActivityModalOpen] = useState(false)
   const [investmentsModalOpen, setInvestmentsModalOpen] = useState(false)
-  const [invoicesModalOpen, setInvoicesModalOpen] = useState(false)
+  const [invoicesModalOpen, setInvoicesModalOpen] = useState(() => initialAction === 'invoices')
   const [invoicesInitialCardId, setInvoicesInitialCardId] = useState<string | null>(null)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
-  const [mobileTab, setMobileTab] = useState<MobileTab>('home')
+  const [mobileTab, setMobileTab] = useState<MobileTab>(() => (initialAction === 'chat' ? 'chat' : 'home'))
 
   // Desktop view layout mode: 'chat_focus' (60/40) | 'equal' (50/50) | 'chat_full' (100%) | 'table_full' (100%)
-  const [desktopView, setDesktopView] = useState<DesktopViewMode>('chat_focus')
+  const [desktopView, setDesktopView] = useState<DesktopViewMode>(() =>
+    initialAction === 'chat' ? 'chat_full' : 'chat_focus'
+  )
 
   // ESC shortcut to return from full-screen view mode
   useEffect(() => {
@@ -81,25 +96,6 @@ function MainDashboard() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [desktopView])
-
-  // Processamento de atalhos rápidos do PWA (ex: ?action=new_expense, ?action=invoices, ?action=chat)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const action = params.get('action')
-    if (!action) return
-
-    if (action === 'new_expense') {
-      handleOpenNewTx()
-    } else if (action === 'invoices') {
-      setInvoicesModalOpen(true)
-    } else if (action === 'chat') {
-      setMobileTab('chat')
-      setDesktopView('chat_full')
-    }
-
-    const cleanUrl = window.location.pathname + window.location.hash
-    window.history.replaceState({}, '', cleanUrl)
-  }, [])
 
   const handleSelectMobileTab = (tab: MobileTab) => {
     setMobileTab(tab)

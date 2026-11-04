@@ -777,13 +777,13 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
       let cleanDesc = desc
 
       if (!itemFriendName && !itemSplitType) {
-        const pctMatch = desc.match(/[;,]?\s*(\d+(?:[.,]\d+)?)\s*%\s*(?:para|com|de)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+        const pctMatch = desc.match(/[;,]?\s*(\d+(?:[.,]\d+)?)\s*%\s*(?:para|com|de)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,.]|$)/i)
         if (pctMatch) {
           itemFriendPct = Number(pctMatch[1].replace(',', '.'))
           itemFriendName = pctMatch[2].trim()
           cleanDesc = desc.replace(pctMatch[0], '').replace(/[;,]?\s*R\$\s*\d+(?:[.,]\d+)?/gi, '').replace(/[;,]\s*$/, '').trim()
         } else {
-          const divMatch = desc.match(/[;,]?\s*(?:dividid[oa]|divis[ãa]o|dividi|meio\s+a\s+meio|50\/50|50-50)\s*(?:com|para)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+          const divMatch = desc.match(/[;,]?\s*(?:dividid[oa]|divis[ãa]o|dividi|meio\s+a\s+meio|50\/50|50-50)\s*(?:com|para)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,.]|$)/i)
           if (divMatch) {
             itemFriendPct = 50
             itemFriendName = divMatch[1].trim()
@@ -1009,13 +1009,13 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
     let cleanDesc = desc
 
     if (!itemFriendName && !itemSplitType) {
-      const pctMatch = desc.match(/[;,]?\s*(\d+(?:[.,]\d+)?)\s*%\s*(?:para|com|de)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+      const pctMatch = desc.match(/[;,]?\s*(\d+(?:[.,]\d+)?)\s*%\s*(?:para|com|de)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,.]|$)/i)
       if (pctMatch) {
         itemFriendPct = Number(pctMatch[1].replace(',', '.'))
         itemFriendName = pctMatch[2].trim()
         cleanDesc = desc.replace(pctMatch[0], '').replace(/[;,]?\s*R\$\s*\d+(?:[.,]\d+)?/gi, '').replace(/[;,]\s*$/, '').trim()
       } else {
-        const divMatch = desc.match(/[;,]?\s*(?:dividid[oa]|divis[ãa]o|dividi|meio\s+a\s+meio|50\/50|50-50)\s*(?:com|para)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,\.]|$)/i)
+        const divMatch = desc.match(/[;,]?\s*(?:dividid[oa]|divis[ãa]o|dividi|meio\s+a\s+meio|50\/50|50-50)\s*(?:com|para)\s+([A-Za-zÀ-ÖØ-öø-ÿ\s]+?)(?:[;,.]|$)/i)
         if (divMatch) {
           itemFriendPct = 50
           itemFriendName = divMatch[1].trim()

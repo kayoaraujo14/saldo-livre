@@ -188,13 +188,14 @@ function DonutChart({
   const center = size / 2
   const circumference = 2 * Math.PI * radius
 
-  // Calculate cumulative offsets
-  let accumulatedPct = 0
+  // Calculate cumulative offsets purely without mutating render state
   const slices = data.map((d, index) => {
     const pct = total > 0 ? d.value / total : 0
+    const priorPct = data
+      .slice(0, index)
+      .reduce((sum, prev) => sum + (total > 0 ? prev.value / total : 0), 0)
     const strokeDasharray = `${pct * circumference} ${circumference}`
-    const strokeDashoffset = -accumulatedPct * circumference
-    accumulatedPct += pct
+    const strokeDashoffset = -priorPct * circumference
     return {
       ...d,
       pct,

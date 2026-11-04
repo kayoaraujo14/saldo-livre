@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md — Fonte da Verdade & Índice Arquitetural (`Saldo Livre`)
 
-> **Última Atualização:** 2026-11-03
+> **Última Atualização:** 2026-11-04
 > **Status da Fundação:** 🟢 **100% CONCLUÍDA E ESTABILIZADA**
 > **Propósito:** Índice central de arquitetura, mapeamento de paridade Web/Mobile, segurança e histórico de micro-commits para otimização máxima de contexto e tokens.
 
@@ -25,6 +25,7 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
   - `/users/{userId}/agent_rules/{ruleId}` (e top-level `/agent_rules`): Regras aprendidas e memórias de categorização do Copiloto.
   - `/users/{userId}/chat_sessions/{sessionId}` (e top-level `/chat_sessions`): Histórico de conversas com o Copiloto Gemini.
   - `/users/{userId}/month_closures/{closureId}` (e top-level `/month_closures`): Fechamentos mensais consolidados (`MonthClosure`) e repasse de saldo acumulado.
+  - `/users/{userId}/activity_logs/{logId}`: Histórico e logs de auditoria de ações do usuário (isolamento estrito no `firestore.rules`).
 - `/transactions/{txId}`: Lançamentos financeiros (Receitas, Despesas, Investimentos, Parcelados e Rateios entre amigos). Isolamento por `visibleToUids`, `createdByUid`, `paidByUid`, `assignedFriendUid` e cartões compartilhados.
 - `/cards/{cardId}`: Cartões de crédito/débito, limites, dias de fechamento/vencimento e compartilhamento (`ownerUid`, `sharedWithUids`).
 - `/recurring_bills/{billId}`: Moldes de contas fixas/recorrentes para autolançamento mensal (`ownerUid`).
@@ -86,6 +87,56 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+
+- **[2026-11-04] Prioridade 3 — Otimização Android: Modernização Java 17, Minificação R8/ProGuard & Validação da Suíte de Testes (Conclusão Integral):**
+  - **Modernização do Java Toolchain (Java 17):**
+    - Atualização de `compileOptions` para `JavaVersion.VERSION_17` (source e target) e `kotlinOptions.jvmTarget = "17"` em `android/app/build.gradle.kts`.
+    - Compatibilização com OpenJDK 17 e Android Gradle Plugin 8.3+.
+  - **Minificação e Otimização de Tamanho de Release (R8 & Resource Shrinking):**
+    - Habilitadas `isMinifyEnabled = true` e `isShrinkResources = true` na configuração `release` do Android.
+    - Otimização com regras de R8/ProGuard em `proguard-rules.pro` preservando modelos do Gemini, Firebase e data classes do Kotlin.
+    - Geração de `app-release.apk` altamente compacto de apenas **4.04 MB** (4.240.308 bytes).
+  - **Diagnóstico de Encoding de Processos Filhos no Gradle (Windows):**
+    - Diagnóstico de falha de carregamento de classes de worker do Gradle decorrente da leitura de `@argfile` no Windows sob diretórios de usuário com acentuação (`C:\Users\Kayo Araújo`).
+    - Resolução com cache redirecionado para `C:\GradleCache` e execução via junção limpa `C:\saldo-livre`.
+  - **Validação Global:**
+    - Testes Unitários Android: **29 testes passando 100%** (`testDebugUnitTest`).
+    - Compilação & Empacotamento de Release: **`assembleRelease` com 49 tarefas executadas e sucesso absoluto**.
+
+- **[2026-11-04] Prioridade 2 — Qualidade de Código, Conformidade React 19 & Zeramento de Lint (Conclusão Integral):**
+  - **Zeramento Absoluto de Diagnósticos (de 83 advertências para ZERO absoluto no oxlint):**
+    - **Sintaxe & Imports Limpos:** Remoção de `fs` não utilizado em `benchmark.cjs`, eliminação de imports órfãos em `invoices.test.ts` e correção de escapes desnecessários em expressões regulares (`[;,\.]` -> `[;,.]`) em `transactionTools.ts`.
+    - **Conformidade com React 19 Compiler:**
+      - `ChatChart.tsx`: Refatorado o cálculo de fatias cumulativas para modelo 100% puro e determinístico sem mutação de acumulador pós-renderização.
+      - `App.tsx`: Inicialização de estado lazy direta para atalhos PWA (`initialAction`), eliminando chamadas síncronas de `setState` em efeitos e o risco de TDZ em `handleOpenNewTx`.
+      - `KpiGrid.tsx`, `AutoLaunchNoticeBanner.tsx` e `RecentActivityModal.tsx`: Extração de leituras de tempo impuras (`new Date()`, `Date.now()`) para utilitários puros em `utils.ts` (`nextWeekKey`, `currentDayOfMonth`, `nowTimestamp`) e inclusão de dependências ausentes de hooks.
+      - `NumberTicker.tsx`: Uso de `useRef` para transições de valor sem captura de estado em `useEffect`.
+      - `FriendsModal.tsx`: Derivação declarativa de abas ativas em render, eliminando efeitos colaterais de sincronização.
+      - `CardInvoicesModal.tsx`: Inclusão de `selectedCardId` e `selected?.card` nas dependências de hooks.
+      - `GeminiChat.tsx`: Referência imutável estável para mensagens iniciais (`DEFAULT_MESSAGES`), seleção segura de sessões na nuvem e dependência de modelo ativo.
+    - **Saneamento e Estabilização do Store (`FinanceContext.tsx`):**
+      - Memoização das coleções centrais unificadas (`transactions`, `cards`, `recurring`, `friendships`, `monthClosures`) via `useMemo`, eliminando dezenas de re-avaliações em cascata nos 18 componentes da aplicação.
+      - Saneamento de dependências nos callbacks de transação e amizade, e inclusão de `profile` e `monthClosures` no `agentEnv`.
+      - Remoção de re-exportações não-componente no arquivo do contexto para preservar 100% o Fast Refresh.
+  - **Validação Global:**
+    - Linter: **0 avisos e 0 erros em 68 arquivos** (`oxlint`).
+    - Testes Unitários: **81 testes verdes** (`vitest run`).
+    - Build de Produção: **Vite build concluído em 1.37s** com zero erros.
+
+- **[2026-11-04] Prioridade 1 — Segurança & Infraestrutura Cloud (Conclusão Integral):**
+  - **Etapa 1.1 — Blindagem de `activity_logs` no `firestore.rules` & Testes Automatizados:**
+    - Delegado ao subagente especialista `firestore-rules-author` a criação da regra de isolamento para a subcoleção privada `/users/{userId}/activity_logs/{logId}`.
+    - Leitura e escrita restritas exclusivamente ao próprio usuário autenticado (`request.auth.uid == userId`), bloqueando acessos anônimos e de terceiros.
+    - Expansão da suíte `web/src/lib/__tests__/firestore-rules.test.ts` com 2 novos testes de isolamento de auditoria (totalizando 15 testes de regras e 81 testes unitários verdes no Vitest).
+  - **Etapa 1.2 — Implementação Real de Backup Gerenciado no Backend Cloud Functions V2:**
+    - Substituição da rotina mockada em `backupFirestoreScheduled` ([backend/src/index.ts](file:///c:/Users/Kayo%20Araújo/Documents/github/saldo-livre/backend/src/index.ts)) pela invocação real da API de exportação gerenciada do Cloud Firestore através de `admin.firestore.v1.FirestoreAdminClient`.
+    - Resolução dinâmica do projeto (`GCLOUD_PROJECT`, `GCP_PROJECT`, `projectId`), montagem determinística de caminho de banco de dados (`projects/{projectId}/databases/(default)`) e exportação para o bucket Cloud Storage (`gs://saldo-livre-c3ca3-backups` ou customizável via `BACKUP_STORAGE_BUCKET`).
+    - Compilação limpa do TypeScript no backend (`npm --prefix backend run build` -> `backend/lib/index.js`).
+  - **Validação Global:**
+    - Testes Vitest Web: **81 testes verdes** (`npm --prefix web test -- --run`).
+    - Build Web: **Zero erros** (`npm --prefix web run build`).
+    - Backend Serverless: **Compilação TypeScript 100% aprovada** (`tsc`).
+
 
 - **[2026-11-03] Infraestrutura & Backend Serverless — 5 Pilares Consolidados (Conclusão Integral):**
   - **Pilar 1 — CI/CD & Deploy Automático de Regras & Quality Gates Universal:**

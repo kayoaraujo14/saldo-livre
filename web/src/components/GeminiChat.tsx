@@ -65,6 +65,8 @@ const INITIAL_MESSAGE: ChatMessage = {
   content: 'Olá! Sou o Copiloto Saldo Livre 🤖✨. Como posso ajudar você hoje?',
 }
 
+const DEFAULT_MESSAGES: readonly ChatMessage[] = [INITIAL_MESSAGE]
+
 const PROMPT_HISTORY_KEY = 'saldo_livre_user_prompt_history'
 
 function getLearnedPrompts(): string[] {
@@ -526,7 +528,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
 
   // Current session & messages
   const currentSession = sessions.find((s) => s.id === currentSessionId) || sessions[0]
-  const messages = currentSession?.messages || [INITIAL_MESSAGE]
+  const messages = currentSession?.messages || DEFAULT_MESSAGES
 
   const activePendingTxs = useMemo(() => {
     if (pendingBatchTransactions && pendingBatchTransactions.length > 0) return pendingBatchTransactions
@@ -559,7 +561,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
 
         // Se a sessão atual for apenas uma inicial em branco, chaveia para a mais recente da nuvem
         setCurrentSessionId((prevId) => {
-          const current = (sessions || []).find((s) => s && s.id === prevId)
+          const current = (safeCloud || []).find((s) => s && s.id === prevId)
           const msgs = Array.isArray(current?.messages) ? current.messages : []
           const isBlank = !current || msgs.length <= 1
           if (isBlank && safeCloud[0]?.id) {
@@ -711,7 +713,7 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     if (current && current !== activeModel) {
       setActiveModel(current)
     }
-  })
+  }, [activeModel])
 
   const handleConfirmPendingAction = async (messageId: string, pendingAction: PendingAction) => {
     updateSessionMessages((prev) =>

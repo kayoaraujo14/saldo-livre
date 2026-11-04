@@ -1,4 +1,4 @@
-const fs = require('fs');
+// Benchmark helper script
 
 // We will mock the context just to run the counts function and see how long it takes.
 const txs = [];

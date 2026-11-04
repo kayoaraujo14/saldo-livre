@@ -43,6 +43,24 @@ export function todayKey() {
   return toDateKey(new Date())
 }
 
+export function currentDayOfMonth() {
+  return new Date().getDate()
+}
+
+export function nowTimestamp() {
+  return Date.now()
+}
+
+export function nextWeekKey(days = 7): { dateStr: string; label: string } {
+  const now = new Date()
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return {
+    label: `${pad(next.getDate())}/${pad(next.getMonth() + 1)}`,
+    dateStr: `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`,
+  }
+}
+
 export function currentMonthKey() {
   return toMonthKey(new Date())
 }

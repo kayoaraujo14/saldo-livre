@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatBRL } from '@/lib/utils'
 
 interface NumberTickerProps {
@@ -18,11 +18,13 @@ export function NumberTicker({
   duration = 600,
   className = '',
 }: NumberTickerProps) {
-  const [displayValue, setDisplayValue] = useState(0)
+  const [displayValue, setDisplayValue] = useState(value)
+  const prevValueRef = useRef(value)
 
   useEffect(() => {
     let startTimestamp: number | null = null
-    const startValue = displayValue
+    const startValue = prevValueRef.current
+    prevValueRef.current = value
 
     const step = (timestamp: number) => {
       if (!startTimestamp) startTimestamp = timestamp

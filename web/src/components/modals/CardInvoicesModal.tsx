@@ -157,7 +157,7 @@ export function CardInvoicesModal({
       setSelectedParticipantName(null)
       setSelectedCategory(null)
     }
-  }, [open, month, initialCardId, initialMonth, cards, transactions, uid])
+  }, [open, month, initialCardId, initialMonth, selectedCardId, cards, transactions, uid])
 
   const invoices = useMemo(
     () => cards.map((c) => buildCardInvoice(c, viewMonth, transactions, uid)),
@@ -283,7 +283,7 @@ export function CardInvoicesModal({
       groups.push({ dateKey, items, total })
     }
     return groups
-  }, [visibleItems, selectedParticipantName, selected?.splitBreakdown, uid])
+  }, [visibleItems, selectedParticipantName, selected?.splitBreakdown, selected?.card, uid])
 
   const handlePayInvoice = async () => {
     if (!selected) return
