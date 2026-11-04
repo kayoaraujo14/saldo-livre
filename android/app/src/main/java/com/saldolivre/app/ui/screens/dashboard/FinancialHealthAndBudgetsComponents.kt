@@ -43,6 +43,7 @@ private val BUDGETABLE_EXPENSE_CATEGORIES = listOf(
     "Educação & Desenvolvimento",
     "Cuidados Pessoais & Estética",
     "Família & Pets",
+    "Investimentos",
     "Financiamentos & Dívidas",
     "Impostos & Tributos",
     "Doações & Presentes",
@@ -1452,7 +1453,8 @@ fun ManageBudgetsDialog(
                                     )
                                     val subInfo = buildString {
                                         if (spentItem != null && spentItem.spent > 0.0) {
-                                            append("Gasto: ${FinanceEngine.formatCurrency(spentItem.spent)}")
+                                            val label = if (category == "Investimentos") "Aportado" else "Gasto"
+                                            append("$label: ${FinanceEngine.formatCurrency(spentItem.spent)}")
                                         }
                                         if (avg3m > 0.0) {
                                             if (isNotEmpty()) append(" • ")

@@ -687,6 +687,7 @@ class FirestoreFinanceRepository(
                     "investmentMonthlyTarget" to profile.investmentMonthlyTarget,
                     "investmentAssetBalances" to profile.investmentAssetBalances,
                     "categoryBudgets" to profile.categoryBudgets,
+                    "monthlyCategoryBudgets" to profile.monthlyCategoryBudgets,
                     "resolvedRecurring" to profile.resolvedRecurring
                 ),
                 com.google.firebase.firestore.SetOptions.merge()
@@ -710,11 +711,28 @@ class FirestoreFinanceRepository(
         }
     }
 
-    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>) {
+    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>, targetMonth: String?) {
         val uid = auth.currentUser?.uid ?: _currentUser.value.uid
-        _currentUser.value = _currentUser.value.copy(categoryBudgets = budgets)
+        val current = _currentUser.value
+        val updatedMonthly = if (!targetMonth.isNullOrBlank()) {
+            current.monthlyCategoryBudgets.toMutableMap().apply {
+                put(targetMonth, budgets)
+            }
+        } else {
+            current.monthlyCategoryBudgets
+        }
+        _currentUser.value = current.copy(
+            categoryBudgets = budgets,
+            monthlyCategoryBudgets = updatedMonthly
+        )
         if (uid.isNotBlank() && uid != "default_uid") {
-            firestore.collection("users").document(uid).update("categoryBudgets", budgets).await()
+            val updates = mutableMapOf<String, Any>(
+                "categoryBudgets" to budgets
+            )
+            if (!targetMonth.isNullOrBlank()) {
+                updates["monthlyCategoryBudgets.$targetMonth"] = budgets
+            }
+            firestore.collection("users").document(uid).update(updates).await()
         }
     }
 
@@ -1029,6 +1047,20 @@ class FirestoreFinanceRepository(
                 budgetsMap[k.toString()] = num
             }
         }
+        val rawMonthlyBudgets = doc.get("monthlyCategoryBudgets") as? Map<*, *>
+        val monthlyBudgetsMap = mutableMapOf<String, Map<String, Double>>()
+        rawMonthlyBudgets?.forEach { (mKey, mVal) ->
+            if (mKey != null && mVal is Map<*, *>) {
+                val catMap = mutableMapOf<String, Double>()
+                mVal.forEach { (cKey, cVal) ->
+                    if (cKey != null) {
+                        val num = (cVal as? Number)?.toDouble() ?: 0.0
+                        catMap[cKey.toString()] = num
+                    }
+                }
+                monthlyBudgetsMap[mKey.toString()] = catMap
+            }
+        }
         return UserProfile(
             uid = doc.id,
             email = doc.getString("email") ?: "",
@@ -1039,6 +1071,7 @@ class FirestoreFinanceRepository(
             investmentMonthlyTarget = doc.getDouble("investmentMonthlyTarget") ?: 1000.0,
             investmentAssetBalances = assetBalances,
             categoryBudgets = budgetsMap,
+            monthlyCategoryBudgets = monthlyBudgetsMap,
             resolvedRecurring = resolvedMap
         )
     }

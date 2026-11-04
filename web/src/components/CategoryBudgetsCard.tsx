@@ -34,6 +34,7 @@ export function CategoryBudgetsCard() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTab, setModalTab] = useState<'budgets' | 'rebalance'>('budgets')
   const [isExpanded, setIsExpanded] = useState(false)
+  const [isCardCollapsed, setIsCardCollapsed] = useState(false)
   const [activeFilter, setActiveFilter] = useState<EnvelopeFilter>('all')
 
   const {
@@ -113,7 +114,7 @@ export function CategoryBudgetsCard() {
       expectedIncome,
     )
     if (Object.keys(suggestion.suggestedBudgets).length > 0) {
-      await setCategoryBudgets(suggestion.suggestedBudgets)
+      await setCategoryBudgets(suggestion.suggestedBudgets, month)
     } else {
       openConfig()
     }
@@ -139,6 +140,9 @@ export function CategoryBudgetsCard() {
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-sm text-white flex items-center gap-1.5">
                   Envelopes Orçamentários
+                  <span className="text-xs font-semibold text-emerald-400 font-sans">
+                    • {monthLabel(month)}
+                  </span>
                 </h3>
                 <Badge
                   variant="outline"
@@ -218,10 +222,23 @@ export function CategoryBudgetsCard() {
               <Sliders className="size-3 mr-1 text-slate-400" />
               {totalBudgeted > 0 ? 'Ajustar Tetos' : 'Configurar'}
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsCardCollapsed((prev) => !prev)}
+              title={isCardCollapsed ? 'Expandir envelopes' : 'Recolher envelopes'}
+              className="h-7 w-7 p-0 text-slate-400 hover:text-white hover:bg-white/[0.06] cursor-pointer"
+            >
+              {isCardCollapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+            </Button>
           </div>
         </div>
 
-        {/* Painel Resumo de Execução do Orçamento vs Entrada Prevista */}
+        {/* Corpo expansível do Card */}
+        {!isCardCollapsed && (
+          <>
+            {/* Painel Resumo de Execução do Orçamento vs Entrada Prevista */}
         {totalBudgeted > 0 && (
           <div className="p-3 rounded-xl bg-slate-950/55 border border-white/[0.06] space-y-2.5">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
@@ -537,6 +554,8 @@ export function CategoryBudgetsCard() {
               </Button>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
 

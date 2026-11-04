@@ -242,7 +242,7 @@ function MainDashboard() {
             className={
               isExpandedView
                 ? 'grid grid-cols-12 flex-1 min-h-0'
-                : 'grid grid-cols-12 gap-3.5 h-[calc(100vh-160px)] max-h-[calc(100vh-160px)] min-h-[540px]'
+                : 'grid grid-cols-12 gap-3.5 h-[calc(100vh-260px)] min-h-[520px]'
             }
           >
             {/* Left Panel: Financial Table */}

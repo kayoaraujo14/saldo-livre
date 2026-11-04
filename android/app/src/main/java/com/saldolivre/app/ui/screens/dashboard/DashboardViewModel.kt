@@ -273,9 +273,11 @@ class DashboardViewModel(
 
                 // 5. Envelopes Orçamentários Inteligentes & Termômetro de Saúde Financeira (4 Pilares)
                 val expectedMonthIncome = if (summary.income > 0.0) summary.income else user.monthlyIncome
+                val monthBudgets = user.monthlyCategoryBudgets[month]?.takeIf { it.isNotEmpty() }
+                    ?: if (month == FinanceEngine.currentMonthKey() || user.monthlyCategoryBudgets.isEmpty()) user.categoryBudgets else emptyMap()
                 val categoryBudgetReport = FinanceEngine.computeCategoryBudgets(
                     byCategory = summary.byCategory,
-                    categoryBudgets = user.categoryBudgets,
+                    categoryBudgets = monthBudgets,
                     monthKey = month,
                     referenceDate = todayStr,
                     expectedIncome = expectedMonthIncome
@@ -623,24 +625,26 @@ class DashboardViewModel(
         return cleaned
     }
 
-    fun updateCategoryBudgets(budgets: Map<String, Double>) {
+    fun updateCategoryBudgets(budgets: Map<String, Double>, targetMonth: String? = null) {
+        val monthToSave = targetMonth ?: _uiState.value.selectedMonth
         viewModelScope.launch {
             try {
                 val calibrated = calibrateMapToIncome(budgets)
-                repository.updateCategoryBudgets(calibrated)
+                repository.updateCategoryBudgets(calibrated, monthToSave)
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao atualizar envelopes orçamentários", e)
             }
         }
     }
 
-    fun applyAiSuggestedBudgets() {
+    fun applyAiSuggestedBudgets(targetMonth: String? = null) {
+        val monthToSave = targetMonth ?: _uiState.value.selectedMonth
         viewModelScope.launch {
             try {
                 val suggested = _uiState.value.suggestedBudgets.suggestedBudgets
                 if (suggested.isNotEmpty()) {
                     val calibrated = calibrateMapToIncome(suggested)
-                    repository.updateCategoryBudgets(calibrated)
+                    repository.updateCategoryBudgets(calibrated, monthToSave)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao aplicar sugestão de envelopes IA", e)
@@ -648,16 +652,19 @@ class DashboardViewModel(
         }
     }
 
-    fun applyBudgetRebalance(fromCategory: String? = null, toCategory: String? = null, amount: Double? = null) {
+    fun applyBudgetRebalance(fromCategory: String? = null, toCategory: String? = null, amount: Double? = null, targetMonth: String? = null) {
+        val monthToSave = targetMonth ?: _uiState.value.selectedMonth
         viewModelScope.launch {
             try {
-                val current = _uiState.value.currentUser.categoryBudgets.toMutableMap()
+                val user = _uiState.value.currentUser
+                val currentMonthBudgets = user.monthlyCategoryBudgets[monthToSave]?.takeIf { it.isNotEmpty() } ?: user.categoryBudgets
+                val current = currentMonthBudgets.toMutableMap()
                 if (!fromCategory.isNullOrBlank() && !toCategory.isNullOrBlank() && amount != null && amount > 0.0) {
                     val fromVal = current[fromCategory] ?: 0.0
                     val toVal = current[toCategory] ?: 0.0
                     current[fromCategory] = max(0.0, FinanceEngine.round2(fromVal - amount))
                     current[toCategory] = FinanceEngine.round2(toVal + amount)
-                    repository.updateCategoryBudgets(current)
+                    repository.updateCategoryBudgets(current, monthToSave)
                 } else {
                     val suggestions = _uiState.value.budgetRebalance.suggestions
                     if (suggestions.isNotEmpty()) {
@@ -667,7 +674,7 @@ class DashboardViewModel(
                             current[s.compensateFrom] = max(0.0, FinanceEngine.round2(fromVal - s.suggestedTransfer))
                             current[s.overspentCategory] = FinanceEngine.round2(toVal + s.suggestedTransfer)
                         }
-                        repository.updateCategoryBudgets(current)
+                        repository.updateCategoryBudgets(current, monthToSave)
                     }
                 }
             } catch (e: Exception) {

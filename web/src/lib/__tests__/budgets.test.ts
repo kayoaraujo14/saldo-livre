@@ -516,5 +516,101 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
       expect(sug.totalSuggested).toBeLessThanOrEqual(3000)
       expect(sug.incomeCoveragePct).toBeLessThanOrEqual(100)
     })
+
+    it('garante que a sugestão da IA nunca seja menor do que o que o usuário já gastou no mês', () => {
+      const txs: Transaction[] = [
+        {
+          id: 'inc1',
+          description: 'Salário',
+          category: 'Salário & Remuneração',
+          type: 'income',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 4000,
+          totalAmount: 4000,
+          estimatedAmount: null,
+          dueDate: '2026-11-05',
+          competenceMonth: '2026-11',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 4000 },
+        },
+        // Já gastou 1400 em Alimentação no próprio mês 2026-11
+        {
+          id: 'exp_nov',
+          description: 'Supermercado e Restaurantes',
+          category: 'Alimentação',
+          type: 'expense',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 1400,
+          totalAmount: 1400,
+          estimatedAmount: null,
+          dueDate: '2026-11-10',
+          competenceMonth: '2026-11',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 1400 },
+        },
+        // Média histórica dos meses anteriores era menor (ex: 800)
+        {
+          id: 'exp_oct',
+          description: 'Mercado Outubro',
+          category: 'Alimentação',
+          type: 'expense',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 800,
+          totalAmount: 800,
+          estimatedAmount: null,
+          dueDate: '2026-10-10',
+          competenceMonth: '2026-10',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 800 },
+        },
+      ]
+
+      const sug = suggestCategoryBudgets(txs, 'me', '2026-11', 4000)
+      // A sugestão para Alimentação DEVE ser >= 1400 (o que já foi gasto no mês)
+      expect(sug.suggestedBudgets['Alimentação']).toBeGreaterThanOrEqual(1400)
+    })
+
+    it('puxa o valor investido corretamente no envelope de Investimentos', () => {
+      const txs: Transaction[] = [
+        {
+          id: 'inv1',
+          description: 'Aporte CDB 100% CDI',
+          category: 'Investimentos',
+          subcategory: 'Renda Fixa (CDB / Tesouro / LCI / LCA)',
+          type: 'expense',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 5000,
+          totalAmount: 5000,
+          estimatedAmount: null,
+          dueDate: '2026-11-08',
+          competenceMonth: '2026-11',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 5000 },
+        },
+      ]
+
+      const budgets = {
+        Investimentos: 6000,
+      }
+
+      const report = computeCategoryBudgets(txs, budgets, '2026-11', '2026-11-10', 'me', txs, 10000)
+      const invEnvelope = report.items.find((i) => i.category === 'Investimentos')!
+      expect(invEnvelope).toBeDefined()
+      expect(invEnvelope.limit).toBe(6000)
+      expect(invEnvelope.spent).toBe(5000) // Puxou exatamente o valor investido de R$ 5.000!
+      expect(invEnvelope.remaining).toBe(1000)
+    })
   })
 })

@@ -142,7 +142,18 @@ class FakeFinanceRepository(
 
     override suspend fun updateInvestmentAssetBalances(balances: Map<String, Double>) {}
     override suspend fun updateInvestmentMonthlyTarget(target: Double) {}
-    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>) {
-        _currentUser.value = _currentUser.value.copy(categoryBudgets = budgets)
+    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>, targetMonth: String?) {
+        val current = _currentUser.value
+        val updatedMonthly = if (!targetMonth.isNullOrBlank()) {
+            current.monthlyCategoryBudgets.toMutableMap().apply {
+                put(targetMonth, budgets)
+            }
+        } else {
+            current.monthlyCategoryBudgets
+        }
+        _currentUser.value = current.copy(
+            categoryBudgets = budgets,
+            monthlyCategoryBudgets = updatedMonthly
+        )
     }
 }

@@ -139,9 +139,10 @@ export interface FinanceContextValue {
   lookupUserByEmail: (email: string) => Promise<UserProfile | null>
   // Envelopes Orçamentários
   categoryBudgetReport: CategoryBudgetReport
-  setCategoryBudget: (category: string, limit: number) => Promise<void>
-  setCategoryBudgets: (budgets: Record<string, number>) => Promise<void>
-  rebalanceCategoryBudgets: (fromCategory: string, toCategory: string, amount: number) => Promise<void>
+  setCategoryBudget: (category: string, limit: number, targetMonth?: string) => Promise<void>
+  setCategoryBudgets: (budgets: Record<string, number>, targetMonth?: string) => Promise<void>
+  rebalanceCategoryBudgets: (fromCategory: string, toCategory: string, amount: number, targetMonth?: string) => Promise<void>
+  copyCategoryBudgetsFromMonth: (sourceMonth: string, targetMonth?: string) => Promise<void>
   monthClosures: MonthClosure[]
   saveMonthClosure: (closure: MonthClosure) => Promise<void>
   deleteMonthClosure: (closedMonth: string) => Promise<void>

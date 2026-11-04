@@ -610,11 +610,24 @@ class MockFinanceRepository(
         _currentUser.value = _currentUser.value.copy(investmentMonthlyTarget = target)
     }
 
-    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>) {
+    override suspend fun updateCategoryBudgets(budgets: Map<String, Double>, targetMonth: String?) {
         val current = _currentUser.value
-        _currentUser.value = current.copy(categoryBudgets = budgets)
+        val updatedMonthly = if (!targetMonth.isNullOrBlank()) {
+            current.monthlyCategoryBudgets.toMutableMap().apply {
+                put(targetMonth, budgets)
+            }
+        } else {
+            current.monthlyCategoryBudgets
+        }
+        _currentUser.value = current.copy(
+            categoryBudgets = budgets,
+            monthlyCategoryBudgets = updatedMonthly
+        )
         try {
             prefs?.edit()?.putString("demo_budgets_${current.uid}", gson.toJson(budgets))?.apply()
+            if (!targetMonth.isNullOrBlank()) {
+                prefs?.edit()?.putString("demo_monthly_budgets_${current.uid}", gson.toJson(updatedMonthly))?.apply()
+            }
         } catch (_: Exception) {
         }
     }

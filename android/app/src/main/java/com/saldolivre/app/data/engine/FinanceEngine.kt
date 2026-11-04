@@ -1098,14 +1098,19 @@ object FinanceEngine {
             if (tx.type == TransactionType.EXPENSE && impact > 0.0) {
                 categoryMap[tx.category] = (categoryMap[tx.category] ?: 0.0) + impact
 
-                if (tx.category == "Investimentos") {
+                val isAporte = tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)
+                if (isAporte) {
                     totalInvested += impact
                     val sub = tx.subcategory ?: "Outros Investimentos"
                     investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) + impact
+                    if (tx.category != "Investimentos") {
+                        categoryMap["Investimentos"] = (categoryMap["Investimentos"] ?: 0.0) + impact
+                    }
                 }
             } else if (tx.type == TransactionType.INCOME && impact > 0.0) {
                 // Abate resgates do total investido no mês
                 val isResgate = tx.category == "Investimentos" ||
+                    tx.category.contains("investimento", ignoreCase = true) ||
                     (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
                 if (isResgate) {
                     totalInvested -= impact
@@ -1243,8 +1248,8 @@ object FinanceEngine {
         var totalInvestedAccumulated = 0.0
         for (tx in all) {
             if (tx.visibleToUids.contains(uid)) {
-                val isAporte = tx.category == "Investimentos" && tx.type == TransactionType.EXPENSE
-                val isResgate = (tx.category == "Investimentos" && tx.type == TransactionType.INCOME) ||
+                val isAporte = (tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)) && tx.type == TransactionType.EXPENSE
+                val isResgate = ((tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)) && tx.type == TransactionType.INCOME) ||
                     (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
                 val imp = impactFor(tx, uid, all)
                 if (isAporte && imp > 0.0) {
@@ -2675,8 +2680,12 @@ object FinanceEngine {
         for (tx in transactions) {
             if (tx.competenceMonth == monthKey) {
                 val impact = impactFor(tx, uid, allTransactions)
+                val isAporte = (tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)) && tx.type == TransactionType.EXPENSE
                 if (tx.type == TransactionType.EXPENSE && impact > 0.0 && tx.category.isNotBlank()) {
                     spentMap[tx.category] = (spentMap[tx.category] ?: 0.0) + impact
+                    if (isAporte && tx.category != "Investimentos") {
+                        spentMap["Investimentos"] = (spentMap["Investimentos"] ?: 0.0) + impact
+                    }
                 } else if (tx.type == TransactionType.INCOME && impact > 0.0) {
                     monthIncomeFromTx += impact
                 }
@@ -2969,18 +2978,31 @@ object FinanceEngine {
             matchingCount++
         }
 
-        if (matchingCount == 0) {
-            val curMap = mutableMapOf<String, Double>()
-            for (tx in allTransactions) {
-                if (tx.type != TransactionType.EXPENSE) continue
-                val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
-                if (m != referenceMonth) continue
-                val impact = impactFor(tx, uid, allTransactions)
-                if (impact <= 0.0 || tx.category.isBlank()) continue
+        val curMonthExpenseMap = mutableMapOf<String, Double>()
+        var referenceMonthInvested = 0.0
+        for (tx in allTransactions) {
+            val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
+            if (m != referenceMonth) continue
+            val impact = impactFor(tx, uid, allTransactions)
+            if (tx.type == TransactionType.EXPENSE && impact > 0.0 && tx.category.isNotBlank()) {
                 val canonicalCat = normalizeBudgetCategory(tx.category)
-                curMap[canonicalCat] = (curMap[canonicalCat] ?: 0.0) + impact
+                if (canonicalCat == "Investimentos") {
+                    referenceMonthInvested += impact
+                } else {
+                    curMonthExpenseMap[canonicalCat] = (curMonthExpenseMap[canonicalCat] ?: 0.0) + impact
+                }
+            } else if (tx.type == TransactionType.INCOME && impact > 0.0) {
+                val isResgate = tx.category == "Investimentos" ||
+                    (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
+                if (isResgate) {
+                    referenceMonthInvested -= impact
+                }
             }
-            monthCategoryTotals[referenceMonth] = curMap
+        }
+        referenceMonthInvested = round2(kotlin.math.max(0.0, referenceMonthInvested))
+
+        if (matchingCount == 0) {
+            monthCategoryTotals[referenceMonth] = curMonthExpenseMap
         }
 
         val activeMonths = monthCategoryTotals.keys.filter { (monthCategoryTotals[it]?.size ?: 0) > 0 }
@@ -2994,6 +3016,13 @@ object FinanceEngine {
             }
         }
 
+        // Inclui categorias com gastos no mês atual mesmo que ausentes do histórico
+        for ((cat, curAmt) in curMonthExpenseMap) {
+            if (!sumMap.containsKey(cat) && curAmt >= 20.0) {
+                sumMap[cat] = curAmt * divisor
+            }
+        }
+
         val suggestedBudgets = linkedMapOf<String, Double>()
         val categoryAverages = linkedMapOf<String, Double>()
         var totalSuggested = 0.0
@@ -3002,47 +3031,89 @@ object FinanceEngine {
             if (cat in NON_ENVELOPE_CATEGORIES || normalizeBudgetCategory(cat) in NON_ENVELOPE_CATEGORIES) continue
             val avg = round2(sum / divisor)
             categoryAverages[cat] = avg
-            if (avg >= 20.0) {
-                // Categorias fixas mantêm o valor exato (arredondado para dezena); variáveis têm margem de +10%
+            val curCommitted = curMonthExpenseMap[cat] ?: 0.0
+            if (avg >= 20.0 || curCommitted > 0.0) {
                 val isFixed = isFixedBudgetCategory(cat)
-                val rawSuggested = if (isFixed) {
-                    kotlin.math.ceil(avg / 10.0) * 10.0
+                val baseTarget = if (isFixed) {
+                    kotlin.math.max(avg, curCommitted)
                 } else {
-                    kotlin.math.ceil((avg * 1.1) / 10.0) * 10.0
+                    kotlin.math.max(avg * 1.1, curCommitted)
                 }
-                val suggested = kotlin.math.max(50.0, rawSuggested)
+                val rawSuggested = kotlin.math.max(50.0, kotlin.math.ceil(baseTarget / 10.0) * 10.0)
+                // O piso inegociável é o que já foi gasto no mês selecionado
+                val suggested = kotlin.math.max(curCommitted, rawSuggested)
                 suggestedBudgets[cat] = suggested
                 totalSuggested += suggested
             }
         }
 
+        if (referenceMonthInvested > 0.0 && !suggestedBudgets.containsKey("Investimentos")) {
+            suggestedBudgets["Investimentos"] = referenceMonthInvested
+            categoryAverages["Investimentos"] = referenceMonthInvested
+            totalSuggested += referenceMonthInvested
+        }
+
         var isCappedToIncome = false
         // Calibração estrita: o orçamento sugerido nunca pode exceder a entrada prevista do mês
+        // e NUNCA pode ser menor do que o que o usuário já gastou no mês
         if (effectiveExpectedIncome > 0.0 && totalSuggested > effectiveExpectedIncome) {
             isCappedToIncome = true
-            val scale = effectiveExpectedIncome / totalSuggested
-            var newTotal = 0.0
-            var maxCat = ""
-            var maxVal = -1.0
+            var sumFloors = 0.0
+            val floorsMap = mutableMapOf<String, Double>()
+            for (cat in suggestedBudgets.keys) {
+                val floor = curMonthExpenseMap[cat] ?: (if (cat == "Investimentos") referenceMonthInvested else 0.0)
+                floorsMap[cat] = floor
+                sumFloors += floor
+            }
+            sumFloors = round2(sumFloors)
 
-            for (cat in suggestedBudgets.keys.toList()) {
-                val rawVal = suggestedBudgets[cat] ?: 0.0
-                val scaled = kotlin.math.max(10.0, kotlin.math.floor((rawVal * scale) / 5.0) * 5.0)
-                val roundedScaled = round2(scaled)
-                suggestedBudgets[cat] = roundedScaled
-                newTotal = round2(newTotal + roundedScaled)
-                if (roundedScaled > maxVal) {
-                    maxVal = roundedScaled
-                    maxCat = cat
+            if (sumFloors >= effectiveExpectedIncome) {
+                var newTotal = 0.0
+                for (cat in suggestedBudgets.keys.toList()) {
+                    val floor = floorsMap[cat] ?: 0.0
+                    suggestedBudgets[cat] = floor
+                    newTotal = round2(newTotal + floor)
                 }
-            }
+                totalSuggested = newTotal
+            } else {
+                val availableFlex = round2(effectiveExpectedIncome - sumFloors)
+                var sumDesiredFlex = 0.0
+                val desiredFlexMap = mutableMapOf<String, Double>()
+                for (cat in suggestedBudgets.keys) {
+                    val floor = floorsMap[cat] ?: 0.0
+                    val desired = kotlin.math.max(0.0, (suggestedBudgets[cat] ?: 0.0) - floor)
+                    desiredFlexMap[cat] = desired
+                    sumDesiredFlex += desired
+                }
+                sumDesiredFlex = round2(sumDesiredFlex)
 
-            if (newTotal > effectiveExpectedIncome && maxCat.isNotEmpty()) {
-                val excess = round2(newTotal - effectiveExpectedIncome)
-                suggestedBudgets[maxCat] = round2(kotlin.math.max(0.0, (suggestedBudgets[maxCat] ?: 0.0) - excess))
-                newTotal = round2(newTotal - excess)
+                var newTotal = 0.0
+                var largestFlexCat = ""
+                var largestFlexVal = -1.0
+
+                for (cat in suggestedBudgets.keys.toList()) {
+                    val floor = floorsMap[cat] ?: 0.0
+                    val desired = desiredFlexMap[cat] ?: 0.0
+                    val scaledFlex = if (sumDesiredFlex > 0.0) {
+                        kotlin.math.floor(((desired / sumDesiredFlex) * availableFlex) / 10.0) * 10.0
+                    } else 0.0
+                    val finalVal = round2(floor + scaledFlex)
+                    suggestedBudgets[cat] = finalVal
+                    newTotal = round2(newTotal + finalVal)
+
+                    if (desired > largestFlexVal) {
+                        largestFlexVal = desired
+                        largestFlexCat = cat
+                    }
+                }
+
+                val diff = round2(effectiveExpectedIncome - newTotal)
+                if (largestFlexCat.isNotEmpty() && diff > 0.0) {
+                    suggestedBudgets[largestFlexCat] = round2((suggestedBudgets[largestFlexCat] ?: 0.0) + diff)
+                    newTotal = round2(newTotal + diff)
+                }
+                totalSuggested = newTotal
             }
-            totalSuggested = round2(newTotal)
         } else {
             totalSuggested = round2(totalSuggested)
         }

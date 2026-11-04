@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
 import { EXPENSE_CATEGORIES, getCategoryDetail } from '@/types'
-import { formatBRL, monthLabel, round2 } from '@/lib/utils'
+import { formatBRL, monthLabel, round2, shiftMonth } from '@/lib/utils'
 import {
   suggestCategoryBudgets,
   suggestBudgetRebalance,
@@ -62,7 +62,14 @@ export function ManageBudgetsModal({
   }, [summary?.income, profile?.monthlyIncome])
 
   // Inicializa o formulário com os valores atuais calibrados quando o modal abrir
-  const currentBudgets = useMemo(() => profile?.categoryBudgets || {}, [profile?.categoryBudgets])
+  const currentBudgets = useMemo(() => {
+    return profile?.monthlyCategoryBudgets?.[month] || profile?.categoryBudgets || {}
+  }, [profile?.monthlyCategoryBudgets, profile?.categoryBudgets, month])
+
+  const previousMonth = useMemo(() => shiftMonth(month, -1), [month])
+  const previousMonthBudgets = useMemo(() => {
+    return profile?.monthlyCategoryBudgets?.[previousMonth] || null
+  }, [profile?.monthlyCategoryBudgets, previousMonth])
 
   useEffect(() => {
     if (open) {
@@ -105,8 +112,13 @@ export function ManageBudgetsModal({
       const canon = normalizeBudgetCategory(item.category)
       map.set(canon, round2((map.get(canon) || 0) + item.spent))
     }
+    // Garante que aportes em Investimentos sejam sempre puxados do mês
+    const totalInvestedThisMonth = summary?.totalInvested || 0
+    if (totalInvestedThisMonth > 0) {
+      map.set('Investimentos', round2(Math.max(map.get('Investimentos') || 0, totalInvestedThisMonth)))
+    }
     return map
-  }, [categoryBudgetReport.items])
+  }, [categoryBudgetReport.items, summary?.totalInvested])
 
   // Oportunidades de rebalanceamento
   const rebalanceInfo = useMemo(() => {
@@ -119,6 +131,18 @@ export function ManageBudgetsModal({
     const nextState: Record<string, string> = {}
     for (const [cat, limit] of Object.entries(aiSuggestion.suggestedBudgets)) {
       nextState[normalizeBudgetCategory(cat)] = String(limit)
+    }
+    setBudgetsState(nextState)
+  }
+
+  // Copia o orçamento do mês anterior
+  const handleCopyFromPreviousMonth = () => {
+    if (!previousMonthBudgets) return
+    const nextState: Record<string, string> = {}
+    for (const [cat, limit] of Object.entries(previousMonthBudgets)) {
+      if (limit > 0) {
+        nextState[normalizeBudgetCategory(cat)] = String(limit)
+      }
     }
     setBudgetsState(nextState)
   }
@@ -207,7 +231,7 @@ export function ManageBudgetsModal({
         Object.assign(finalBudgets, rawSanitized)
       }
 
-      await setCategoryBudgets(finalBudgets)
+      await setCategoryBudgets(finalBudgets, month)
       onOpenChange(false)
     } finally {
       setIsSaving(false)
@@ -220,7 +244,7 @@ export function ManageBudgetsModal({
     toCat: string,
     amount: number,
   ) => {
-    await rebalanceCategoryBudgets(fromCat, toCat, amount)
+    await rebalanceCategoryBudgets(fromCat, toCat, amount, month)
     setRebalanceSuccessMsg(
       `Transferência de ${formatBRL(amount)} de "${fromCat}" para "${toCat}" concluída com sucesso!`,
     )
@@ -386,7 +410,7 @@ export function ManageBudgetsModal({
                 )}
               </div>
 
-              {/* Banner da Sugestão com IA */}
+              {/* Banner da Sugestão com IA & Cópia do Mês Anterior */}
               <div className="glass-card rounded-xl p-3.5 border border-emerald-500/25 bg-emerald-950/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-emerald-300 text-xs">
@@ -394,19 +418,34 @@ export function ManageBudgetsModal({
                     Sugerir Orçamento com IA (Teto: {formatBRL(aiSuggestion?.totalSuggested || 0)})
                   </div>
                   <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Analisa seu histórico de 3 meses e os compromissos de {monthLabel(month)}, limitando o orçamento total à entrada prevista do mês ({aiSuggestion?.incomeCoveragePct || 0}% da entrada).
+                    Analisa seu histórico de 3 meses e os gastos já efetuados em {monthLabel(month)}, garantindo que a sugestão nunca seja menor do que o que você já gastou e respeitando a entrada prevista ({aiSuggestion?.incomeCoveragePct || 0}% da entrada).
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={applyAiSuggestions}
-                  className="shrink-0 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40 text-xs h-8"
-                >
-                  <Sparkles className="size-3.5 mr-1.5" />
-                  Preencher com IA
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {previousMonthBudgets && Object.keys(previousMonthBudgets).length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCopyFromPreviousMonth}
+                      className="bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-white/[0.1] text-xs h-8"
+                      title={`Copiar os envelopes configurados em ${monthLabel(previousMonth)}`}
+                    >
+                      <RotateCcw className="size-3 mr-1.5" />
+                      Copiar {monthLabel(previousMonth).split(' ')[0]}
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={applyAiSuggestions}
+                    className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40 text-xs h-8"
+                  >
+                    <Sparkles className="size-3.5 mr-1.5" />
+                    Preencher com IA
+                  </Button>
+                </div>
               </div>
 
               {/* Lista de Categorias com Inputs Acessíveis */}
@@ -451,7 +490,8 @@ export function ManageBudgetsModal({
                           <div className="flex items-center gap-2 flex-wrap text-[10px] text-slate-400 mt-0.5">
                             {spentNow > 0 && (
                               <span>
-                                Gasto no mês: <strong className="text-slate-300 font-mono">{formatBRL(spentNow)}</strong>
+                                {cat === 'Investimentos' ? 'Aportado no mês: ' : 'Gasto no mês: '}
+                                <strong className="text-slate-300 font-mono">{formatBRL(spentNow)}</strong>
                               </span>
                             )}
                             {avg && avg > 0 ? (

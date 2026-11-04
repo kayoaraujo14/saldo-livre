@@ -574,19 +574,31 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     return computeSummary(transactions, currentUid, month, monthClosures, cards)
   }, [transactions, currentUid, month, monthClosures, cards])
 
+  const currentMonthBudgets = useMemo(() => {
+    const monthly = profile?.monthlyCategoryBudgets?.[month]
+    if (monthly && typeof monthly === 'object' && Object.keys(monthly).length > 0) {
+      return monthly
+    }
+    // Se o mês selecionado for o mês atual ou se ainda não houver particionamento mensal, usa categoryBudgets
+    if (month === currentMonthKey() || !profile?.monthlyCategoryBudgets) {
+      return profile?.categoryBudgets || {}
+    }
+    return {}
+  }, [profile?.monthlyCategoryBudgets, profile?.categoryBudgets, month])
+
   const categoryBudgetReport = useMemo(() => {
     const expectedIncome =
       summary?.income && summary.income > 0 ? summary.income : (profile?.monthlyIncome || 0)
     return computeCategoryBudgets(
       summary?.byCategory || [],
-      profile?.categoryBudgets || {},
+      currentMonthBudgets,
       month,
       todayKey(),
       currentUid || undefined,
       transactions,
       expectedIncome,
     )
-  }, [summary?.byCategory, summary?.income, profile?.categoryBudgets, profile?.monthlyIncome, month, currentUid, transactions])
+  }, [summary?.byCategory, summary?.income, currentMonthBudgets, profile?.monthlyIncome, month, currentUid, transactions])
 
   const [closureModalOpen, setClosureModalOpen] = useState(false)
   const [closureDismissed, setClosureDismissed] = useState(false)
@@ -1730,44 +1742,86 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   )
 
   const setCategoryBudget = useCallback(
-    async (category: string, limit: number) => {
-      const current = { ...(profile?.categoryBudgets || {}) }
+    async (category: string, limit: number, targetMonth?: string) => {
+      const activeM = targetMonth || month
+      const currentMonthly = { ...(profile?.monthlyCategoryBudgets?.[activeM] || profile?.categoryBudgets || {}) }
       if (limit > 0) {
-        current[category] = round2(limit)
+        currentMonthly[category] = round2(limit)
       } else {
-        delete current[category]
+        delete currentMonthly[category]
       }
-      await updateProfile({ categoryBudgets: current })
+      const allMonthly = {
+        ...(profile?.monthlyCategoryBudgets || {}),
+        [activeM]: currentMonthly,
+      }
+      await updateProfile({
+        categoryBudgets: currentMonthly,
+        monthlyCategoryBudgets: allMonthly,
+      })
     },
-    [profile?.categoryBudgets, updateProfile],
+    [profile?.monthlyCategoryBudgets, profile?.categoryBudgets, month, updateProfile],
   )
 
   const setCategoryBudgets = useCallback(
-    async (budgets: Record<string, number>) => {
+    async (budgets: Record<string, number>, targetMonth?: string) => {
+      const activeM = targetMonth || month
       const sanitized: Record<string, number> = {}
       for (const [cat, lim] of Object.entries(budgets || {})) {
         const n = Number(lim)
         if (n > 0) sanitized[cat] = round2(n)
       }
-      await updateProfile({ categoryBudgets: sanitized })
+      const allMonthly = {
+        ...(profile?.monthlyCategoryBudgets || {}),
+        [activeM]: sanitized,
+      }
+      await updateProfile({
+        categoryBudgets: sanitized,
+        monthlyCategoryBudgets: allMonthly,
+      })
     },
-    [updateProfile],
+    [profile?.monthlyCategoryBudgets, month, updateProfile],
   )
 
   const rebalanceCategoryBudgets = useCallback(
-    async (fromCategory: string, toCategory: string, amount: number) => {
+    async (fromCategory: string, toCategory: string, amount: number, targetMonth?: string) => {
+      const activeM = targetMonth || month
       const amt = round2(Number(amount) || 0)
       if (amt <= 0) return
-      const current = { ...(profile?.categoryBudgets || {}) }
-      const fromVal = current[fromCategory] || 0
-      const toVal = current[toCategory] || 0
+      const currentMonthly = { ...(profile?.monthlyCategoryBudgets?.[activeM] || profile?.categoryBudgets || {}) }
+      const fromVal = currentMonthly[fromCategory] || 0
+      const toVal = currentMonthly[toCategory] || 0
       const newFrom = Math.max(0, round2(fromVal - amt))
       const newTo = round2(toVal + amt)
-      current[fromCategory] = newFrom
-      current[toCategory] = newTo
-      await updateProfile({ categoryBudgets: current })
+      currentMonthly[fromCategory] = newFrom
+      currentMonthly[toCategory] = newTo
+      const allMonthly = {
+        ...(profile?.monthlyCategoryBudgets || {}),
+        [activeM]: currentMonthly,
+      }
+      await updateProfile({
+        categoryBudgets: currentMonthly,
+        monthlyCategoryBudgets: allMonthly,
+      })
     },
-    [profile?.categoryBudgets, updateProfile],
+    [profile?.monthlyCategoryBudgets, profile?.categoryBudgets, month, updateProfile],
+  )
+
+  const copyCategoryBudgetsFromMonth = useCallback(
+    async (sourceMonth: string, targetMonth?: string) => {
+      const activeM = targetMonth || month
+      const sourceBudgets =
+        profile?.monthlyCategoryBudgets?.[sourceMonth] || profile?.categoryBudgets || {}
+      if (Object.keys(sourceBudgets).length === 0) return
+      const allMonthly = {
+        ...(profile?.monthlyCategoryBudgets || {}),
+        [activeM]: { ...sourceBudgets },
+      }
+      await updateProfile({
+        categoryBudgets: { ...sourceBudgets },
+        monthlyCategoryBudgets: allMonthly,
+      })
+    },
+    [profile?.monthlyCategoryBudgets, profile?.categoryBudgets, month, updateProfile],
   )
 
   const lookupUserByEmail = useCallback(async (email: string) => {
@@ -1961,6 +2015,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     setCategoryBudget,
     setCategoryBudgets,
     rebalanceCategoryBudgets,
+    copyCategoryBudgetsFromMonth,
     monthClosures,
     saveMonthClosure,
     deleteMonthClosure,

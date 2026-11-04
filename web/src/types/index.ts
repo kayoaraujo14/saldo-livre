@@ -695,6 +695,8 @@ export interface UserProfile {
   investmentAssetBalances?: Record<string, number>
   emergencyReserveBalance?: number
   categoryBudgets?: Record<string, number>
+  /** Orçamentos de envelopes configurados mês a mês (formato: "AAAA-MM": { "Categoria": limite }) */
+  monthlyCategoryBudgets?: Record<string, Record<string, number>>
 }
 
 // ============================================================

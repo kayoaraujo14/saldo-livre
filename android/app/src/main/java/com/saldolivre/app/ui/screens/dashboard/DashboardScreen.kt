@@ -686,7 +686,7 @@ fun DashboardScreen(
                     },
                     onQuickApplyAiBudgets = {
                         com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
-                        viewModel.applyAiSuggestedBudgets()
+                        viewModel.applyAiSuggestedBudgets(uiState.selectedMonth)
                     },
                     onAskCopilot = { prompt ->
                         onNavigateToChatWithPrompt(prompt)
@@ -1188,19 +1188,21 @@ fun DashboardScreen(
 
     // Dialog de Gestão de Envelopes Orçamentários & Rebalanceamento IA
     if (showManageBudgetsDialog) {
+        val currentSelectedMonthBudgets = uiState.currentUser.monthlyCategoryBudgets[uiState.selectedMonth]?.takeIf { it.isNotEmpty() }
+            ?: uiState.currentUser.categoryBudgets
         ManageBudgetsDialog(
             initialTab = budgetsDialogTab,
-            currentBudgets = uiState.currentUser.categoryBudgets,
+            currentBudgets = currentSelectedMonthBudgets,
             suggestedBudgets = uiState.suggestedBudgets,
             report = uiState.categoryBudgetReport,
             rebalance = uiState.budgetRebalance,
             onSaveBudgets = { newBudgets ->
                 com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
-                viewModel.updateCategoryBudgets(newBudgets)
+                viewModel.updateCategoryBudgets(newBudgets, uiState.selectedMonth)
             },
             onApplyRebalance = { fromCat, toCat, amount ->
                 com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
-                viewModel.applyBudgetRebalance(fromCat, toCat, amount)
+                viewModel.applyBudgetRebalance(fromCat, toCat, amount, uiState.selectedMonth)
             },
             onDismiss = { showManageBudgetsDialog = false }
         )

@@ -1001,10 +1001,14 @@ export function computeSummary(
     if (tx.type === 'expense' && impact > 0) {
       cat.set(tx.category, (cat.get(tx.category) ?? 0) + impact)
 
-      if (tx.category === 'Investimentos') {
+      const isAporte = tx.category === 'Investimentos' || /investimento/i.test(tx.category)
+      if (isAporte) {
         totalInvested += impact
         const subName = tx.subcategory || 'Outros Investimentos'
         investSubcat.set(subName, (investSubcat.get(subName) ?? 0) + impact)
+        if (tx.category !== 'Investimentos') {
+          cat.set('Investimentos', (cat.get('Investimentos') ?? 0) + impact)
+        }
       }
 
       if (tx.subcategory) {
@@ -1026,6 +1030,7 @@ export function computeSummary(
       // Abate resgates de investimentos do total investido no mês
       const isResgate =
         tx.category === 'Investimentos' ||
+        /investimento/i.test(tx.category) ||
         (tx.category === 'Rendimentos & Investimentos' && Boolean(tx.subcategory && /resgate/i.test(tx.subcategory)))
       if (isResgate) {
         totalInvested -= impact
@@ -1066,9 +1071,9 @@ export function computeSummary(
   let totalInvestedAccumulated = 0
   for (const tx of all || []) {
     if ((tx.visibleToUids || []).includes(uid)) {
-      const isAporte = tx.category === 'Investimentos' && tx.type === 'expense'
+      const isAporte = (tx.category === 'Investimentos' || /investimento/i.test(tx.category)) && tx.type === 'expense'
       const isResgate =
-        (tx.category === 'Investimentos' && tx.type === 'income') ||
+        ((tx.category === 'Investimentos' || /investimento/i.test(tx.category)) && tx.type === 'income') ||
         (tx.category === 'Rendimentos & Investimentos' && Boolean(tx.subcategory && /resgate/i.test(tx.subcategory)))
       const imp = impactFor(tx, uid, all)
       if (isAporte && imp > 0) {
@@ -2670,6 +2675,25 @@ export function computeCategoryBudgets(
     }
   }
 
+  // Reconcilia aportes de investimento no mês caso não tenham sido capturados na lista genérica
+  if (uid && Array.isArray(allTransactions) && allTransactions.length > 0) {
+    let investMonthSpent = 0
+    for (const tx of allTransactions) {
+      const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
+      if (m === monthKey && (tx.visibleToUids || []).includes(uid)) {
+        const isAporte = (tx.category === 'Investimentos' || /investimento/i.test(tx.category)) && tx.type === 'expense'
+        if (isAporte) {
+          const impact = impactFor(tx, uid, allTransactions)
+          if (impact > 0) investMonthSpent += impact
+        }
+      }
+    }
+    if (investMonthSpent > 0) {
+      const existing = spentMap.get('Investimentos') || 0
+      spentMap.set('Investimentos', round2(Math.max(existing, investMonthSpent)))
+    }
+  }
+
   // Consolida o mapa de orçamentos brutos sob as mesmas chaves reconciliadas
   const rawLimitsMap = new Map<string, number>()
   for (const [cat, val] of Object.entries(rawBudgetsInput)) {
@@ -2960,65 +2984,102 @@ export function suggestCategoryBudgets(
     if (NON_ENVELOPE_CATEGORIES.has(cat)) continue
     const avg = round2(sum / divisor)
     categoryAverages[cat] = avg
-    if (avg >= 20) {
+    const curCommitted = curMonthExpenseMap.get(cat) || 0
+    if (avg >= 20 || curCommitted > 0) {
       const isFixed = FIXED_MONTHLY_CATEGORIES.has(cat)
-      const curCommitted = curMonthExpenseMap.get(cat) || 0
       // Categorias fixas usam o valor real compromissado/médio arredondado em dezenas (sem inflar +10%);
       // categorias variáveis recebem margem de segurança de 10%
-      const baseTarget = isFixed ? Math.max(avg, curCommitted) : avg * 1.1
-      const suggested = Math.max(50, Math.ceil(baseTarget / 10) * 10)
+      const baseTarget = isFixed ? Math.max(avg, curCommitted) : Math.max(avg * 1.1, curCommitted)
+      const rawSuggested = Math.max(50, Math.ceil(baseTarget / 10) * 10)
+      // O piso inegociável é o que já foi gasto no mês selecionado
+      const suggested = Math.max(curCommitted, rawSuggested)
       suggestedBudgets[cat] = suggested
       totalSuggested += suggested
     }
+  }
+
+  // Se houver aportes de investimento no mês de referência e a categoria não estiver em suggestedBudgets
+  if (referenceMonthInvested > 0 && !suggestedBudgets['Investimentos']) {
+    suggestedBudgets['Investimentos'] = referenceMonthInvested
+    categoryAverages['Investimentos'] = referenceMonthInvested
+    totalSuggested += referenceMonthInvested
   }
 
   totalSuggested = round2(totalSuggested)
   let isCappedToIncome = false
 
   // Teto rigoroso: o orçamento sugerido NUNCA pode ultrapassar a entrada prevista daquele mês
+  // e NUNCA pode ser menor do que o que a pessoa já gastou no mês selecionado.
   if (effectiveExpectedIncome > 0 && totalSuggested > 0) {
-    const maxEnvelopeCeiling =
-      referenceMonthInvested > 0 && referenceMonthInvested < effectiveExpectedIncome
-        ? round2(effectiveExpectedIncome - referenceMonthInvested)
-        : effectiveExpectedIncome
+    const maxEnvelopeCeiling = effectiveExpectedIncome
 
     if (totalSuggested > maxEnvelopeCeiling && maxEnvelopeCeiling > 0) {
       isCappedToIncome = true
-      const ratio = maxEnvelopeCeiling / totalSuggested
-      let newTotal = 0
-      let largestCat = ''
-      let largestVal = -1
 
+      // 1. Calcula a soma dos pisos inegociáveis (o que já foi gasto no mês em cada categoria)
+      let sumFloors = 0
+      const floorsMap: Record<string, number> = {}
       for (const cat of Object.keys(suggestedBudgets)) {
-        const raw = suggestedBudgets[cat]
-        const scaled = maxEnvelopeCeiling >= 200
-          ? Math.max(10, Math.floor((raw * ratio) / 10) * 10)
-          : round2(raw * ratio)
-        suggestedBudgets[cat] = scaled
-        newTotal = round2(newTotal + scaled)
-        if (scaled > largestVal) {
-          largestVal = scaled
-          largestCat = cat
-        }
+        const floor = curMonthExpenseMap.get(cat) || (cat === 'Investimentos' ? referenceMonthInvested : 0)
+        floorsMap[cat] = floor
+        sumFloors += floor
       }
+      sumFloors = round2(sumFloors)
 
-      // Caso o piso de 10 ainda deixe newTotal > maxEnvelopeCeiling, aplica ajuste proporcional exato
-      if (newTotal > maxEnvelopeCeiling) {
-        const exactRatio = maxEnvelopeCeiling / newTotal
-        newTotal = 0
+      if (sumFloors >= maxEnvelopeCeiling) {
+        // Cenário onde os gastos já realizados no mês já consom toda a renda prevista:
+        // Mantém cada categoria exatamente no seu gasto realizado (não inventa teto menor que o dinheiro já gasto)
+        let newTotal = 0
         for (const cat of Object.keys(suggestedBudgets)) {
-          const scaled = round2(suggestedBudgets[cat] * exactRatio)
-          suggestedBudgets[cat] = scaled
-          newTotal = round2(newTotal + scaled)
+          const floor = floorsMap[cat] || 0
+          suggestedBudgets[cat] = floor
+          newTotal = round2(newTotal + floor)
         }
+        totalSuggested = newTotal
+      } else {
+        // Folga disponível para distribuir acima dos pisos gastos:
+        const availableFlex = round2(maxEnvelopeCeiling - sumFloors)
+
+        // Margem desejada pela IA acima dos pisos para cada categoria:
+        let sumDesiredFlex = 0
+        const desiredFlexMap: Record<string, number> = {}
+        for (const cat of Object.keys(suggestedBudgets)) {
+          const floor = floorsMap[cat] || 0
+          const desired = Math.max(0, suggestedBudgets[cat] - floor)
+          desiredFlexMap[cat] = desired
+          sumDesiredFlex += desired
+        }
+        sumDesiredFlex = round2(sumDesiredFlex)
+
+        let newTotal = 0
+        let largestFlexCat = ''
+        let largestFlexVal = -1
+
+        for (const cat of Object.keys(suggestedBudgets)) {
+          const floor = floorsMap[cat] || 0
+          const desired = desiredFlexMap[cat] || 0
+          const scaledFlex = sumDesiredFlex > 0
+            ? Math.floor(((desired / sumDesiredFlex) * availableFlex) / 10) * 10
+            : 0
+          const finalVal = round2(floor + scaledFlex)
+          suggestedBudgets[cat] = finalVal
+          newTotal = round2(newTotal + finalVal)
+
+          if (desired > largestFlexVal) {
+            largestFlexVal = desired
+            largestFlexCat = cat
+          }
+        }
+
+        // Distribui o resíduo da dezena na categoria com maior folga flexível
         const diff = round2(maxEnvelopeCeiling - newTotal)
-        if (largestCat && diff < 0) {
-          suggestedBudgets[largestCat] = round2(Math.max(0, suggestedBudgets[largestCat] + diff))
+        if (largestFlexCat && diff > 0) {
+          suggestedBudgets[largestFlexCat] = round2(suggestedBudgets[largestFlexCat] + diff)
           newTotal = round2(newTotal + diff)
         }
-      }
 
-      totalSuggested = round2(newTotal)
+        totalSuggested = newTotal
+      }
     }
   }
 
