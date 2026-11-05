@@ -326,7 +326,8 @@ class FinanceEngineProjectionTest {
             status = CategoryBudgetAlertStatus.OK
         )
 
-        val report = CategoryBudgetReport(
+        // Cenário 1: Há sobra em outra categoria -> sugere REBALANCE
+        val reportWithSurplus = CategoryBudgetReport(
             items = listOf(item1, item2),
             totalSpent = 900.0,
             totalBudgeted = 1000.0,
@@ -340,12 +341,36 @@ class FinanceEngineProjectionTest {
             investmentGoal = 600.0
         )
 
-        val insights = FinanceEngine.buildBudgetInsights(report)
-        assertTrue(insights.isNotEmpty())
-        val overInsight = insights.find { it.severity == BudgetInsightSeverity.DANGER }
-        assertNotNull(overInsight)
-        assertNotNull(overInsight?.action)
-        assertEquals(BudgetInsightActionType.ADJUST_LIMIT, overInsight?.action?.type)
-        assertEquals("Alimentação & Mercado", overInsight?.action?.category)
+        val insights1 = FinanceEngine.buildBudgetInsights(reportWithSurplus)
+        assertTrue(insights1.isNotEmpty())
+        val overInsight1 = insights1.find { it.severity == BudgetInsightSeverity.DANGER }
+        assertNotNull(overInsight1)
+        assertNotNull(overInsight1?.action)
+        assertEquals(BudgetInsightActionType.REBALANCE, overInsight1?.action?.type)
+        assertEquals("Alimentação & Mercado", overInsight1?.action?.category)
+        assertEquals("Lazer & Entretenimento", overInsight1?.action?.fromCategory)
+
+        // Cenário 2: Sem categorias com sobra para compensar -> sugere ADJUST_LIMIT (subir teto)
+        val reportWithoutSurplus = CategoryBudgetReport(
+            items = listOf(item1),
+            totalSpent = 800.0,
+            totalBudgeted = 600.0,
+            overallPercentage = 150.0,
+            isCappedToIncome = false,
+            rawTotalBudgeted = 600.0,
+            expectedIncome = 3000.0,
+            totalCommitted = 900.0,
+            totalPending = 100.0,
+            totalRealRemaining = -300.0,
+            investmentGoal = 600.0
+        )
+
+        val insights2 = FinanceEngine.buildBudgetInsights(reportWithoutSurplus)
+        assertTrue(insights2.isNotEmpty())
+        val overInsight2 = insights2.find { it.severity == BudgetInsightSeverity.DANGER }
+        assertNotNull(overInsight2)
+        assertNotNull(overInsight2?.action)
+        assertEquals(BudgetInsightActionType.ADJUST_LIMIT, overInsight2?.action?.type)
+        assertEquals("Alimentação & Mercado", overInsight2?.action?.category)
     }
 }
