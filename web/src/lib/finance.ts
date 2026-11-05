@@ -28,8 +28,10 @@ import type {
   CategoryBudgetPaceStatus,
   CategoryBudgetReport,
   CategoryBudgetStatus,
+  BudgetInsight,
+  BudgetInsightAction,
 } from '@/types'
-import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
+import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
 import { buildCardInvoice } from './invoices'
 
 export interface Party {
@@ -3008,6 +3010,8 @@ export function computeCategoryBudgets(
   const investmentTarget = rawLimitsMap.get('Investimentos') || 0
   const investmentSpent = spentAmountMap.get('Investimentos') || 0
   const investmentPercentage = investmentTarget > 0 ? round2((investmentSpent / investmentTarget) * 100) : 0
+  // Meta 50/30/20: 20% da renda prevista, independente do teto de envelope (que pode ter sido reduzido pela calibragem)
+  const investmentGoal = round2(Math.max(0, validExpectedIncome) * 0.2)
 
   return {
     items,
@@ -3033,7 +3037,143 @@ export function computeCategoryBudgets(
     investmentTarget,
     investmentSpent,
     investmentPercentage,
+    investmentGoal,
   }
+}
+
+/**
+ * Gera até 3 insights acionáveis e determinísticos (sem rede) sobre os envelopes.
+ * Espelha `buildBudgetInsights` do Android. Ordenados por severidade (perigo > atenção > info).
+ */
+export function buildBudgetInsights(report: CategoryBudgetReport): BudgetInsight[] {
+  const insights: BudgetInsight[] = []
+  const severityRank: Record<BudgetInsight['severity'], number> = { info: 0, attention: 1, danger: 2 }
+
+  if (report.items.length === 0 || report.totalBudgeted <= 0) {
+    return [
+      {
+        id: 'setup',
+        severity: 'info',
+        title: 'Crie seus envelopes',
+        message:
+          'Defina um teto por categoria para saber quanto ainda pode gastar. A IA monta um plano com base no seu histórico.',
+        action: { type: 'apply_plan', label: 'Montar com IA' },
+      },
+    ]
+  }
+
+  const rebalance = suggestBudgetRebalance(report)
+
+  // 1) Estouros reais (>= R$ 1,00)
+  report.items
+    .filter((i) => i.limit > 0 && i.committedAmount - i.limit >= 1)
+    .sort((a, b) => b.committedAmount - b.limit - (a.committedAmount - a.limit))
+    .slice(0, 2)
+    .forEach((item) => {
+      const excess = round2(item.committedAmount - item.limit)
+      const transfer = rebalance.suggestions.find((s) => s.overspentCategory === item.category)
+      const raise = Math.ceil(excess / 10) * 10
+      const action: BudgetInsightAction =
+        transfer && transfer.suggestedTransfer > 0
+          ? {
+              type: 'rebalance',
+              label: `Cobrir com ${transfer.compensateFrom}`,
+              category: item.category,
+              amount: transfer.suggestedTransfer,
+              fromCategory: transfer.compensateFrom,
+            }
+          : {
+              type: 'adjust_limit',
+              label: `Subir teto em ${formatBRL(raise)}`,
+              category: item.category,
+              amount: raise,
+            }
+      insights.push({
+        id: `over_${item.category}`,
+        severity: 'danger',
+        title: `${item.category} passou do teto`,
+        message: `Comprometido ${formatBRL(item.committedAmount)} de ${formatBRL(item.limit)} (${formatBRL(excess)} acima).`,
+        action,
+      })
+    })
+
+  // 2) Ritmo de gasto: variáveis perto do teto ou projetadas para estourar
+  report.items
+    .filter(
+      (i) =>
+        i.limit > 0 &&
+        !i.isFixedCategory &&
+        i.committedAmount - i.limit < 1 &&
+        i.spentAmount > 0 &&
+        (i.totalPercentage >= 85 || i.projectedSpent > i.limit + 1),
+    )
+    .sort((a, b) => b.totalPercentage - a.totalPercentage)
+    .slice(0, 1)
+    .forEach((item) => {
+      const daily = item.daysRemaining > 0 ? item.realRemaining / item.daysRemaining : item.realRemaining
+      insights.push({
+        id: `pace_${item.category}`,
+        severity: 'attention',
+        title: `${item.category} está acelerado`,
+        message: `Restam ${formatBRL(Math.max(0, item.realRemaining))} até o fim do mês, cerca de ${formatBRL(Math.max(0, daily))} por dia.`,
+        action: {
+          type: 'ask_copilot',
+          label: 'Pedir dica à IA',
+          category: item.category,
+          prompt: `Meu envelope de ${item.category} está em ${Math.round(item.totalPercentage)}% do teto. Como posso segurar os gastos até o fim do mês?`,
+        },
+      })
+    })
+
+  // 3) Gastos sem envelope (itens sem teto que já têm valor comprometido)
+  const unbudgeted = report.items
+    .filter((i) => i.limit <= 0 && i.committedAmount > 0 && !/investimento/i.test(i.category))
+    .sort((a, b) => b.committedAmount - a.committedAmount)
+  if (unbudgeted.length > 0) {
+    const unb = unbudgeted[0]
+    const suggestedLimit = Math.ceil(unb.committedAmount / 50) * 50
+    insights.push({
+      id: `unbudgeted_${unb.category}`,
+      severity: 'attention',
+      title: `${unb.category} está sem teto`,
+      message: `Você já tem ${formatBRL(unb.committedAmount)} nessa categoria e nenhum envelope para acompanhar.`,
+      action: {
+        type: 'adjust_limit',
+        label: `Criar teto de ${formatBRL(suggestedLimit)}`,
+        category: unb.category,
+        amount: suggestedLimit,
+      },
+    })
+  }
+
+  // 4) Meta de aporte 50/30/20
+  const goal = report.investmentGoal ?? 0
+  const invested = report.investmentSpent ?? 0
+  const goalGap = goal - invested
+  if (goal > 0 && goalGap > 0 && invested < goal * 0.5) {
+    insights.push({
+      id: 'invest_goal',
+      severity: 'info',
+      title: `Meta de aporte: faltam ${formatBRL(goalGap)}`,
+      message: `Pela regra 50/30/20, separe 20% da renda (${formatBRL(goal)}) para o seu futuro.`,
+      action: {
+        type: 'ask_copilot',
+        label: 'Como atingir?',
+        prompt: `Quero atingir minha meta de aporte de ${formatBRL(goal)} neste mês. Já investi ${formatBRL(invested)}. Qual o melhor caminho?`,
+      },
+    })
+  }
+
+  if (insights.length === 0) {
+    insights.push({
+      id: 'all_good',
+      severity: 'info',
+      title: 'Tudo sob controle',
+      message: `Você ainda pode gastar ${formatBRL(Math.max(0, report.totalRealRemaining))} dentro dos tetos até o fim do mês.`,
+    })
+  }
+
+  return insights.sort((a, b) => severityRank[b.severity] - severityRank[a.severity]).slice(0, 3)
 }
 
 /**

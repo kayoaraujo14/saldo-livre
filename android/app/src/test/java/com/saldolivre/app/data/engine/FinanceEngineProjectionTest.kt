@@ -300,4 +300,52 @@ class FinanceEngineProjectionTest {
         assertEquals(300.0, lazer!!.spent, 0.01)
         assertEquals(750.0, lazer.limit, 0.01)
     }
+
+    @Test
+    fun `buildBudgetInsights produces actionable insights for over budget categories`() {
+        val item1 = CategoryBudgetStatus(
+            category = "Alimentação & Mercado",
+            spent = 800.0,
+            pendingAmount = 100.0,
+            committedAmount = 900.0,
+            limit = 600.0,
+            remaining = -300.0,
+            realRemaining = -300.0,
+            percentage = 150.0,
+            status = CategoryBudgetAlertStatus.DANGER
+        )
+        val item2 = CategoryBudgetStatus(
+            category = "Lazer & Entretenimento",
+            spent = 100.0,
+            pendingAmount = 0.0,
+            committedAmount = 100.0,
+            limit = 400.0,
+            remaining = 300.0,
+            realRemaining = 300.0,
+            percentage = 25.0,
+            status = CategoryBudgetAlertStatus.OK
+        )
+
+        val report = CategoryBudgetReport(
+            items = listOf(item1, item2),
+            totalSpent = 900.0,
+            totalBudgeted = 1000.0,
+            overallPercentage = 90.0,
+            isCappedToIncome = false,
+            rawTotalBudgeted = 1000.0,
+            expectedIncome = 3000.0,
+            totalCommitted = 900.0,
+            totalPending = 100.0,
+            totalRealRemaining = 100.0,
+            investmentGoal = 600.0
+        )
+
+        val insights = FinanceEngine.buildBudgetInsights(report)
+        assertTrue(insights.isNotEmpty())
+        val overInsight = insights.find { it.severity == BudgetInsightSeverity.DANGER }
+        assertNotNull(overInsight)
+        assertNotNull(overInsight?.action)
+        assertEquals(BudgetInsightActionType.ADJUST_LIMIT, overInsight?.action?.type)
+        assertEquals("Alimentação & Mercado", overInsight?.action?.category)
+    }
 }

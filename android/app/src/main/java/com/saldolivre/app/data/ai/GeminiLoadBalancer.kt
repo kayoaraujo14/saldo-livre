@@ -8,6 +8,8 @@ import com.google.ai.client.generativeai.type.content
 import com.google.ai.client.generativeai.type.generationConfig
 import com.saldolivre.app.BuildConfig
 import com.saldolivre.app.data.model.ChatMessage
+import com.saldolivre.app.data.model.BudgetInsight
+import com.saldolivre.app.data.model.CategoryBudgetReport
 import com.saldolivre.app.data.model.MessageSender
 import com.saldolivre.app.data.model.SmartBudgetAllocation
 import com.saldolivre.app.data.model.SmartBudgetPlan
@@ -475,6 +477,73 @@ class GeminiLoadBalancer(
             summaryInsight = "Plano inteligente calculado com Regra 50/30/20 protegendo R$ ${String.format(Locale.US, "%.2f", totalPending)} em contas a vencer com tetos arredondados.",
             allocations = fallbackAllocations
         )
+    }
+
+    /**
+     * Coach de envelopes: o Gemini analisa o estado real dos tetos e devolve insights acionáveis.
+     * Retorna null quando não há chave/resposta válida (o chamador mantém os insights locais).
+     */
+    suspend fun generateBudgetCoachInsights(
+        report: CategoryBudgetReport,
+        health: FinancialHealthScore
+    ): List<BudgetInsight>? {
+        val keys = getApiKeys()
+        if (keys.isEmpty() || report.items.isEmpty()) return null
+
+        fun brl(v: Double) = String.format(Locale.US, "%.2f", v)
+        val envelopes = report.items.joinToString("\n") {
+            "- ${it.category}: teto R$ ${brl(it.limit)}, pago R$ ${brl(it.spentAmount)}, a vencer R$ ${brl(it.pendingAmount)}, " +
+                "uso ${it.totalPercentage.toInt()}%, ${if (it.isFixedCategory) "FIXO" else "VARIAVEL"}, status ${it.badgeLabel}, dias restantes ${it.daysRemaining}"
+        }
+        val unbudgeted = report.unbudgetedCategories.joinToString("; ") { "${it.category} R$ ${brl(it.amount)}" }
+            .ifBlank { "nenhum" }
+
+        val prompt = """
+            Você é o coach de orçamento de um app de finanças pessoais brasileiro. Fale em português, tom direto e amigável, sem jargão.
+            Analise os envelopes do mês e devolva de 2 a 4 insights curtos e ACIONÁVEIS, priorizando o que mais impacta o usuário.
+
+            DADOS:
+            - Renda prevista: R$ ${brl(report.expectedIncome)}
+            - Ainda pode gastar dentro dos tetos: R$ ${brl(report.totalRealRemaining)}
+            - Meta de aporte (20% da renda): R$ ${brl(report.investmentGoal)} | já investido: R$ ${brl(report.investmentSpent)}
+            - Score de saúde: ${health.score}/100 (poupança ${health.savingsScore}/30, custo de vida ${health.spendingLimitScore}/30, reserva ${health.emergencyReserveScore}/25, envelopes ${health.envelopeScore}/15)
+            - Gastos sem teto: $unbudgeted
+            - Envelopes:
+            $envelopes
+
+            REGRAS:
+            1. Use apenas nomes de categoria EXATAMENTE como listados acima (ou dos gastos sem teto).
+            2. Nunca sugira reduzir um teto abaixo de (pago + a vencer). Valores em múltiplos de 10, sem centavos.
+            3. Cite valores reais em R$ e, quando houver, os dias restantes. Não invente números.
+            4. Categorias FIXAS não têm "ritmo"; não as trate como gasto acelerado.
+            5. Se estiver tudo bem, devolva 1 insight positivo e 1 oportunidade (ex: aporte).
+            6. "severity": DANGER (estouro), ATTENTION (risco), INFO (oportunidade/elogio).
+            7. "action.type": ADJUST_LIMIT (amount em R$ a somar ao teto; negativo reduz), ASK_COPILOT (com "prompt" para o chat) ou NONE.
+
+            Responda APENAS com JSON:
+            {"insights":[{"severity":"ATTENTION","title":"até 60 caracteres","message":"1 a 2 frases","action":{"type":"ADJUST_LIMIT","category":"Lazer & Entretenimento","amount":50,"label":"Subir teto em R$ 50"}}]}
+        """.trimIndent()
+
+        val validCategories = report.items.map { it.category } + report.unbudgetedCategories.map { it.category }
+        for (key in keys) {
+            for (model in listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest")) {
+                try {
+                    val generativeModel = GenerativeModel(
+                        modelName = model,
+                        apiKey = key,
+                        generationConfig = generationConfig { temperature = 0.3f }
+                    )
+                    val text = generativeModel.generateContent(prompt).text?.trim()
+                    if (!text.isNullOrBlank()) {
+                        val parsed = BudgetInsightParser.parse(text, validCategories)
+                        if (parsed.isNotEmpty()) return parsed
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("GeminiLB", "Falha Budget Coach com modelo $model: ${e.message}")
+                }
+            }
+        }
+        return null
     }
 
     suspend fun generateFinancialHealthAiDiagnosis(

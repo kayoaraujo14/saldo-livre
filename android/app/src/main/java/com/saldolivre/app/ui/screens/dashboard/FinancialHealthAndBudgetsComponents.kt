@@ -109,15 +109,188 @@ fun DualLayerProgressBar(
     }
 }
 
+private val InvestBlue = Color(0xFF60A5FA)
+
+private fun brl(value: Double): String = FinanceEngine.formatCurrency(value)
+
+/**
+ * Paleta semântica ÚNICA da tela de orçamentos:
+ * verde = dentro do teto · âmbar = atenção · vermelho = estourou · cinza = sem teto · roxo = IA.
+ */
 fun getCategoryBadgeColor(badgeLabel: String): Color {
     return when (badgeLabel) {
         "Estourado", "Vai Estourar" -> Rose400
-        "Quase no Limite", "No Limite" -> Amber400
-        "Ritmo Rápido" -> Amber400
-        "Sob Controle", "Quitado / Dentro do Previsto" -> Emerald400
-        "Previsto no Teto", "Fixo em Dia" -> Cyan400
+        "Quase no Limite", "No Limite", "Ritmo Rápido" -> Amber400
         "Definir Teto" -> TextMuted
         else -> Emerald400
+    }
+}
+
+/** Texto curto e autoexplicativo exibido no selo (os rótulos internos do motor continuam intactos). */
+fun getCategoryBadgeText(badgeLabel: String): String {
+    return when (badgeLabel) {
+        "Previsto no Teto", "Fixo em Dia", "Quitado / Dentro do Previsto", "Sob Controle" -> "Dentro do teto"
+        "Definir Teto" -> "Sem teto"
+        else -> badgeLabel
+    }
+}
+
+private fun envelopeSeverityRank(item: CategoryBudgetStatus): Int = when {
+    item.limit > 0.0 && (item.committedAmount - item.limit) >= 0.01 -> 0
+    item.status == CategoryBudgetAlertStatus.DANGER -> 0
+    item.status == CategoryBudgetAlertStatus.WARNING -> 1
+    else -> 2
+}
+
+private fun insightColor(insight: BudgetInsight): Color = when (insight.severity) {
+    BudgetInsightSeverity.DANGER -> Rose400
+    BudgetInsightSeverity.ATTENTION -> Amber400
+    BudgetInsightSeverity.INFO -> if (insight.id == "all_good") Emerald400 else TextSecondary
+}
+
+@Composable
+private fun BudgetAiCoachCard(
+    insights: List<BudgetInsight>,
+    isGenerating: Boolean,
+    onGenerate: () -> Unit,
+    onAction: (BudgetInsightAction) -> Unit
+) {
+    val fromAi = insights.any { it.fromAi }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Purple500.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+            .border(1.dp, Purple400.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = Purple400,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Assistente IA",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1
+                )
+                Box(
+                    modifier = Modifier
+                        .background(Purple500.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                ) {
+                    Text(
+                        text = if (fromAi) "Gemini" else "Dicas rápidas",
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Purple400,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !isGenerating) { onGenerate() }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(12.dp),
+                        strokeWidth = 2.dp,
+                        color = Purple400
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = Purple400,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+                Text(
+                    text = when {
+                        isGenerating -> "Analisando…"
+                        fromAi -> "Atualizar"
+                        else -> "Analisar com Gemini"
+                    },
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Purple400,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+
+        insights.forEach { insight ->
+            val color = insightColor(insight)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .background(color, RoundedCornerShape(2.dp))
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = insight.title,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = insight.message,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = TextSecondary
+                    )
+                    insight.action?.let { action ->
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 3.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Purple500.copy(alpha = 0.16f))
+                                .border(1.dp, Purple400.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                .clickable { onAction(action) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = action.label,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Purple400
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -128,31 +301,37 @@ fun CategoryBudgetsSectionCard(
     onOpenConfig: () -> Unit,
     onOpenRebalance: () -> Unit,
     onQuickApplyAiBudgets: () -> Unit,
-    onAdjustBudget: ((category: String, delta: Double) -> Unit)? = null
+    onAdjustBudget: ((category: String, delta: Double) -> Unit)? = null,
+    insights: List<BudgetInsight> = emptyList(),
+    isGeneratingInsights: Boolean = false,
+    onGenerateAiInsights: () -> Unit = {},
+    onInsightAction: (BudgetInsightAction) -> Unit = {},
+    onAskAi: (String) -> Unit = {}
 ) {
     var isExpanded by remember { mutableStateOf(false) }
+    var showHelp by remember { mutableStateOf(false) }
     var filterMode by remember { mutableStateOf(EnvelopeFilterMode.ALL) }
     var expandedCategoryKey by remember { mutableStateOf<String?>(null) }
 
-    val allCount = report.items.size
-    val alertsCount = remember(report.items) {
-        report.items.count {
-            it.status != CategoryBudgetAlertStatus.OK ||
+    val sortedItems = remember(report.items) {
+        report.items.sortedWith(
+            compareBy<CategoryBudgetStatus>({ envelopeSeverityRank(it) }, { -it.totalPercentage })
+        )
+    }
+    val allCount = sortedItems.size
+    val isAlert: (CategoryBudgetStatus) -> Boolean = {
+        it.status != CategoryBudgetAlertStatus.OK ||
             it.burnRateStatus != CategoryBudgetPaceStatus.NORMAL ||
             it.badgeLabel in listOf("Estourado", "Vai Estourar", "Quase no Limite", "Ritmo Rápido")
-        }
     }
+    val alertsCount = remember(sortedItems) { sortedItems.count(isAlert) }
 
-    val filteredItems = remember(report.items, filterMode) {
+    val filteredItems = remember(sortedItems, filterMode) {
         when (filterMode) {
-            EnvelopeFilterMode.ALL -> report.items
-            EnvelopeFilterMode.ALERTS -> report.items.filter {
-                it.status != CategoryBudgetAlertStatus.OK ||
-                it.burnRateStatus != CategoryBudgetPaceStatus.NORMAL ||
-                it.badgeLabel in listOf("Estourado", "Vai Estourar", "Quase no Limite", "Ritmo Rápido")
-            }
-            EnvelopeFilterMode.VARIABLE -> report.items.filter { !it.isFixedCategory && !it.category.contains("investimento", ignoreCase = true) }
-            EnvelopeFilterMode.FIXED -> report.items.filter { it.isFixedCategory }
+            EnvelopeFilterMode.ALL -> sortedItems
+            EnvelopeFilterMode.ALERTS -> sortedItems.filter(isAlert)
+            EnvelopeFilterMode.VARIABLE -> sortedItems.filter { !it.isFixedCategory && !it.category.contains("investimento", ignoreCase = true) }
+            EnvelopeFilterMode.FIXED -> sortedItems.filter { it.isFixedCategory }
         }
     }
     val visibleItems = if (isExpanded) filteredItems else filteredItems.take(5)
@@ -163,9 +342,9 @@ fun CategoryBudgetsSectionCard(
         CategoryBudgetAlertStatus.OK -> Emerald400
     }
     val statusText = when (report.status) {
-        CategoryBudgetAlertStatus.DANGER -> "Atenção aos Tetos"
-        CategoryBudgetAlertStatus.WARNING -> "Ritmo Acelerado"
-        CategoryBudgetAlertStatus.OK -> "Dentro da Meta"
+        CategoryBudgetAlertStatus.DANGER -> "Atenção aos tetos"
+        CategoryBudgetAlertStatus.WARNING -> "Ritmo acelerado"
+        CategoryBudgetAlertStatus.OK -> "Dentro da meta"
     }
 
     Card(
@@ -180,12 +359,11 @@ fun CategoryBudgetsSectionCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header Compacto e Limpo em 2 Linhas
+            // ── Cabeçalho: título + ajuda + ações ─────────────────────────────
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Linha 1: Ícone + Título Completo + Status Badge + Subtítulo curto
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -194,14 +372,14 @@ fun CategoryBudgetsSectionCard(
                     Box(
                         modifier = Modifier
                             .size(38.dp)
-                            .background(Emerald500.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                            .border(1.dp, Emerald500.copy(alpha = 0.25f), RoundedCornerShape(10.dp)),
+                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.TrackChanges,
                             contentDescription = null,
-                            tint = Emerald400,
+                            tint = TextPrimary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -210,84 +388,121 @@ fun CategoryBudgetsSectionCard(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Envelopes Orçamentários",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                maxLines = 1
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 7.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = statusText,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = statusColor
-                                )
-                            }
-                        }
-
+                        Text(
+                            text = "Envelopes Orçamentários",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1
+                        )
                         Text(
                             text = if (report.totalBudgeted > 0.0) {
-                                "Controle de tetos e compromissos com folga real"
+                                "Um teto de gasto para cada categoria do mês"
                             } else {
-                                "Defina tetos baseados na entrada prevista do mês para controle e IA."
+                                "Defina tetos por categoria e acompanhe quanto ainda pode gastar"
                             },
                             fontSize = 11.5.sp,
                             color = TextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            maxLines = 2,
+                            lineHeight = 15.sp
                         )
+                    }
+
+                    if (report.totalBudgeted > 0.0) {
+                        Box(
+                            modifier = Modifier
+                                .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = statusText,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = statusColor,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Como funciona",
+                        tint = if (showHelp) TextPrimary else TextMuted,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .clickable { showHelp = !showHelp }
+                            .padding(2.dp)
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = showHelp,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(10.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text("Como ler esta tela", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("• Envelope é o teto de gasto de uma categoria neste mês.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
+                        Text("• Barra cheia = já pago. Barra clara = contas e faturas que ainda vão vencer.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
+                        Text("• “Ainda pode gastar” = tetos − pago − a vencer.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(Modifier.size(8.dp).background(Emerald400, CircleShape)); Text("ok", fontSize = 11.sp, color = TextSecondary)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(Modifier.size(8.dp).background(Amber400, CircleShape)); Text("atenção", fontSize = 11.sp, color = TextSecondary)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(Modifier.size(8.dp).background(Rose400, CircleShape)); Text("estourou", fontSize = 11.sp, color = TextSecondary)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(Modifier.size(8.dp).background(Purple400, CircleShape)); Text("IA", fontSize = 11.sp, color = TextSecondary)
+                            }
+                        }
+                        Text("• Toque em uma categoria para ajustar o teto ou perguntar à IA.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
                     }
                 }
 
-                // Linha 2 (Action Bar limpa): Dois botões lado a lado com weight(1f)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Botão primário com destaque sutil: ✨ Sugerir com IA
                     Button(
                         onClick = onQuickApplyAiBudgets,
                         modifier = Modifier
                             .weight(1f)
-                            .height(36.dp),
+                            .height(38.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Emerald600.copy(alpha = 0.90f),
+                            containerColor = Purple500.copy(alpha = 0.85f),
                             contentColor = Color.White
                         )
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp)
-                        )
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Sugerir com IA",
+                            text = if (report.totalBudgeted > 0.0) "Planejar com IA" else "Criar com IA",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )
                     }
 
-                    // Botão secundário outlined: ⚙️ Ajustar Tetos
                     OutlinedButton(
                         onClick = onOpenConfig,
                         modifier = Modifier
                             .weight(1f)
-                            .height(36.dp),
+                            .height(38.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                         shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
@@ -296,15 +511,10 @@ fun CategoryBudgetsSectionCard(
                             contentColor = TextPrimary
                         )
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = TextSecondary
-                        )
+                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (report.totalBudgeted > 0.0) "Ajustar Tetos" else "Configurar",
+                            text = if (report.totalBudgeted > 0.0) "Ajustar tetos" else "Definir tetos",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1
@@ -313,7 +523,7 @@ fun CategoryBudgetsSectionCard(
                 }
             }
 
-            // Resumo com Hierarquia Visual Clara
+            // ── Resumo: quanto ainda pode gastar ───────────────────────────────
             if (report.totalBudgeted > 0.0) {
                 Column(
                     modifier = Modifier
@@ -322,48 +532,51 @@ fun CategoryBudgetsSectionCard(
                         .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Topo: Folga Real (destaque grande) + Teto Total Orçado
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.Top
                     ) {
                         Column {
                             Text(
-                                text = "FOLGA REAL LIVRE",
+                                text = "AINDA PODE GASTAR",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextMuted,
                                 letterSpacing = 0.5.sp
                             )
                             Text(
-                                text = FinanceEngine.formatCurrency(report.totalRealRemaining),
-                                fontSize = 18.sp,
+                                text = brl(report.totalRealRemaining),
+                                fontSize = 20.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (report.totalRealRemaining > 0.0) Emerald400 else Rose400
+                            )
+                            Text(
+                                text = "dentro dos tetos, até o fim do mês",
+                                fontSize = 10.5.sp,
+                                color = TextMuted
                             )
                         }
 
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                text = "TETO TOTAL ORÇADO",
+                                text = "TETO TOTAL",
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextMuted,
                                 letterSpacing = 0.5.sp
                             )
                             Text(
-                                text = FinanceEngine.formatCurrency(report.totalBudgeted),
-                                fontSize = 14.sp,
+                                text = brl(report.totalBudgeted),
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextPrimary
                             )
                         }
                     }
 
-                    // Global Dual-Layer Progress Bar (10dp height, rounded)
-                    val globalSpentRatio = if (report.totalBudgeted > 0.0) (report.totalSpent / report.totalBudgeted).toFloat() else 0f
-                    val globalPendingRatio = if (report.totalBudgeted > 0.0) (report.totalPending / report.totalBudgeted).toFloat() else 0f
+                    val globalSpentRatio = (report.totalSpent / report.totalBudgeted).toFloat()
+                    val globalPendingRatio = (report.totalPending / report.totalBudgeted).toFloat()
                     DualLayerProgressBar(
                         spentRatio = globalSpentRatio,
                         pendingRatio = globalPendingRatio,
@@ -371,148 +584,122 @@ fun CategoryBudgetsSectionCard(
                         height = 10.dp
                     )
 
-                    // Base / Legenda: 2 indicadores limpos
+                    // Legenda única da barra (as categorias abaixo não repetem esse texto)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(modifier = Modifier.size(7.dp).background(statusColor, CircleShape))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(modifier = Modifier.size(8.dp).background(statusColor, CircleShape))
                             Text(
-                                text = "Pago: ${FinanceEngine.formatCurrency(report.totalSpent)}",
+                                text = "Pago ${brl(report.totalSpent)}",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = TextSecondary
                             )
                         }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Box(
                                 modifier = Modifier
-                                    .size(7.dp)
-                                    .background(statusColor.copy(alpha = 0.4f), CircleShape)
+                                    .size(8.dp)
+                                    .background(statusColor.copy(alpha = 0.35f), CircleShape)
                                     .border(0.5.dp, statusColor, CircleShape)
                             )
                             Text(
-                                text = "A Vencer: ${FinanceEngine.formatCurrency(report.totalPending)}",
+                                text = "A vencer ${brl(report.totalPending)}",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Amber400
+                                color = TextSecondary
                             )
                         }
                     }
 
-                    // Sub-card de Investimentos (50/30/20) Isolado e Alinhado em Linha Única
-                    if (report.investmentTarget > 0.0 || report.investmentSpent > 0.0) {
-                        Row(
+                    // Meta de aporte (regra 50/30/20) isolada do consumo
+                    val goal = if (report.investmentGoal > 0.0) report.investmentGoal else report.investmentTarget
+                    if (goal > 0.0 || report.investmentSpent > 0.0) {
+                        val ratio = if (goal > 0.0) (report.investmentSpent / goal).toFloat().coerceIn(0f, 1f) else 0f
+                        val pct = if (goal > 0.0) (report.investmentSpent / goal * 100.0).roundToInt() else 0
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(DarkBackground.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                                .border(1.dp, Emerald500.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .border(1.dp, InvestBlue.copy(alpha = 0.20f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.TrendingUp,
-                                    contentDescription = null,
-                                    tint = Emerald400,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "Investimentos (50/30/20)",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Emerald400
-                                )
-                            }
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = "${FinanceEngine.formatCurrency(report.investmentSpent)} / ${FinanceEngine.formatCurrency(report.investmentTarget)}",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .background(Emerald500.copy(alpha = 0.18f), RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                                        contentDescription = null,
+                                        tint = InvestBlue,
+                                        modifier = Modifier.size(14.dp)
+                                    )
                                     Text(
-                                        text = "${report.investmentPercentage.roundToInt()}%",
-                                        fontSize = 10.sp,
+                                        text = "Meta de aporte · 20% da renda",
+                                        fontSize = 11.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Emerald400
+                                        color = InvestBlue,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
+                                Text(
+                                    text = "$pct%",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = InvestBlue,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
                             }
+                            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = brl(report.investmentSpent),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "de ${brl(goal)} neste mês",
+                                    fontSize = 11.5.sp,
+                                    color = TextSecondary,
+                                    modifier = Modifier.padding(bottom = 1.dp)
+                                )
+                            }
+                            DualLayerProgressBar(
+                                spentRatio = ratio,
+                                pendingRatio = 0f,
+                                statusColor = InvestBlue,
+                                height = 4.dp
+                            )
                         }
                     }
                 }
             }
 
-            // Preventive AI Alert Banner (Apenas para despesas com estouro real >= R$ 1,00)
-            val topOver = report.topOverspentCategory
-            val hasRealOverspend = topOver != null && ((topOver.committedAmount - topOver.limit) >= 1.00)
-            if (hasRealOverspend && rebalance.canRebalance && rebalance.suggestions.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Purple500.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
-                        .border(1.dp, Purple400.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-                        .clickable { onOpenRebalance() }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            tint = Purple400,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "\"${topOver!!.category}\" excedeu em ${FinanceEngine.formatCurrency(topOver.committedAmount - topOver.limit)}. A IA pode rebalancear com a folga de outra categoria.",
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp,
-                            color = TextPrimary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Text(
-                        text = "Rebalancear",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Purple400,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
-                }
+            // ── Assistente IA: insights acionáveis ─────────────────────────────
+            if (insights.isNotEmpty()) {
+                BudgetAiCoachCard(
+                    insights = insights,
+                    isGenerating = isGeneratingInsights,
+                    onGenerate = onGenerateAiInsights,
+                    onAction = onInsightAction
+                )
             }
 
-            // Envelope Items
+            // ── Lista de envelopes ─────────────────────────────────────────────
             if (report.items.isNotEmpty()) {
-                // Quick Filter Chips (Todos, Em Alerta, Variáveis, Fixos)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -522,19 +709,17 @@ fun CategoryBudgetsSectionCard(
                         val isSelected = filterMode == mode
                         val labelText = when (mode) {
                             EnvelopeFilterMode.ALL -> "Todos ($allCount)"
-                            EnvelopeFilterMode.ALERTS -> "Em Alerta ($alertsCount)"
+                            EnvelopeFilterMode.ALERTS -> "Em alerta ($alertsCount)"
                             EnvelopeFilterMode.VARIABLE -> "Variáveis"
                             EnvelopeFilterMode.FIXED -> "Fixos"
                         }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (isSelected) Emerald500.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.04f)
-                                )
+                                .background(if (isSelected) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.04f))
                                 .border(
                                     1.dp,
-                                    if (isSelected) Emerald400.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
+                                    if (isSelected) Color.White.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.08f),
                                     RoundedCornerShape(8.dp)
                                 )
                                 .clickable { filterMode = mode }
@@ -544,26 +729,35 @@ fun CategoryBudgetsSectionCard(
                                 text = labelText,
                                 fontSize = 11.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Emerald400 else TextSecondary
+                                color = if (isSelected) TextPrimary else TextSecondary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
                 }
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (visibleItems.isEmpty()) {
+                        Text(
+                            text = "Nenhuma categoria neste filtro.",
+                            fontSize = 12.sp,
+                            color = TextMuted,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+                    }
                     for (item in visibleItems) {
                         val badgeColor = getCategoryBadgeColor(item.badgeLabel)
                         val isThisCardExpanded = expandedCategoryKey == item.category
-                        val isOnlyPredicted = item.spentAmount == 0.0 && item.pendingAmount > 0.0
+                        val isOver = item.limit > 0.0 && (item.committedAmount - item.limit) >= 0.01
 
-                        // Card Individual do Envelope
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(DarkSurfaceVariant.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
                                 .border(
                                     1.dp,
-                                    if (isThisCardExpanded) Emerald400.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.06f),
+                                    if (isThisCardExpanded) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f),
                                     RoundedCornerShape(12.dp)
                                 )
                                 .clickable {
@@ -572,114 +766,80 @@ fun CategoryBudgetsSectionCard(
                                 .padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            // Topo: [Bolinha] + [Nome Completo da Categoria (weight(1f))] + [Badge]
+                            // Linha 1: nome + selo de status + seta
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                Text(
+                                    text = item.category,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(9.dp)
-                                            .background(badgeColor, CircleShape)
-                                    )
-                                    Text(
-                                        text = item.category,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = TextPrimary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-
+                                )
                                 Box(
                                     modifier = Modifier
                                         .background(badgeColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
-                                        text = item.badgeLabel,
+                                        text = getCategoryBadgeText(item.badgeLabel),
                                         fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = badgeColor
+                                        color = badgeColor,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
+                                Icon(
+                                    imageVector = if (isThisCardExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = if (isThisCardExpanded) "Recolher" else "Ajustar teto",
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
 
-                            // Linha de Valores: Comprometido vs Teto e Folga/Excesso
+                            // Linha 2: comprometido de teto  |  sobra / acima
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.Bottom
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.Bottom,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    if (isOnlyPredicted) {
-                                        Text(
-                                            text = FinanceEngine.formatCurrency(item.committedAmount),
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Amber400
-                                        )
-                                        Text(
-                                            text = "previstos",
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = Amber400,
-                                            modifier = Modifier.padding(bottom = 1.dp)
-                                        )
-                                        Text(
-                                            text = if (item.limit > 0.0) "/ ${FinanceEngine.formatCurrency(item.limit)}" else "(Sem teto)",
-                                            fontSize = 12.sp,
-                                            color = TextSecondary,
-                                            modifier = Modifier.padding(bottom = 1.dp)
-                                        )
-                                    } else {
-                                        Text(
-                                            text = FinanceEngine.formatCurrency(item.committedAmount),
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            text = if (item.limit > 0.0) "/ ${FinanceEngine.formatCurrency(item.limit)}" else "(Sem teto)",
-                                            fontSize = 12.sp,
-                                            color = TextSecondary,
-                                            modifier = Modifier.padding(bottom = 1.dp)
-                                        )
-                                    }
+                                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = brl(item.committedAmount),
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = if (item.limit > 0.0) "de ${brl(item.limit)}" else "(sem teto)",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary,
+                                        modifier = Modifier.padding(bottom = 1.dp)
+                                    )
                                 }
-
-                                val diffText = when {
-                                    item.category.contains("investimento", ignoreCase = true) && item.limit > 0.0 && item.spentAmount >= item.limit -> {
-                                        "+${FinanceEngine.formatCurrency(item.spentAmount - item.limit)}"
-                                    }
-                                    item.committedAmount - item.limit >= 0.01 -> "-${FinanceEngine.formatCurrency(item.committedAmount - item.limit)}"
-                                    item.realRemaining > 0.0 -> "+${FinanceEngine.formatCurrency(item.realRemaining)}"
-                                    else -> "No limite"
+                                val rightText = when {
+                                    item.limit <= 0.0 -> ""
+                                    isOver -> "${brl(item.committedAmount - item.limit)} acima"
+                                    else -> "sobra ${brl(item.realRemaining)}"
                                 }
-                                val diffColor = when {
-                                    item.committedAmount - item.limit >= 0.01 -> Rose400
-                                    item.realRemaining > 0.0 -> Emerald400
-                                    else -> TextSecondary
+                                if (rightText.isNotEmpty()) {
+                                    Text(
+                                        text = rightText,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = badgeColor,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
-                                Text(
-                                    text = diffText,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = diffColor
-                                )
                             }
 
-                            // Barra de Dupla Camada (1ª camada: Pago, 2ª camada: A Vencer)
                             val itemSpentRatio = if (item.limit > 0.0) (item.spentAmount / item.limit).toFloat() else 0f
                             val itemPendingRatio = if (item.limit > 0.0) (item.pendingAmount / item.limit).toFloat() else 0f
                             DualLayerProgressBar(
@@ -689,21 +849,20 @@ fun CategoryBudgetsSectionCard(
                                 height = 6.dp
                             )
 
-                            // Rodapé: Composição detalhada (Pagos + A Vencer • Folga Real)
-                            val footerText = when {
-                                isOnlyPredicted -> "R$ 0,00 pago + ${FinanceEngine.formatCurrency(item.pendingAmount)} a vencer • Folga real: +${FinanceEngine.formatCurrency(item.realRemaining)}"
-                                item.pendingAmount > 0.0 -> "${FinanceEngine.formatCurrency(item.spentAmount)} pagos + ${FinanceEngine.formatCurrency(item.pendingAmount)} a vencer • Folga real: +${FinanceEngine.formatCurrency(item.realRemaining)}"
-                                else -> "${FinanceEngine.formatCurrency(item.spentAmount)} pagos • Folga real: +${FinanceEngine.formatCurrency(item.realRemaining)}"
+                            val detail = when {
+                                item.pendingAmount > 0.0 && item.spentAmount <= 0.0 -> "Nada pago ainda · ${brl(item.pendingAmount)} a vencer"
+                                item.pendingAmount > 0.0 -> "Pago ${brl(item.spentAmount)} · A vencer ${brl(item.pendingAmount)}"
+                                item.spentAmount > 0.0 -> "Pago ${brl(item.spentAmount)}"
+                                else -> "Sem gastos neste mês"
                             }
                             Text(
-                                text = footerText,
+                                text = detail,
                                 fontSize = 11.sp,
-                                color = TextSecondary,
+                                color = TextMuted,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
 
-                            // Gaveta Rápida de Ajuste de Teto com AnimatedVisibility
                             AnimatedVisibility(
                                 visible = isThisCardExpanded,
                                 enter = expandVertically() + fadeIn(),
@@ -713,14 +872,14 @@ fun CategoryBudgetsSectionCard(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(DarkBackground.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                        .padding(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        text = "Ajuste rápido do teto:",
-                                        fontSize = 10.5.sp,
+                                        text = if (item.limit > 0.0) "Teto atual ${brl(item.limit)} · ajuste rápido:" else "Ainda sem teto · crie um:",
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = TextMuted
+                                        color = TextSecondary
                                     )
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -735,31 +894,50 @@ fun CategoryBudgetsSectionCard(
                                                     .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(6.dp))
                                                     .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(6.dp))
                                                     .clickable { onAdjustBudget?.invoke(item.category, delta) }
-                                                    .padding(vertical = 5.dp),
+                                                    .padding(vertical = 7.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
                                                     text = label,
-                                                    fontSize = 11.sp,
+                                                    fontSize = 11.5.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = if (delta > 0) Emerald400 else Rose400
+                                                    color = TextPrimary
                                                 )
                                             }
                                         }
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
                                         Box(
                                             modifier = Modifier
-                                                .background(Emerald500.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                                .border(1.dp, Emerald400.copy(alpha = 0.30f), RoundedCornerShape(6.dp))
+                                                .weight(1f)
+                                                .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
+                                                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
                                                 .clickable { onOpenConfig() }
-                                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                                                .padding(vertical = 8.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = "Editar",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Emerald400
-                                            )
+                                            Text("Editar valor", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        }
+                                        Row(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .background(Purple500.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
+                                                .border(1.dp, Purple400.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    onAskAi(
+                                                        "Analise meu envelope de ${item.category}: teto ${brl(item.limit)}, pago ${brl(item.spentAmount)}, a vencer ${brl(item.pendingAmount)}. O que posso fazer para fechar o mês dentro do orçamento?"
+                                                    )
+                                                }
+                                                .padding(vertical = 8.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Purple400, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text("Perguntar à IA", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Purple400)
                                         }
                                     }
                                 }
@@ -775,47 +953,17 @@ fun CategoryBudgetsSectionCard(
                             Icon(
                                 imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                 contentDescription = null,
-                                tint = Emerald400,
+                                tint = TextSecondary,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = if (isExpanded) {
-                                    "Recolher categorias secundárias"
-                                } else {
-                                    "Ver mais ${filteredItems.size - 5} categorias sob controle (ou zeradas)"
-                                },
+                                text = if (isExpanded) "Mostrar menos" else "Ver mais ${filteredItems.size - 5} categorias",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Emerald400
+                                color = TextSecondary
                             )
                         }
-                    }
-                }
-            } else {
-                // Empty state
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(12.dp))
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Nenhum envelope definido neste mês. Ative tetos automáticos em 1 clique baseados na sua média histórica e na Regra 50/30/20!",
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    Button(
-                        onClick = onQuickApplyAiBudgets,
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600, contentColor = Color.White),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Criar Envelopes Inteligentes", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             }

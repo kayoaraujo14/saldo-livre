@@ -4,6 +4,7 @@ import {
   suggestCategoryBudgets,
   suggestBudgetRebalance,
   calculateFinancialHealthScore,
+  buildBudgetInsights,
 } from '../finance'
 import { createToolExecutor } from '../agentTools'
 import type { MonthSummary, Transaction, UserProfile } from '@/types'
@@ -612,6 +613,41 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
       expect(invEnvelope.limit).toBe(6000)
       expect(invEnvelope.spent).toBe(5000) // Puxou exatamente o valor investido de R$ 5.000!
       expect(invEnvelope.remaining).toBe(1000)
+    })
+  })
+
+  describe('buildBudgetInsights', () => {
+    it('gera insights acionáveis para categorias estouradas e meta 50/30/20', () => {
+      const txs: Transaction[] = [
+        {
+          id: 'tx1',
+          description: 'Supermercado',
+          category: 'Alimentação',
+          subcategory: 'Supermercado',
+          type: 'expense',
+          paymentMethod: 'pix',
+          status: 'paid',
+          actualAmount: 1200,
+          totalAmount: 1200,
+          estimatedAmount: null,
+          dueDate: '2026-11-05',
+          competenceMonth: '2026-11',
+          paidByUid: 'me',
+          createdByUid: 'me',
+          visibleToUids: ['me'],
+          userImpact: { me: 1200 },
+        },
+      ]
+      const budgets = { Alimentação: 1000 }
+      const report = computeCategoryBudgets(txs, budgets, '2026-11', '2026-11-15', 'me', txs, 5000)
+      const insights = buildBudgetInsights(report)
+
+      expect(insights.length).toBeGreaterThanOrEqual(1)
+      const dangerInsight = insights.find((i) => i.severity === 'danger')
+      expect(dangerInsight).toBeDefined()
+      expect(dangerInsight?.action).toBeDefined()
+      expect(dangerInsight?.action?.type).toBe('adjust_limit')
+      expect(dangerInsight?.action?.category).toBe('Alimentação')
     })
   })
 })

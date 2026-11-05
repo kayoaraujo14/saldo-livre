@@ -38,12 +38,14 @@ interface ManageBudgetsModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   initialTab?: 'budgets' | 'rebalance'
+  autoGeneratePlan?: boolean
 }
 
 export function ManageBudgetsModal({
   open,
   onOpenChange,
   initialTab = 'budgets',
+  autoGeneratePlan = false,
 }: ManageBudgetsModalProps) {
   const {
     profile,
@@ -183,6 +185,13 @@ export function ManageBudgetsModal({
       setIsLoadingGemini(false)
     }
   }
+
+  useEffect(() => {
+    if (open && autoGeneratePlan && !geminiPlan && !isLoadingGemini) {
+      handleGenerateGeminiPlan()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, autoGeneratePlan])
 
   // Aplica as sugestões geradas pelo Gemini
   const handleApplyGeminiPlan = () => {

@@ -3094,6 +3094,8 @@ object FinanceEngine {
         val investmentTarget = consolidatedBudgets["Investimentos"] ?: 0.0
         val investmentSpent = consolidatedSpentMap["Investimentos"] ?: 0.0
         val investmentPercentage = if (investmentTarget > 0.0) round2((investmentSpent / investmentTarget) * 100.0) else 0.0
+        // Meta 50/30/20: 20% da renda prevista, independente do teto de envelope (que pode ter sido reduzido pela calibragem)
+        val investmentGoal = round2(kotlin.math.max(0.0, effectiveExpectedIncome) * 0.20)
 
         return CategoryBudgetReport(
             items = items,
@@ -3118,8 +3120,148 @@ object FinanceEngine {
             unbudgetedCategories = unbudgetedCategories,
             investmentTarget = investmentTarget,
             investmentSpent = investmentSpent,
-            investmentPercentage = investmentPercentage
+            investmentPercentage = investmentPercentage,
+            investmentGoal = investmentGoal
         )
+    }
+
+    /**
+     * Gera até 3 insights acionáveis e determinísticos (sem rede) sobre os envelopes.
+     * Espelha `buildBudgetInsights` da Web. Ordenados por severidade (perigo > atenção > info).
+     */
+    fun buildBudgetInsights(report: CategoryBudgetReport): List<BudgetInsight> {
+        val insights = mutableListOf<BudgetInsight>()
+
+        if (report.items.isEmpty() || report.totalBudgeted <= 0.0) {
+            insights.add(
+                BudgetInsight(
+                    id = "setup",
+                    severity = BudgetInsightSeverity.INFO,
+                    title = "Crie seus envelopes",
+                    message = "Defina um teto por categoria para saber quanto ainda pode gastar. A IA monta um plano com base no seu histórico.",
+                    action = BudgetInsightAction(BudgetInsightActionType.APPLY_PLAN, "Montar com IA")
+                )
+            )
+            return insights
+        }
+
+        val rebalance = suggestBudgetRebalance(report)
+
+        // 1) Estouros reais (>= R$ 1,00)
+        report.items
+            .filter { it.limit > 0.0 && (it.committedAmount - it.limit) >= 1.0 }
+            .sortedByDescending { it.committedAmount - it.limit }
+            .take(2)
+            .forEach { item ->
+                val excess = round2(item.committedAmount - item.limit)
+                val transfer = rebalance.suggestions.firstOrNull { it.overspentCategory == item.category }
+                val action = if (transfer != null && transfer.suggestedTransfer > 0.0) {
+                    BudgetInsightAction(
+                        type = BudgetInsightActionType.REBALANCE,
+                        label = "Cobrir com ${transfer.compensateFrom}",
+                        category = item.category,
+                        amount = transfer.suggestedTransfer,
+                        fromCategory = transfer.compensateFrom
+                    )
+                } else {
+                    val raise = kotlin.math.ceil(excess / 10.0) * 10.0
+                    BudgetInsightAction(
+                        type = BudgetInsightActionType.ADJUST_LIMIT,
+                        label = "Subir teto em ${formatCurrency(raise)}",
+                        category = item.category,
+                        amount = raise
+                    )
+                }
+                insights.add(
+                    BudgetInsight(
+                        id = "over_${item.category}",
+                        severity = BudgetInsightSeverity.DANGER,
+                        title = "${item.category} passou do teto",
+                        message = "Comprometido ${formatCurrency(item.committedAmount)} de ${formatCurrency(item.limit)} (${formatCurrency(excess)} acima).",
+                        action = action
+                    )
+                )
+            }
+
+        // 2) Ritmo de gasto: variáveis perto do teto ou projetadas para estourar
+        report.items
+            .filter {
+                it.limit > 0.0 && !it.isFixedCategory &&
+                    (it.committedAmount - it.limit) < 1.0 &&
+                    it.spentAmount > 0.0 &&
+                    (it.totalPercentage >= 85.0 || it.projectedSpent > it.limit + 1.0)
+            }
+            .sortedByDescending { it.totalPercentage }
+            .take(1)
+            .forEach { item ->
+                val daily = if (item.daysRemaining > 0) item.realRemaining / item.daysRemaining else item.realRemaining
+                insights.add(
+                    BudgetInsight(
+                        id = "pace_${item.category}",
+                        severity = BudgetInsightSeverity.ATTENTION,
+                        title = "${item.category} está acelerado",
+                        message = "Restam ${formatCurrency(kotlin.math.max(0.0, item.realRemaining))} até o fim do mês, cerca de ${formatCurrency(kotlin.math.max(0.0, daily))} por dia.",
+                        action = BudgetInsightAction(
+                            type = BudgetInsightActionType.ASK_COPILOT,
+                            label = "Pedir dica à IA",
+                            category = item.category,
+                            prompt = "Meu envelope de ${item.category} está em ${kotlin.math.round(item.totalPercentage).toInt()}% do teto. Como posso segurar os gastos até o fim do mês?"
+                        )
+                    )
+                )
+            }
+
+        // 3) Gastos sem envelope
+        report.unbudgetedCategories.firstOrNull()?.let { unb ->
+            val suggestedLimit = kotlin.math.ceil(unb.amount / 50.0) * 50.0
+            insights.add(
+                BudgetInsight(
+                    id = "unbudgeted_${unb.category}",
+                    severity = BudgetInsightSeverity.ATTENTION,
+                    title = "${unb.category} está sem teto",
+                    message = "Você já tem ${formatCurrency(unb.amount)} nessa categoria e nenhum envelope para acompanhar.",
+                    action = BudgetInsightAction(
+                        type = BudgetInsightActionType.ADJUST_LIMIT,
+                        label = "Criar teto de ${formatCurrency(suggestedLimit)}",
+                        category = unb.category,
+                        amount = suggestedLimit
+                    )
+                )
+            )
+        }
+
+        // 4) Meta de aporte 50/30/20
+        val goalGap = report.investmentGoal - report.investmentSpent
+        if (report.investmentGoal > 0.0 && goalGap > 0.0 && report.investmentSpent < report.investmentGoal * 0.5) {
+            insights.add(
+                BudgetInsight(
+                    id = "invest_goal",
+                    severity = BudgetInsightSeverity.INFO,
+                    title = "Meta de aporte: faltam ${formatCurrency(goalGap)}",
+                    message = "Pela regra 50/30/20, separe 20% da renda (${formatCurrency(report.investmentGoal)}) para o seu futuro.",
+                    action = BudgetInsightAction(
+                        type = BudgetInsightActionType.ASK_COPILOT,
+                        label = "Como atingir?",
+                        prompt = "Quero atingir minha meta de aporte de ${formatCurrency(report.investmentGoal)} neste mês. Já investi ${formatCurrency(report.investmentSpent)}. Qual o melhor caminho?"
+                    )
+                )
+            )
+        }
+
+        if (insights.isEmpty()) {
+            insights.add(
+                BudgetInsight(
+                    id = "all_good",
+                    severity = BudgetInsightSeverity.INFO,
+                    title = "Tudo sob controle",
+                    message = "Você ainda pode gastar ${formatCurrency(kotlin.math.max(0.0, report.totalRealRemaining))} dentro dos tetos até o fim do mês."
+                )
+            )
+        }
+
+        return insights
+            .sortedByDescending { it.severity.ordinal }
+            .take(3)
     }
 
     fun suggestCategoryBudgets(

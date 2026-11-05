@@ -20,6 +20,9 @@ import com.saldolivre.app.data.model.BudgetRebalanceResult
 import com.saldolivre.app.data.model.SuggestedBudgetsResult
 import com.saldolivre.app.data.model.SmartBudgetPlan
 import com.saldolivre.app.data.model.FinancialHealthAiDiagnosis
+import com.saldolivre.app.data.model.BudgetInsight
+import com.saldolivre.app.data.model.BudgetInsightAction
+import com.saldolivre.app.data.model.BudgetInsightActionType
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -92,8 +95,16 @@ data class DashboardUiState(
     val isGeneratingSmartBudget: Boolean = false,
     val smartBudgetPlan: SmartBudgetPlan? = null,
     val isGeneratingHealthAiDiagnosis: Boolean = false,
-    val healthAiDiagnosis: FinancialHealthAiDiagnosis? = null
-)
+    val healthAiDiagnosis: FinancialHealthAiDiagnosis? = null,
+    val budgetInsights: List<BudgetInsight> = emptyList(),
+    val aiBudgetInsights: List<BudgetInsight>? = null,
+    val aiBudgetInsightsMonth: String? = null,
+    val isGeneratingBudgetInsights: Boolean = false
+) {
+    /** Insights do Gemini (quando gerados para o mês atual) ou, senão, os insights locais instantâneos. */
+    val displayedBudgetInsights: List<BudgetInsight>
+        get() = if (aiBudgetInsights != null && aiBudgetInsightsMonth == selectedMonth) aiBudgetInsights else budgetInsights
+}
 
 class DashboardViewModel(
     private val repository: FinanceRepository
@@ -341,7 +352,11 @@ class DashboardViewModel(
                     isGeneratingSmartBudget = _uiState.value.isGeneratingSmartBudget,
                     smartBudgetPlan = _uiState.value.smartBudgetPlan,
                     isGeneratingHealthAiDiagnosis = _uiState.value.isGeneratingHealthAiDiagnosis,
-                    healthAiDiagnosis = _uiState.value.healthAiDiagnosis
+                    healthAiDiagnosis = _uiState.value.healthAiDiagnosis,
+                    budgetInsights = FinanceEngine.buildBudgetInsights(categoryBudgetReport),
+                    aiBudgetInsights = _uiState.value.aiBudgetInsights,
+                    aiBudgetInsightsMonth = _uiState.value.aiBudgetInsightsMonth,
+                    isGeneratingBudgetInsights = _uiState.value.isGeneratingBudgetInsights
                 )
             }.collect { newState ->
                 _uiState.value = newState
@@ -748,6 +763,61 @@ class DashboardViewModel(
                 android.util.Log.e("DashboardViewModel", "Erro ao gerar Diagnóstico de Saúde com Gemini", e)
                 _uiState.update { it.copy(isGeneratingHealthAiDiagnosis = false) }
             }
+        }
+    }
+
+    /** Pede ao Gemini uma análise dos envelopes; em caso de falha mantém os insights locais. */
+    fun generateBudgetAiInsights() {
+        val state = _uiState.value
+        if (state.isGeneratingBudgetInsights) return
+        val month = state.selectedMonth
+        _uiState.update { it.copy(isGeneratingBudgetInsights = true) }
+        viewModelScope.launch {
+            try {
+                val insights = geminiLoadBalancer.generateBudgetCoachInsights(
+                    report = state.categoryBudgetReport,
+                    health = state.financialHealth
+                )
+                _uiState.update {
+                    it.copy(
+                        isGeneratingBudgetInsights = false,
+                        aiBudgetInsights = insights ?: it.aiBudgetInsights,
+                        aiBudgetInsightsMonth = if (insights != null) month else it.aiBudgetInsightsMonth
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao gerar insights de envelopes com Gemini", e)
+                _uiState.update { it.copy(isGeneratingBudgetInsights = false) }
+            }
+        }
+    }
+
+    /**
+     * Aplica uma ação sugerida por um insight (local ou Gemini).
+     * Nunca deixa um teto abaixo do que já está comprometido (pago + a vencer).
+     */
+    fun applyBudgetInsightAction(action: BudgetInsightAction) {
+        val state = _uiState.value
+        val month = state.selectedMonth
+        when (action.type) {
+            BudgetInsightActionType.ADJUST_LIMIT -> {
+                val category = action.category ?: return
+                val user = state.currentUser
+                val monthBudgets = user.monthlyCategoryBudgets[month]?.takeIf { it.isNotEmpty() } ?: user.categoryBudgets
+                val item = state.categoryBudgetReport.items.find { it.category == category }
+                val current = monthBudgets[category] ?: item?.limit ?: 0.0
+                val floor = kotlin.math.ceil((item?.committedAmount ?: 0.0) / 10.0) * 10.0
+                val newLimit = max(floor, current + action.amount)
+                val updated = monthBudgets.toMutableMap()
+                if (newLimit > 0.0) updated[category] = newLimit else updated.remove(category)
+                updateCategoryBudgets(updated, month)
+                _uiState.update { it.copy(aiBudgetInsights = null, aiBudgetInsightsMonth = null) }
+            }
+            BudgetInsightActionType.REBALANCE -> {
+                applyBudgetRebalance(action.fromCategory, action.category, action.amount, month)
+                _uiState.update { it.copy(aiBudgetInsights = null, aiBudgetInsightsMonth = null) }
+            }
+            else -> Unit // OPEN_CONFIG, APPLY_PLAN e ASK_COPILOT são tratados pela tela (navegação/diálogos)
         }
     }
 

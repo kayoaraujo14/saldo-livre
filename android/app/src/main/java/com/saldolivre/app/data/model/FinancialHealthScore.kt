@@ -83,7 +83,9 @@ data class CategoryBudgetReport(
     val unbudgetedCategories: List<CategoryExpense> = emptyList(),
     val investmentTarget: Double = 0.0,
     val investmentSpent: Double = 0.0,
-    val investmentPercentage: Double = 0.0
+    val investmentPercentage: Double = 0.0,
+    /** Meta de aporte da regra 50/30/20 (20% da renda prevista), independente do teto de envelope. */
+    val investmentGoal: Double = 0.0
 ) {
     val totalAvailableIncome: Double get() = kotlin.math.max(0.0, expectedIncome + carryoverAmount - previousMonthDeficit)
     val categories: List<CategoryBudgetStatus> get() = items
@@ -169,4 +171,43 @@ data class SmartBudgetPlan(
 data class FinancialHealthAiDiagnosis(
     val overallAssessment: String = "",
     val actionPlan: List<String> = emptyList()
+)
+
+enum class BudgetInsightSeverity {
+    INFO,
+    ATTENTION,
+    DANGER
+}
+
+enum class BudgetInsightActionType {
+    /** Soma [BudgetInsightAction.amount] (pode ser negativo) ao teto da categoria. */
+    ADJUST_LIMIT,
+    /** Transfere folga de outra categoria para a categoria estourada. */
+    REBALANCE,
+    /** Pede ao Gemini um plano completo de envelopes. */
+    APPLY_PLAN,
+    /** Abre a tela de ajuste de tetos. */
+    OPEN_CONFIG,
+    /** Abre o chat do Copilot com um prompt pronto. */
+    ASK_COPILOT
+}
+
+@Immutable
+data class BudgetInsightAction(
+    val type: BudgetInsightActionType,
+    val label: String,
+    val category: String? = null,
+    val amount: Double = 0.0,
+    val fromCategory: String? = null,
+    val prompt: String? = null
+)
+
+@Immutable
+data class BudgetInsight(
+    val id: String,
+    val severity: BudgetInsightSeverity,
+    val title: String,
+    val message: String,
+    val action: BudgetInsightAction? = null,
+    val fromAi: Boolean = false
 )

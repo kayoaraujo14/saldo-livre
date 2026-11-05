@@ -646,9 +646,37 @@ fun DashboardScreen(
                         showManageBudgetsDialog = true
                     },
                     onQuickApplyAiBudgets = {
+                        // O Gemini monta o plano e o usuário revisa cada teto (com motivo) antes de aplicar
                         com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
-                        viewModel.applyAiSuggestedBudgets(uiState.selectedMonth)
+                        budgetsDialogTab = 0
+                        showManageBudgetsDialog = true
+                        viewModel.generateSmartBudgetPlan()
                     },
+                    insights = uiState.displayedBudgetInsights,
+                    isGeneratingInsights = uiState.isGeneratingBudgetInsights,
+                    onGenerateAiInsights = { viewModel.generateBudgetAiInsights() },
+                    onInsightAction = { action ->
+                        when (action.type) {
+                            com.saldolivre.app.data.model.BudgetInsightActionType.ADJUST_LIMIT,
+                            com.saldolivre.app.data.model.BudgetInsightActionType.REBALANCE -> {
+                                com.saldolivre.app.ui.util.HapticFeedbackHelper.confirm(context)
+                                viewModel.applyBudgetInsightAction(action)
+                            }
+                            com.saldolivre.app.data.model.BudgetInsightActionType.APPLY_PLAN -> {
+                                budgetsDialogTab = 0
+                                showManageBudgetsDialog = true
+                                viewModel.generateSmartBudgetPlan()
+                            }
+                            com.saldolivre.app.data.model.BudgetInsightActionType.OPEN_CONFIG -> {
+                                budgetsDialogTab = 0
+                                showManageBudgetsDialog = true
+                            }
+                            com.saldolivre.app.data.model.BudgetInsightActionType.ASK_COPILOT -> {
+                                action.prompt?.let { onNavigateToChatWithPrompt(it) }
+                            }
+                        }
+                    },
+                    onAskAi = { prompt -> onNavigateToChatWithPrompt(prompt) },
                     onAdjustBudget = { category, delta ->
                         val currentSelectedMonthBudgets = uiState.currentUser.monthlyCategoryBudgets[uiState.selectedMonth]?.takeIf { it.isNotEmpty() }
                             ?: uiState.currentUser.categoryBudgets

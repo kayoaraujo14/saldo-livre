@@ -768,6 +768,36 @@ export interface CategoryBudgetReport {
   investmentTarget?: number
   investmentSpent?: number
   investmentPercentage?: number
+  /** Meta de aporte da regra 50/30/20 (20% da renda prevista), independente do teto de envelope */
+  investmentGoal?: number
+}
+
+export type BudgetInsightSeverity = 'info' | 'attention' | 'danger'
+
+export type BudgetInsightActionType =
+  | 'adjust_limit'
+  | 'rebalance'
+  | 'apply_plan'
+  | 'open_config'
+  | 'ask_copilot'
+
+export interface BudgetInsightAction {
+  type: BudgetInsightActionType
+  label: string
+  category?: string
+  /** adjust_limit: valor (pode ser negativo) somado ao teto · rebalance: valor transferido */
+  amount?: number
+  fromCategory?: string
+  prompt?: string
+}
+
+export interface BudgetInsight {
+  id: string
+  severity: BudgetInsightSeverity
+  title: string
+  message: string
+  action?: BudgetInsightAction
+  fromAi?: boolean
 }
 
 export interface BudgetRebalanceSuggestion {

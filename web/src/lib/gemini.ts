@@ -7,6 +7,8 @@ import { GoogleGenAI, Type, type Content, type FunctionDeclaration, type Part } 
 import type {
   AccountCashFlowSummary,
   ActionCardData,
+  BudgetInsight,
+  BudgetInsightAction,
   CategoryBudgetReport,
   ChatMessage,
   ChatAttachment,
@@ -1969,3 +1971,139 @@ Gere um diagnóstico ultra objetivo e um plano de ação estritamente no formato
   }
 }
 
+
+// ------------------------------------------------------------------
+// Coach de Envelopes (insights acionáveis do Gemini)
+// ------------------------------------------------------------------
+
+/**
+ * Converte a resposta JSON do Gemini em insights validados.
+ * Ações que referenciem categoria inexistente ou valores fora do razoável são descartadas
+ * (o texto do insight é mantido), para que a IA nunca dispare uma alteração perigosa.
+ */
+export function parseBudgetInsights(raw: string, validCategories: string[]): BudgetInsight[] {
+  const MAX_INSIGHTS = 4
+  const MAX_ADJUST_ABS = 5000
+  let root: unknown
+  try {
+    root = JSON.parse(raw.replace(/```json|```/g, '').trim())
+  } catch {
+    return []
+  }
+  const list = (root as { insights?: unknown })?.insights
+  if (!Array.isArray(list)) return []
+
+  const canonical = new Map(validCategories.map((c) => [c.trim().toLowerCase(), c]))
+  const rank: Record<BudgetInsight['severity'], number> = { info: 0, attention: 1, danger: 2 }
+  const result: BudgetInsight[] = []
+
+  list.forEach((entry, index) => {
+    if (result.length >= MAX_INSIGHTS || !entry || typeof entry !== 'object') return
+    const obj = entry as Record<string, unknown>
+    const title = String(obj.title ?? '').trim()
+    const message = String(obj.message ?? '').trim()
+    if (!title || !message) return
+
+    const sev = String(obj.severity ?? 'info').trim().toLowerCase()
+    const severity: BudgetInsight['severity'] = sev === 'danger' ? 'danger' : sev === 'attention' ? 'attention' : 'info'
+
+    let action: BudgetInsightAction | undefined
+    const a = obj.action as Record<string, unknown> | undefined
+    if (a && typeof a === 'object') {
+      const type = String(a.type ?? 'none').trim().toLowerCase()
+      if (type === 'adjust_limit') {
+        const category = canonical.get(String(a.category ?? '').trim().toLowerCase())
+        const amount = Number(a.amount)
+        if (category && Number.isFinite(amount) && amount !== 0 && Math.abs(amount) <= MAX_ADJUST_ABS) {
+          const rounded = Math.round(amount / 10) * 10
+          if (rounded !== 0) {
+            const label = String(a.label ?? '').trim() || (rounded > 0 ? `Subir teto em R$ ${rounded}` : `Reduzir teto em R$ ${Math.abs(rounded)}`)
+            action = { type: 'adjust_limit', label: label.slice(0, 32), category, amount: rounded }
+          }
+        }
+      } else if (type === 'ask_copilot') {
+        const prompt = String(a.prompt ?? '').trim() || `Me ajude com: ${title}`
+        action = { type: 'ask_copilot', label: (String(a.label ?? '').trim() || 'Perguntar à IA').slice(0, 32), prompt }
+      }
+    }
+
+    result.push({
+      id: `ai_${index}`,
+      severity,
+      title: title.slice(0, 70),
+      message: message.slice(0, 220),
+      action,
+      fromAi: true,
+    })
+  })
+
+  return result.sort((x, y) => rank[y.severity] - rank[x.severity])
+}
+
+/**
+ * Coach de envelopes: o Gemini analisa o estado real dos tetos e devolve insights acionáveis.
+ * Retorna null quando não há chave/resposta válida (o chamador mantém os insights locais).
+ */
+export async function generateBudgetCoachInsights(
+  report: CategoryBudgetReport,
+  health: Pick<
+    FinancialHealthScore,
+    'score' | 'savingsScore' | 'spendingLimitScore' | 'emergencyReserveScore' | 'envelopeScore'
+  >,
+): Promise<BudgetInsight[] | null> {
+  const keys = getGeminiApiKeys()
+  if (keys.length === 0 || report.items.length === 0) return null
+
+  const brl = (v: number) => v.toFixed(2)
+  const envelopes = report.items
+    .map(
+      (i) =>
+        `- ${i.category}: teto R$ ${brl(i.limit)}, pago R$ ${brl(i.spentAmount)}, a vencer R$ ${brl(i.pendingAmount)}, uso ${Math.round(i.totalPercentage)}%, ${i.isFixedCategory ? 'FIXO' : 'VARIAVEL'}, status ${i.badgeLabel}, dias restantes ${i.daysRemaining}`,
+    )
+    .join('\n')
+
+  const prompt = `Você é o coach de orçamento de um app de finanças pessoais brasileiro. Fale em português, tom direto e amigável, sem jargão.
+Analise os envelopes do mês e devolva de 2 a 4 insights curtos e ACIONÁVEIS, priorizando o que mais impacta o usuário.
+
+DADOS:
+- Renda prevista: R$ ${brl(report.expectedIncome ?? 0)}
+- Ainda pode gastar dentro dos tetos: R$ ${brl(report.totalRealRemaining)}
+- Meta de aporte (20% da renda): R$ ${brl(report.investmentGoal ?? 0)} | já investido: R$ ${brl(report.investmentSpent ?? 0)}
+- Score de saúde: ${health.score}/100 (poupança ${health.savingsScore}/30, custo de vida ${health.spendingLimitScore}/30, reserva ${health.emergencyReserveScore}/25, envelopes ${health.envelopeScore}/15)
+- Envelopes:
+${envelopes}
+
+REGRAS:
+1. Use apenas nomes de categoria EXATAMENTE como listados acima.
+2. Nunca sugira reduzir um teto abaixo de (pago + a vencer). Valores em múltiplos de 10, sem centavos.
+3. Cite valores reais em R$ e, quando houver, os dias restantes. Não invente números.
+4. Categorias FIXAS não têm "ritmo"; não as trate como gasto acelerado.
+5. Se estiver tudo bem, devolva 1 insight positivo e 1 oportunidade (ex: aporte).
+6. "severity": danger (estouro), attention (risco), info (oportunidade/elogio).
+7. "action.type": adjust_limit (amount em R$ a somar ao teto; negativo reduz), ask_copilot (com "prompt" para o chat) ou none.
+
+Responda APENAS com JSON:
+{"insights":[{"severity":"attention","title":"até 60 caracteres","message":"1 a 2 frases","action":{"type":"adjust_limit","category":"Lazer & Entretenimento","amount":50,"label":"Subir teto em R$ 50"}}]}`
+
+  const validCategories = report.items.map((i) => i.category)
+  for (const key of keys) {
+    const ai = new GoogleGenAI({ apiKey: key })
+    for (const model of ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest']) {
+      try {
+        const res = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: { responseMimeType: 'application/json', temperature: 0.3 },
+        })
+        const text = (res.text || '').trim()
+        if (text) {
+          const parsed = parseBudgetInsights(text, validCategories)
+          if (parsed.length > 0) return parsed
+        }
+      } catch (err) {
+        console.warn(`Falha no Gemini Budget Coach com modelo ${model}:`, err)
+      }
+    }
+  }
+  return null
+}
