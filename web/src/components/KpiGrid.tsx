@@ -577,7 +577,7 @@ export function KpiGrid({
                   Ver Diagnóstico & Dicas IA
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 truncate max-w-xl mt-0.5">
+              <p className="text-[10px] text-slate-400 line-clamp-2 max-w-xl mt-0.5">
                 {healthScore.actionableTips?.[0] || healthScore.description}
               </p>
             </div>

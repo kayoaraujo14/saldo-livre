@@ -251,4 +251,88 @@ class FinanceEngineBudgetTest {
             assertEquals("Teto $limit não deve ter centavos quebrados", limit, kotlin.math.floor(limit), 0.001)
         }
     }
+
+    @Test
+    fun `calculateFinancialHealthScore returns strictly 0 for savings when totalInvested is 0 even with free balance`() {
+        val summary = MonthSummary(
+            income = 5000.0,
+            paid = 2000.0,
+            committed = 0.0,
+            totalInvested = 0.0,
+            freeBalance = 3000.0
+        )
+        val health = FinanceEngine.calculateFinancialHealthScore(
+            summary = summary,
+            emergencyReserveBalance = 0.0,
+            budgetReport = null
+        )
+
+        assertEquals("Score de poupança deve ser 0 quando totalInvested for 0", 0, health.savingsScore)
+        assertEquals(0, health.savingsRatePercentage)
+    }
+
+    @Test
+    fun `computeCategoryBudgets assigns Previsto no Teto badge when spentAmount is 0 and pending is within ceiling`() {
+        val txs = listOf(
+            Transaction(
+                id = "tx_pending",
+                description = "Compras a vencer",
+                competenceMonth = "2026-11",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.CREDIT_CARD,
+                totalAmount = 366.58,
+                category = "Compras & Estilo de Vida",
+                dueDate = "2026-11-28",
+                status = TransactionStatus.PENDING,
+                visibleToUids = listOf(myUid),
+                userImpact = mapOf(myUid to 366.58)
+            )
+        )
+        val budgets = mapOf("Compras & Estilo de Vida" to 450.0)
+        val report = FinanceEngine.computeCategoryBudgetsFromTransactions(
+            transactions = txs,
+            categoryBudgets = budgets,
+            monthKey = "2026-11",
+            referenceDate = "2026-11-05",
+            uid = myUid,
+            expectedIncome = 5000.0
+        )
+
+        val item = report.items.find { it.category == "Compras & Estilo de Vida" }
+        assertNotNull(item)
+        assertEquals(CategoryBudgetAlertStatus.OK, item!!.status)
+        assertEquals("Previsto no Teto", item.badgeLabel)
+        assertEquals(0.0, item.spentAmount, 0.01)
+        assertEquals(366.58, item.pendingAmount, 0.01)
+    }
+
+    @Test
+    fun `suggestCategoryBudgets applies 15-20 percent buffer rounded to multiples of 50 for variable categories`() {
+        val txs = listOf(
+            Transaction(
+                id = "tx1",
+                description = "Compras Setembro",
+                competenceMonth = "2026-09",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.CREDIT_CARD,
+                totalAmount = 366.58,
+                category = "Compras & Estilo de Vida",
+                dueDate = "2026-09-20",
+                status = TransactionStatus.PAID,
+                userImpact = mapOf(myUid to 366.58)
+            )
+        )
+        val result = FinanceEngine.suggestCategoryBudgets(
+            allTransactions = txs,
+            uid = myUid,
+            referenceMonth = "2026-11",
+            monthlyIncome = 5000.0
+        )
+
+        val limit = result.suggestedBudgets["Compras & Estilo de Vida"]
+        assertNotNull(limit)
+        // 366.58 * 1.15 = 421.56 -> múltiplo de 50 = 450.0
+        assertEquals(450.0, limit!!, 0.01)
+        assertEquals(0.0, limit % 50.0, 0.001)
+    }
 }

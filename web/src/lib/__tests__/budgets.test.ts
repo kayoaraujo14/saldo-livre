@@ -205,8 +205,8 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
       const suggestion = suggestCategoryBudgets(historyTxs, 'me', '2026-11', 5000)
 
       expect(suggestion.categoryAverages['Alimentação']).toBe(1000) // (900 + 1100) / 2
-      // 1000 * 1.10 = 1100
-      expect(suggestion.suggestedBudgets['Alimentação']).toBe(1100)
+      // 1000 * 1.15 = 1150 (margem de 15% arredondada em múltiplos de R$ 50)
+      expect(suggestion.suggestedBudgets['Alimentação']).toBe(1150)
       expect(suggestion.totalSuggested).toBeGreaterThan(0)
       expect(suggestion.incomeCoveragePct).toBeGreaterThan(0)
     })

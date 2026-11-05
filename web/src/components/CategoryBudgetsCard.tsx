@@ -264,61 +264,25 @@ export function CategoryBudgetsCard() {
         {/* Corpo do Card */}
         {!isCardCollapsed && (
           <>
-            {/* Resumo Compacto Integrado à Barra Segmentada (Substitui as 4 caixas repetitivas) */}
+            {/* Resumo Compacto com Hierarquia Visual Clara */}
             {totalBudgeted > 0 && (
-              <div className="p-3 rounded-xl bg-slate-950/60 border border-white/[0.06] space-y-2.5">
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-white/[0.06] space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Orçado Total</span>
-                      <strong className="font-mono text-emerald-300 text-xs sm:text-sm">{formatBRL(totalBudgeted)}</strong>
-                    </div>
-                    <div className="h-5 w-px bg-white/10 hidden sm:block" />
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Pago</span>
-                      <strong className="font-mono text-slate-100 text-xs sm:text-sm">{formatBRL(totalSpent)}</strong>
-                    </div>
-                    <div className="h-5 w-px bg-white/10 hidden sm:block" />
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">A Vencer</span>
-                      <strong className="font-mono text-amber-300 text-xs sm:text-sm">+{formatBRL(totalPending)}</strong>
-                    </div>
-                    <div className="h-5 w-px bg-white/10 hidden sm:block" />
-                    <div>
-                      <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Folga Real</span>
-                      <strong className={`font-mono text-xs sm:text-sm ${totalRealRemaining >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {totalRealRemaining >= 0 ? `+${formatBRL(totalRealRemaining)}` : `-${formatBRL(Math.abs(totalRealRemaining))}`}
-                      </strong>
-                    </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Folga Real Livre</span>
+                    <strong className={`font-mono text-base sm:text-lg font-extrabold ${totalRealRemaining >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {totalRealRemaining >= 0 ? `+${formatBRL(totalRealRemaining)}` : `-${formatBRL(Math.abs(totalRealRemaining))}`}
+                    </strong>
                   </div>
 
-                  {/* Pill Destacado de Investimentos (50/30/20) - Separado de consumo */}
-                  {investmentTarget > 0 && (
-                    <div
-                      title="Meta de Aporte 50/30/20 (isolada das despesas de consumo dos envelopes)"
-                      className="px-2.5 py-1 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center gap-2 text-[11px] text-indigo-200"
-                    >
-                      <TrendingUp className="size-3.5 text-indigo-400 shrink-0" />
-                      <div className="flex items-baseline gap-1.5 font-mono">
-                        <span className="text-slate-400 text-[10px] font-sans">Aporte 20%:</span>
-                        <strong className="text-indigo-200">{formatBRL(investmentSpent)}</strong>
-                        <span className="text-slate-500 text-[10px]">/ {formatBRL(investmentTarget)}</span>
-                        <span className="text-indigo-400 font-bold text-[10px]">({investmentPercentage}%)</span>
-                      </div>
-                    </div>
-                  )}
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Teto Total Orçado</span>
+                    <strong className="font-mono text-emerald-300 text-xs sm:text-sm">{formatBRL(totalBudgeted)}</strong>
+                  </div>
                 </div>
 
-                {/* Barra Geral de Dupla Camada Segmentada */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                    <span>
-                      {Math.round(overallPercentage)}% consumido {totalPending > 0 && `(+${Math.round((totalPending / totalBudgeted) * 100)}% a vencer)`}
-                    </span>
-                    <span className={totalRealRemaining >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {totalRealRemaining >= 0 ? `${formatBRL(totalRealRemaining)} folga livre` : `${formatBRL(Math.abs(totalRealRemaining))} excedido`}
-                    </span>
-                  </div>
+                {/* Barra Geral de Dupla Camada Segmentada (10px height) */}
+                <div className="space-y-1.5">
                   <div className="relative w-full bg-slate-950 rounded-full h-2.5 overflow-hidden flex border border-white/[0.08]">
                     {/* 1ª Camada Sólida (Pago) */}
                     <div
@@ -346,7 +310,40 @@ export function CategoryBudgetsCard() {
                       />
                     )}
                   </div>
+
+                  {/* Legenda Limpa na Base */}
+                  <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <div className="flex items-center gap-1.5">
+                      <div className="size-2 rounded-full bg-emerald-500" />
+                      <span>Pago: <strong className="font-mono text-slate-200">{formatBRL(totalSpent)}</strong></span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <div className="size-2 rounded-full bg-amber-400/60 border border-amber-400" />
+                      <span>A Vencer: <strong className="font-mono text-amber-300">{formatBRL(totalPending)}</strong></span>
+                    </div>
+                  </div>
                 </div>
+
+                {/* Sub-card Destacado de Investimentos (50/30/20) - Separado de consumo */}
+                {investmentTarget > 0 && (
+                  <div
+                    title="Meta de Aporte 50/30/20 (isolada das despesas de consumo dos envelopes)"
+                    className="px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-between gap-2 text-[11px] text-indigo-200"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <TrendingUp className="size-3.5 text-indigo-400 shrink-0" />
+                      <span className="font-semibold text-indigo-300">Investimentos (50/30/20)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <strong className="text-indigo-200">{formatBRL(investmentSpent)}</strong>
+                      <span className="text-slate-500 text-[10px]">/ {formatBRL(investmentTarget)}</span>
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-0 bg-indigo-500/20 text-indigo-300 font-mono">
+                        {investmentPercentage}%
+                      </Badge>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -381,9 +378,9 @@ export function CategoryBudgetsCard() {
                     <div className="flex items-center gap-1.5 flex-wrap">
                       {(
                         [
+                          { id: 'all', label: `Todos (${items.length})` },
                           { id: 'alerts', label: `Em Alerta (${alertsCount})` },
                           { id: 'variable', label: 'Gastos Variáveis' },
-                          { id: 'all', label: `Todos (${items.length})` },
                           { id: 'fixed', label: 'Fixos Mensais' },
                         ] as const
                       ).map((tab) => (
@@ -465,7 +462,7 @@ export function CategoryBudgetsCard() {
                                         ? 'bg-orange-500/15 text-orange-300'
                                         : item.badgeLabel === 'Ritmo Rápido'
                                           ? 'bg-amber-500/15 text-amber-300'
-                                          : item.badgeLabel === 'Fixo em Dia' || item.badgeLabel === 'Quitado / Dentro do Previsto'
+                                          : item.badgeLabel === 'Previsto no Teto' || item.badgeLabel === 'Fixo em Dia' || item.badgeLabel === 'Quitado / Dentro do Previsto'
                                             ? 'bg-cyan-500/15 text-cyan-300'
                                             : 'bg-emerald-500/15 text-emerald-300'
                                   }`}
@@ -477,19 +474,33 @@ export function CategoryBudgetsCard() {
 
                             {/* Valores e Quick-Edit (-/+ R$ 50) */}
                             <div className="flex items-center justify-between text-xs pt-0.5">
-                              <div>
-                                <span className="font-mono font-bold text-white text-xs sm:text-sm">
-                                  {formatBRL(item.spentAmount)}
-                                </span>
-                                {item.pendingAmount > 0 && (
-                                  <span className="text-[10px] text-amber-300/90 font-mono ml-1" title="Contas a vencer">
-                                    +{formatBRL(item.pendingAmount)}
+                              {item.spentAmount === 0 && item.pendingAmount > 0 ? (
+                                <div>
+                                  <span className="font-mono font-bold text-amber-300 text-xs sm:text-sm">
+                                    {formatBRL(item.committedAmount)}
                                   </span>
-                                )}
-                                <span className="text-[10px] text-slate-400 font-mono ml-1">
-                                  {item.limit > 0 ? `/ ${formatBRL(item.limit)}` : ''}
-                                </span>
-                              </div>
+                                  <span className="text-[10px] text-amber-400 font-medium ml-1">
+                                    previstos
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-mono ml-1">
+                                    {item.limit > 0 ? `/ ${formatBRL(item.limit)}` : ''}
+                                  </span>
+                                </div>
+                              ) : (
+                                <div>
+                                  <span className="font-mono font-bold text-white text-xs sm:text-sm">
+                                    {formatBRL(item.spentAmount)}
+                                  </span>
+                                  {item.pendingAmount > 0 && (
+                                    <span className="text-[10px] text-amber-300/90 font-mono ml-1" title="Contas a vencer">
+                                      +{formatBRL(item.pendingAmount)}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-slate-400 font-mono ml-1">
+                                    {item.limit > 0 ? `/ ${formatBRL(item.limit)}` : ''}
+                                  </span>
+                                </div>
+                              )}
 
                               {/* Controles de Quick-Edit */}
                               {item.limit > 0 && (
@@ -607,12 +618,12 @@ export function CategoryBudgetsCard() {
                       {isExpanded ? (
                         <>
                           <ChevronUp className="size-3" />
-                          Recolher envelopes
+                          Recolher categorias secundárias
                         </>
                       ) : (
                         <>
                           <ChevronDown className="size-3" />
-                          Mostrar todas as {filteredItems.length} categorias
+                          Ver mais {filteredItems.length - 4} categorias sob controle (ou zeradas)
                         </>
                       )}
                     </button>

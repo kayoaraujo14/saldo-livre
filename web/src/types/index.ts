@@ -709,6 +709,7 @@ export type CategoryBudgetBadgeLabel =
   | 'Estourado'
   | 'Vai Estourar'
   | 'Quase no Limite'
+  | 'Previsto no Teto'
   | 'Ritmo Rápido'
   | 'Sob Controle'
   | 'Fixo em Dia'

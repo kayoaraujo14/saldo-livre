@@ -2428,13 +2428,15 @@ export function calculateFinancialHealthScore(
       Math.round(((totalInvested + positiveFreeBalance) / income) * 100),
     )
 
-    if (rate >= 0.20) {
+    if (totalInvested <= 0 || rate <= 0) {
+      savingsScore = 0
+    } else if (rate >= 0.20) {
       savingsScore = 30
     } else {
-      const baseInvestedPts = rate > 0 ? Math.round((rate / 0.20) * 30) : 0
-      // Reconhece a margem de Saldo Livre positivo projetado como capacidade real de aporte (até +10 pts)
+      const baseInvestedPts = Math.round((rate / 0.20) * 25)
+      // Reconhece a margem de Saldo Livre positivo projetado como capacidade real de aporte (até +5 pts se já investiu)
       const freeMarginRate = positiveFreeBalance / income
-      const marginBonusPts = freeMarginRate > 0 ? Math.min(10, Math.round((freeMarginRate / 0.20) * 10)) : 0
+      const marginBonusPts = freeMarginRate > 0 ? Math.min(5, Math.round((freeMarginRate / 0.20) * 5)) : 0
       savingsScore = Math.min(30, baseInvestedPts + marginBonusPts)
     }
   } else if (totalInvested > 0) {
@@ -2872,15 +2874,23 @@ export function computeCategoryBudgets(
       badgeLabel = 'Vai Estourar'
       criticalCount++
     } else if (isExactLimit) {
-      status = isFixedCategory ? 'ok' : 'warning'
-      badgeLabel = isFixedCategory ? 'Quitado / Dentro do Previsto' : 'No Limite'
-      if (status === 'warning') warningCount++
+      if (spentAmount === 0 && pendingAmount > 0) {
+        status = 'ok'
+        badgeLabel = 'Previsto no Teto'
+      } else {
+        status = isFixedCategory ? 'ok' : 'warning'
+        badgeLabel = isFixedCategory ? 'Quitado / Dentro do Previsto' : 'No Limite'
+        if (status === 'warning') warningCount++
+      }
     } else if (isFixedCategory) {
       status = 'ok'
       badgeLabel = 'Fixo em Dia'
     } else {
       // Gastos variáveis
-      if (totalPercentage >= 90) {
+      if (spentAmount === 0 && pendingAmount > 0 && committedAmount <= limit + 0.01) {
+        status = 'ok'
+        badgeLabel = 'Previsto no Teto'
+      } else if (totalPercentage >= 90) {
         status = 'warning'
         badgeLabel = 'Quase no Limite'
         warningCount++
@@ -3140,12 +3150,17 @@ export function suggestCategoryBudgets(
     categoryAverages[cat] = avg
     const curCommitted = curMonthExpenseMap.get(cat) || 0
     if (avg >= 20 || curCommitted > 0) {
-      const isFixed = FIXED_MONTHLY_CATEGORIES.has(cat)
-      // Categorias fixas usam o valor real compromissado/médio arredondado em dezenas (sem inflar +10%);
-      // categorias variáveis recebem margem de segurança de 10%
-      const baseTarget = isFixed ? Math.max(avg, curCommitted) : Math.max(avg * 1.1, curCommitted)
-      // NUNCA gera centavos quebrados: arredonda sempre para múltiplos de R$ 10,00
-      const suggested = Math.max(50, Math.ceil(baseTarget / 10) * 10)
+      const isFixed = FIXED_MONTHLY_CATEGORIES.has(cat) || FIXED_MONTHLY_CATEGORIES.has(normalizeBudgetCategory(cat))
+      const baseTarget = isFixed
+        ? Math.max(avg, curCommitted)
+        : Math.max(avg * 1.15, curCommitted * 1.20)
+      const rawSuggested = isFixed
+        ? Math.max(50, Math.ceil(baseTarget / 10) * 10)
+        : Math.max(50, Math.ceil(baseTarget / 50) * 50)
+      const committedCeil = isFixed
+        ? Math.ceil(curCommitted / 10) * 10
+        : Math.ceil(curCommitted / 50) * 50
+      const suggested = Math.max(committedCeil, rawSuggested)
       suggestedBudgets[cat] = suggested
       totalSuggested += suggested
     }

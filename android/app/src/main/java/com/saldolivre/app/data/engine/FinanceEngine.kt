@@ -2447,13 +2447,15 @@ object FinanceEngine {
                 100,
                 kotlin.math.round(((totalInvested + positiveFreeBalance) / income) * 100.0).toInt()
             )
-            savingsScore = if (rate >= 0.20) {
+            savingsScore = if (totalInvested <= 0.0 || rate <= 0.0) {
+                0
+            } else if (rate >= 0.20) {
                 30
             } else {
-                val baseInvestedPts = if (rate > 0.0) kotlin.math.round((rate / 0.20) * 30.0).toInt() else 0
+                val baseInvestedPts = kotlin.math.round((rate / 0.20) * 25.0).toInt()
                 val freeMarginRate = positiveFreeBalance / income
                 val marginBonusPts = if (freeMarginRate > 0.0) {
-                    kotlin.math.min(10, kotlin.math.round((freeMarginRate / 0.20) * 10.0).toInt())
+                    kotlin.math.min(5, kotlin.math.round((freeMarginRate / 0.20) * 5.0).toInt())
                 } else 0
                 kotlin.math.min(30, baseInvestedPts + marginBonusPts)
             }
@@ -2928,15 +2930,23 @@ object FinanceEngine {
                 badgeLabel = "Vai Estourar"
                 criticalCount++
             } else if (isExactLimit) {
-                status = if (isFixedCategory) CategoryBudgetAlertStatus.OK else CategoryBudgetAlertStatus.WARNING
-                badgeLabel = if (isFixedCategory) "Quitado / Dentro do Previsto" else "No Limite"
-                if (status == CategoryBudgetAlertStatus.WARNING) warningCount++
+                if (spentAmount == 0.0 && pendingAmount > 0.0) {
+                    status = CategoryBudgetAlertStatus.OK
+                    badgeLabel = "Previsto no Teto"
+                } else {
+                    status = if (isFixedCategory) CategoryBudgetAlertStatus.OK else CategoryBudgetAlertStatus.WARNING
+                    badgeLabel = if (isFixedCategory) "Quitado / Dentro do Previsto" else "No Limite"
+                    if (status == CategoryBudgetAlertStatus.WARNING) warningCount++
+                }
             } else if (isFixedCategory) {
                 status = CategoryBudgetAlertStatus.OK
                 badgeLabel = "Fixo em Dia"
             } else {
                 // Gastos variáveis
-                if (totalPercentage >= 90.0) {
+                if (spentAmount == 0.0 && pendingAmount > 0.0 && committedAmount <= limit + 0.01) {
+                    status = CategoryBudgetAlertStatus.OK
+                    badgeLabel = "Previsto no Teto"
+                } else if (totalPercentage >= 90.0) {
                     status = CategoryBudgetAlertStatus.WARNING
                     badgeLabel = "Quase no Limite"
                     warningCount++
@@ -3222,11 +3232,19 @@ object FinanceEngine {
                 val baseTarget = if (isFixed) {
                     kotlin.math.max(avg, curCommitted)
                 } else {
-                    kotlin.math.max(avg * 1.1, curCommitted)
+                    kotlin.math.max(avg * 1.15, curCommitted * 1.20)
                 }
-                val rawSuggested = kotlin.math.max(50.0, kotlin.math.ceil(baseTarget / 10.0) * 10.0)
-                // O piso inegociável é o que já foi gasto no mês selecionado, arredondado para múltiplo de 10
-                val committedCeil = kotlin.math.ceil(curCommitted / 10.0) * 10.0
+                val rawSuggested = if (isFixed) {
+                    kotlin.math.max(50.0, kotlin.math.ceil(baseTarget / 10.0) * 10.0)
+                } else {
+                    kotlin.math.max(50.0, kotlin.math.ceil(baseTarget / 50.0) * 50.0)
+                }
+                // O piso inegociável é o que já foi gasto no mês selecionado
+                val committedCeil = if (isFixed) {
+                    kotlin.math.ceil(curCommitted / 10.0) * 10.0
+                } else {
+                    kotlin.math.ceil(curCommitted / 50.0) * 50.0
+                }
                 val suggested = kotlin.math.max(committedCeil, rawSuggested)
                 suggestedBudgets[cat] = suggested
                 totalSuggested += suggested
