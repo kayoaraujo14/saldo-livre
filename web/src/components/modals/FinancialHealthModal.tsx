@@ -92,21 +92,7 @@ export function FinancialHealthModal({
         isMounted = false
       }
     }
-  }, [
-    open,
-    health.score,
-    health.classification,
-    health.savingsScore,
-    health.spendingLimitScore,
-    health.emergencyReserveScore,
-    health.envelopeScore,
-    health.savingsRatePercentage,
-    health.spendingRatioPercentage,
-    health.emergencyCoverageMonths,
-    health.actionableTips,
-    livingCost,
-    summary?.income
-  ])
+  }, [open, health.score, livingCost, summary?.income])
 
   const handleAskCopilot = () => {
     onOpenChange(false)
