@@ -70,7 +70,13 @@ export function normalizeCategory(cat: string): Category {
     case 'Receita': return 'Outras Receitas'
     case 'Cartão Terceiros': return 'Outros'
     case 'Estorno': return 'Outros'
-    default: return cat as Category
+    // Apelidos curtos usados em orçamentos/IA
+    case 'Cuidados Pessoais': return 'Cuidados Pessoais & Estética'
+    case 'Família': return 'Família & Dependentes'
+    case 'Trabalho': return 'Trabalho / PJ / Carreira'
+    case 'Impostos': return 'Impostos & Tributos'
+    case 'Financiamentos': return 'Financiamentos & Dívidas'
+    default: return (cat || '').trim() as Category
   }
 }
 
@@ -637,12 +643,11 @@ export function getCategoryDetail(name: string): CategoryDetail {
   if (name in CATEGORY_GROUPS) {
     return CATEGORY_GROUPS[name as Category]
   }
-  // Mapeamentos de tolerância para nomes legados ou similares
-  if (name === 'Lazer') return CATEGORY_GROUPS['Lazer & Entretenimento']
-  if (name === 'Assinaturas') return CATEGORY_GROUPS['Assinaturas & Serviços']
-  if (name === 'Compras') return CATEGORY_GROUPS['Compras & Estilo de Vida']
-  if (name === 'Educação') return CATEGORY_GROUPS['Educação & Desenvolvimento']
-  if (name === 'Financiamentos & Empréstimos') return CATEGORY_GROUPS['Financiamentos & Dívidas']
+  // Mapeamentos de tolerância para nomes legados ou similares (fonte única: normalizeCategory)
+  const canonical = normalizeCategory(name)
+  if (canonical in CATEGORY_GROUPS && canonical !== name) {
+    return CATEGORY_GROUPS[canonical]
+  }
 
   return {
     icon: 'Tag',

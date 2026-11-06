@@ -31,6 +31,7 @@ import type {
   BudgetInsight,
   BudgetInsightAction,
 } from '@/types'
+import { INCOME_CATEGORIES, normalizeCategory } from '@/types'
 import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
 import { buildCardInvoice } from './invoices'
 
@@ -2301,54 +2302,43 @@ export function guessCategory(text: string, amount?: number, type?: 'income' | '
   return guessCategoryAndSubcategory(text, amount, type).category
 }
 
-/**
- * Calcula o Score do Termômetro de Saúde Financeira (0 a 100).
- * Avalia 3 pilares fundamentais da metodologia Saldo Livre:
- * 1. Índice de Poupança & Investimentos (até 35 pts)
- * 2. Controle de Teto de Gastos / Consumo da Renda (até 35 pts)
- * 3. Cobertura da Reserva de Emergência (até 30 pts)
- */
-export const FIXED_MONTHLY_CATEGORIES = new Set([
+/** Categorias canônicas (padrão dos lançamentos) com despesa fixa/recorrente mensal. */
+export const FIXED_MONTHLY_CATEGORIES = new Set<string>([
   'Moradia',
-  'Assinaturas',
   'Assinaturas & Serviços',
-  'Educação',
   'Educação & Desenvolvimento',
-  'Financiamentos',
   'Financiamentos & Dívidas',
-  'Impostos',
   'Impostos & Tributos',
 ])
 
-export const NON_ENVELOPE_CATEGORIES = new Set([
+/** Categorias que nunca geram envelope de despesa: entradas, patrimônio e legados de crédito/terceiros. */
+export const NON_ENVELOPE_CATEGORIES = new Set<string>([
   'Investimentos',
+  ...INCOME_CATEGORIES,
   'Receita',
   'Estorno',
   'Cartão Terceiros',
-  'Rendimentos & Investimentos',
-  'Salário & Remuneração',
-  'Outras Receitas',
-  'Reembolsos & Acertos',
-  'Benefícios',
 ])
 
-const CATEGORY_CANONICAL_MAP: Record<string, string> = {
-  Lazer: 'Lazer & Entretenimento',
-  Assinaturas: 'Assinaturas & Serviços',
-  Compras: 'Compras & Estilo de Vida',
-  Educação: 'Educação & Desenvolvimento',
-  Financiamentos: 'Financiamentos & Dívidas',
-  'Financiamentos & Empréstimos': 'Financiamentos & Dívidas',
-  Impostos: 'Impostos & Tributos',
-  'Cuidados Pessoais': 'Cuidados Pessoais & Estética',
-  Família: 'Família & Dependentes',
-  Trabalho: 'Trabalho / PJ / Carreira',
-}
-
+/**
+ * Normaliza a categoria de um envelope para o padrão das categorias dos lançamentos
+ * (fonte única: `normalizeCategory`). Legados de crédito/terceiros são preservados
+ * para continuarem fora dos envelopes.
+ */
 export function normalizeBudgetCategory(category: string): string {
   const trimmed = (category || '').trim()
-  return CATEGORY_CANONICAL_MAP[trimmed] || trimmed
+  if (trimmed === 'Estorno' || trimmed === 'Cartão Terceiros' || trimmed === 'Receita') return trimmed
+  return normalizeCategory(trimmed)
 }
+
+/**
+ * Calcula o Score do Termômetro de Saúde Financeira (0 a 100).
+ * Soma 4 pilares da metodologia Saldo Livre:
+ * 1. Poupança & Investimentos (até 30 pts)
+ * 2. Controle de Custo de Vida / Consumo da Renda (até 30 pts)
+ * 3. Cobertura da Reserva de Emergência (até 25 pts)
+ * 4. Aderência aos Envelopes Orçamentários (até 15 pts)
+ */
 
 export function resolveEmergencyReserveBalance(
   profile: UserProfile | null | undefined,
@@ -2790,7 +2780,9 @@ export function computeCategoryBudgets(
         effectiveLimitsMap.set(k, rawLim)
         continue
       }
-      const scaled = Math.floor((rawLim * ratio) / 10) * 10
+      let scaled = Math.floor((rawLim * ratio) / 10) * 10
+      // Nunca zera um envelope configurado só por causa do arredondamento em múltiplos de 10
+      if (scaled <= 0 && rawLim > 0) scaled = Math.max(1, Math.floor(rawLim * ratio))
       effectiveLimitsMap.set(k, scaled)
       sumScaled += scaled
       if (scaled > maxVal) {

@@ -2301,78 +2301,61 @@ object FinanceEngine {
         return groups
     }
 
+    /** Categorias canônicas (padrão dos lançamentos) com despesa fixa/recorrente mensal. */
     val FIXED_MONTHLY_CATEGORIES = setOf(
         "Moradia",
-        "Assinaturas",
         "Assinaturas & Serviços",
-        "Educação",
         "Educação & Desenvolvimento",
-        "Financiamentos",
         "Financiamentos & Dívidas",
-        "Financiamentos & Empréstimos",
-        "Impostos",
         "Impostos & Tributos"
     )
 
-    val NON_ENVELOPE_CATEGORIES = setOf(
-        "Investimentos",
-        "Receita",
-        "Estorno",
-        "Cartão Terceiros",
-        "Rendimentos & Investimentos",
-        "Salário & Remuneração",
-        "Outras Receitas",
-        "Reembolsos & Acertos",
-        "Benefícios"
-    )
+    /** Entradas, patrimônio e legados de crédito/terceiros nunca geram envelope de despesa. */
+    val NON_ENVELOPE_CATEGORIES: Set<String> =
+        setOf("Investimentos", "Receita", "Estorno", "Cartão Terceiros") +
+            com.saldolivre.app.data.model.CategoryRegistry.INCOME_CATEGORIES.map { it.name }
 
     private val CATEGORY_CANONICAL_MAP = mapOf(
         "assinaturas" to "Assinaturas & Serviços",
-        "assinaturas & servicos" to "Assinaturas & Serviços",
-        "assinaturas & serviços" to "Assinaturas & Serviços",
-        "educacao" to "Educação & Desenvolvimento",
         "educação" to "Educação & Desenvolvimento",
-        "educacao & desenvolvimento" to "Educação & Desenvolvimento",
-        "educação & desenvolvimento" to "Educação & Desenvolvimento",
+        "educacao" to "Educação & Desenvolvimento",
         "lazer" to "Lazer & Entretenimento",
-        "lazer & entretenimento" to "Lazer & Entretenimento",
         "compras" to "Compras & Estilo de Vida",
-        "compras & estilo de vida" to "Compras & Estilo de Vida",
         "cuidados pessoais" to "Cuidados Pessoais & Estética",
-        "cuidados pessoais & estetica" to "Cuidados Pessoais & Estética",
-        "cuidados pessoais & estética" to "Cuidados Pessoais & Estética",
+        "família" to "Família & Dependentes",
+        "familia" to "Família & Dependentes",
+        "trabalho" to "Trabalho / PJ / Carreira",
         "financiamentos" to "Financiamentos & Dívidas",
-        "financiamentos & dividas" to "Financiamentos & Dívidas",
-        "financiamentos & dívidas" to "Financiamentos & Dívidas",
-        "financiamentos & emprestimos" to "Financiamentos & Dívidas",
         "financiamentos & empréstimos" to "Financiamentos & Dívidas",
-        "impostos" to "Impostos & Tributos",
-        "impostos & tributos" to "Impostos & Tributos",
-        "alimentacao" to "Alimentação",
-        "alimentação" to "Alimentação",
-        "saude" to "Saúde",
-        "saúde" to "Saúde",
-        "familia & pets" to "Família & Pets",
-        "família & pets" to "Família & Pets",
-        "doacoes & presentes" to "Doações & Presentes",
-        "doações & presentes" to "Doações & Presentes"
+        "financiamentos & emprestimos" to "Financiamentos & Dívidas",
+        "impostos" to "Impostos & Tributos"
     )
 
+    private fun foldAccents(s: String): String =
+        java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+
+    /**
+     * Normaliza a categoria de um envelope para o padrão das categorias dos lançamentos.
+     * Demais categorias canônicas são reconhecidas sem diferenciar maiúsculas/acentos.
+     */
     fun normalizeBudgetCategory(category: String): String {
         val trimmed = category.trim()
         if (trimmed.isEmpty()) return trimmed
-        return CATEGORY_CANONICAL_MAP[trimmed.lowercase()] ?: trimmed
+        CATEGORY_CANONICAL_MAP[trimmed.lowercase()]?.let { return it }
+        val folded = foldAccents(trimmed)
+        val registry = com.saldolivre.app.data.model.CategoryRegistry
+        return (registry.EXPENSE_CATEGORIES + registry.INCOME_CATEGORIES)
+            .firstOrNull { foldAccents(it.name) == folded }?.name ?: trimmed
     }
 
     /**
-     * Calcula o Score do Termômetro de Saúde Financeira (0 a 100).
-     * Avalia 4 pilares integrados da metodologia Saldo Livre com 100% de paridade com a Web:
-     * 1. Índice de Poupança, Investimentos & Margem Livre (até 35 pts)
-     * 2. Controle de Custo de Vida / Consumo da Renda (até 35 pts)
-     * 3. Cobertura da Reserva de Emergência (até 30 pts)
-     * 4. Sinergia e Disciplina nos Envelopes Orçamentários (+4 a -8 pts)
-     */
-    fun isFixedBudgetCategory(category: String): Boolean =
+     * Pontuação do Termômetro de Saúde Financeira (0 a 100), com paridade com a Web:
+     * 1. Poupança & Investimentos (até 30 pts)
+     * 2. Controle de Custo de Vida / Consumo da Renda (até 30 pts)
+     * 3. Cobertura da Reserva de Emergência (até 25 pts)
+     * 4. Aderência aos Envelopes Orçamentários (até 15 pts)
+     */    fun isFixedBudgetCategory(category: String): Boolean =
         category in FIXED_MONTHLY_CATEGORIES || normalizeBudgetCategory(category) in FIXED_MONTHLY_CATEGORIES
 
     fun resolveEmergencyReserveBalance(profile: UserProfile?, summary: MonthSummary?): Double {
@@ -2854,7 +2837,8 @@ object FinanceEngine {
                     effectiveBudgets[cat] = round2(rawVal)
                     continue
                 }
-                val scaled = kotlin.math.floor((rawVal * scaleFactor) / 10.0) * 10.0
+                var scaled = kotlin.math.floor((rawVal * scaleFactor) / 10.0) * 10.0
+                if (scaled <= 0.0 && rawVal > 0.0) scaled = kotlin.math.max(1.0, kotlin.math.floor(rawVal * scaleFactor))
                 effectiveBudgets[cat] = scaled
                 runningSum = round2(runningSum + scaled)
                 if (scaled > maxVal) {
