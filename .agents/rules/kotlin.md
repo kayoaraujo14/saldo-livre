@@ -1,33 +1,17 @@
 ---
 name: kotlin-rules
-description: Regras e padrões de desenvolvimento para a aplicação Mobile Android (Kotlin + Jetpack Compose + MVVM)
+description: Regras para Android nativo (Kotlin, Jetpack Compose, MVVM)
 trigger:
   type: glob
   patterns:
-    - "android/**/*.kt"
-    - "android/**/*.xml"
+    - "android/**/*"
 ---
 
-# Diretrizes de Desenvolvimento Mobile (Android / Kotlin)
+# Diretrizes Android (Kotlin)
 
-Ao desenvolver, manter ou refatorar código no diretório `/android`, você deve seguir rigorosamente as diretrizes abaixo:
-
-## 1. Arquitetura MVVM (Model-View-ViewModel)
-- O código da aplicação deve ser estruturado rigorosamente seguindo o padrão **MVVM**:
-  - **Model**: Estruturas de dados, entidades e camadas de acesso a dados (Repository Pattern).
-  - **ViewModel**: Herda de `androidx.lifecycle.ViewModel`, gerencia o estado da tela e concentra a lógica de apresentação e regras de negócios.
-  - **View (UI)**: Telas declarativas desacopladas que apenas observam o estado emitido pela ViewModel e despacham intenções/eventos de usuário.
-- Exponha estados de UI de forma reativa e imutável através de **Kotlin Coroutines** utilizando `StateFlow` ou `SharedFlow` (`asStateFlow()`).
-- Mantenha o fluxo unidirecional de dados (Unidirectional Data Flow - UDF): eventos sobem da View para a ViewModel; o estado atualizado desce da ViewModel para a View.
-
-## 2. Interface Declarativa com Jetpack Compose
-- Toda a interface de usuário deve ser construída exclusivamente com **Jetpack Compose** e componentes do **Material Design 3**.
-- **Não** crie novos layouts baseados no sistema legado de Views XML (`layout/*.xml`). Arquivos XML devem ser restritos à configuração do sistema (como `AndroidManifest.xml`, valores de `strings.xml`, `colors.xml` e drawables/launchers).
-- Componentize as telas em funções `@Composable` pequenas, focadas, coesas e reutilizáveis.
-- Utilize observação de estado otimizada no Compose com `collectAsStateWithLifecycle()` ou `collectAsState()`.
-- Respeite o tema central do aplicativo (`MaterialTheme`) com suporte a Dark Mode e paletas semânticas.
-
-## 3. Validação Visual Obrigatória (Skill ui-ux-validator)
-- Sempre que houver criação, modificação ou refatoração em arquivos de interface do usuário (`android/app/src/main/java/com/saldolivre/app/ui/**`), é **obrigatório** acionar o protocolo da skill `.agents/skills/ui-ux-validator/SKILL.md`.
-- Execute a instalação no emulador/dispositivo (`./gradlew installDebug`), utilize `uiautomator dump` e `adb shell input` para navegação e bypass de autenticação (Modo Demo), e capture prints com `screencap` em `.agents/screenshots/android/`.
-- Inspecione as imagens com visão multimodal aplicando o Checklist de Auditoria Visual (espaçamentos, insets edge-to-edge, legibilidade monetária e contraste) e o Loop de Auto-correção antes de considerar a entrega finalizada.
+- **Arquitetura:** MVVM estrita com Jetpack Compose (Material 3) e Unidirectional Data Flow: eventos sobem da View, estado desce via `StateFlow` imutável (`asStateFlow()`) nos ViewModels. Sem novos layouts XML.
+- **Assincronia:** operações assíncronas e chamadas ao Firestore/Gemini isoladas em Dispatchers apropriados (`Dispatchers.IO`/`Default`) via Coroutines; nunca bloqueie a main thread.
+- **Camada de dados:** isolada pela interface `FinanceRepository.kt`. Mantenha `FirestoreFinanceRepository.kt`, `MockFinanceRepository.kt` e `FakeFinanceRepository.kt` (testutil) sempre sincronizados.
+- **Paridade:** lógica financeira e ferramentas Gemini devem ser espelhadas na Web (ver `global.md`).
+- **UI:** ao alterar `android/app/src/main/java/com/saldolivre/app/ui/**`, aplique a skill `ui-ux-validator`.
+- **Verificação obrigatória:** ao finalizar alterações em `android/`, execute `./gradlew testDebugUnitTest` e garanta sucesso total.

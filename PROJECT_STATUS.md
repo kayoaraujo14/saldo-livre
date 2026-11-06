@@ -1,11 +1,11 @@
 # PROJECT_STATUS.md — Fonte da Verdade & Índice Arquitetural (`Saldo Livre`)
 
-> **Última Atualização:** 2026-11-04
+> **Última Atualização:** 2026-11-06
 > **Status da Fundação:** 🟢 **100% CONCLUÍDA E ESTABILIZADA**
 > **Propósito:** Índice central de arquitetura, mapeamento de paridade Web/Mobile, segurança e histórico de micro-commits para otimização máxima de contexto e tokens.
 
 ### Pilares da Fundação Consolidados:
-- ✅ **Arquitetura Monorepo & Governança:** Isolamento estrito de contexto (`/web` e `/android`) regido por `.agents/rules.json` e Squad Multidisciplinar (`global.md`).
+- ✅ **Arquitetura Monorepo & Governança:** Isolamento estrito de contexto (`/web` e `/android`) regido por `.agents/rules.json`, Squad Multidisciplinar (`global.md`), skills de domínio especializadas (`cross-platform-finance-parity`, `gemini-agent-tools-sync`, `firestore-contract-sync`) e workflows acionáveis (`.agents/workflows/`).
 - ✅ **Paridade 100% do Motor Financeiro:** Regras de negócio, Saldo Livre, faturas, rateios, projeções e fechamentos mensais sincronizados entre `finance.ts`/`invoices.ts` e `FinanceEngine.kt`/`InvoiceEngine.kt`.
 - ✅ **Copiloto Gemini & IA Híbrida:** Assistente conversacional multi-turn com Function Calling, gráficos dinâmicos, comando de voz, classificador neural local e balanceador de chaves (`GeminiLoadBalancer`).
 - ✅ **Modo Demo Offline & Cloud Firestore:** Funcionamento imediato com dados interativos de demonstração (`mockData.ts` / `MockFinanceRepository.kt`) e sincronização em tempo real blindada por `firestore.rules`.
@@ -396,6 +396,13 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
   - **Cálculo Líquido de Investimentos (Aportes & Resgates):** corrigido o cálculo de `totalInvested` (mensal) e `totalInvestedAccumulated` (histórico acumulado). Resgates de investimentos (`type: 'income'` em `Investimentos` ou `Rendimentos & Investimentos › Resgates de Aplicação`) agora abatem corretamente o montante investido e alimentam a liquidez da conta corrente.
   - **Modelos de Perfil e Fechamento Atualizados:** adicionados `investmentMonthlyTarget` e `investmentAssetBalances` em `UserProfile` (Web e Android) e `investmentSubcategory` em `MonthClosure`, preparando a persistência das caixinhas e a destinação de sobras diretamente no Firestore.
   - **Paridade de Compilação:** `npm run build` (TypeScript e Vite) OK e `./gradlew.bat compileDebugKotlin` OK.
+
+- **[2026-11-06] Reestruturação, Limpeza de Contexto e Governança de Agentes (.agents/):**
+  - **Higiene do Repositório & Poda de Skills:** Removido arquivo residual `FinanceEngine.kt` da raiz (0 bytes). Eliminadas skills não utilizadas na stack (`xcode-project-setup/`, `firebase-data-connect/`, `firebase-app-hosting-basics/`) e referências a plataformas desnecessárias (`flutter_setup.md`, `ios_setup.md`, `sdk_ios.md`, etc.). Variantes enterprise eliminadas em `firebase-firestore/` e mantida apenas a variante Standard com SDKs Web e Android. `skills-lock.json` atualizado.
+  - **Roteamento Inteligente & Regras Estritas (.agents/rules.json):** Escopos configurados com globs estritos: `global.md` (`**/*`), `react.md` (`web/**/*`, `backend/**/*`) e `kotlin.md` (`android/**/*`). Regras reescritas com imperativos de Paridade Multiplataforma, sincronia simultânea de contratos de dados (Web, Android, Mock/Demo e Firestore Rules) e ciclo Plan-Act-Verify com linters e testes.
+  - **Criação de Skills de Domínio:** Criadas `.agents/skills/cross-platform-finance-parity` (espelhamento obrigatório de motores de cálculo e testes idênticos), `.agents/skills/gemini-agent-tools-sync` (sincronia de ferramentas de Function Calling, balanceador e gráficos) e `.agents/skills/firestore-contract-sync` (checklist estrito para alterações de esquema e regras).
+  - **Workflows Acionáveis (.agents/workflows/):** Criados playbooks `feature-multiplataforma.md` (passo a passo para implementação de ponta a ponta com paridade) e `auditar-paridade.md` (auditoria periódica e geração de relatório de divergências).
+  - **Validação de Build e Qualidade:** Web passou com 100% de sucesso no Oxlint (0 erros) e Vitest (99 testes aprovados em 9 suítes). Android com compilação de código de app e testes 100% aprovada (`compileDebugKotlin` e `compileDebugUnitTestKotlin` sem erros).
 
 - **[2026-11-03] Estabilização de CI/CD, Quality Gates & Dependabot (Concluída):**
   - **Filtro Inteligente de Mudanças (Quality Gates):** Introdução de detecção seletiva de caminhos (`dorny/paths-filter@v3`) em `.github/workflows/quality-gates.yml`. PRs de documentação, Web ou Backend agora não disparam compilações desnecessárias do Android, e vice-versa, com consolidador de status `quality-gates-status`.

@@ -1,20 +1,32 @@
-# DIRETRIZES GLOBAIS: SQUAD MULTIDISCIPLINAR & OTIMIZAÇÃO DE TOKENS
+---
+name: global-rules
+description: Diretrizes globais do monorepo Saldo Livre (Web + Android + Firestore)
+trigger:
+  type: glob
+  patterns:
+    - "**/*"
+---
 
-Você atua neste Monorepo (`Saldo Livre`) não apenas como desenvolvedor, mas como um Squad completo de Engenharia de Software. Em toda interação, aplique rigorosamente estas regras:
+# Diretrizes Globais
 
-## 1. OTIMIZAÇÃO EXTREMA DE TOKENS E CONTEXTO
-- **Consulta ao Índice Primeiro:** Antes de fazer buscas amplas no repositório, leia o arquivo `PROJECT_STATUS.md` na raiz para localizar rapidamente onde cada funcionalidade vive.
-- **Isolamento Estrito de Plataforma:** Respeite os gatilhos locais (`react.md` e `kotlin.md`). Se a tarefa for exclusiva da Web (`/web`), NUNCA leia arquivos da pasta `/android`, e vice-versa. Carregue no contexto apenas os arquivos estritamente necessários para a tarefa atual.
-- **Zero Código Sem Aprovação:** Para novas features ou refatorações médias/grandes, nunca gere código direto. Gere primeiro um plano enxuto em Markdown, apresente os impactos e PAUSE aguardando aprovação.
+## 1. Contexto Inicial
+- SEMPRE leia `PROJECT_STATUS.md` (raiz) antes de iniciar qualquer planejamento arquitetural.
+- SEMPRE atualize `PROJECT_STATUS.md` ao concluir uma feature.
+- Carregue apenas os arquivos necessários; não leia `android/` em tarefas exclusivas de `web/` e vice-versa (exceto para espelhar lógica, ver regra 2).
 
-## 2. ATUAÇÃO DAS PERSONAS (SEU TIME INTERNO)
-Antes de entregar qualquer alteração, valide o código sob a ótica de 5 especialistas:
-- **Arquiteto & Homogeneidade (Full-Stack):** Garanta 100% de paridade nas regras de negócio, cálculos financeiros (`FinanceEngine` / `finance.ts`) e estrutura de coleções do Firestore (`/users/{uid}/...`) entre React (`/web`) e Kotlin (`/android`).
-- **UX/UI Designer:** Mantenha a identidade visual unificada ("Premium & Smart": Dark Mode, destaques em Verde-Esmeralda, componentes em pílula `CircleShape`/`rounded-full`, sem síndrome de *box-in-box*, textos protegidos contra quebra com `Ellipsis`/`truncate` e layouts responsivos).
-- **Cyber Security:** Proteja dados sensíveis. Nunca exponha chaves de API (Gemini/Firebase) hardcoded no código versionado, garanta o isolamento estrito por `uid` nas queries e valide impactos no `firestore.rules` e no `proguard-rules.pro`.
-- **QA & Debugger:** Antecipe *edge cases* (valores nulos, divisão de centavos, listas vazias, falhas de rede/429). Nunca dê uma etapa por concluída sem validar a compilação: rode `./gradlew.bat compileDebugKotlin` (para mudanças no `/android`) ou `npm run build` (para mudanças no `/web`).
-- **Documentador Técnico:** Mantenha o arquivo `PROJECT_STATUS.md` na raiz sempre atualizado a cada micro-commit concluído, servindo como fonte da verdade da arquitetura.
+## 2. Regra de Ouro: Paridade Multiplataforma
+O Saldo Livre possui motores nativos independentes na Web (TypeScript) e no Android (Kotlin). Nenhuma regra matemática, cálculo de fatura, projeção, orçamento ou ferramenta do agente Gemini pode ser alterada em uma plataforma sem ser espelhada na outra **dentro do mesmo plano de trabalho**. Use as skills `cross-platform-finance-parity` e `gemini-agent-tools-sync`.
 
-## 3. FLUXO DE EXECUÇÃO (MICRO-COMMITS)
-- Resolva apenas **UM item/etapa por vez**.
-- Aplique a mudança -> Rode o comando de build para provar zero erros -> Atualize o `PROJECT_STATUS.md` -> PAUSE e aguarde minha validação antes de avançar.
+## 3. Sincronia de Contratos e Segurança
+Toda alteração de schema de dados exige atualização simultânea em:
+- a) `web/src/types/index.ts` e `web/src/store/types.ts`
+- b) Modelos Kotlin em `android/app/src/main/java/com/saldolivre/app/data/model/`
+- c) Dados de demonstração/mock: `web/src/lib/mockData.ts`, `web/src/store/demoState.ts`, `MockFinanceRepository.kt` e `FakeFinanceRepository.kt`
+- d) Regras e índices do Firestore: `firestore.rules` e `firestore.indexes.json` (skill `firestore-contract-sync`)
+
+Nunca versione chaves de API; garanta isolamento por `uid` em toda query.
+
+## 4. Ciclo Plan-Act-Verify
+- Mudanças médias/grandes: apresente um plano enxuto antes de codar.
+- Nenhuma tarefa está concluída até que linters e testes unitários das plataformas afetadas sejam executados via terminal e passem com 100% de sucesso (Web: `npm run lint` + `npm test` em `web/`; Android: `./gradlew testDebugUnitTest`).
+- UI alterada: siga a skill `ui-ux-validator`.

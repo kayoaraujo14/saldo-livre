@@ -259,20 +259,10 @@ ______________________________________________________________________
   - Gemini API Provider: Gemini Developer API
   - Reference: [usage_patterns_android.md](references/usage_patterns_android.md)
 
-- **iOS (Swift)**
-
-  - Gemini API Provider: Gemini Developer API
-  - Reference: [ios_setup.md](references/ios_setup.md)
-
 - **Web Modular API**
 
   - Gemini API Provider: Gemini Developer API
   - Reference: [usage_patterns_web.md](references/usage_patterns_web.md)
-
-- **Flutter (Dart)**
-
-  - Gemini API Provider: Gemini Developer API
-  - Reference: [flutter_setup.md](references/flutter_setup.md)
 
 > [!WARNING] **CRITICAL: Use current model names:** Always check the
 > [Firebase AI Logic Models documentation](https://firebase.google.com/docs/ai-logic/models.md.txt)
@@ -282,8 +272,6 @@ ______________________________________________________________________
 ## References
 
 [Android (Kotlin) SDK usage patterns](references/usage_patterns_android.md)
-[iOS SDK code examples and usage patterns](references/ios_setup.md)
 [Web SDK setup, code examples, and usage patterns](references/usage_patterns_web.md)
 
-[Flutter SDK code examples and usage patterns](references/flutter_setup.md)
 [Client-side Text-to-Speech (TTS) generation](references/tts_generation.md)

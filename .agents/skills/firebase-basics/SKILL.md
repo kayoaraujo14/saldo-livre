@@ -139,7 +139,6 @@ Adhere to these principles:
 - **SDK Setup:** For detailed guides on adding Firebase to your app:
   - **Web**: See [references/web_setup.md](references/web_setup.md)
   - **Android**: See [references/android_setup.md](references/android_setup.md)
-  - **iOS**: See [references/ios_setup.md](references/ios_setup.md)
 
 # Common Issues
 
