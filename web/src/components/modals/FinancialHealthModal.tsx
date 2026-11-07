@@ -62,38 +62,71 @@ export function FinancialHealthModal({
   const configuredEnvelopes = health.budgetConfiguredCount ?? 0
   const overspentEnvelopes = health.budgetOverspentCount ?? 0
 
+  const {
+    score,
+    classification,
+    savingsScore,
+    spendingLimitScore,
+    emergencyReserveScore,
+    envelopeScore,
+    savingsRatePercentage,
+    spendingRatioPercentage,
+    emergencyCoverageMonths,
+    actionableTips,
+  } = health
+
+  const actionableTipsKey = useMemo(
+    () => (actionableTips || []).join('||'),
+    [actionableTips],
+  )
+
   useEffect(() => {
-    if (open) {
-      let isMounted = true
-      setIsLoadingAi(true)
-      generateFinancialHealthAiDiagnosis({
-        score: health.score,
-        classification: health.classification,
-        savingsScore: health.savingsScore,
-        spendingLimitScore: health.spendingLimitScore,
-        emergencyReserveScore: health.emergencyReserveScore,
-        envelopeScore: health.envelopeScore,
-        savingsRatePercentage: health.savingsRatePercentage,
-        spendingRatioPercentage: health.spendingRatioPercentage,
-        emergencyCoverageMonths: health.emergencyCoverageMonths,
-        monthlyLivingCost: livingCost,
-        monthlyIncome,
-        actionableTips: health.actionableTips,
+    if (!open) return
+
+    let isMounted = true
+    setIsLoadingAi(true)
+    generateFinancialHealthAiDiagnosis({
+      score,
+      classification,
+      savingsScore,
+      spendingLimitScore,
+      emergencyReserveScore,
+      envelopeScore,
+      savingsRatePercentage,
+      spendingRatioPercentage,
+      emergencyCoverageMonths,
+      monthlyLivingCost: livingCost,
+      monthlyIncome,
+      actionableTips,
+    })
+      .then((res) => {
+        if (isMounted) setAiDiagnosis(res)
       })
-        .then((res) => {
-          if (isMounted) setAiDiagnosis(res)
-        })
-        .catch((err) => {
-          console.warn('Erro ao carregar diagnóstico IA:', err)
-        })
-        .finally(() => {
-          if (isMounted) setIsLoadingAi(false)
-        })
-      return () => {
-        isMounted = false
-      }
+      .catch((err) => {
+        console.warn('Erro ao carregar diagnóstico IA:', err)
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingAi(false)
+      })
+    return () => {
+      isMounted = false
     }
-  }, [open, health, livingCost, monthlyIncome])
+  }, [
+    open,
+    score,
+    classification,
+    savingsScore,
+    spendingLimitScore,
+    emergencyReserveScore,
+    envelopeScore,
+    savingsRatePercentage,
+    spendingRatioPercentage,
+    emergencyCoverageMonths,
+    livingCost,
+    monthlyIncome,
+    actionableTipsKey,
+    actionableTips,
+  ])
 
   const handleAskCopilot = () => {
     onOpenChange(false)

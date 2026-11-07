@@ -89,6 +89,20 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-07] Conclusão da Sprint 1 (v1.2.0: UI/UX & Prevenção de Bugs Visuais) — Issue #52 (Conclusão Integral):**
+  - **1. Correção Estrita de Exhaustive-Deps em `FinancialHealthModal.tsx`:**
+    - Desestruturadas as propriedades escalares de `health` (`score`, `classification`, `savingsScore`, `spendingLimitScore`, `emergencyReserveScore`, `envelopeScore`, `savingsRatePercentage`, `spendingRatioPercentage`, `emergencyCoverageMonths`, `actionableTips`).
+    - Estabilizada a dependência de `actionableTips` com chave serializada de comparação (`actionableTipsKey`), garantindo conformidade absoluta com o React 19 Compiler e prevenindo requisições de rede redundantes para a API Gemini ao alternar estados periféricos do Dashboard.
+    - Adicionado early return guard (`if (!open) return`) prevenindo ativação de efeitos colaterais com o modal fechado.
+  - **2. Code-Splitting e Otimização de Chunks no Vite (`CategoryBudgetsCard.tsx`):**
+    - Substituída a importação estática de `ManageBudgetsModal` por carregamento dinâmico assíncrono via `lazy()` e `<Suspense fallback={null}>`.
+    - Eliminado o aviso `[INEFFECTIVE_DYNAMIC_IMPORT]` no Vite, movendo `ManageBudgetsModal` para seu próprio chunk assíncrono (`dist/assets/ManageBudgetsModal-*.js`, 20 kB) e reduzindo o payload inicial do bundle `index.js`.
+  - **3. Qualidade & Validação Global:**
+    - Linter: **0 avisos e 0 erros** em 77 arquivos (`oxlint`).
+    - Testes Unitários: **113 testes verdes** em 10 suítes (`vitest`).
+    - Build Web: **`tsc -b && vite build` aprovado com sucesso em 801ms**.
+    - Android: **Compilação Kotlin aprovada** (`compileDebugSources` - BUILD SUCCESSFUL).
+
 - **[2026-11-04] Calibração de Orçamento pela Entrada Prevista do Mês, Paridade 100% de KPIs de Saúde Financeira & Upgrade de UI/UX (Web & Android):**
   - **1. Orçamento Calibrado Estritamente pela Entrada Prevista do Mês (`summary.income`):**
     - Tanto o cálculo ativo dos envelopes (`computeCategoryBudgets`) quanto a sugestão da IA (`suggestCategoryBudgets`) em `web/src/lib/finance.ts` e `android/.../FinanceEngine.kt` utilizam a **entrada prevista real do mês selecionado (`summary.income`)** (usando `profile.monthlyIncome` apenas como fallback caso não haja receitas no mês).
