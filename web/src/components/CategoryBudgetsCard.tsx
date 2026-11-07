@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, lazy, Suspense } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useFinance } from '@/store/FinanceContext'
@@ -10,7 +10,6 @@ import {
 } from '@/lib/finance'
 import { generateBudgetCoachInsights } from '@/lib/gemini'
 import type { BudgetInsight, BudgetInsightAction, CategoryBudgetStatus } from '@/types'
-import { ManageBudgetsModal } from '@/components/modals/ManageBudgetsModal'
 import {
   Target,
   Sparkles,
@@ -22,6 +21,12 @@ import {
   RefreshCw,
   TrendingUp,
 } from 'lucide-react'
+
+const ManageBudgetsModal = lazy(() =>
+  import('@/components/modals/ManageBudgetsModal').then((m) => ({
+    default: m.ManageBudgetsModal,
+  })),
+)
 
 type EnvelopeFilter = 'alerts' | 'variable' | 'all' | 'fixed'
 type Tone = 'ok' | 'warning' | 'danger' | 'muted'
@@ -622,12 +627,16 @@ export function CategoryBudgetsCard() {
         )}
       </div>
 
-      <ManageBudgetsModal
-        open={modalOpen}
-        onOpenChange={setModalOpen}
-        initialTab={modalTab}
-        autoGeneratePlan={modalAutoPlan}
-      />
+      {modalOpen && (
+        <Suspense fallback={null}>
+          <ManageBudgetsModal
+            open={modalOpen}
+            onOpenChange={setModalOpen}
+            initialTab={modalTab}
+            autoGeneratePlan={modalAutoPlan}
+          />
+        </Suspense>
+      )}
     </>
   )
 }
