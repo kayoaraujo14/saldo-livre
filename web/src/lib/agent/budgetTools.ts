@@ -21,12 +21,28 @@ export async function gerenciarEnvelopesOrcamentarios(
   const uid = env.me.uid
   const monthKey = env.monthKey
   const refDate = todayKey()
-  const rawMonthSummary = computeSummary(txs, uid, monthKey, [], env.getCards ? env.getCards() : [])
+  const cards = env.getCards ? env.getCards() : []
+  const closures = env.getClosures ? env.getClosures() : []
+  const rawMonthSummary = computeSummary(txs, uid, monthKey, cards, closures)
   const expectedMonthIncome =
     rawMonthSummary.income > 0 ? rawMonthSummary.income : (profile?.monthlyIncome || 0)
+  const carryoverAmount = rawMonthSummary.carryoverAmount || 0
+  const previousMonthDeficit = rawMonthSummary.previousMonthDeficit || 0
+  const recurringBills = env.getRecurring ? env.getRecurring() : []
 
   if (acao === 'consultar') {
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
+    const report = computeCategoryBudgets(
+      txs,
+      currentBudgets,
+      monthKey,
+      refDate,
+      uid,
+      txs,
+      expectedMonthIncome,
+      carryoverAmount,
+      previousMonthDeficit,
+      recurringBills
+    )
     const rebalance = suggestBudgetRebalance(report)
 
     const itensFormatados = report.items.map((i) => ({
@@ -125,7 +141,18 @@ export async function gerenciarEnvelopesOrcamentarios(
       await env.updateProfile({ categoryBudgets: currentBudgets })
     }
 
-    const updatedReport = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
+    const updatedReport = computeCategoryBudgets(
+      txs,
+      currentBudgets,
+      monthKey,
+      refDate,
+      uid,
+      txs,
+      expectedMonthIncome,
+      carryoverAmount,
+      previousMonthDeficit,
+      recurringBills
+    )
     const item = updatedReport.items.find((i) => i.category === categoria)
 
     return {
@@ -211,7 +238,18 @@ export async function gerenciarEnvelopesOrcamentarios(
   }
 
   if (acao === 'rebalancear_automatico') {
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
+    const report = computeCategoryBudgets(
+      txs,
+      currentBudgets,
+      monthKey,
+      refDate,
+      uid,
+      txs,
+      expectedMonthIncome,
+      carryoverAmount,
+      previousMonthDeficit,
+      recurringBills
+    )
     const rebalance = suggestBudgetRebalance(report)
 
     if (!rebalance.canRebalance || rebalance.suggestions.length === 0) {
@@ -261,7 +299,7 @@ export async function gerenciarEnvelopesOrcamentarios(
 
   if (acao === 'sugerir_tetos') {
     const monthlyIncome = expectedMonthIncome
-    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome)
+    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome, carryoverAmount, previousMonthDeficit)
 
     return {
       response: {
@@ -297,7 +335,7 @@ export async function gerenciarEnvelopesOrcamentarios(
 
   if (acao === 'aplicar_sugestao_ia') {
     const monthlyIncome = expectedMonthIncome
-    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome)
+    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome, carryoverAmount, previousMonthDeficit)
     const entries = Object.entries(suggestion.suggestedBudgets)
 
     if (entries.length === 0) {
@@ -351,7 +389,18 @@ export async function gerenciarEnvelopesOrcamentarios(
     }
 
     const valorParcela = round2(valorCompra / parcelas)
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, expectedMonthIncome)
+    const report = computeCategoryBudgets(
+      txs,
+      currentBudgets,
+      monthKey,
+      refDate,
+      uid,
+      txs,
+      expectedMonthIncome,
+      carryoverAmount,
+      previousMonthDeficit,
+      recurringBills
+    )
     const envelope = report.items.find((i) => i.category === categoria)
 
     const tetoAtual = envelope?.limit || 0
@@ -428,7 +477,18 @@ export async function gerenciarEnvelopesOrcamentarios(
             freeBalance: round2(profile!.monthlyIncome! - rawSummary.paid - rawSummary.committed),
           }
         : rawSummary
-    const report = computeCategoryBudgets(txs, currentBudgets, monthKey, refDate, uid, txs, summary.income)
+    const report = computeCategoryBudgets(
+      txs,
+      currentBudgets,
+      monthKey,
+      refDate,
+      uid,
+      txs,
+      summary.income,
+      summary.carryoverAmount,
+      summary.previousMonthDeficit,
+      recurringBills
+    )
     const rebalance = suggestBudgetRebalance(report)
     const reserveBalance = resolveEmergencyReserveBalance(profile, summary)
     const health = calculateFinancialHealthScore(summary, reserveBalance, report)

@@ -19,7 +19,8 @@ import type {
   FinancialHealthAiDiagnosis,
 } from '@/types'
 import { CATEGORIES } from '@/types'
-import { sanitizeAndValidateBudgetPlan } from './finance'
+import { sanitizeAndValidateBudgetPlan, normalizeBudgetCategory } from './finance'
+import { round2 } from './utils'
 
 export const GEMINI_MODEL = 'gemini-3.5-flash'
 export const DEFAULT_MODELS_POOL = [
@@ -1769,21 +1770,54 @@ export async function generateSmartBudgetPlan(
   const keys = getGeminiApiKeys()
   const income = Math.max(0, Number(params.monthlyIncome) || 0)
 
+  // 1. Canonicaliza todas as categorias de entrada para evitar duplicação ou divergência entre aliases
+  const canonicalSpent: Record<string, number> = {}
+  for (const [k, v] of Object.entries(params.spentByCategory || {})) {
+    if (v > 0) {
+      const canon = normalizeBudgetCategory(k)
+      canonicalSpent[canon] = round2((canonicalSpent[canon] || 0) + v)
+    }
+  }
+
+  const canonicalPending: Record<string, number> = {}
+  for (const [k, v] of Object.entries(params.pendingByCategory || {})) {
+    if (v > 0) {
+      const canon = normalizeBudgetCategory(k)
+      canonicalPending[canon] = round2((canonicalPending[canon] || 0) + v)
+    }
+  }
+
+  const canonicalHistory: Record<string, number> = {}
+  for (const [k, v] of Object.entries(params.history3mAverages || {})) {
+    if (v > 0) {
+      const canon = normalizeBudgetCategory(k)
+      canonicalHistory[canon] = round2(Math.max(canonicalHistory[canon] || 0, v))
+    }
+  }
+
+  const canonicalLimits: Record<string, number> = {}
+  for (const [k, v] of Object.entries(params.existingLimits || {})) {
+    if (v > 0) {
+      const canon = normalizeBudgetCategory(k)
+      canonicalLimits[canon] = round2((canonicalLimits[canon] || 0) + v)
+    }
+  }
+
   const categoriesSet = new Set<string>([
-    ...Object.keys(params.spentByCategory || {}),
-    ...Object.keys(params.pendingByCategory || {}),
-    ...Object.keys(params.history3mAverages || {}),
-    ...Object.keys(params.existingLimits || {}),
+    ...Object.keys(canonicalSpent),
+    ...Object.keys(canonicalPending),
+    ...Object.keys(canonicalHistory),
+    ...Object.keys(canonicalLimits),
   ])
 
   const categoryContext = Array.from(categoriesSet)
     .filter((cat) => cat && !/rendimento|sal[áa]rio/i.test(cat))
     .map((cat) => {
-      const spent = params.spentByCategory[cat] || 0
-      const pending = params.pendingByCategory[cat] || 0
-      const committed = spent + pending
-      const histAvg = params.history3mAverages[cat] || 0
-      const curLim = params.existingLimits?.[cat] || 0
+      const spent = canonicalSpent[cat] || 0
+      const pending = canonicalPending[cat] || 0
+      const committed = round2(spent + pending)
+      const histAvg = canonicalHistory[cat] || 0
+      const curLim = canonicalLimits[cat] || 0
       return `- ${cat}: pago = R$ ${spent.toFixed(2)}, a vencer = R$ ${pending.toFixed(2)} (comprometido total = R$ ${committed.toFixed(2)}), média 3 meses = R$ ${histAvg.toFixed(2)}, teto atual = R$ ${curLim.toFixed(2)}`
     })
     .join('\n')
@@ -1797,11 +1831,11 @@ DADOS DO MÊS:
 ${categoryContext || 'Nenhum dado prévio.'}
 
 REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
-1. NUNCA sugira um teto menor do que o total comprometido (já pago + contas a vencer) de uma categoria. O usuário não pode ter um teto menor do que o que ele já gastou ou já tem de boleto/fatura agendada!
+1. PISO INEGOCIÁVEL: Se uma categoria tiver gastos ou contas a vencer (comprometido total > 0), o "suggestedLimit" NUNCA pode ser menor do que o total comprometido (já pago + contas a vencer). Além disso, a justificativa ("reason") JAMAIS deve dizer que a categoria está sem compromissos ou zerada quando houver comprometimento! Só mencione "sem compromissos" se o comprometido for estritamente R$ 0,00.
 2. A soma de todos os tetos de despesas sugeridos NÃO DEVE ultrapassar a receita prevista do mês (R$ ${income.toFixed(2)}). Se a receita for maior que os gastos, reserve pelo menos 15-20% para "Investimentos" (Futuro/Aportes).
 3. "Investimentos" NÃO é despesa de consumo; é meta de aporte da regra 50/30/20.
 4. ARREDONDAMENTO OBRIGATÓRIO: NUNCA sugira valores com centavos quebrados (como R$ 499,08 ou R$ 338,38). Todos os valores de "suggestedLimit" DEVEM ser inteiros múltiplos de R$ 10,00 ou R$ 50,00 (ex: 150, 400, 750, 1200).
-5. Cada alocação deve ter uma justificativa curta ("reason") de 1 frase explicando a escolha com base nos dados.
+5. Cada alocação deve ter uma justificativa curta ("reason") de 1 frase explicando a escolha com base nos dados reais de comprometimento e média.
 6. Retorne estritamente um JSON no seguinte formato:
 {
   "summaryInsight": "Resumo executivo curto de 1-2 frases explicando a estratégia adotada (ex: Regra 50/30/20 adaptada protegendo R$ 1.280 em contas a vencer com folga real garantida).",
@@ -1834,8 +1868,8 @@ REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
               return sanitizeAndValidateBudgetPlan(
                 parsed,
                 income,
-                params.spentByCategory,
-                params.pendingByCategory,
+                canonicalSpent,
+                canonicalPending,
               )
             }
           }
@@ -1850,10 +1884,10 @@ REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
   const fallbackAllocations: SmartBudgetAllocation[] = []
   for (const cat of categoriesSet) {
     if (!cat || /rendimento|sal[áa]rio/i.test(cat)) continue
-    const spent = params.spentByCategory[cat] || 0
-    const pending = params.pendingByCategory[cat] || 0
-    const committed = spent + pending
-    const histAvg = params.history3mAverages[cat] || 0
+    const spent = canonicalSpent[cat] || 0
+    const pending = canonicalPending[cat] || 0
+    const committed = round2(spent + pending)
+    const histAvg = canonicalHistory[cat] || 0
     const minFloor = Math.ceil(committed / 10) * 10
     const isFixed = /moradia|financiamento|assinatura/i.test(cat)
     const baseTarget = isFixed ? Math.max(histAvg, committed) : Math.max(histAvg * 1.1, committed)
@@ -1864,11 +1898,13 @@ REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
       suggestedLimit: limit,
       reason: pending > 0
         ? `Protegendo R$ ${pending.toFixed(2)} em contas a vencer e cobrindo média de R$ ${histAvg.toFixed(2)}.`
-        : `Margem de segurança calculada sobre sua média histórica de R$ ${histAvg.toFixed(2)}.`,
+        : committed > 0
+          ? `Garante os R$ ${committed.toFixed(2)} já pagos no mês com margem de segurança.`
+          : `Margem de segurança calculada sobre sua média histórica de R$ ${histAvg.toFixed(2)}.`,
     })
   }
 
-  const totalPending = Object.values(params.pendingByCategory || {}).reduce((a, b) => a + b, 0)
+  const totalPending = Object.values(canonicalPending).reduce((a, b) => a + b, 0)
   const rawFallback: SmartBudgetPlan = {
     summaryInsight: `Plano inteligente calculado com Regra 50/30/20 protegendo R$ ${totalPending.toFixed(2)} em contas a vencer com tetos arredondados.`,
     allocations: fallbackAllocations,
@@ -1876,8 +1912,8 @@ REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
   return sanitizeAndValidateBudgetPlan(
     rawFallback,
     income,
-    params.spentByCategory,
-    params.pendingByCategory,
+    canonicalSpent,
+    canonicalPending,
   )
 }
 

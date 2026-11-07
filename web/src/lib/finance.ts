@@ -939,8 +939,8 @@ export function computeSummary(
   all: Transaction[],
   uid: string,
   monthKey: string,
-  closures: MonthClosure[] = [],
-  cards: Card[] = []
+  cards: Card[] = [],
+  closures: MonthClosure[] = []
 ): MonthSummary {
   const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
   let income = 0
@@ -1113,7 +1113,7 @@ export function computeSummary(
     prevClosureObj = prevClosure
     carryoverAmount = round2(prevClosure.carryoverToNextMonth || 0)
     cushionAmount = round2(prevClosure.cushionAmount || 0)
-  } else if (state !== 'future') {
+  } else {
     const pastMonths = Array.from(
       new Set(
         (all || [])
@@ -1776,6 +1776,8 @@ export function projectFutureMonths(args: {
           previousMonthDeficit = round2(Math.abs(runningBalance))
         }
       }
+    } else if ((projections[i - 1]?.projectedFreeBalance ?? 0) < 0) {
+      previousMonthDeficit = round2(Math.abs(projections[i - 1].projectedFreeBalance))
     }
 
     // Check existing transactions for that month visible to uid
@@ -2399,7 +2401,11 @@ export function calculateFinancialHealthScore(
     }
   }
 
-  const income = summary.income || 0
+  const rawIncome = summary.income || 0
+  const carryover = summary.carryoverAmount || 0
+  const deficit = summary.previousMonthDeficit || 0
+  const effectiveAvailable = round2(Math.max(0, rawIncome + carryover - deficit))
+  const income = effectiveAvailable
   const rawTotalOutflow = (summary.paid || 0) > 0 || (summary.committed || 0) > 0
     ? (summary.paid === summary.committed && !summary.committedEstimated && !summary.committedPending
         ? summary.committed
@@ -3533,29 +3539,104 @@ export function sanitizeAndValidateBudgetPlan(
     rawSuggested: number
   }
 
+  const canonSpent: Record<string, number> = {}
+  for (const [k, v] of Object.entries(spentByCategory || {})) {
+    if (v > 0) {
+      const c = normalizeBudgetCategory(k)
+      canonSpent[c] = round2((canonSpent[c] || 0) + v)
+    }
+  }
+
+  const canonPending: Record<string, number> = {}
+  for (const [k, v] of Object.entries(pendingByCategory || {})) {
+    if (v > 0) {
+      const c = normalizeBudgetCategory(k)
+      canonPending[c] = round2((canonPending[c] || 0) + v)
+    }
+  }
+
+  // Deduplica e consolida alocações por categoria canônica
+  const allocMap = new Map<string, { rawLimit: number; reason: string }>()
+  for (const alloc of rawAllocs) {
+    const rawCat = (alloc.category || '').trim()
+    if (!rawCat || /rendimento|sal[áa]rio/i.test(rawCat)) continue
+    const canonCat = normalizeBudgetCategory(rawCat)
+    if (!canonCat) continue
+
+    const prev = allocMap.get(canonCat)
+    const curLimit = Number(alloc.suggestedLimit) || 0
+    const curReason = (alloc.reason || '').trim()
+
+    if (!prev) {
+      allocMap.set(canonCat, { rawLimit: curLimit, reason: curReason })
+    } else {
+      const maxLimit = Math.max(prev.rawLimit, curLimit)
+      const chosenReason = curReason && !/(?:sem|nenhum|zerad|n[aã]o)/i.test(curReason)
+        ? curReason
+        : prev.reason
+      allocMap.set(canonCat, { rawLimit: maxLimit, reason: chosenReason })
+    }
+  }
+
+  // Assegura que TODAS as categorias com gastos ou pendências comprometidas estejam presentes
+  const allCommittedCategories = new Set([
+    ...Object.keys(canonSpent),
+    ...Object.keys(canonPending),
+  ])
+  for (const cat of allCommittedCategories) {
+    if (!cat || /rendimento|sal[áa]rio/i.test(cat)) continue
+    const canonCat = normalizeBudgetCategory(cat)
+    const committed = round2((canonSpent[canonCat] || 0) + (canonPending[canonCat] || 0))
+    if (committed > 0 && !allocMap.has(canonCat)) {
+      const pending = canonPending[canonCat] || 0
+      const minFloor = Math.ceil(committed / 10) * 10
+      allocMap.set(canonCat, {
+        rawLimit: minFloor,
+        reason: pending > 0
+          ? `Garante os ${formatBRL(committed)} já comprometidos no mês (${formatBRL(pending)} a vencer).`
+          : `Garante os ${formatBRL(committed)} já pagos no mês com margem de segurança.`,
+      })
+    }
+  }
+
   let totalFloorExpenses = 0
   const items: ItemCalc[] = []
 
-  for (const alloc of rawAllocs) {
-    const cat = (alloc.category || '').trim()
-    if (!cat) continue
-    const isInv = /investimento/i.test(cat)
-    const isFix = FIXED_MONTHLY_CATEGORIES.has(cat) || FIXED_MONTHLY_CATEGORIES.has(normalizeBudgetCategory(cat))
-    const spent = Math.max(0, Number(spentByCategory[cat]) || 0)
-    const pending = Math.max(0, Number(pendingByCategory[cat]) || 0)
+  for (const [canonCat, data] of allocMap.entries()) {
+    const isInv = /investimento/i.test(canonCat)
+    const isFix = FIXED_MONTHLY_CATEGORIES.has(canonCat)
+    const spent = Math.max(0, Number(canonSpent[canonCat]) || 0)
+    const pending = Math.max(0, Number(canonPending[canonCat]) || 0)
     const committed = round2(spent + pending)
 
     // Piso: múltiplo de 10 cobrindo todo o comprometido (mínimo 0)
     const floor = isInv ? 0 : Math.ceil(committed / 10) * 10
-    const rawSuggested = Math.max(floor, Math.ceil((Number(alloc.suggestedLimit) || floor) / 10) * 10)
+    const rawSuggested = Math.max(floor, Math.ceil((data.rawLimit || floor) / 10) * 10)
 
     if (!isInv) {
       totalFloorExpenses += floor
     }
 
+    let cleanReason = data.reason
+    if (committed > 0) {
+      const isHallucinated =
+        data.rawLimit < committed ||
+        /(?:sem|nenhum|zerad|n[aã]o h[aá]|n[aã]o possui)\s*(?:compromisso|gasto|despesa|conta|pend[eê]ncia|sa[ií]da|movimenta[cç][aã]o)?/i.test(cleanReason) ||
+        !cleanReason
+      if (isHallucinated) {
+        cleanReason = pending > 0
+          ? `Garante os ${formatBRL(committed)} já comprometidos no mês (${formatBRL(pending)} a vencer).`
+          : `Garante os ${formatBRL(committed)} já pagos no mês com margem de segurança.`
+      }
+    } else if (!cleanReason) {
+      cleanReason = isInv
+        ? 'Meta de investimento e construção de patrimônio (50/30/20).'
+        : 'Sem compromissos no momento, alocação preventiva de segurança.'
+    }
+
     items.push({
-      category: cat,
-      reason: alloc.reason || '',
+      category: canonCat,
+      reason: cleanReason,
       isInvestment: isInv,
       isFixed: isFix,
       committed,
@@ -3572,14 +3653,14 @@ export function sanitizeAndValidateBudgetPlan(
       reason: item.isInvestment
         ? 'Aportes pausados: gastos essenciais e compromissos consom toda a renda do mês.'
         : (item.committed > 0
-            ? `Travado no piso real de R$ ${formatBRL(item.committed)} já comprometido neste mês.`
+            ? `Travado no piso real de ${formatBRL(item.committed)} já comprometido neste mês.`
             : 'Teto mínimo de segurança mantido.'),
     }))
 
     const deficit = round2(totalFloorExpenses - maxAvailable)
     const deficitMsg = deficit > 0
-      ? `Atenção: Seus gastos e contas já comprometidos (R$ ${formatBRL(totalFloorExpenses)}) excedem a renda disponível (R$ ${formatBRL(maxAvailable)}) em R$ ${formatBRL(deficit)}. Os envelopes foram travados estritamente no piso real já consumido para evitar endividamento adicional.`
-      : `Atenção: Seus gastos já comprometidos consom exatamente 100% da sua renda disponível do mês (R$ ${formatBRL(maxAvailable)}). Os tetos foram travados nos pisos reais já consumidos sem margem flexível.`
+      ? `Atenção: Seus gastos e contas já comprometidos (${formatBRL(totalFloorExpenses)}) excedem a renda disponível (${formatBRL(maxAvailable)}) em ${formatBRL(deficit)}. Os envelopes foram travados estritamente no piso real já consumido para evitar endividamento adicional.`
+      : `Atenção: Seus gastos já comprometidos consom exatamente 100% da sua renda disponível do mês (${formatBRL(maxAvailable)}). Os tetos foram travados nos pisos reais já consumidos sem margem flexível.`
 
     return {
       summaryInsight: deficitMsg,
@@ -3593,7 +3674,7 @@ export function sanitizeAndValidateBudgetPlan(
       category: item.category,
       suggestedLimit: item.floor,
       reason: item.floor > 0
-        ? `Travado no gasto já realizado de R$ ${formatBRL(item.committed)}.`
+        ? `Travado no gasto já realizado de ${formatBRL(item.committed)}.`
         : 'Sem renda disponível registrada para alocação.',
     }))
     return {

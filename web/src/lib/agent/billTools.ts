@@ -53,14 +53,16 @@ export async function atualizar(env: AgentEnv, args: Record<string, unknown>): P
     ...(newDueDate ? { dueDate: newDueDate } : {}),
   }
 
-  const before = computeSummary(all, env.me.uid, tx.competenceMonth)
+  const cards = env.getCards?.() || []
+  const closures = env.getClosures?.() || []
+  const before = computeSummary(all, env.me.uid, tx.competenceMonth, cards, closures)
   const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
 
   if (isPendingConfirmation) {
     const title = `Atualizar Conta: ${tx.description}`
     const fakeUpdated: Transaction = { ...tx, ...patch }
     const fakeNextAll = all.map((t) => (t.id === tx.id ? fakeUpdated : t))
-    const fakeAfter = computeSummary(fakeNextAll, env.me.uid, tx.competenceMonth)
+    const fakeAfter = computeSummary(fakeNextAll, env.me.uid, tx.competenceMonth, cards, closures)
     const diffSaldo = round2(fakeAfter.freeBalance - before.freeBalance)
 
     const confirmationLines = [
@@ -102,7 +104,7 @@ export async function atualizar(env: AgentEnv, args: Record<string, unknown>): P
 
   const updated: Transaction = { ...tx, ...patch }
   const nextAll = all.map((t) => (t.id === tx.id ? updated : t))
-  const after = computeSummary(nextAll, env.me.uid, tx.competenceMonth)
+  const after = computeSummary(nextAll, env.me.uid, tx.competenceMonth, cards, closures)
 
   const diffSaldo = round2(after.freeBalance - before.freeBalance)
 

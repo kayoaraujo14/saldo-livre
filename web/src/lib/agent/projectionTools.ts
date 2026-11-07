@@ -19,7 +19,7 @@ export async function relatorio(env: AgentEnv, args?: Record<string, unknown>): 
   const cartaoFiltro = typeof args?.cartao === 'string' ? args.cartao.trim() : ''
   const closures = env.getClosures?.() || []
   const cards = env.getCards()
-  const s = computeSummary(all, env.me.uid, targetMonth, closures, cards)
+  const s = computeSummary(all, env.me.uid, targetMonth, cards, closures)
   const { receivables, payables } = listReceivables(all, env.me.uid, targetMonth, cards)
   const monthTxs = all.filter((t) => t.competenceMonth === targetMonth && (t.visibleToUids || []).includes(env.me.uid))
 

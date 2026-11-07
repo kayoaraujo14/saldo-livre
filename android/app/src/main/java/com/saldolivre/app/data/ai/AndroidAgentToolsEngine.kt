@@ -3139,7 +3139,7 @@ class AndroidAgentToolsEngine(
             }
 
             "sugerir_tetos" -> {
-                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome)
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome, summary.carryoverAmount, summary.previousMonthDeficit)
                 val suggested = suggestedResult.suggestedBudgets
                 if (suggested.isEmpty()) {
                     return ToolExecutionResult(text = "ℹ️ Ainda não há dados suficientes de renda ou despesas para sugerir tetos automaticamente.")
@@ -3165,7 +3165,7 @@ class AndroidAgentToolsEngine(
             }
 
             "aplicar_sugestao_ia" -> {
-                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome)
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome, summary.carryoverAmount, summary.previousMonthDeficit)
                 val suggested = suggestedResult.suggestedBudgets
                 if (suggested.isEmpty()) {
                     return ToolExecutionResult(text = "⚠️ Não foi possível gerar tetos sugeridos sem receita ou histórico no mês.")
@@ -3246,7 +3246,7 @@ class AndroidAgentToolsEngine(
             else -> {
                 // "consultar"
                 if (report.categories.isEmpty()) {
-                    val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income)
+                    val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income, summary.carryoverAmount, summary.previousMonthDeficit)
                     val suggested = suggestedResult.suggestedBudgets
                     val sugTotal = suggested.values.sum()
                     return ToolExecutionResult(

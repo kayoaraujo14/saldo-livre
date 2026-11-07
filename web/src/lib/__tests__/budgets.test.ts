@@ -672,7 +672,7 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
 
       const food = validated.allocations.find((a) => a.category === 'Alimentação')!
       const rent = validated.allocations.find((a) => a.category === 'Moradia')!
-      const leisure = validated.allocations.find((a) => a.category === 'Lazer')!
+      const leisure = validated.allocations.find((a) => a.category === 'Lazer & Entretenimento' || a.category === 'Lazer')!
       const inv = validated.allocations.find((a) => a.category === 'Investimentos')!
 
       // Pisos reais: 1400 e 1800
@@ -707,6 +707,71 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
       expect(food.suggestedLimit).toBeGreaterThanOrEqual(400)
       const trans = validated.allocations.find((a) => a.category === 'Transporte')!
       expect(trans.suggestedLimit).toBeGreaterThanOrEqual(200)
+    })
+
+    it('nunca sugere teto menor do que o mínimo comprometido e higieniza justificativa alucinada de sem compromissos', () => {
+      const rawPlan = {
+        summaryInsight: 'Estratégia 50/30/20',
+        allocations: [
+          {
+            category: 'Compras & Estilo de Vida',
+            suggestedLimit: 170, // Menor que o comprometido real de 479.08
+            reason: 'Sem compromissos no momento, zerado para priorizar as metas de investimento.',
+          },
+        ],
+      }
+      // Comprometido de R$ 479,08 a vencer registrado sob o alias legado 'Compras'
+      const pending = { Compras: 479.08 }
+      const validated = sanitizeAndValidateBudgetPlan(rawPlan, 5000, {}, pending)
+
+      const compras = validated.allocations.find(
+        (a) => a.category === 'Compras & Estilo de Vida',
+      )!
+      expect(compras).toBeDefined()
+      // O piso inegociável é R$ 480 (múltiplo de 10 cobrindo 479.08)
+      expect(compras.suggestedLimit).toBeGreaterThanOrEqual(480)
+      expect(compras.reason).not.toContain('Sem compromissos')
+      expect(compras.reason).toContain('Garante')
+    })
+
+    it('injeta automaticamente categorias omitidas pelo LLM que possuem compromissos financeiros', () => {
+      const rawPlan = {
+        summaryInsight: 'Plano com omissão',
+        allocations: [
+          { category: 'Alimentação', suggestedLimit: 1200, reason: 'Alimentação' },
+        ],
+      }
+      // O LLM omitiu 'Transporte' e 'Assinaturas', mas ambas têm despesas comprometidas
+      const spent = { Transporte: 250 }
+      const pending = { Assinaturas: 79.9 }
+      const validated = sanitizeAndValidateBudgetPlan(rawPlan, 4000, spent, pending)
+
+      const trans = validated.allocations.find((a) => a.category === 'Transporte')
+      expect(trans).toBeDefined()
+      expect(trans!.suggestedLimit).toBeGreaterThanOrEqual(250)
+
+      const assinaturas = validated.allocations.find((a) => a.category === 'Assinaturas & Serviços')
+      expect(assinaturas).toBeDefined()
+      expect(assinaturas!.suggestedLimit).toBeGreaterThanOrEqual(80)
+      expect(assinaturas!.reason).toContain('Garante')
+    })
+
+    it('funde e desduplica aliases legados sob o nome canônico', () => {
+      const rawPlan = {
+        summaryInsight: 'Plano com categorias duplicadas por alias',
+        allocations: [
+          { category: 'Compras', suggestedLimit: 200, reason: 'Compras do mês' },
+          { category: 'Compras & Estilo de Vida', suggestedLimit: 300, reason: 'Estilo de vida' },
+        ],
+      }
+      const validated = sanitizeAndValidateBudgetPlan(rawPlan, 500, {}, {})
+
+      const comprasAllocs = validated.allocations.filter(
+        (a) => a.category === 'Compras & Estilo de Vida' || a.category === 'Compras',
+      )
+      expect(comprasAllocs.length).toBe(1)
+      expect(comprasAllocs[0].category).toBe('Compras & Estilo de Vida')
+      expect(comprasAllocs[0].suggestedLimit).toBe(500)
     })
   })
 })

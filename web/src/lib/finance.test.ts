@@ -159,4 +159,57 @@ describe('calculateFinancialHealthScore', () => {
     expect(result.score).toBe(100)
     expect(result.classification).toBe('excellent')
   })
+
+  it('considers carryoverAmount from previous month as effective available income in savings and spending ratios', () => {
+    // Usuário sem receita nova no mês (ex: freelancer), mas com R$ 5.000 de sobra do mês anterior
+    const summary = {
+      monthKey: '2026-11',
+      income: 0,
+      carryoverAmount: 5000,
+      previousMonthDeficit: 0,
+      committed: 2500,
+      paid: 2500,
+      committedEstimated: 0,
+      committedPending: 0,
+      freeBalance: 2500,
+      totalInvested: 1000, // 20% de R$ 5.000
+      byCategory: [
+        { category: 'Alimentação', amount: 1500 },
+        { category: 'Investimentos', amount: 1000 },
+      ],
+    } as unknown as MonthSummary
+
+    const result = calculateFinancialHealthScore(summary, 20000)
+
+    // effectiveAvailable = 5000; totalExpenses = 1500 (30% de 5000); totalInvested = 1000 (20% de 5000)
+    expect(result.spendingRatioPercentage).toBe(30)
+    expect(result.spendingLimitScore).toBe(30)
+    expect(result.savingsRatePercentage).toBe(20)
+    expect(result.savingsScore).toBe(30)
+    expect(result.score).toBeGreaterThanOrEqual(80)
+  })
+
+  it('reduces effective available income when previousMonthDeficit is inherited', () => {
+    // Usuário com R$ 3.000 de renda, mas herdou R$ 2.500 de déficit (efetivo disponível = R$ 500)
+    const summary = {
+      monthKey: '2026-11',
+      income: 3000,
+      carryoverAmount: 0,
+      previousMonthDeficit: 2500,
+      committed: 1000,
+      paid: 1000,
+      committedEstimated: 0,
+      committedPending: 0,
+      freeBalance: -500,
+      totalInvested: 0,
+      byCategory: [{ category: 'Alimentação', amount: 1000 }],
+    } as unknown as MonthSummary
+
+    const result = calculateFinancialHealthScore(summary, 0)
+
+    // Gastou R$ 1000 sobre R$ 500 disponível = 200% de comprometimento -> nota zero de spending limit
+    expect(result.spendingRatioPercentage).toBe(200)
+    expect(result.spendingLimitScore).toBe(0)
+    expect(result.classification).toBe('critical')
+  })
 })

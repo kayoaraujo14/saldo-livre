@@ -1205,7 +1205,7 @@ object FinanceEngine {
             // Já houve fechamento formal do mês imediatamente anterior
             carryoverAmount = round2(prevClosure.carryoverToNextMonth)
             cushionAmount = round2(prevClosure.cushionAmount)
-        } else if (monthState != "future") {
+        } else {
             // Cadeia contínua de saldo acumulado:
             // Itera mês a mês desde o primeiro registro no passado até o mês anterior imediato
             val pastMonths = all
@@ -1924,6 +1924,9 @@ object FinanceEngine {
                         previousMonthDeficit = round2(kotlin.math.abs(runningBalance))
                     }
                 }
+            } else if ((projections.getOrNull(i - 1)?.projectedFreeBalance ?: 0.0) < 0.0) {
+                // Cascata Conservadora: déficit projetado do mês anterior acumula para o próximo mês
+                previousMonthDeficit = round2(kotlin.math.abs(projections[i - 1].projectedFreeBalance))
             }
 
             val monthTxs = all.filter {
@@ -2317,18 +2320,92 @@ object FinanceEngine {
 
     private val CATEGORY_CANONICAL_MAP = mapOf(
         "assinaturas" to "Assinaturas & Serviços",
+        "assinaturas & serviços" to "Assinaturas & Serviços",
+        "assinaturas & servicos" to "Assinaturas & Serviços",
+        "assinaturas e serviços" to "Assinaturas & Serviços",
+        "assinaturas e servicos" to "Assinaturas & Serviços",
+        "serviços" to "Assinaturas & Serviços",
+        "servicos" to "Assinaturas & Serviços",
+        "streaming" to "Assinaturas & Serviços",
         "educação" to "Educação & Desenvolvimento",
         "educacao" to "Educação & Desenvolvimento",
+        "educação & desenvolvimento" to "Educação & Desenvolvimento",
+        "educacao & desenvolvimento" to "Educação & Desenvolvimento",
+        "educação e desenvolvimento" to "Educação & Desenvolvimento",
+        "educacao e desenvolvimento" to "Educação & Desenvolvimento",
+        "cursos" to "Educação & Desenvolvimento",
         "lazer" to "Lazer & Entretenimento",
+        "lazer & entretenimento" to "Lazer & Entretenimento",
+        "lazer e entretenimento" to "Lazer & Entretenimento",
+        "entretenimento" to "Lazer & Entretenimento",
         "compras" to "Compras & Estilo de Vida",
+        "compras & estilo de vida" to "Compras & Estilo de Vida",
+        "compras e estilo de vida" to "Compras & Estilo de Vida",
+        "estilo de vida" to "Compras & Estilo de Vida",
+        "vestuário" to "Compras & Estilo de Vida",
+        "vestuario" to "Compras & Estilo de Vida",
         "cuidados pessoais" to "Cuidados Pessoais & Estética",
+        "cuidados pessoais & estética" to "Cuidados Pessoais & Estética",
+        "cuidados pessoais & estetica" to "Cuidados Pessoais & Estética",
+        "cuidados pessoais e estética" to "Cuidados Pessoais & Estética",
+        "cuidados pessoais e estetica" to "Cuidados Pessoais & Estética",
+        "estética" to "Cuidados Pessoais & Estética",
+        "estetica" to "Cuidados Pessoais & Estética",
         "família" to "Família & Dependentes",
         "familia" to "Família & Dependentes",
+        "família & dependentes" to "Família & Dependentes",
+        "familia & dependentes" to "Família & Dependentes",
+        "família e dependentes" to "Família & Dependentes",
+        "familia e dependentes" to "Família & Dependentes",
+        "dependentes" to "Família & Dependentes",
+        "família & pets" to "Família & Dependentes",
+        "familia & pets" to "Família & Dependentes",
+        "família e pets" to "Família & Dependentes",
+        "familia e pets" to "Família & Dependentes",
         "trabalho" to "Trabalho / PJ / Carreira",
+        "carreira" to "Trabalho / PJ / Carreira",
+        "pj" to "Trabalho / PJ / Carreira",
+        "trabalho / pj / carreira" to "Trabalho / PJ / Carreira",
         "financiamentos" to "Financiamentos & Dívidas",
+        "financiamento" to "Financiamentos & Dívidas",
         "financiamentos & empréstimos" to "Financiamentos & Dívidas",
         "financiamentos & emprestimos" to "Financiamentos & Dívidas",
-        "impostos" to "Impostos & Tributos"
+        "financiamentos e empréstimos" to "Financiamentos & Dívidas",
+        "financiamentos e emprestimos" to "Financiamentos & Dívidas",
+        "financiamentos & dívidas" to "Financiamentos & Dívidas",
+        "financiamentos & dividas" to "Financiamentos & Dívidas",
+        "financiamentos e dívidas" to "Financiamentos & Dívidas",
+        "financiamentos e dividas" to "Financiamentos & Dívidas",
+        "empréstimos" to "Financiamentos & Dívidas",
+        "emprestimos" to "Financiamentos & Dívidas",
+        "empréstimo" to "Financiamentos & Dívidas",
+        "emprestimo" to "Financiamentos & Dívidas",
+        "dívidas" to "Financiamentos & Dívidas",
+        "dividas" to "Financiamentos & Dívidas",
+        "dívida" to "Financiamentos & Dívidas",
+        "divida" to "Financiamentos & Dívidas",
+        "impostos" to "Impostos & Tributos",
+        "impostos & tributos" to "Impostos & Tributos",
+        "impostos e tributos" to "Impostos & Tributos",
+        "tributos" to "Impostos & Tributos",
+        "pets" to "Pets",
+        "pet" to "Pets",
+        "alimentação" to "Alimentação",
+        "alimentacao" to "Alimentação",
+        "moradia" to "Moradia",
+        "transporte" to "Transporte",
+        "transportes" to "Transporte",
+        "saúde" to "Saúde",
+        "saude" to "Saúde",
+        "investimentos" to "Investimentos",
+        "investimento" to "Investimentos",
+        "outros" to "Outros",
+        "outro" to "Outros",
+        "receita" to "Outras Receitas",
+        "outras receitas" to "Outras Receitas",
+        "cartão terceiros" to "Outros",
+        "cartao terceiros" to "Outros",
+        "estorno" to "Outros"
     )
 
     private fun foldAccents(s: String): String =
@@ -2344,6 +2421,7 @@ object FinanceEngine {
         if (trimmed.isEmpty()) return trimmed
         CATEGORY_CANONICAL_MAP[trimmed.lowercase()]?.let { return it }
         val folded = foldAccents(trimmed)
+        CATEGORY_CANONICAL_MAP[folded]?.let { return it }
         val registry = com.saldolivre.app.data.model.CategoryRegistry
         return (registry.EXPENSE_CATEGORIES + registry.INCOME_CATEGORIES)
             .firstOrNull { foldAccents(it.name) == folded }?.name ?: trimmed
@@ -2400,7 +2478,11 @@ object FinanceEngine {
             )
         }
 
-        val income = summary.income
+        val rawIncome = summary.income
+        val carryover = summary.carryoverAmount
+        val deficit = summary.previousMonthDeficit
+        val effectiveAvailable = round2(kotlin.math.max(0.0, rawIncome + carryover - deficit))
+        val income = effectiveAvailable
         val rawTotalOutflow = when {
             summary.paid > 0.0 || summary.committed > 0.0 -> {
                 if (summary.paid == summary.committed && summary.committedEstimated == 0.0 && summary.committedPending == 0.0) {
@@ -2655,7 +2737,9 @@ object FinanceEngine {
             categoryBudgets = categoryBudgets,
             monthKey = mKey,
             referenceDate = referenceDate,
-            expectedIncome = resolvedIncome
+            expectedIncome = resolvedIncome,
+            carryoverAmount = summary.carryoverAmount,
+            previousMonthDeficit = summary.previousMonthDeficit
         )
     }
 
@@ -2794,7 +2878,7 @@ object FinanceEngine {
             if (valAmt <= 0.0) continue
             val norm = normalizeBudgetCategory(rawCat)
             val matchedBudgetKey = normalizedBudgetKeyMap[norm]
-            val targetKey = matchedBudgetKey ?: rawCat
+            val targetKey = matchedBudgetKey ?: norm
             consolidatedSpentMap[targetKey] = round2((consolidatedSpentMap[targetKey] ?: 0.0) + valAmt)
         }
 
@@ -2803,7 +2887,7 @@ object FinanceEngine {
             if (valAmt <= 0.0) continue
             val norm = normalizeBudgetCategory(rawCat)
             val matchedBudgetKey = normalizedBudgetKeyMap[norm]
-            val targetKey = matchedBudgetKey ?: rawCat
+            val targetKey = matchedBudgetKey ?: norm
             consolidatedPendingMap[targetKey] = round2((consolidatedPendingMap[targetKey] ?: 0.0) + valAmt)
         }
 
@@ -3572,29 +3656,110 @@ object FinanceEngine {
             val rawSuggested: Double
         )
 
+        val canonSpent = mutableMapOf<String, Double>()
+        for ((k, v) in spentByCategory) {
+            if (v > 0.0) {
+                val c = normalizeBudgetCategory(k)
+                canonSpent[c] = round2((canonSpent[c] ?: 0.0) + v)
+            }
+        }
+        val canonPending = mutableMapOf<String, Double>()
+        for ((k, v) in pendingByCategory) {
+            if (v > 0.0) {
+                val c = normalizeBudgetCategory(k)
+                canonPending[c] = round2((canonPending[c] ?: 0.0) + v)
+            }
+        }
+
+        // Deduplica e consolida alocações por categoria canônica
+        data class AllocData(val rawLimit: Double, val reason: String)
+        val allocMap = linkedMapOf<String, AllocData>()
+        for (alloc in rawAllocs) {
+            val rawCat = alloc.category.trim()
+            if (rawCat.isBlank() || rawCat.contains("rendimento", ignoreCase = true) || rawCat.contains("salário", ignoreCase = true) || rawCat.contains("salario", ignoreCase = true)) continue
+            val canonCat = normalizeBudgetCategory(rawCat)
+            if (canonCat.isBlank()) continue
+
+            val prev = allocMap[canonCat]
+            val curLimit = alloc.suggestedLimit
+            val curReason = alloc.reason.trim()
+
+            if (prev == null) {
+                allocMap[canonCat] = AllocData(rawLimit = curLimit, reason = curReason)
+            } else {
+                val maxLimit = kotlin.math.max(prev.rawLimit, curLimit)
+                val chosenReason = if (curReason.isNotBlank() && !Regex("""(?:sem|nenhum|zerad|não|nao)""", RegexOption.IGNORE_CASE).containsMatchIn(curReason)) {
+                    curReason
+                } else {
+                    prev.reason
+                }
+                allocMap[canonCat] = AllocData(rawLimit = maxLimit, reason = chosenReason)
+            }
+        }
+
+        // Assegura que TODAS as categorias com gastos ou pendências comprometidas estejam presentes
+        val allCommittedCategories = linkedSetOf<String>().apply {
+            addAll(canonSpent.keys)
+            addAll(canonPending.keys)
+        }
+        for (cat in allCommittedCategories) {
+            if (cat.isBlank() || cat.contains("rendimento", ignoreCase = true) || cat.contains("salário", ignoreCase = true) || cat.contains("salario", ignoreCase = true)) continue
+            val canonCat = normalizeBudgetCategory(cat)
+            val committed = round2((canonSpent[canonCat] ?: 0.0) + (canonPending[canonCat] ?: 0.0))
+            if (committed > 0.0 && !allocMap.containsKey(canonCat)) {
+                val pending = canonPending[canonCat] ?: 0.0
+                val minFloor = kotlin.math.ceil(committed / 10.0) * 10.0
+                val reason = if (pending > 0.0) {
+                    "Garante os ${formatCurrency(committed)} já comprometidos no mês (${formatCurrency(pending)} a vencer)."
+                } else {
+                    "Garante os ${formatCurrency(committed)} já pagos no mês com margem de segurança."
+                }
+                allocMap[canonCat] = AllocData(rawLimit = minFloor, reason = reason)
+            }
+        }
+
         var totalFloorExpenses = 0.0
         val items = mutableListOf<ItemCalc>()
 
-        for (alloc in rawAllocs) {
-            val cat = alloc.category.trim()
-            if (cat.isBlank()) continue
-            val isInv = cat.contains("investimento", ignoreCase = true)
-            val isFix = isFixedBudgetCategory(cat)
-            val spent = kotlin.math.max(0.0, spentByCategory[cat] ?: 0.0)
-            val pending = kotlin.math.max(0.0, pendingByCategory[cat] ?: 0.0)
+        for ((canonCat, data) in allocMap) {
+            val isInv = canonCat.contains("investimento", ignoreCase = true)
+            val isFix = isFixedBudgetCategory(canonCat)
+            val spent = kotlin.math.max(0.0, canonSpent[canonCat] ?: 0.0)
+            val pending = kotlin.math.max(0.0, canonPending[canonCat] ?: 0.0)
             val committed = round2(spent + pending)
 
             val floor = if (isInv) 0.0 else kotlin.math.ceil(committed / 10.0) * 10.0
-            val rawSuggested = kotlin.math.max(floor, kotlin.math.ceil((alloc.suggestedLimit.takeIf { it > 0.0 } ?: floor) / 10.0) * 10.0)
+            val rawSuggested = kotlin.math.max(floor, kotlin.math.ceil((data.rawLimit.takeIf { it > 0.0 } ?: floor) / 10.0) * 10.0)
 
             if (!isInv) {
                 totalFloorExpenses += floor
             }
 
+            var cleanReason = data.reason
+            if (committed > 0.0) {
+                val isHallucinated =
+                    data.rawLimit < committed ||
+                    Regex("""(?:sem|nenhum|zerad|não h[aá]|nao h[aá]|não possui|nao possui)\s*(?:compromisso|gasto|despesa|conta|pendência|pendencia|saída|saida|movimentação|movimentacao)?""", RegexOption.IGNORE_CASE).containsMatchIn(cleanReason) ||
+                    cleanReason.isBlank()
+                if (isHallucinated) {
+                    cleanReason = if (pending > 0.0) {
+                        "Garante os ${formatCurrency(committed)} já comprometidos no mês (${formatCurrency(pending)} a vencer)."
+                    } else {
+                        "Garante os ${formatCurrency(committed)} já pagos no mês com margem de segurança."
+                    }
+                }
+            } else if (cleanReason.isBlank()) {
+                cleanReason = if (isInv) {
+                    "Meta de investimento e construção de patrimônio (50/30/20)."
+                } else {
+                    "Sem compromissos no momento, alocação preventiva de segurança."
+                }
+            }
+
             items.add(
                 ItemCalc(
-                    category = cat,
-                    reason = alloc.reason,
+                    category = canonCat,
+                    reason = cleanReason,
                     isInvestment = isInv,
                     isFixed = isFix,
                     committed = committed,

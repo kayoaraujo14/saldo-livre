@@ -356,7 +356,7 @@ class FinanceEngineBudgetTest {
 
         val food = validated.allocations.find { it.category == "Alimentação" }
         val rent = validated.allocations.find { it.category == "Moradia" }
-        val leisure = validated.allocations.find { it.category == "Lazer" }
+        val leisure = validated.allocations.find { it.category == "Lazer & Entretenimento" || it.category == "Lazer" }
         val inv = validated.allocations.find { it.category == "Investimentos" }
 
         assertNotNull(food)
@@ -397,5 +397,141 @@ class FinanceEngineBudgetTest {
         assertNotNull(trans)
         assertTrue(food!!.suggestedLimit >= 400.0)
         assertTrue(trans!!.suggestedLimit >= 200.0)
+    }
+
+    @Test
+    fun `calculateFinancialHealthScore considers carryoverAmount from previous month as effective available income in savings and spending ratios`() {
+        val summary = MonthSummary(
+            monthKey = "2026-11",
+            income = 0.0,
+            carryoverAmount = 5000.0,
+            previousMonthDeficit = 0.0,
+            committed = 2500.0,
+            paid = 2500.0,
+            committedEstimated = 0.0,
+            committedPending = 0.0,
+            freeBalance = 2500.0,
+            totalInvested = 1000.0,
+            byCategory = listOf(
+                CategoryExpense("Alimentação", 1500.0),
+                CategoryExpense("Investimentos", 1000.0)
+            )
+        )
+
+        val result = FinanceEngine.calculateFinancialHealthScore(summary, 20000.0)
+
+        assertEquals(30, result.spendingRatioPercentage)
+        assertEquals(30, result.spendingLimitScore)
+        assertEquals(20, result.savingsRatePercentage)
+        assertEquals(30, result.savingsScore)
+        assertTrue(result.score >= 80)
+    }
+
+    @Test
+    fun `calculateFinancialHealthScore reduces effective available income when previousMonthDeficit is inherited`() {
+        val summary = MonthSummary(
+            monthKey = "2026-11",
+            income = 3000.0,
+            carryoverAmount = 0.0,
+            previousMonthDeficit = 2500.0,
+            committed = 1000.0,
+            paid = 1000.0,
+            committedEstimated = 0.0,
+            committedPending = 0.0,
+            freeBalance = -500.0,
+            totalInvested = 0.0,
+            byCategory = listOf(CategoryExpense("Alimentação", 1000.0))
+        )
+
+        val result = FinanceEngine.calculateFinancialHealthScore(summary, 0.0)
+
+        assertEquals(200, result.spendingRatioPercentage)
+        assertEquals(0, result.spendingLimitScore)
+        assertEquals(FinancialHealthClassification.CRITICAL, result.classification)
+    }
+
+    @Test
+    fun `sanitizeAndValidateBudgetPlan never suggests lower than committed minimum and repairs hallucinated reasons`() {
+        val rawPlan = SmartBudgetPlan(
+            summaryInsight = "Estratégia 50/30/20",
+            allocations = listOf(
+                SmartBudgetAllocation(
+                    category = "Compras & Estilo de Vida",
+                    suggestedLimit = 170.0,
+                    reason = "Sem compromissos no momento, zerado para priorizar as metas de investimento."
+                )
+            )
+        )
+        val pending = mapOf("Compras" to 479.08)
+        val validated = FinanceEngine.sanitizeAndValidateBudgetPlan(rawPlan, 5000.0, emptyMap(), pending)
+
+        val compras = validated.allocations.find {
+            it.category == "Compras & Estilo de Vida"
+        }
+        assertNotNull(compras)
+        assertTrue(compras!!.suggestedLimit >= 480.0)
+        assertFalse(compras.reason.contains("Sem compromissos", ignoreCase = true))
+        assertTrue(compras.reason.contains("Garante", ignoreCase = true))
+    }
+
+    @Test
+    fun `sanitizeAndValidateBudgetPlan automatically injects omitted categories that have commitments`() {
+        val rawPlan = SmartBudgetPlan(
+            summaryInsight = "Plano com omissão",
+            allocations = listOf(
+                SmartBudgetAllocation(
+                    category = "Alimentação",
+                    suggestedLimit = 1200.0,
+                    reason = "Alimentação"
+                )
+            )
+        )
+        val spent = mapOf("Transporte" to 250.0)
+        val pending = mapOf("Assinaturas" to 79.9)
+        val validated = FinanceEngine.sanitizeAndValidateBudgetPlan(rawPlan, 4000.0, spent, pending)
+
+        val trans = validated.allocations.find { it.category == "Transporte" }
+        assertNotNull(trans)
+        assertTrue(trans!!.suggestedLimit >= 250.0)
+
+        val assinaturas = validated.allocations.find { it.category == "Assinaturas & Serviços" }
+        assertNotNull(assinaturas)
+        assertTrue(assinaturas!!.suggestedLimit >= 80.0)
+        assertTrue(assinaturas.reason.contains("Garante", ignoreCase = true))
+    }
+
+    @Test
+    fun `sanitizeAndValidateBudgetPlan deduplicates legacy aliases under canonical category`() {
+        val rawPlan = SmartBudgetPlan(
+            summaryInsight = "Plano com duplicatas por alias",
+            allocations = listOf(
+                SmartBudgetAllocation(category = "Compras", suggestedLimit = 200.0, reason = "Compras"),
+                SmartBudgetAllocation(category = "Compras & Estilo de Vida", suggestedLimit = 300.0, reason = "Estilo de vida")
+            )
+        )
+        val validated = FinanceEngine.sanitizeAndValidateBudgetPlan(rawPlan, 500.0, emptyMap(), emptyMap())
+
+        val comprasAllocs = validated.allocations.filter {
+            it.category == "Compras & Estilo de Vida" || it.category == "Compras"
+        }
+        assertEquals(1, comprasAllocs.size)
+        assertEquals("Compras & Estilo de Vida", comprasAllocs[0].category)
+        assertEquals(500.0, comprasAllocs[0].suggestedLimit, 0.01)
+    }
+
+    @Test
+    fun `normalizeBudgetCategory normalizes legacy aliases and folded casing`() {
+        assertEquals("Lazer & Entretenimento", FinanceEngine.normalizeBudgetCategory("Lazer"))
+        assertEquals("Lazer & Entretenimento", FinanceEngine.normalizeBudgetCategory("lazer"))
+        assertEquals("Compras & Estilo de Vida", FinanceEngine.normalizeBudgetCategory("Compras"))
+        assertEquals("Compras & Estilo de Vida", FinanceEngine.normalizeBudgetCategory("compras"))
+        assertEquals("Assinaturas & Serviços", FinanceEngine.normalizeBudgetCategory("Assinaturas"))
+        assertEquals("Educação & Desenvolvimento", FinanceEngine.normalizeBudgetCategory("Educação"))
+        assertEquals("Educação & Desenvolvimento", FinanceEngine.normalizeBudgetCategory("educacao"))
+        assertEquals("Financiamentos & Dívidas", FinanceEngine.normalizeBudgetCategory("Financiamentos & Empréstimos"))
+        assertEquals("Financiamentos & Dívidas", FinanceEngine.normalizeBudgetCategory("financiamentos e empréstimos"))
+        assertEquals("Família & Dependentes", FinanceEngine.normalizeBudgetCategory("Família & Pets"))
+        assertEquals("Pets", FinanceEngine.normalizeBudgetCategory("Pets"))
+        assertEquals("Pets", FinanceEngine.normalizeBudgetCategory("pets"))
     }
 }

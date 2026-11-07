@@ -1,4 +1,4 @@
-﻿package com.saldolivre.app.ui.screens.dashboard.budgets
+package com.saldolivre.app.ui.screens.dashboard.budgets
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -74,7 +74,7 @@ private fun BudgetAiCoachCard(
                         .padding(horizontal = 5.dp, vertical = 1.5.dp)
                 ) {
                     Text(
-                        text = if (fromAi) "Gemini" else "Dicas rÃ¡pidas",
+                        text = if (fromAi) "Gemini" else "Dicas rápidas",
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Purple400,
@@ -108,7 +108,7 @@ private fun BudgetAiCoachCard(
                 }
                 Text(
                     text = when {
-                        isGenerating -> "Analisandoâ€¦"
+                        isGenerating -> "Analisando…"
                         fromAi -> "Atualizar"
                         else -> "Analisar com Gemini"
                     },
@@ -203,7 +203,7 @@ fun CategoryBudgetsSectionCard(
     val isAlert: (CategoryBudgetStatus) -> Boolean = {
         it.status != CategoryBudgetAlertStatus.OK ||
             it.burnRateStatus != CategoryBudgetPaceStatus.NORMAL ||
-            it.badgeLabel in listOf("Estourado", "Vai Estourar", "Quase no Limite", "Ritmo RÃ¡pido")
+            it.badgeLabel in listOf("Estourado", "Vai Estourar", "Quase no Limite", "Ritmo Rápido")
     }
     val alertsCount = remember(sortedItems) { sortedItems.count(isAlert) }
 
@@ -223,7 +223,7 @@ fun CategoryBudgetsSectionCard(
         CategoryBudgetAlertStatus.OK -> Emerald400
     }
     val statusText = when (report.status) {
-        CategoryBudgetAlertStatus.DANGER -> "AtenÃ§Ã£o aos tetos"
+        CategoryBudgetAlertStatus.DANGER -> "Atenção aos tetos"
         CategoryBudgetAlertStatus.WARNING -> "Ritmo acelerado"
         CategoryBudgetAlertStatus.OK -> "Dentro da meta"
     }
@@ -240,7 +240,7 @@ fun CategoryBudgetsSectionCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // â”€â”€ CabeÃ§alho: tÃ­tulo + ajuda + aÃ§Ãµes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Cabeçalho: título + ajuda + ações ─────────────────────────────
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -270,7 +270,7 @@ fun CategoryBudgetsSectionCard(
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
-                            text = "Envelopes OrÃ§amentÃ¡rios",
+                            text = "Envelopes Orçamentários",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
@@ -278,7 +278,7 @@ fun CategoryBudgetsSectionCard(
                         )
                         Text(
                             text = if (report.totalBudgeted > 0.0) {
-                                "Um teto de gasto para cada categoria do mÃªs"
+                                "Um teto de gasto para cada categoria do mês"
                             } else {
                                 "Defina tetos por categoria e acompanhe quanto ainda pode gastar"
                             },
@@ -331,15 +331,15 @@ fun CategoryBudgetsSectionCard(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text("Como ler esta tela", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                        Text("â€¢ Envelope Ã© o teto de gasto de uma categoria neste mÃªs.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
-                        Text("â€¢ Barra cheia = jÃ¡ pago. Barra clara = contas e faturas que ainda vÃ£o vencer.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
-                        Text("â€¢ â€œAinda pode gastarâ€ = tetos âˆ’ pago âˆ’ a vencer.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
+                        Text("• Envelope é o teto de gasto de uma categoria neste mês.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
+                        Text("• Barra cheia = já pago. Barra clara = contas e faturas que ainda vão vencer.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
+                        Text("• “Ainda pode gastar” = tetos − pago − a vencer.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
                         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Box(Modifier.size(8.dp).background(Emerald400, CircleShape)); Text("ok", fontSize = 11.sp, color = TextSecondary)
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Box(Modifier.size(8.dp).background(Amber400, CircleShape)); Text("atenÃ§Ã£o", fontSize = 11.sp, color = TextSecondary)
+                                Box(Modifier.size(8.dp).background(Amber400, CircleShape)); Text("atenção", fontSize = 11.sp, color = TextSecondary)
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Box(Modifier.size(8.dp).background(Rose400, CircleShape)); Text("estourou", fontSize = 11.sp, color = TextSecondary)
@@ -348,7 +348,7 @@ fun CategoryBudgetsSectionCard(
                                 Box(Modifier.size(8.dp).background(Purple400, CircleShape)); Text("IA", fontSize = 11.sp, color = TextSecondary)
                             }
                         }
-                        Text("â€¢ Toque em uma categoria para ajustar o teto ou perguntar Ã  IA.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
+                        Text("• Toque em uma categoria para ajustar o teto ou perguntar à IA.", fontSize = 11.5.sp, color = TextSecondary, lineHeight = 16.sp)
                     }
                 }
 
@@ -404,7 +404,7 @@ fun CategoryBudgetsSectionCard(
                 }
             }
 
-            // â”€â”€ Resumo: quanto ainda pode gastar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Resumo: quanto ainda pode gastar ───────────────────────────────
             if (report.totalBudgeted > 0.0) {
                 Column(
                     modifier = Modifier
@@ -433,7 +433,7 @@ fun CategoryBudgetsSectionCard(
                                 color = if (report.totalRealRemaining > 0.0) Emerald400 else Rose400
                             )
                             Text(
-                                text = "dentro dos tetos, atÃ© o fim do mÃªs",
+                                text = "dentro dos tetos, até o fim do mês",
                                 fontSize = 10.5.sp,
                                 color = TextMuted
                             )
@@ -465,7 +465,7 @@ fun CategoryBudgetsSectionCard(
                         height = 10.dp
                     )
 
-                    // Legenda Ãºnica da barra (as categorias abaixo nÃ£o repetem esse texto)
+                    // Legenda única da barra (as categorias abaixo não repetem esse texto)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -526,7 +526,7 @@ fun CategoryBudgetsSectionCard(
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Text(
-                                        text = "Meta de aporte Â· 20% da renda",
+                                        text = "Meta de aporte · 20% da renda",
                                         fontSize = 11.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = InvestBlue,
@@ -552,7 +552,7 @@ fun CategoryBudgetsSectionCard(
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "de ${brl(goal)} neste mÃªs",
+                                    text = "de ${brl(goal)} neste mês",
                                     fontSize = 11.5.sp,
                                     color = TextSecondary,
                                     modifier = Modifier.padding(bottom = 1.dp)
@@ -569,7 +569,7 @@ fun CategoryBudgetsSectionCard(
                 }
             }
 
-            // â”€â”€ Assistente IA: insights acionÃ¡veis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Assistente IA: insights acionáveis ─────────────────────────────
             if (insights.isNotEmpty()) {
                 BudgetAiCoachCard(
                     insights = insights,
@@ -579,7 +579,7 @@ fun CategoryBudgetsSectionCard(
                 )
             }
 
-            // â”€â”€ Lista de envelopes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── Lista de envelopes ─────────────────────────────────────────────
             if (report.items.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -591,7 +591,7 @@ fun CategoryBudgetsSectionCard(
                         val labelText = when (mode) {
                             EnvelopeFilterMode.ALL -> "Todos ($allCount)"
                             EnvelopeFilterMode.ALERTS -> "Em alerta ($alertsCount)"
-                            EnvelopeFilterMode.VARIABLE -> "VariÃ¡veis"
+                            EnvelopeFilterMode.VARIABLE -> "Variáveis"
                             EnvelopeFilterMode.FIXED -> "Fixos"
                         }
                         Box(
@@ -731,10 +731,10 @@ fun CategoryBudgetsSectionCard(
                             )
 
                             val detail = when {
-                                item.pendingAmount > 0.0 && item.spentAmount <= 0.0 -> "Nada pago ainda Â· ${brl(item.pendingAmount)} a vencer"
-                                item.pendingAmount > 0.0 -> "Pago ${brl(item.spentAmount)} Â· A vencer ${brl(item.pendingAmount)}"
+                                item.pendingAmount > 0.0 && item.spentAmount <= 0.0 -> "Nada pago ainda · ${brl(item.pendingAmount)} a vencer"
+                                item.pendingAmount > 0.0 -> "Pago ${brl(item.spentAmount)} · A vencer ${brl(item.pendingAmount)}"
                                 item.spentAmount > 0.0 -> "Pago ${brl(item.spentAmount)}"
-                                else -> "Sem gastos neste mÃªs"
+                                else -> "Sem gastos neste mês"
                             }
                             Text(
                                 text = detail,
@@ -757,7 +757,7 @@ fun CategoryBudgetsSectionCard(
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        text = if (item.limit > 0.0) "Teto atual ${brl(item.limit)} Â· ajuste rÃ¡pido:" else "Ainda sem teto Â· crie um:",
+                                        text = if (item.limit > 0.0) "Teto atual ${brl(item.limit)} · ajuste rápido:" else "Ainda sem teto · crie um:",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = TextSecondary
@@ -809,7 +809,7 @@ fun CategoryBudgetsSectionCard(
                                                 .border(1.dp, Purple400.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
                                                 .clickable {
                                                     onAskAi(
-                                                        "Analise meu envelope de ${item.category}: teto ${brl(item.limit)}, pago ${brl(item.spentAmount)}, a vencer ${brl(item.pendingAmount)}. O que posso fazer para fechar o mÃªs dentro do orÃ§amento?"
+                                                        "Analise meu envelope de ${item.category}: teto ${brl(item.limit)}, pago ${brl(item.spentAmount)}, a vencer ${brl(item.pendingAmount)}. O que posso fazer para fechar o mês dentro do orçamento?"
                                                     )
                                                 }
                                                 .padding(vertical = 8.dp),
@@ -818,7 +818,7 @@ fun CategoryBudgetsSectionCard(
                                         ) {
                                             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = Purple400, modifier = Modifier.size(13.dp))
                                             Spacer(modifier = Modifier.width(5.dp))
-                                            Text("Perguntar Ã  IA", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Purple400)
+                                            Text("Perguntar à IA", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Purple400)
                                         }
                                     }
                                 }

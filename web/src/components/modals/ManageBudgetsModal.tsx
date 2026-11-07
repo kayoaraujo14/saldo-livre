@@ -199,7 +199,19 @@ export function ManageBudgetsModal({
     const nextState: Record<string, string> = { ...budgetsState }
     for (const alloc of geminiPlan.allocations) {
       const canon = normalizeBudgetCategory(alloc.category)
-      nextState[canon] = String(alloc.suggestedLimit)
+      const committed = committedByCategory.totalCommittedMap[canon] || 0
+      const minFloor = Math.ceil(committed / 10) * 10
+      const finalLimit = Math.max(minFloor, alloc.suggestedLimit)
+      nextState[canon] = String(finalLimit)
+    }
+    for (const [canon, committed] of Object.entries(committedByCategory.totalCommittedMap)) {
+      if (committed > 0) {
+        const minFloor = Math.ceil(committed / 10) * 10
+        const current = parseFloat(nextState[canon] || '0') || 0
+        if (current < minFloor) {
+          nextState[canon] = String(minFloor)
+        }
+      }
     }
     setBudgetsState(nextState)
   }
@@ -209,7 +221,19 @@ export function ManageBudgetsModal({
     if (!aiSuggestion) return
     const nextState: Record<string, string> = {}
     for (const [cat, limit] of Object.entries(aiSuggestion.suggestedBudgets)) {
-      nextState[normalizeBudgetCategory(cat)] = String(limit)
+      const canon = normalizeBudgetCategory(cat)
+      const committed = committedByCategory.totalCommittedMap[canon] || 0
+      const minFloor = Math.ceil(committed / 10) * 10
+      nextState[canon] = String(Math.max(minFloor, limit))
+    }
+    for (const [canon, committed] of Object.entries(committedByCategory.totalCommittedMap)) {
+      if (committed > 0) {
+        const minFloor = Math.ceil(committed / 10) * 10
+        const current = parseFloat(nextState[canon] || '0') || 0
+        if (current < minFloor) {
+          nextState[canon] = String(minFloor)
+        }
+      }
     }
     setBudgetsState(nextState)
   }
@@ -313,7 +337,11 @@ export function ManageBudgetsModal({
           finalBudgets[maxCat] = finalBudgets[maxCat] + diff
         }
       } else {
-        Object.assign(finalBudgets, rawSanitized)
+        for (const [cat, num] of Object.entries(rawSanitized)) {
+          const committed = committedByCategory.totalCommittedMap[cat] || 0
+          const minFloor = Math.ceil(committed / 10) * 10
+          finalBudgets[cat] = Math.max(minFloor, num)
+        }
       }
 
       await setCategoryBudgets(finalBudgets, month)

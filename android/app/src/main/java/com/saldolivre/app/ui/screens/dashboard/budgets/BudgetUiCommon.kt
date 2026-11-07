@@ -20,16 +20,17 @@ val BUDGETABLE_EXPENSE_CATEGORIES = listOf(
     "Moradia",
     "Transporte",
     "Saúde",
-    "Lazer & Entretenimento",
-    "Compras & Estilo de Vida",
-    "Assinaturas & Serviços",
-    "Educação & Desenvolvimento",
     "Cuidados Pessoais & Estética",
-    "Família & Pets",
+    "Lazer & Entretenimento",
+    "Assinaturas & Serviços",
+    "Compras & Estilo de Vida",
+    "Educação & Desenvolvimento",
+    "Família & Dependentes",
+    "Pets",
     "Investimentos",
     "Financiamentos & Dívidas",
     "Impostos & Tributos",
-    "Doações & Presentes",
+    "Trabalho / PJ / Carreira",
     "Outros"
 )
 

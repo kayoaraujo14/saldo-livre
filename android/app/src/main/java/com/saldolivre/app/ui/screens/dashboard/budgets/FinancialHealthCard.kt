@@ -1,4 +1,4 @@
-﻿package com.saldolivre.app.ui.screens.dashboard.budgets
+package com.saldolivre.app.ui.screens.dashboard.budgets
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -88,7 +88,7 @@ fun CompactFinancialHealthCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "SAÃšDE FINANCEIRA",
+                            text = "SAÚDE FINANCEIRA",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.8.sp,
@@ -264,7 +264,7 @@ fun FullFinancialHealthCard(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "SAÃšDE FINANCEIRA",
+                                text = "SAÚDE FINANCEIRA",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.8.sp,
@@ -295,7 +295,7 @@ fun FullFinancialHealthCard(
                     }
                 }
                 Text(
-                    text = "Raio-X â†’",
+                    text = "Raio-X →",
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     color = Emerald400
@@ -313,7 +313,7 @@ fun FullFinancialHealthCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 HealthPillarColumn(
-                    title = "POUPANÃ‡A",
+                    title = "POUPANÇA",
                     scoreText = "${health.savingsScore}/30 pts",
                     ratio = health.savingsScore / 30f,
                     subtitle = "${health.savingsRatePercentage}% investido",

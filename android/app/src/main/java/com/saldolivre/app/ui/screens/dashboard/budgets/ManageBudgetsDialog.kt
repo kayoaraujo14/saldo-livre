@@ -1,4 +1,4 @@
-﻿package com.saldolivre.app.ui.screens.dashboard.budgets
+package com.saldolivre.app.ui.screens.dashboard.budgets
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -81,7 +81,7 @@ fun ManageBudgetsDialog(
                 if (raw > 0.0) parsedVals[cat] = raw
             }
 
-            // Piso inegociÃ¡vel por categoria: o que jÃ¡ foi gasto no mÃªs ou custo fixo contratual
+            // Piso inegociável por categoria: o que já foi gasto no mês ou custo fixo contratual
             val floorVals = mutableMapOf<String, Double>()
             for ((cat, raw) in parsedVals) {
                 val spentItem = report.items.find {
@@ -116,7 +116,7 @@ fun ManageBudgetsDialog(
                         budgetInputs[cat] = if (calibrated % 1.0 == 0.0) calibrated.toInt().toString() else FinanceEngine.round2(calibrated).toString()
                     }
                 } else {
-                    // Entrada nÃ£o cobre nem os pisos jÃ¡ gastos das categorias flexÃ­veis; fixa no piso gasto
+                    // Entrada não cobre nem os pisos já gastos das categorias flexíveis; fixa no piso gasto
                     for (cat in flexCategories) {
                         val floor = floorVals[cat] ?: 0.0
                         val calibrated = kotlin.math.max(10.0, kotlin.math.floor(floor / 5.0) * 5.0)
@@ -124,7 +124,7 @@ fun ManageBudgetsDialog(
                     }
                 }
             } else {
-                // Se as despesas fixas sozinhas jÃ¡ consomem a renda prevista, mantÃ©m os fixos e ajusta flexÃ­veis para o mÃ­nimo
+                // Se as despesas fixas sozinhas já consomem a renda prevista, mantém os fixos e ajusta flexíveis para o mínimo
                 for (cat in flexCategories) {
                     val floor = floorVals[cat] ?: 0.0
                     val minVal = if (floor > 0.0) floor else 10.0
@@ -158,7 +158,7 @@ fun ManageBudgetsDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Envelopes OrÃ§amentÃ¡rios Inteligentes",
+                            text = "Envelopes Orçamentários Inteligentes",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -225,7 +225,7 @@ fun ManageBudgetsDialog(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        // TermÃ´metro ao Vivo de AlocaÃ§Ã£o da Entrada Prevista do MÃªs
+                        // Termômetro ao Vivo de Alocação da Entrada Prevista do Mês
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -248,20 +248,20 @@ fun ManageBudgetsDialog(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = if (report.carryoverAmount > 0.0) "ORÃ‡AMENTO TOTAL VS DISPONÃVEL NO MÃŠS" else "ORÃ‡AMENTO TOTAL VS ENTRADA DO MÃŠS",
+                                        text = if (report.carryoverAmount > 0.0) "ORÇAMENTO TOTAL VS DISPONÍVEL NO MÊS" else "ORÇAMENTO TOTAL VS ENTRADA DO MÊS",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = TextMuted
                                     )
                                     Text(
-                                        text = "${FinanceEngine.formatCurrency(formTotal)} / ${if (expectedIncome > 0.0) FinanceEngine.formatCurrency(expectedIncome) else "â€”"}",
+                                        text = "${FinanceEngine.formatCurrency(formTotal)} / ${if (expectedIncome > 0.0) FinanceEngine.formatCurrency(expectedIncome) else "—"}",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = if (isOverIncome) Rose400 else Color.White
                                     )
                                     if (report.carryoverAmount > 0.0) {
                                         Text(
-                                            text = "Entrada: ${FinanceEngine.formatCurrency(report.expectedIncome)} â€¢ Sobra: +${FinanceEngine.formatCurrency(report.carryoverAmount)}",
+                                            text = "Entrada: ${FinanceEngine.formatCurrency(report.expectedIncome)} • Sobra: +${FinanceEngine.formatCurrency(report.carryoverAmount)}",
                                             fontSize = 9.5.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = Cyan400
@@ -278,7 +278,7 @@ fun ManageBudgetsDialog(
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                             modifier = Modifier.height(28.dp)
                                         ) {
-                                            Text("Calibrar Ã  Entrada", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text("Calibrar à Entrada", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                     if (formTotal > 0.0) {
@@ -342,7 +342,7 @@ fun ManageBudgetsDialog(
                             }
                         }
 
-                        // Feature: Sugerir OrÃ§amento com Gemini AI
+                        // Feature: Sugerir Orçamento com Gemini AI
                         Card(
                             shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = Purple500.copy(alpha = 0.12f)),
@@ -371,7 +371,7 @@ fun ManageBudgetsDialog(
                                             modifier = Modifier.size(16.dp)
                                         )
                                         Text(
-                                            text = "âœ¨ Planejador Inteligente Gemini",
+                                            text = "✨ Planejador Inteligente Gemini",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White
@@ -410,7 +410,7 @@ fun ManageBudgetsDialog(
                                     ) {
                                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Purple400, strokeWidth = 2.dp)
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Gemini analisando contas a vencer e histÃ³rico...", fontSize = 11.sp, color = TextSecondary)
+                                        Text("Gemini analisando contas a vencer e histórico...", fontSize = 11.sp, color = TextSecondary)
                                     }
                                 } else if (smartBudgetPlan != null) {
                                     Text(
@@ -422,8 +422,28 @@ fun ManageBudgetsDialog(
                                     Button(
                                         onClick = {
                                             for (a in smartBudgetPlan.allocations) {
-                                                val v = a.suggestedLimit
-                                                budgetInputs[a.category] = if (v % 1.0 == 0.0) v.toInt().toString() else FinanceEngine.round2(v).toString()
+                                                val normCat = FinanceEngine.normalizeBudgetCategory(a.category)
+                                                val spentItem = report.items.find {
+                                                    FinanceEngine.normalizeBudgetCategory(it.category) == normCat
+                                                }
+                                                val minFloor = (spentItem?.spentAmount ?: 0.0) + (spentItem?.pendingAmount ?: 0.0)
+                                                val floorCeil = (kotlin.math.ceil(minFloor / 10.0) * 10.0)
+                                                val v = kotlin.math.max(floorCeil, a.suggestedLimit)
+                                                budgetInputs[normCat] = if (v % 1.0 == 0.0) v.toInt().toString() else FinanceEngine.round2(v).toString()
+                                            }
+                                            for (cat in BUDGETABLE_EXPENSE_CATEGORIES) {
+                                                val normCat = FinanceEngine.normalizeBudgetCategory(cat)
+                                                val spentItem = report.items.find {
+                                                    FinanceEngine.normalizeBudgetCategory(it.category) == normCat
+                                                }
+                                                val minFloor = (spentItem?.spentAmount ?: 0.0) + (spentItem?.pendingAmount ?: 0.0)
+                                                if (minFloor > 0.0) {
+                                                    val floorCeil = kotlin.math.ceil(minFloor / 10.0) * 10.0
+                                                    val cur = (budgetInputs[cat] ?: budgetInputs[normCat] ?: "").replace(",", ".").trim().toDoubleOrNull() ?: 0.0
+                                                    if (cur < floorCeil) {
+                                                        budgetInputs[cat] = floorCeil.toInt().toString()
+                                                    }
+                                                }
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(containerColor = Emerald600, contentColor = Color.White),
@@ -433,7 +453,7 @@ fun ManageBudgetsDialog(
                                     ) {
                                         Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Aplicar SugestÃµes da IA nos Campos", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("Aplicar Sugestões da IA nos Campos", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 } else if (suggestedBudgets.suggestedBudgets.isNotEmpty()) {
                                     Row(
@@ -442,14 +462,21 @@ fun ManageBudgetsDialog(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "SugestÃ£o estatÃ­stica: ${FinanceEngine.formatCurrency(suggestedBudgets.totalSuggested)}",
+                                            text = "Sugestão estatística: ${FinanceEngine.formatCurrency(suggestedBudgets.totalSuggested)}",
                                             fontSize = 10.5.sp,
                                             color = TextSecondary
                                         )
                                         OutlinedButton(
                                             onClick = {
                                                 for ((cat, lim) in suggestedBudgets.suggestedBudgets) {
-                                                    budgetInputs[cat] = lim.toInt().toString()
+                                                    val normCat = FinanceEngine.normalizeBudgetCategory(cat)
+                                                    val spentItem = report.items.find {
+                                                        FinanceEngine.normalizeBudgetCategory(it.category) == normCat
+                                                    }
+                                                    val minFloor = (spentItem?.spentAmount ?: 0.0) + (spentItem?.pendingAmount ?: 0.0)
+                                                    val floorCeil = (kotlin.math.ceil(minFloor / 10.0) * 10.0)
+                                                    val v = kotlin.math.max(floorCeil, lim)
+                                                    budgetInputs[normCat] = if (v % 1.0 == 0.0) v.toInt().toString() else FinanceEngine.round2(v).toString()
                                                 }
                                             },
                                             shape = RoundedCornerShape(6.dp),
@@ -457,7 +484,7 @@ fun ManageBudgetsDialog(
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                             modifier = Modifier.height(26.dp)
                                         ) {
-                                            Text("Usar HistÃ³rico", fontSize = 10.sp, color = Emerald400, fontWeight = FontWeight.Bold)
+                                            Text("Usar Histórico", fontSize = 10.sp, color = Emerald400, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -472,7 +499,9 @@ fun ManageBudgetsDialog(
                             val pendingAmt = spentItem?.pendingAmount ?: 0.0
                             val minFloor = spentAmt + pendingAmt
                             val avg3m = suggestedBudgets.categoryAverages[category] ?: 0.0
-                            val aiReason = smartBudgetPlan?.allocations?.find { it.category == category }?.reason
+                            val aiReason = smartBudgetPlan?.allocations?.find {
+                                FinanceEngine.normalizeBudgetCategory(it.category) == FinanceEngine.normalizeBudgetCategory(category)
+                            }?.reason
 
                             Column(
                                 modifier = Modifier
@@ -495,7 +524,7 @@ fun ManageBudgetsDialog(
                                         )
                                         if (minFloor > 0.0) {
                                             Text(
-                                                text = "MÃ­nimo comprometido: ${FinanceEngine.formatCurrency(minFloor)} (${FinanceEngine.formatCurrency(spentAmt)} pagos + ${FinanceEngine.formatCurrency(pendingAmt)} a vencer)",
+                                                text = "Mínimo comprometido: ${FinanceEngine.formatCurrency(minFloor)} (${FinanceEngine.formatCurrency(spentAmt)} pagos + ${FinanceEngine.formatCurrency(pendingAmt)} a vencer)",
                                                 fontSize = 10.sp,
                                                 color = Amber400
                                             )
@@ -518,7 +547,7 @@ fun ManageBudgetsDialog(
 
                                 if (!aiReason.isNullOrBlank()) {
                                     Text(
-                                        text = "âœ¨ $aiReason",
+                                        text = "✨ $aiReason",
                                         fontSize = 10.sp,
                                         color = Purple400,
                                         lineHeight = 14.sp
@@ -541,7 +570,7 @@ fun ManageBudgetsDialog(
                                                 }
                                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
-                                            Text("MÃ©dia 3M: ${FinanceEngine.formatCurrency(avg3m)}", fontSize = 9.5.sp, color = Cyan400)
+                                            Text("Média 3M: ${FinanceEngine.formatCurrency(avg3m)}", fontSize = 9.5.sp, color = Cyan400)
                                         }
                                     }
                                     Box(
@@ -595,7 +624,13 @@ fun ManageBudgetsDialog(
                                     val clean = raw.replace(",", ".").trim()
                                     val v = clean.toDoubleOrNull() ?: 0.0
                                     if (v > 0.0) {
-                                        parsed[cat] = FinanceEngine.round2(v)
+                                        val normCat = FinanceEngine.normalizeBudgetCategory(cat)
+                                        val spentItem = report.items.find {
+                                            FinanceEngine.normalizeBudgetCategory(it.category) == normCat
+                                        }
+                                        val minFloor = (spentItem?.spentAmount ?: 0.0) + (spentItem?.pendingAmount ?: 0.0)
+                                        val floorCeil = kotlin.math.ceil(minFloor / 10.0) * 10.0
+                                        parsed[cat] = FinanceEngine.round2(kotlin.math.max(floorCeil, v))
                                     }
                                 }
                                 onSaveBudgets(parsed)
@@ -637,20 +672,20 @@ fun ManageBudgetsDialog(
                                     modifier = Modifier.size(32.dp)
                                 )
                                 Text(
-                                    text = "OrÃ§amento Equilibrado!",
+                                    text = "Orçamento Equilibrado!",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                                 Text(
-                                    text = "Nenhuma categoria precisa de compensaÃ§Ã£o no momento ou nÃ£o hÃ¡ sobras para realocar.",
+                                    text = "Nenhuma categoria precisa de compensação no momento ou não há sobras para realocar.",
                                     fontSize = 11.sp,
                                     color = TextSecondary
                                 )
                             }
                         } else {
                             Text(
-                                text = "A IA identificou envelopes com folga que podem cobrir os excessos deste mÃªs sem alterar seu orÃ§amento global:",
+                                text = "A IA identificou envelopes com folga que podem cobrir os excessos deste mês sem alterar seu orçamento global:",
                                 fontSize = 11.sp,
                                 color = TextSecondary
                             )
@@ -670,7 +705,7 @@ fun ManageBudgetsDialog(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "${s.compensateFrom} âž” ${s.overspentCategory}",
+                                            text = "${s.compensateFrom} ➔ ${s.overspentCategory}",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.White

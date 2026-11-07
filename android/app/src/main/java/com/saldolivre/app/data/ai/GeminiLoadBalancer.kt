@@ -13,6 +13,7 @@ import com.saldolivre.app.data.model.CategoryBudgetReport
 import com.saldolivre.app.data.model.MessageSender
 import com.saldolivre.app.data.model.SmartBudgetAllocation
 import com.saldolivre.app.data.model.SmartBudgetPlan
+import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.FinancialHealthAiDiagnosis
 import com.saldolivre.app.data.model.FinancialHealthScore
 import kotlinx.coroutines.delay
@@ -360,21 +361,52 @@ class GeminiLoadBalancer(
         existingLimits: Map<String, Double>
     ): SmartBudgetPlan {
         val income = kotlin.math.max(0.0, monthlyIncome)
+
+        // 1. Canonicaliza todas as categorias de entrada para evitar duplicação ou divergência entre aliases
+        val canonSpent = mutableMapOf<String, Double>()
+        for ((k, v) in spentByCategory) {
+            if (v > 0.0) {
+                val c = FinanceEngine.normalizeBudgetCategory(k)
+                canonSpent[c] = FinanceEngine.round2((canonSpent[c] ?: 0.0) + v)
+            }
+        }
+        val canonPending = mutableMapOf<String, Double>()
+        for ((k, v) in pendingByCategory) {
+            if (v > 0.0) {
+                val c = FinanceEngine.normalizeBudgetCategory(k)
+                canonPending[c] = FinanceEngine.round2((canonPending[c] ?: 0.0) + v)
+            }
+        }
+        val canonHistory = mutableMapOf<String, Double>()
+        for ((k, v) in history3mAverages) {
+            if (v > 0.0) {
+                val c = FinanceEngine.normalizeBudgetCategory(k)
+                canonHistory[c] = FinanceEngine.round2(kotlin.math.max(canonHistory[c] ?: 0.0, v))
+            }
+        }
+        val canonLimits = mutableMapOf<String, Double>()
+        for ((k, v) in existingLimits) {
+            if (v > 0.0) {
+                val c = FinanceEngine.normalizeBudgetCategory(k)
+                canonLimits[c] = FinanceEngine.round2((canonLimits[c] ?: 0.0) + v)
+            }
+        }
+
         val categoriesSet = linkedSetOf<String>().apply {
-            addAll(spentByCategory.keys)
-            addAll(pendingByCategory.keys)
-            addAll(history3mAverages.keys)
-            addAll(existingLimits.keys)
+            addAll(canonSpent.keys)
+            addAll(canonPending.keys)
+            addAll(canonHistory.keys)
+            addAll(canonLimits.keys)
         }
 
         val categoryContext = categoriesSet
             .filter { it.isNotBlank() && !it.contains("rendimento", ignoreCase = true) && !it.contains("salário", ignoreCase = true) && !it.contains("salario", ignoreCase = true) }
             .joinToString("\n") { cat ->
-                val spent = spentByCategory[cat] ?: 0.0
-                val pending = pendingByCategory[cat] ?: 0.0
+                val spent = canonSpent[cat] ?: 0.0
+                val pending = canonPending[cat] ?: 0.0
                 val committed = spent + pending
-                val histAvg = history3mAverages[cat] ?: 0.0
-                val curLim = existingLimits[cat] ?: 0.0
+                val histAvg = canonHistory[cat] ?: 0.0
+                val curLim = canonLimits[cat] ?: 0.0
                 "- $cat: pago = R$ ${String.format(Locale.US, "%.2f", spent)}, a vencer = R$ ${String.format(Locale.US, "%.2f", pending)} (comprometido total = R$ ${String.format(Locale.US, "%.2f", committed)}), média 3 meses = R$ ${String.format(Locale.US, "%.2f", histAvg)}, teto atual = R$ ${String.format(Locale.US, "%.2f", curLim)}"
             }
 
@@ -388,11 +420,11 @@ class GeminiLoadBalancer(
             ${categoryContext.ifBlank { "Nenhum dado prévio." }}
 
             REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
-            1. NUNCA sugira um teto menor do que o total comprometido (já pago + contas a vencer) de uma categoria. O usuário não pode ter um teto menor do que o que ele já gastou ou já tem de boleto/fatura agendada!
+            1. PISO INEGOCIÁVEL: Se uma categoria tiver gastos ou contas a vencer (comprometido total > 0), o "suggestedLimit" NUNCA pode ser menor do que o total comprometido (já pago + contas a vencer). Além disso, a justificativa ("reason") JAMAIS deve dizer que a categoria está sem compromissos ou zerada quando houver comprometimento! Só mencione "sem compromissos" se o comprometido for estritamente R$ 0,00.
             2. A soma de todos os tetos de despesas sugeridos NÃO DEVE ultrapassar a receita prevista do mês (R$ ${String.format(Locale.US, "%.2f", income)}). Se a receita for maior que os gastos, reserve pelo menos 15-20% para "Investimentos" (Futuro/Aportes).
             3. "Investimentos" NÃO é despesa de consumo; é meta de aporte da regra 50/30/20.
             4. ARREDONDAMENTO OBRIGATÓRIO: NUNCA sugira valores com centavos quebrados (como R$ 499,08 ou R$ 338,38). Todos os valores de "suggestedLimit" DEVEM ser inteiros múltiplos de R$ 10,00 ou R$ 50,00 (ex: 150, 400, 750, 1200).
-            5. Cada alocação deve ter uma justificativa curta ("reason") de 1 frase explicando a escolha com base nos dados.
+            5. Cada alocação deve ter uma justificativa curta ("reason") de 1 frase explicando a escolha com base nos dados reais de comprometimento e média.
             6. Retorne estritamente um JSON no seguinte formato:
             {
               "summaryInsight": "Resumo executivo curto de 1-2 frases explicando a estratégia adotada (ex: Regra 50/30/20 adaptada protegendo R$ 1.280 em contas a vencer com folga real garantida).",
@@ -429,13 +461,29 @@ class GeminiLoadBalancer(
                                 val list = mutableListOf<SmartBudgetAllocation>()
                                 for (i in 0 until allocArray.length()) {
                                     val obj = allocArray.getJSONObject(i)
-                                    val cat = obj.getString("category")
-                                    val spent = spentByCategory[cat] ?: 0.0
-                                    val pending = pendingByCategory[cat] ?: 0.0
-                                    val minFloor = (kotlin.math.ceil((spent + pending) / 10.0) * 10.0)
+                                    val rawCat = obj.getString("category")
+                                    val cat = FinanceEngine.normalizeBudgetCategory(rawCat)
+                                    val spent = canonSpent[cat] ?: 0.0
+                                    val pending = canonPending[cat] ?: 0.0
+                                    val committed = spent + pending
+                                    val minFloor = (kotlin.math.ceil(committed / 10.0) * 10.0)
                                     val rawLimit = obj.optDouble("suggestedLimit", minFloor)
                                     val lim = kotlin.math.max(minFloor, kotlin.math.max(50.0, kotlin.math.ceil(rawLimit / 10.0) * 10.0))
-                                    val reason = obj.optString("reason", "Sugerido com base no histórico recente e compromissos.")
+                                    var reason = obj.optString("reason", "").trim()
+                                    if (committed > 0.0) {
+                                        val isHallucinated = rawLimit < committed ||
+                                            Regex("""(?:sem|nenhum|zerad|não h[aá]|nao h[aá]|não possui|nao possui)\s*(?:compromisso|gasto|despesa|conta|pendência|pendencia|saída|saida|movimentação|movimentacao)?""", RegexOption.IGNORE_CASE).containsMatchIn(reason) ||
+                                            reason.isBlank()
+                                        if (isHallucinated) {
+                                            reason = if (pending > 0.0) {
+                                                "Garante os ${FinanceEngine.formatCurrency(committed)} já comprometidos no mês (${FinanceEngine.formatCurrency(pending)} a vencer)."
+                                            } else {
+                                                "Garante os ${FinanceEngine.formatCurrency(committed)} já pagos no mês com margem de segurança."
+                                            }
+                                        }
+                                    } else if (reason.isBlank()) {
+                                        reason = "Sem compromissos no momento, alocação preventiva de segurança."
+                                    }
                                     list.add(SmartBudgetAllocation(category = cat, suggestedLimit = lim, reason = reason))
                                 }
                                 return SmartBudgetPlan(
@@ -455,10 +503,10 @@ class GeminiLoadBalancer(
         val fallbackAllocations = mutableListOf<SmartBudgetAllocation>()
         for (cat in categoriesSet) {
             if (cat.isBlank() || cat.contains("rendimento", ignoreCase = true) || cat.contains("salário", ignoreCase = true) || cat.contains("salario", ignoreCase = true)) continue
-            val spent = spentByCategory[cat] ?: 0.0
-            val pending = pendingByCategory[cat] ?: 0.0
+            val spent = canonSpent[cat] ?: 0.0
+            val pending = canonPending[cat] ?: 0.0
             val committed = spent + pending
-            val histAvg = history3mAverages[cat] ?: 0.0
+            val histAvg = canonHistory[cat] ?: 0.0
             val minFloor = (kotlin.math.ceil(committed / 10.0) * 10.0)
             val isFixed = cat.contains("moradia", ignoreCase = true) || cat.contains("financiamento", ignoreCase = true) || cat.contains("assinatura", ignoreCase = true)
             val baseTarget = if (isFixed) kotlin.math.max(histAvg, committed) else kotlin.math.max(histAvg * 1.1, committed)
@@ -466,13 +514,15 @@ class GeminiLoadBalancer(
 
             val reason = if (pending > 0.0) {
                 "Protegendo R$ ${String.format(Locale.US, "%.2f", pending)} em contas a vencer e cobrindo média de R$ ${String.format(Locale.US, "%.2f", histAvg)}."
+            } else if (committed > 0.0) {
+                "Garante os ${FinanceEngine.formatCurrency(committed)} já pagos no mês com margem de segurança."
             } else {
                 "Margem de segurança calculada sobre sua média histórica de R$ ${String.format(Locale.US, "%.2f", histAvg)}."
             }
             fallbackAllocations.add(SmartBudgetAllocation(category = cat, suggestedLimit = limit, reason = reason))
         }
 
-        val totalPending = pendingByCategory.values.sum()
+        val totalPending = canonPending.values.sum()
         return SmartBudgetPlan(
             summaryInsight = "Plano inteligente calculado com Regra 50/30/20 protegendo R$ ${String.format(Locale.US, "%.2f", totalPending)} em contas a vencer com tetos arredondados.",
             allocations = fallbackAllocations

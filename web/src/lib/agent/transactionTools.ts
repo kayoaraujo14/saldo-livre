@@ -43,6 +43,12 @@ import {
   money,
   SPLIT_MAP,
 } from './common'
+
+function getAgentSummary(env: AgentEnv, txs: Transaction[], monthKey: string) {
+  const cards = env.getCards?.() || []
+  const closures = env.getClosures?.() || []
+  return computeSummary(txs, env.me.uid, monthKey, cards, closures)
+}
 import type { AgentEnv, ToolResult } from './types'
 
 export async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
@@ -382,7 +388,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     finalDueDate = `${explicitMonth}-${date.slice(8, 10)}`
   }
 
-  const before = computeSummary(env.getTransactions(), env.me.uid, competenceMonth)
+  const before = getAgentSummary(env, env.getTransactions(), competenceMonth)
   const finalDescription = isInstallment
     ? formatInstallmentDesc(cleanBaseDesc, parcelaAtual, totalParcelas)
     : (cleanBaseDesc || description)
@@ -606,7 +612,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     id = await env.addTransaction(tx)
   }
 
-  const after = computeSummary(env.getTransactions(), env.me.uid, competenceMonth)
+  const after = getAgentSummary(env, env.getTransactions(), competenceMonth)
 
   return {
     response: {
@@ -861,7 +867,7 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
       ...validTxs.map((t) => `| ${formatShortDate(t.data)} | ${t.tipo === 'income' ? '🟢 Entrada' : '🔴 Saída'} | ${t.contraparte} | ${money(t.valor_exato)} |`),
     ].join('\n')
 
-    const summaryBefore = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
+    const summaryBefore = getAgentSummary(env, env.getTransactions(), targetMonth)
     const isAllIncome = countReceitas > 0 && countDespesas === 0
     const isMixed = countReceitas > 0 && countDespesas > 0
 
@@ -1068,7 +1074,7 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
 
   env.setPendingTransactions?.([])
 
-  const summaryAfter = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
+  const summaryAfter = getAgentSummary(env, env.getTransactions(), targetMonth)
 
   const isAllIncome = receitasCount > 0 && despesasCount === 0
   const isMixed = receitasCount > 0 && despesasCount > 0
@@ -1243,7 +1249,7 @@ export async function expandirParcelamentos(env: AgentEnv, args: Record<string, 
       { label: 'Compras encontradas', value: `${expandedSummary.length} série(s) completa(s)` },
       { label: 'Mês de Referência', value: monthLabel(targetMonth) },
       { label: 'Histórico', value: 'Aloca parcelas anteriores como pagas e futuras como pendentes' },
-      { label: 'Saldo Livre em ' + monthLabel(targetMonth), value: money(computeSummary(env.getTransactions(), env.me.uid, targetMonth).freeBalance) },
+      { label: 'Saldo Livre em ' + monthLabel(targetMonth), value: money(getAgentSummary(env, env.getTransactions(), targetMonth).freeBalance) },
     ]
 
     return {
@@ -1279,7 +1285,7 @@ export async function expandirParcelamentos(env: AgentEnv, args: Record<string, 
     }
   }
 
-  const after = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
+  const after = getAgentSummary(env, env.getTransactions(), targetMonth)
 
   return {
     response: {
@@ -1388,7 +1394,7 @@ export async function excluir(env: AgentEnv, args: Record<string, unknown>): Pro
       { label: 'Itens a Excluir', value: deletedDescriptions.slice(0, 4).join(', ') + (deletedDescriptions.length > 4 ? ` (+${deletedDescriptions.length - 4})` : '') },
       { label: 'Valor a Remover', value: money(totalDeletedValue), tone: 'positive' as const },
       { label: 'Mês Afetado', value: monthLabel(affectedMonth) },
-      { label: 'Saldo Livre Atual', value: money(computeSummary(all, env.me.uid, affectedMonth).freeBalance) },
+      { label: 'Saldo Livre Atual', value: money(getAgentSummary(env, all, affectedMonth).freeBalance) },
     ]
 
     return {
@@ -1422,7 +1428,7 @@ export async function excluir(env: AgentEnv, args: Record<string, unknown>): Pro
   }
 
   const nextAll = env.getTransactions().filter((t) => !targets.some((x) => x.id === t.id))
-  const after = computeSummary(nextAll, env.me.uid, affectedMonth)
+  const after = getAgentSummary(env, nextAll, affectedMonth)
 
   return {
     response: {
@@ -1751,7 +1757,7 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
   }
 
   const targetMonth = novoMesFatura && !hasInstallments ? novoMesFatura : (targets[0]?.competenceMonth || env.monthKey)
-  const summaryAfter = computeSummary(env.getTransactions(), env.me.uid, targetMonth)
+  const summaryAfter = getAgentSummary(env, env.getTransactions(), targetMonth)
 
   return {
     response: {

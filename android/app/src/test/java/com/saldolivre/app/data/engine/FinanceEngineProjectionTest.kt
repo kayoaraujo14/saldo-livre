@@ -373,4 +373,134 @@ class FinanceEngineProjectionTest {
         assertEquals(BudgetInsightActionType.ADJUST_LIMIT, overInsight2?.action?.type)
         assertEquals("Alimentação & Mercado", overInsight2?.action?.category)
     }
+
+    @Test
+    fun `projectFutureMonths cascades projected deficit to next month as previousMonthDeficit (Conservative Cascade)`() {
+        val customTxs = listOf(
+            Transaction(
+                id = "tx_nov_extra",
+                description = "Despesa Pesada Nov",
+                category = "Outros",
+                type = TransactionType.EXPENSE,
+                status = TransactionStatus.PAID,
+                paymentMethod = PaymentMethod.PIX,
+                totalAmount = 4000.0,
+                actualAmount = 4000.0,
+                dueDate = "2026-11-10",
+                competenceMonth = "2026-11",
+                createdByUid = myUid,
+                paidByUid = myUid,
+                visibleToUids = listOf(myUid),
+                userImpact = mapOf(myUid to 4000.0),
+                splitType = SplitType.MINE,
+                allocations = listOf(Allocation(type = "PLATFORM_USER", uid = myUid, name = "Você", amount = 4000.0, reimbursed = true)),
+                createdAt = System.currentTimeMillis()
+            ),
+            Transaction(
+                id = "tx_dec_light",
+                description = "Despesa Leve Dez",
+                category = "Outros",
+                type = TransactionType.EXPENSE,
+                status = TransactionStatus.ESTIMATED,
+                paymentMethod = PaymentMethod.PIX,
+                totalAmount = 1500.0,
+                estimatedAmount = 1500.0,
+                dueDate = "2026-12-10",
+                competenceMonth = "2026-12",
+                createdByUid = myUid,
+                paidByUid = myUid,
+                visibleToUids = listOf(myUid),
+                userImpact = mapOf(myUid to 1500.0),
+                splitType = SplitType.MINE,
+                allocations = listOf(Allocation(type = "PLATFORM_USER", uid = myUid, name = "Você", amount = 1500.0, reimbursed = false)),
+                createdAt = System.currentTimeMillis()
+            ),
+            Transaction(
+                id = "tx_jan_light",
+                description = "Despesa Leve Jan",
+                category = "Outros",
+                type = TransactionType.EXPENSE,
+                status = TransactionStatus.ESTIMATED,
+                paymentMethod = PaymentMethod.PIX,
+                totalAmount = 1500.0,
+                estimatedAmount = 1500.0,
+                dueDate = "2027-01-10",
+                competenceMonth = "2027-01",
+                createdByUid = myUid,
+                paidByUid = myUid,
+                visibleToUids = listOf(myUid),
+                userImpact = mapOf(myUid to 1500.0),
+                splitType = SplitType.MINE,
+                allocations = listOf(Allocation(type = "PLATFORM_USER", uid = myUid, name = "Você", amount = 1500.0, reimbursed = false)),
+                createdAt = System.currentTimeMillis()
+            )
+        )
+
+        val customProfile = me.copy(monthlyIncome = 3000.0)
+
+        val projections = FinanceEngine.projectFutureMonths(
+            all = customTxs,
+            bills = emptyList(),
+            profile = customProfile,
+            uid = myUid,
+            startMonthKey = "2026-11",
+            count = 3,
+            cards = emptyList(),
+            closures = emptyList()
+        )
+
+        val mNov = projections[0]
+        assertEquals("2026-11", mNov.monthKey)
+        assertEquals(3000.0, mNov.projectedIncome, 0.01)
+        assertEquals(4000.0, mNov.projectedExpense, 0.01)
+        assertEquals(-1000.0, mNov.projectedFreeBalance, 0.01)
+
+        val mDec = projections[1]
+        assertEquals("2026-12", mDec.monthKey)
+        assertEquals(1000.0, mDec.previousMonthDeficit, 0.01)
+        assertEquals(3000.0, mDec.projectedIncome, 0.01)
+        assertEquals(1500.0, mDec.projectedExpense, 0.01)
+        assertEquals(500.0, mDec.projectedFreeBalance, 0.01)
+
+        val mJan = projections[2]
+        assertEquals("2027-01", mJan.monthKey)
+        assertEquals(0.0, mJan.previousMonthDeficit, 0.01)
+        assertEquals(0.0, mJan.carryoverAmount, 0.01)
+        assertEquals(1500.0, mJan.projectedFreeBalance, 0.01)
+    }
+
+    @Test
+    fun `computeSummary on a future month inherits accumulated deficit from unclosed past months`() {
+        val txPast = Transaction(
+            id = "tx_oct_def",
+            description = "Déficit de Outubro",
+            category = "Outros",
+            type = TransactionType.EXPENSE,
+            status = TransactionStatus.PAID,
+            paymentMethod = PaymentMethod.PIX,
+            totalAmount = 700.0,
+            actualAmount = 700.0,
+            dueDate = "2026-10-15",
+            competenceMonth = "2026-10",
+            createdByUid = myUid,
+            paidByUid = myUid,
+            visibleToUids = listOf(myUid),
+            userImpact = mapOf(myUid to 700.0),
+            splitType = SplitType.MINE,
+            allocations = listOf(Allocation(type = "PLATFORM_USER", uid = myUid, name = "Você", amount = 700.0, reimbursed = true)),
+            createdAt = System.currentTimeMillis()
+        )
+
+        val summaryFuture = FinanceEngine.computeSummary(
+            all = listOf(txPast),
+            uid = myUid,
+            monthKey = "2027-05",
+            cards = emptyList(),
+            closures = emptyList()
+        )
+
+        assertEquals("future", summaryFuture.monthState)
+        assertEquals(700.0, summaryFuture.previousMonthDeficit, 0.01)
+        assertEquals(-700.0, summaryFuture.freeBalance, 0.01)
+    }
 }

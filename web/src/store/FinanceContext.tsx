@@ -571,7 +571,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   const summary = useMemo(() => {
     if (!currentUid) return null
-    return computeSummary(transactions, currentUid, month, monthClosures, cards)
+    return computeSummary(transactions, currentUid, month, cards, monthClosures)
   }, [transactions, currentUid, month, monthClosures, cards])
 
   const currentMonthBudgets = useMemo(() => {

@@ -60,24 +60,87 @@ export const CATEGORIES = [
   ...LEGACY_CATEGORIES,
 ] as const
 
+function foldCategoryAccents(s: string): string {
+  return (s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+const CATEGORY_CANONICAL_MAP: Record<string, Category> = {
+  'assinaturas': 'Assinaturas & Serviços',
+  'assinaturas & servicos': 'Assinaturas & Serviços',
+  'assinaturas e servicos': 'Assinaturas & Serviços',
+  'servicos': 'Assinaturas & Serviços',
+  'streaming': 'Assinaturas & Serviços',
+  'educacao': 'Educação & Desenvolvimento',
+  'educacao & desenvolvimento': 'Educação & Desenvolvimento',
+  'educacao e desenvolvimento': 'Educação & Desenvolvimento',
+  'cursos': 'Educação & Desenvolvimento',
+  'lazer': 'Lazer & Entretenimento',
+  'lazer & entretenimento': 'Lazer & Entretenimento',
+  'lazer e entretenimento': 'Lazer & Entretenimento',
+  'entretenimento': 'Lazer & Entretenimento',
+  'compras': 'Compras & Estilo de Vida',
+  'compras & estilo de vida': 'Compras & Estilo de Vida',
+  'compras e estilo de vida': 'Compras & Estilo de Vida',
+  'estilo de vida': 'Compras & Estilo de Vida',
+  'vestuario': 'Compras & Estilo de Vida',
+  'cuidados pessoais': 'Cuidados Pessoais & Estética',
+  'cuidados pessoais & estetica': 'Cuidados Pessoais & Estética',
+  'cuidados pessoais e estetica': 'Cuidados Pessoais & Estética',
+  'estetica': 'Cuidados Pessoais & Estética',
+  'familia': 'Família & Dependentes',
+  'familia & dependentes': 'Família & Dependentes',
+  'familia e dependentes': 'Família & Dependentes',
+  'dependentes': 'Família & Dependentes',
+  'familia & pets': 'Família & Dependentes',
+  'familia e pets': 'Família & Dependentes',
+  'trabalho': 'Trabalho / PJ / Carreira',
+  'carreira': 'Trabalho / PJ / Carreira',
+  'pj': 'Trabalho / PJ / Carreira',
+  'trabalho / pj / carreira': 'Trabalho / PJ / Carreira',
+  'financiamentos': 'Financiamentos & Dívidas',
+  'financiamento': 'Financiamentos & Dívidas',
+  'financiamentos & emprestimos': 'Financiamentos & Dívidas',
+  'financiamentos e emprestimos': 'Financiamentos & Dívidas',
+  'financiamentos & dividas': 'Financiamentos & Dívidas',
+  'financiamentos e dividas': 'Financiamentos & Dívidas',
+  'emprestimos': 'Financiamentos & Dívidas',
+  'emprestimo': 'Financiamentos & Dívidas',
+  'dividas': 'Financiamentos & Dívidas',
+  'divida': 'Financiamentos & Dívidas',
+  'impostos': 'Impostos & Tributos',
+  'impostos & tributos': 'Impostos & Tributos',
+  'impostos e tributos': 'Impostos & Tributos',
+  'tributos': 'Impostos & Tributos',
+  'pets': 'Pets',
+  'pet': 'Pets',
+  'alimentacao': 'Alimentação',
+  'moradia': 'Moradia',
+  'transporte': 'Transporte',
+  'transportes': 'Transporte',
+  'saude': 'Saúde',
+  'investimentos': 'Investimentos',
+  'investimento': 'Investimentos',
+  'outros': 'Outros',
+  'outro': 'Outros',
+  'receita': 'Outras Receitas',
+  'outras receitas': 'Outras Receitas',
+  'cartao terceiros': 'Outros',
+  'estorno': 'Outros',
+}
+
 export function normalizeCategory(cat: string): Category {
-  switch (cat) {
-    case 'Lazer': return 'Lazer & Entretenimento'
-    case 'Assinaturas': return 'Assinaturas & Serviços'
-    case 'Compras': return 'Compras & Estilo de Vida'
-    case 'Educação': return 'Educação & Desenvolvimento'
-    case 'Financiamentos & Empréstimos': return 'Financiamentos & Dívidas'
-    case 'Receita': return 'Outras Receitas'
-    case 'Cartão Terceiros': return 'Outros'
-    case 'Estorno': return 'Outros'
-    // Apelidos curtos usados em orçamentos/IA
-    case 'Cuidados Pessoais': return 'Cuidados Pessoais & Estética'
-    case 'Família': return 'Família & Dependentes'
-    case 'Trabalho': return 'Trabalho / PJ / Carreira'
-    case 'Impostos': return 'Impostos & Tributos'
-    case 'Financiamentos': return 'Financiamentos & Dívidas'
-    default: return (cat || '').trim() as Category
+  const trimmed = (cat || '').trim()
+  if (!trimmed) return '' as Category
+  const folded = foldCategoryAccents(trimmed)
+  if (CATEGORY_CANONICAL_MAP[folded]) {
+    return CATEGORY_CANONICAL_MAP[folded]
   }
+  const match = (CATEGORIES as readonly string[]).find((c) => foldCategoryAccents(c) === folded)
+  return (match || trimmed) as Category
 }
 
 export type Category = (typeof CATEGORIES)[number]

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { friendPctOf, projectFutureMonths } from '../finance'
+import { computeSummary, friendPctOf, projectFutureMonths } from '../finance'
 import type { Card, MonthClosure, RecurringBill, Transaction, UserProfile } from '@/types'
 
 describe('friendPctOf', () => {
@@ -214,5 +214,137 @@ describe('projectFutureMonths (12-month projection, channels, categories & items
     // 5000 (income) + 450 (carryover) - 2035.9 (expense) = 3414.1
     expect(nov.projectedFreeBalance).toBe(3414.1)
     expect(nov.items?.some((i) => i.id === 'proj_carryover_2026-11' && i.amount === 450)).toBe(true)
+  })
+
+  it('cascades projected deficit to next month as previousMonthDeficit (Conservative Cascade)', () => {
+    // Cenário:
+    // Mês 1 (2026-11): Renda 3000, Despesas 4000 -> Déficit projetado de -1000
+    // Mês 2 (2026-12): Renda 3000, Despesas 1500 -> Deve herdar previousMonthDeficit = 1000! Saldo Livre = 3000 - 1000 - 1500 = +500
+    // Mês 3 (2027-01): Renda 3000, Despesas 1500 -> Como Mês 2 fechou positivo (+500), Mês 3 NÃO herda déficit nem acumula sobra sem fechamento (conservador)
+    const customTxs: Transaction[] = [
+      {
+        id: 'tx_nov_extra',
+        description: 'Despesa Pesada Nov',
+        category: 'Outros',
+        type: 'expense',
+        status: 'paid',
+        paymentMethod: 'pix',
+        totalAmount: 4000,
+        actualAmount: 4000,
+        dueDate: '2026-11-10',
+        competenceMonth: '2026-11',
+        createdByUid: 'u1',
+        paidByUid: 'u1',
+        visibleToUids: ['u1'],
+        userImpact: { u1: 4000 },
+        splitType: 'mine',
+        allocations: [{ type: 'PLATFORM_USER', uid: 'u1', name: 'Você', amount: 4000, reimbursed: true }],
+        createdAt: Date.now(),
+      },
+      {
+        id: 'tx_dec_light',
+        description: 'Despesa Leve Dez',
+        category: 'Outros',
+        type: 'expense',
+        status: 'estimated',
+        paymentMethod: 'pix',
+        totalAmount: 1500,
+        estimatedAmount: 1500,
+        dueDate: '2026-12-10',
+        competenceMonth: '2026-12',
+        createdByUid: 'u1',
+        paidByUid: 'u1',
+        visibleToUids: ['u1'],
+        userImpact: { u1: 1500 },
+        splitType: 'mine',
+        allocations: [{ type: 'PLATFORM_USER', uid: 'u1', name: 'Você', amount: 1500, reimbursed: false }],
+        createdAt: Date.now(),
+      },
+      {
+        id: 'tx_jan_light',
+        description: 'Despesa Leve Jan',
+        category: 'Outros',
+        type: 'expense',
+        status: 'estimated',
+        paymentMethod: 'pix',
+        totalAmount: 1500,
+        estimatedAmount: 1500,
+        dueDate: '2027-01-10',
+        competenceMonth: '2027-01',
+        createdByUid: 'u1',
+        paidByUid: 'u1',
+        visibleToUids: ['u1'],
+        userImpact: { u1: 1500 },
+        splitType: 'mine',
+        allocations: [{ type: 'PLATFORM_USER', uid: 'u1', name: 'Você', amount: 1500, reimbursed: false }],
+        createdAt: Date.now(),
+      },
+    ]
+
+    const customProfile: UserProfile = {
+      ...me,
+      monthlyIncome: 3000,
+    }
+
+    const projections = projectFutureMonths({
+      all: customTxs,
+      bills: [],
+      profile: customProfile,
+      uid: 'u1',
+      startMonthKey: '2026-11',
+      count: 3,
+      cards: [],
+      closures: [],
+    })
+
+    const mNov = projections[0]
+    expect(mNov.monthKey).toBe('2026-11')
+    expect(mNov.projectedIncome).toBe(3000)
+    expect(mNov.projectedExpense).toBe(4000)
+    expect(mNov.projectedFreeBalance).toBe(-1000)
+
+    const mDec = projections[1]
+    expect(mDec.monthKey).toBe('2026-12')
+    expect(mDec.previousMonthDeficit).toBe(1000)
+    expect(mDec.projectedIncome).toBe(3000)
+    expect(mDec.projectedExpense).toBe(1500)
+    // (3000 - 1000) - 1500 = +500
+    expect(mDec.projectedFreeBalance).toBe(500)
+
+    const mJan = projections[2]
+    expect(mJan.monthKey).toBe('2027-01')
+    expect(mJan.previousMonthDeficit).toBe(0)
+    expect(mJan.carryoverAmount).toBe(0)
+    expect(mJan.projectedFreeBalance).toBe(1500)
+  })
+
+  it('inherits accumulated deficit when computing summary on a future month without closure', () => {
+    // Transação em 2026-10 deixando déficit de R$ 700
+    const txPast: Transaction = {
+      id: 'tx_oct_def',
+      description: 'Déficit de Outubro',
+      category: 'Outros',
+      type: 'expense',
+      status: 'paid',
+      paymentMethod: 'pix',
+      totalAmount: 700,
+      actualAmount: 700,
+      dueDate: '2026-10-15',
+      competenceMonth: '2026-10',
+      createdByUid: 'u1',
+      paidByUid: 'u1',
+      visibleToUids: ['u1'],
+      userImpact: { u1: 700 },
+      splitType: 'mine',
+      allocations: [{ type: 'PLATFORM_USER', uid: 'u1', name: 'Você', amount: 700, reimbursed: true }],
+      createdAt: Date.now(),
+    }
+
+    // Navegando para mês futuro distante 2027-05 onde não há receita nem despesa
+    const summaryFuture = computeSummary([txPast], 'u1', '2027-05', [], [])
+
+    expect(summaryFuture.monthState).toBe('future')
+    expect(summaryFuture.previousMonthDeficit).toBe(700)
+    expect(summaryFuture.freeBalance).toBe(-700)
   })
 })

@@ -1,4 +1,4 @@
-﻿---
+---
 name: react-rules
 description: Regras para Web (React + TypeScript + Tailwind) e Backend
 trigger:

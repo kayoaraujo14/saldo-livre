@@ -1,4 +1,4 @@
-﻿---
+---
 name: gemini-agent-tools-sync
 description: Mantém sincronizadas as ferramentas de Function Calling do assistente Gemini entre Web e Android. Use sempre que criar, editar ou corrigir ferramentas de Function Calling, prompts de sistema, gráficos no chat ou classificadores inteligentes.
 ---

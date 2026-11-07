@@ -1,4 +1,4 @@
-﻿package com.saldolivre.app.ui.screens.dashboard.budgets
+package com.saldolivre.app.ui.screens.dashboard.budgets
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -97,14 +97,14 @@ fun FinancialHealthDialog(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = "DiagnÃ³stico de SaÃºde Financeira",
+                                    text = "Diagnóstico de Saúde Financeira",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                             }
                             Text(
-                                text = "AvaliaÃ§Ã£o integrada dos 4 pilares em ${FinanceEngine.formatMonthLabel(monthKey)}",
+                                text = "Avaliação integrada dos 4 pilares em ${FinanceEngine.formatMonthLabel(monthKey)}",
                                 fontSize = 11.sp,
                                 color = TextSecondary
                             )
@@ -188,7 +188,7 @@ fun FinancialHealthDialog(
                                 Button(
                                     onClick = {
                                         onDismiss()
-                                        onAskCopilot("FaÃ§a um diagnÃ³stico completo da minha SaÃºde Financeira (4 pilares) e dos meus Envelopes OrÃ§amentÃ¡rios deste mÃªs, indicando um plano prÃ¡tico para subir meu Score.")
+                                        onAskCopilot("Faça um diagnóstico completo da minha Saúde Financeira (4 pilares) e dos meus Envelopes Orçamentários deste mês, indicando um plano prático para subir meu Score.")
                                     },
                                     modifier = Modifier.weight(1f).height(34.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Emerald600, contentColor = Color.White),
@@ -237,7 +237,7 @@ fun FinancialHealthDialog(
                         }
                     }
 
-                    // Resumo Executivo do MÃªs
+                    // Resumo Executivo do Mês
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -270,7 +270,7 @@ fun FinancialHealthDialog(
                                     .background(DarkBackground.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                                     .padding(8.dp)
                             ) {
-                                Text("Custo de Vida LÃ­quido", fontSize = 9.sp, color = TextMuted)
+                                Text("Custo de Vida Líquido", fontSize = 9.sp, color = TextMuted)
                                 Text(
                                     text = FinanceEngine.formatCurrency(livingCost),
                                     fontSize = 11.sp,
@@ -289,7 +289,7 @@ fun FinancialHealthDialog(
                                     .background(DarkBackground.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
                                     .padding(8.dp)
                             ) {
-                                Text("Investido no MÃªs", fontSize = 9.sp, color = TextMuted)
+                                Text("Investido no Mês", fontSize = 9.sp, color = TextMuted)
                                 Text(
                                     text = FinanceEngine.formatCurrency(summary.totalInvested),
                                     fontSize = 11.sp,
@@ -314,7 +314,7 @@ fun FinancialHealthDialog(
                         }
                     }
 
-                    // Plano de AÃ§Ã£o Gemini AI
+                    // Plano de Ação Gemini AI
                     Card(
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -342,7 +342,7 @@ fun FinancialHealthDialog(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Text(
-                                        text = "Plano de AÃ§Ã£o Gemini AI âœ¨",
+                                        text = "Plano de Ação Gemini AI ✨",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
@@ -390,7 +390,7 @@ fun FinancialHealthDialog(
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
-                                    Text("Gerando recomendaÃ§Ãµes prÃ¡ticas com o Gemini...", fontSize = 11.sp, color = TextSecondary)
+                                    Text("Gerando recomendações práticas com o Gemini...", fontSize = 11.sp, color = TextSecondary)
                                 }
                             } else if (diagnosis != null) {
                                 Text(
@@ -415,7 +415,7 @@ fun FinancialHealthDialog(
                                 }
                             } else {
                                 Text(
-                                    text = "Toque em 'Diagnosticar' para obter um plano de aÃ§Ã£o estratÃ©gico gerado pelo Gemini com foco em elevar seu Score.",
+                                    text = "Toque em 'Diagnosticar' para obter um plano de ação estratégico gerado pelo Gemini com foco em elevar seu Score.",
                                     fontSize = 11.sp,
                                     color = TextMuted
                                 )
@@ -425,12 +425,12 @@ fun FinancialHealthDialog(
 
                     // 4 Pillars Breakdown (Total = 100 pts)
                     PillarRowCard(
-                        title = "1. Taxa de PoupanÃ§a & Investimento",
+                        title = "1. Taxa de Poupança & Investimento",
                         scoreText = "${health.savingsScore}/30 pts",
                         progress = (health.savingsScore / 30f).coerceIn(0f, 1f),
                         color = Emerald400,
-                        line1 = "Investido no mÃªs: ${FinanceEngine.formatCurrency(summary.totalInvested)} (${health.savingsRatePercentage}%)",
-                        line2 = "Meta saudÃ¡vel: >= 20% da renda"
+                        line1 = "Investido no mês: ${FinanceEngine.formatCurrency(summary.totalInvested)} (${health.savingsRatePercentage}%)",
+                        line2 = "Meta saudável: >= 20% da renda"
                     )
 
                     PillarRowCard(
@@ -438,12 +438,12 @@ fun FinancialHealthDialog(
                         scoreText = "${health.spendingLimitScore}/30 pts",
                         progress = (health.spendingLimitScore / 30f).coerceIn(0f, 1f),
                         color = Cyan400,
-                        line1 = "Custo lÃ­quido (sem aportes): ${FinanceEngine.formatCurrency(livingCost)} (${health.spendingRatioPercentage}%)",
-                        line2 = "Teto saudÃ¡vel recomendado: AtÃ© 70% da renda"
+                        line1 = "Custo líquido (sem aportes): ${FinanceEngine.formatCurrency(livingCost)} (${health.spendingRatioPercentage}%)",
+                        line2 = "Teto saudável recomendado: Até 70% da renda"
                     )
 
                     PillarRowCard(
-                        title = "3. Reserva de EmergÃªncia",
+                        title = "3. Reserva de Emergência",
                         scoreText = "${health.emergencyReserveScore}/25 pts",
                         progress = (health.emergencyReserveScore / 25f).coerceIn(0f, 1f),
                         color = Amber400,
@@ -456,13 +456,13 @@ fun FinancialHealthDialog(
                         scoreText = "${health.envelopeScore}/15 pts",
                         progress = (health.envelopeScore / 15f).coerceIn(0f, 1f),
                         color = if (health.budgetOverspentCount > 0) Rose400 else Purple400,
-                        line1 = "AderÃªncia dos envelopes variÃ¡veis",
+                        line1 = "Aderência dos envelopes variáveis",
                         line2 = if (health.budgetConfiguredCount == 0) {
-                            "Configure tetos para pontuar atÃ© 15 pts"
+                            "Configure tetos para pontuar até 15 pts"
                         } else if (health.budgetOverspentCount == 0) {
                             "Todos os envelopes sob controle (+15 pts)!"
                         } else {
-                            "${health.budgetOverspentCount} envelope(s) com estouro no mÃªs"
+                            "${health.budgetOverspentCount} envelope(s) com estouro no mês"
                         }
                     )
 
@@ -490,7 +490,7 @@ fun FinancialHealthDialog(
                                         modifier = Modifier.size(15.dp)
                                     )
                                     Text(
-                                        text = "ALAVANCAS PRÃTICAS PARA SUBIR SEU SCORE",
+                                        text = "ALAVANCAS PRÁTICAS PARA SUBIR SEU SCORE",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Emerald400

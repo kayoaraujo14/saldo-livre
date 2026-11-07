@@ -714,10 +714,22 @@ class DashboardViewModel(
             user.monthlyIncome
         }
 
-        val spentMap = report.items.associate { it.category to it.spentAmount }
-        val pendingMap = report.items.associate { it.category to it.pendingAmount }
-        val histAverages = _uiState.value.suggestedBudgets.categoryAverages
-        val currentLimits = report.items.associate { it.category to it.limit }
+        val spentMap = mutableMapOf<String, Double>()
+        val pendingMap = mutableMapOf<String, Double>()
+        val currentLimits = mutableMapOf<String, Double>()
+        for (item in report.items) {
+            val canon = FinanceEngine.normalizeBudgetCategory(item.category)
+            spentMap[canon] = FinanceEngine.round2((spentMap[canon] ?: 0.0) + item.spentAmount)
+            pendingMap[canon] = FinanceEngine.round2((pendingMap[canon] ?: 0.0) + item.pendingAmount)
+            if (item.limit > 0.0) {
+                currentLimits[canon] = FinanceEngine.round2((currentLimits[canon] ?: 0.0) + item.limit)
+            }
+        }
+        val histAverages = mutableMapOf<String, Double>()
+        for ((k, v) in _uiState.value.suggestedBudgets.categoryAverages) {
+            val canon = FinanceEngine.normalizeBudgetCategory(k)
+            histAverages[canon] = FinanceEngine.round2(kotlin.math.max(histAverages[canon] ?: 0.0, v))
+        }
 
         _uiState.update { it.copy(isGeneratingSmartBudget = true) }
         viewModelScope.launch {
