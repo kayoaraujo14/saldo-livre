@@ -233,7 +233,8 @@ fun AppNavHost(
                 val cardsViewModel = viewModel { CardsAndInvoicesViewModel(repository) }
                 CardsAndInvoicesScreen(
                     viewModel = cardsViewModel,
-                    onEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") }
+                    onEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") },
+                    onNavigateToAddTransaction = { navController.navigate("add_transaction") }
                 )
             }
 
@@ -351,7 +352,8 @@ fun AppNavHost(
                 CardsAndInvoicesScreen(
                     viewModel = cardsViewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    onEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") }
+                    onEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") },
+                    onNavigateToAddTransaction = { navController.navigate("add_transaction") }
                 )
             }
 

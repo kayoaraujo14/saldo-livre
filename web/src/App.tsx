@@ -11,7 +11,8 @@ import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
 import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
 import { AutoLaunchNoticeBanner } from '@/components/AutoLaunchNoticeBanner'
 import { Button } from '@/components/ui/button'
-import { Clock, ArrowRight, ReceiptText, Sparkles } from 'lucide-react'
+import { Clock, ArrowRight, ReceiptText, Sparkles, Plus } from 'lucide-react'
+import { EmptyState } from '@/components/ui/EmptyState'
 import type { Transaction } from '@/types'
 import { consolidateMonthTransactions } from '@/lib/invoices'
 import { formatBRL, monthLabel } from '@/lib/utils'
@@ -319,6 +320,7 @@ function MainDashboard() {
             >
               <TransactionTable
                 onEditTx={handleEditTx}
+                onNewTx={() => setTxModalOpen(true)}
                 onOpenInvoices={(cardId) => {
                   setInvoicesInitialCardId(cardId || null)
                   setInvoicesModalOpen(true)
@@ -394,9 +396,17 @@ function MainDashboard() {
                 </div>
 
                 {recentTransactions.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-6">
-                    Nenhum lançamento registrado neste mês.
-                  </p>
+                  <EmptyState
+                    compact
+                    icon={ReceiptText}
+                    title="Nenhum lançamento recente"
+                    description="Cadastre despesas ou receitas para visualizar seus lançamentos aqui."
+                    action={{
+                      label: 'Novo Lançamento',
+                      onClick: () => setTxModalOpen(true),
+                      icon: Plus,
+                    }}
+                  />
                 ) : (
                   <div className="space-y-2">
                     {recentTransactions.map((tx) => (
@@ -422,6 +432,7 @@ function MainDashboard() {
             <div className="h-[calc(100dvh-130px-env(safe-area-inset-bottom,0px))] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <TransactionTable
                 onEditTx={handleEditTx}
+                onNewTx={() => setTxModalOpen(true)}
                 onOpenInvoices={(cardId) => {
                   setInvoicesInitialCardId(cardId || null)
                   setInvoicesModalOpen(true)

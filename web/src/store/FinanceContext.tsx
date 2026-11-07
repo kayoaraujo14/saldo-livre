@@ -144,6 +144,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           setFbRecurring([])
           setFbFriendships([])
           setFbRules([])
+          setIsTxLoaded(false)
         }
         setAuthLoading(false)
       })
@@ -1963,11 +1964,14 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     [currentUid, mode, authUser],
   )
 
+  const isLoading = mode === 'firebase' ? (authLoading || (Boolean(authUser) && !isTxLoaded)) : false
+
   const value: FinanceContextValue = {
     mode,
     firebaseAvailable: fb.isFirebaseConfigured,
     isFirebaseConfigured: fb.isFirebaseConfigured,
     authLoading,
+    isLoading,
     isAuthenticated: mode === 'demo' ? Boolean(sessionUid) : Boolean(authUser),
     authUser,
     users,
