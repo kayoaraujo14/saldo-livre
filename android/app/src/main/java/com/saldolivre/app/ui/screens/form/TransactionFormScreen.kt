@@ -41,6 +41,7 @@ import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.ui.components.SelectionChip
 import com.saldolivre.app.ui.theme.*
+import com.saldolivre.app.ui.util.safeNavigationBarBottomPadding
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -1233,7 +1234,7 @@ fun TransactionFormScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(30.dp))
+            Spacer(modifier = Modifier.height(safeNavigationBarBottomPadding(extraDp = 24.dp)))
         }
     }
 }

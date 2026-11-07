@@ -420,7 +420,7 @@ private fun InvoicesTabContent(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // 1. Navegador de Mês
@@ -655,7 +655,7 @@ private fun CardsManagementTabContent(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Banner Resumo de Limites e Uso (exibido apenas se houver mais de 1 cartão para evitar redundância de valor)

@@ -337,7 +337,7 @@ fun TransactionsScreen(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(top = 2.dp, bottom = 24.dp)
+                    contentPadding = PaddingValues(top = 2.dp, bottom = 56.dp)
                 ) {
                     if (uiState.carryoverAmount > 0.0 || uiState.previousMonthDeficit > 0.0) {
                         item(key = "opening_balance_item", contentType = "opening_balance") {

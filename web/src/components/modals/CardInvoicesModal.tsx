@@ -301,7 +301,7 @@ export function CardInvoicesModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl lg:max-w-6xl w-[96vw] max-h-[94dvh] overflow-y-auto bg-[#0a0f1d]/98 border border-white/[0.1] text-slate-100 p-4 sm:p-6 md:p-7 rounded-[2rem] shadow-2xl backdrop-blur-2xl">
+      <DialogContent className="max-w-5xl lg:max-w-6xl w-[96vw] max-h-[94dvh] overflow-y-auto bg-[#0a0f1d]/98 border border-white/[0.1] text-slate-100 p-4 sm:p-6 md:p-7 pb-[max(1.5rem,calc(env(safe-area-inset-bottom,0px)+1rem))] rounded-[2rem] shadow-2xl backdrop-blur-2xl">
         <DialogHeader className="space-y-1">
           <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold text-white">
             <Receipt className="size-5 text-cyan-400" />

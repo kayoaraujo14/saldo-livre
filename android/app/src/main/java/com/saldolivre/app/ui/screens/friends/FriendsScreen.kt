@@ -37,6 +37,7 @@ import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.PendingChargeGroup
 import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.theme.*
+import com.saldolivre.app.ui.util.safeNavigationBarBottomPadding
 
 private val DarkCyanHeroTint = Color(0xFF164E63)
 private val StatementHeroBrush = Brush.verticalGradient(
@@ -271,7 +272,7 @@ private fun ApprovalsTabContent(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = safeNavigationBarBottomPadding(extraDp = 24.dp)),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (friendRequests.isNotEmpty()) {
@@ -698,7 +699,7 @@ private fun FriendsTabContent(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = safeNavigationBarBottomPadding(extraDp = 24.dp)),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Card de Adicionar Amigo (CircleShape search/invite bar)

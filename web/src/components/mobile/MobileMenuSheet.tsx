@@ -66,7 +66,7 @@ export function MobileMenuSheet({
   const totalAlerts = pendingFriendRequests.length + pendingChargeGroups.length
 
   return (
-    <div className="space-y-3.5 pb-24 animate-in fade-in duration-200">
+    <div className="space-y-3.5 pb-[max(6.5rem,calc(env(safe-area-inset-bottom,0px)+5.75rem))] animate-in fade-in duration-200">
       {/* 1. User Profile Card */}
       <div className="glass-card rounded-2xl p-4 border border-white/[0.08] flex items-center justify-between min-w-0">
         <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">

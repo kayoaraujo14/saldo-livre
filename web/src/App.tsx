@@ -152,7 +152,7 @@ function MainDashboard() {
   }, [monthTransactions, transactions, cards, currentUid, month])
 
   return (
-    <div className={`flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(5rem,calc(env(safe-area-inset-bottom,0px)+4.75rem))] lg:pb-6 overflow-x-hidden ${isExpandedView ? 'lg:h-[100dvh] lg:overflow-hidden' : ''}`}>
+    <div className={`flex flex-col min-h-[100dvh] bg-[#090d16] text-slate-100 font-sans selection:bg-emerald-500/20 selection:text-emerald-300 pb-[max(6.5rem,calc(env(safe-area-inset-bottom,0px)+5.75rem))] lg:pb-6 overflow-x-hidden ${isExpandedView ? 'lg:h-[100dvh] lg:overflow-hidden' : ''}`}>
       {/* 1. Header (Sticky & Native Safe-Top Padded) */}
       <Header
         onOpenNewTx={handleOpenNewTx}
@@ -419,7 +419,7 @@ function MainDashboard() {
 
           {/* View 2: Mobile EXTRATO (Full Transaction Feed with Mobile Cards) */}
           {mobileTab === 'transactions' && (
-            <div className="h-[calc(100dvh-130px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
+            <div className="h-[calc(100dvh-130px-env(safe-area-inset-bottom,0px))] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <TransactionTable
                 onEditTx={handleEditTx}
                 onOpenInvoices={(cardId) => {
@@ -432,7 +432,7 @@ function MainDashboard() {
 
           {/* View 3: Mobile COPILOTO IA (Full-Height Conversational Assistant) */}
           {mobileTab === 'chat' && (
-            <div className="h-[calc(100dvh-155px)] min-h-[460px] flex flex-col animate-in fade-in duration-200">
+            <div className="h-[calc(100dvh-155px-env(safe-area-inset-bottom,0px))] min-h-[460px] flex flex-col animate-in fade-in duration-200">
               <GeminiChat
                 onOpenApiKey={() => setApiKeyModalOpen(true)}
               />
