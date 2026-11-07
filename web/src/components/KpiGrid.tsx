@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { NumberTicker } from '@/components/ui/NumberTicker'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useFinance } from '@/store/FinanceContext'
 import { formatBRL, monthLabel, shiftMonth, todayKey, nextWeekKey, round2 } from '@/lib/utils'
 import { buildCardInvoice, invoiceDates } from '@/lib/invoices'
@@ -40,6 +41,7 @@ export function KpiGrid({
     me,
     profile,
     categoryBudgetReport,
+    isLoading,
   } = useFinance()
 
   // 1. Consumo da Renda (Sem repetição do valor da renda que já está no Hero Card)
@@ -179,7 +181,9 @@ export function KpiGrid({
     return calculateFinancialHealthScore(summary, reserveBalance, categoryBudgetReport)
   }, [profile, summary, categoryBudgetReport])
 
-  if (!summary) return null
+  if (!summary || isLoading) {
+    return <KpiGridSkeleton />
+  }
 
   const isPositiveBalance = summary.freeBalance >= 0
   const incomeRemainingPct = summary.income > 0 ? Math.round((summary.freeBalance / summary.income) * 100) : 0
@@ -623,6 +627,124 @@ export function KpiGrid({
                 {healthScore.envelopeScore}<span className="text-slate-500 text-[9px]">/15</span>
               </span>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Esqueleto de carregamento completo do KpiGrid com efeito Shimmer.
+ * Preserva as dimensões e proporções exatas da grade para garantir CLS (Cumulative Layout Shift) zero.
+ */
+export function KpiGridSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Carregando indicadores financeiros"
+      className="grid grid-cols-2 lg:grid-cols-12 gap-2.5 sm:gap-3 select-none"
+    >
+      {/* 1. Hero Saldo Livre Skeleton */}
+      <div className="col-span-2 lg:col-span-4 rounded-2xl p-3 sm:p-3.5 flex flex-col justify-between bg-slate-900/60 backdrop-blur-md border border-white/[0.08] min-h-[148px]">
+        <div>
+          <div className="flex items-center justify-between gap-1 mb-2">
+            <div className="flex items-center gap-1.5">
+              <Skeleton className="size-6 rounded-lg" />
+              <Skeleton className="h-3.5 w-24" />
+            </div>
+            <Skeleton className="h-4 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-8 w-44 mt-1 mb-2.5" />
+          <Skeleton className="h-1.5 w-full rounded-full" />
+        </div>
+        <div className="flex items-center gap-2 mt-2 pt-1 border-t border-white/[0.04]">
+          <Skeleton className="h-3 w-28" />
+          <Skeleton className="h-3 w-28" />
+        </div>
+      </div>
+
+      {/* 2. Consumo da Renda Skeleton */}
+      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between bg-slate-900/60 backdrop-blur-md border border-white/[0.08] min-h-[148px]">
+        <div>
+          <div className="flex items-center justify-between gap-1 mb-2">
+            <Skeleton className="size-6 rounded-lg" />
+            <Skeleton className="h-4 w-12 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-24 mb-1.5" />
+          <Skeleton className="h-6 w-28 mb-2" />
+          <Skeleton className="h-1.5 w-full rounded-full" />
+        </div>
+        <div className="flex items-center justify-between pt-1 mt-1.5 border-t border-white/[0.04]">
+          <Skeleton className="h-2.5 w-16" />
+          <Skeleton className="h-2.5 w-12" />
+        </div>
+      </div>
+
+      {/* 3. Radar 7 Dias Skeleton */}
+      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between bg-slate-900/60 backdrop-blur-md border border-white/[0.08] min-h-[148px]">
+        <div>
+          <div className="flex items-center justify-between gap-1 mb-2">
+            <Skeleton className="size-6 rounded-lg" />
+            <Skeleton className="h-4 w-14 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-20 mb-1.5" />
+          <Skeleton className="h-6 w-24 mb-1" />
+          <Skeleton className="h-2.5 w-28 mt-1" />
+        </div>
+        <div className="pt-1 mt-1.5 border-t border-white/[0.04]">
+          <Skeleton className="h-2.5 w-24" />
+        </div>
+      </div>
+
+      {/* 4. Maior Despesa Skeleton */}
+      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between bg-slate-900/60 backdrop-blur-md border border-white/[0.08] min-h-[148px]">
+        <div>
+          <div className="flex items-center justify-between gap-1 mb-2">
+            <Skeleton className="size-6 rounded-lg" />
+            <Skeleton className="h-4 w-14 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-20 mb-1.5" />
+          <Skeleton className="h-6 w-24 mb-1" />
+          <Skeleton className="h-2.5 w-28 mt-1" />
+        </div>
+        <div className="pt-1 mt-1.5 border-t border-white/[0.04]">
+          <Skeleton className="h-2.5 w-20" />
+        </div>
+      </div>
+
+      {/* 5. Investimentos Skeleton */}
+      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between bg-slate-900/60 backdrop-blur-md border border-white/[0.08] min-h-[148px]">
+        <div>
+          <div className="flex items-center justify-between gap-1 mb-2">
+            <Skeleton className="size-6 rounded-lg" />
+            <Skeleton className="h-4 w-12 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-22 mb-1.5" />
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-6 w-24" />
+            <Skeleton className="size-5 rounded-full" />
+          </div>
+          <Skeleton className="h-2.5 w-28 mt-1" />
+        </div>
+        <div className="pt-1 mt-1.5 border-t border-white/[0.04]">
+          <Skeleton className="h-2.5 w-24" />
+        </div>
+      </div>
+
+      {/* 6. Termômetro de Saúde Financeira Skeleton */}
+      <div className="col-span-2 lg:col-span-12 rounded-2xl p-2.5 sm:p-3 bg-slate-900/60 backdrop-blur-md border border-white/[0.08] min-h-[58px]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
+          <div className="flex items-center gap-3 flex-1">
+            <Skeleton className="size-10 rounded-full shrink-0" />
+            <div className="space-y-1.5 flex-1">
+              <Skeleton className="h-3.5 w-40" />
+              <Skeleton className="h-2.5 w-56" />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-7 w-28 rounded-lg" />
+            <Skeleton className="h-7 w-20 rounded-lg" />
           </div>
         </div>
       </div>

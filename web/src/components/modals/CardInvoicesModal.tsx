@@ -36,7 +36,11 @@ import {
   Wallet,
   Zap,
   RotateCcw,
+  SearchX,
+  ReceiptText,
 } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 interface CardInvoicesModalProps {
   open: boolean
@@ -109,6 +113,47 @@ function StatusPill({ inv }: { inv: CardInvoice }) {
   )
 }
 
+function CardInvoicesSkeleton() {
+  return (
+    <div className="space-y-4" role="status" aria-label="Carregando faturas">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={`inv-kpi-${i}`} className="p-3 rounded-2xl bg-slate-900/60 border border-white/[0.08] space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Skeleton className="size-4 rounded-full" />
+              <Skeleton className="h-3 w-20" />
+            </div>
+            <Skeleton className="h-5 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2 overflow-hidden">
+        <Skeleton className="h-20 w-44 rounded-2xl shrink-0" />
+        <Skeleton className="h-20 w-44 rounded-2xl shrink-0" />
+      </div>
+      <div className="p-5 rounded-3xl bg-slate-900/60 border border-white/[0.08] space-y-3">
+        <div className="flex justify-between items-center">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-5 w-20 rounded-full" />
+        </div>
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-2 w-full rounded-full" />
+      </div>
+      <div className="space-y-2">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={`inv-row-${i}`} className="flex items-center justify-between p-3 rounded-xl bg-slate-900/40 border border-white/[0.04]">
+            <div className="space-y-1">
+              <Skeleton className="h-3.5 w-36" />
+              <Skeleton className="h-2.5 w-24" />
+            </div>
+            <Skeleton className="h-4 w-20" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function CardInvoicesModal({
   open,
   onOpenChange,
@@ -116,7 +161,7 @@ export function CardInvoicesModal({
   initialCardId,
   initialMonth,
 }: CardInvoicesModalProps) {
-  const { cards, transactions, me, month, setStatus } = useFinance()
+  const { cards, transactions, me, month, setStatus, isLoading } = useFinance()
   const uid = me?.uid ?? ''
 
   const [viewMonth, setViewMonth] = useState(initialMonth || month)
@@ -344,16 +389,14 @@ export function CardInvoicesModal({
           </button>
         </div>
 
-        {cards.length === 0 ? (
-          <div className="py-16 text-center space-y-3">
-            <div className="size-16 rounded-3xl bg-slate-900/90 border border-slate-800 flex items-center justify-center mx-auto text-slate-600">
-              <CreditCard className="size-8" />
-            </div>
-            <p className="text-base text-slate-200 font-bold">Nenhum cartão cadastrado</p>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Cadastre seus cartões de crédito na seção "Cartões de Crédito" para vincular às suas compras e acompanhar as faturas com inteligência.
-            </p>
-          </div>
+        {isLoading ? (
+          <CardInvoicesSkeleton />
+        ) : cards.length === 0 ? (
+          <EmptyState
+            icon={CreditCard}
+            title="Nenhum cartão cadastrado"
+            description="Cadastre seus cartões de crédito para acompanhar faturas abertas, datas de fechamento e limites disponíveis com inteligência."
+          />
         ) : (
           <div className="space-y-4">
             {/* KPIs consolidados (ocultados quando redundantes com o cartão único exibido) */}
@@ -934,23 +977,33 @@ export function CardInvoicesModal({
                   </div>
 
                   {visibleItems.length === 0 ? (
-                    <div className="py-16 text-center space-y-2">
-                      <p className="text-xs text-slate-400 font-medium">Nenhum lançamento encontrado para este filtro.</p>
-                      {(searchQuery || selectedParticipantName || selectedCategory || itemFilter !== 'all') && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSearchQuery('')
-                            setSelectedParticipantName(null)
-                            setSelectedCategory(null)
-                            setItemFilter('all')
-                          }}
-                          className="text-[11px] text-cyan-400 hover:underline cursor-pointer"
-                        >
-                          Limpar todos os filtros
-                        </button>
-                      )}
-                    </div>
+                    <EmptyState
+                      compact
+                      icon={searchQuery || selectedParticipantName || selectedCategory || itemFilter !== 'all' ? SearchX : ReceiptText}
+                      title={
+                        searchQuery || selectedParticipantName || selectedCategory || itemFilter !== 'all'
+                          ? 'Nenhum lançamento encontrado'
+                          : 'Fatura zerada neste mês'
+                      }
+                      description={
+                        searchQuery || selectedParticipantName || selectedCategory || itemFilter !== 'all'
+                          ? 'Nenhum lançamento corresponde aos filtros ativos selecionados.'
+                          : `Nenhuma compra lançada no cartão ${selected.card.cardName} para a competência de ${monthLabel(viewMonth)}.`
+                      }
+                      action={
+                        searchQuery || selectedParticipantName || selectedCategory || itemFilter !== 'all'
+                          ? {
+                              label: 'Limpar Filtros',
+                              onClick: () => {
+                                setSearchQuery('')
+                                setSelectedParticipantName(null)
+                                setSelectedCategory(null)
+                                setItemFilter('all')
+                              },
+                            }
+                          : undefined
+                      }
+                    />
                   ) : (
                     <div className="space-y-4 max-h-[65dvh] overflow-y-auto pr-1">
                       {groupedInvoiceItems.map((group) => {

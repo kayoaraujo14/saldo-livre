@@ -298,6 +298,17 @@ class CardsAndInvoicesViewModel(
         _uiState.update { it.copy(searchQuery = query) }
     }
 
+    fun clearAllInvoiceFilters() {
+        _uiState.update {
+            it.copy(
+                searchQuery = "",
+                selectedParticipantName = null,
+                selectedCategory = null,
+                itemFilter = InvoiceItemFilter.ALL
+            )
+        }
+    }
+
     fun requestPay() {
         val invoice = _uiState.value.selectedInvoice ?: return
         if (invoice.card.ownerUid != _uiState.value.currentUser.uid) {

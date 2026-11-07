@@ -15,6 +15,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.saldolivre.app.ui.theme.*
 
@@ -62,54 +63,6 @@ fun ShimmerBox(
     shape: Shape = RoundedCornerShape(8.dp)
 ) {
     Box(modifier = modifier.shimmerEffect(shape = shape))
-}
-
-/**
- * Esqueleto de carregamento completo para a tela de Extrato (TransactionsScreen).
- */
-@Composable
-fun TransactionsSkeleton(
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Seletor de mês skeleton
-        ShimmerBox(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(44.dp),
-            shape = RoundedCornerShape(12.dp)
-        )
-
-        // Barra de busca skeleton
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ShimmerBox(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp),
-                shape = CircleShape
-            )
-            ShimmerBox(
-                modifier = Modifier.size(48.dp),
-                shape = CircleShape
-            )
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Lista de itens skeleton
-        repeat(5) {
-            TransactionItemSkeleton()
-        }
-    }
 }
 
 /**
@@ -174,6 +127,54 @@ fun TransactionItemSkeleton(
                     shape = CircleShape
                 )
             }
+        }
+    }
+}
+
+/**
+ * Esqueleto de carregamento completo para a tela de Extrato (TransactionsScreen).
+ */
+@Composable
+fun TransactionsSkeleton(
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Seletor de mês skeleton
+        ShimmerBox(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            shape = RoundedCornerShape(12.dp)
+        )
+
+        // Barra de busca skeleton
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ShimmerBox(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp),
+                shape = CircleShape
+            )
+            ShimmerBox(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape
+            )
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        // Lista de itens skeleton
+        repeat(5) {
+            TransactionItemSkeleton()
         }
     }
 }
@@ -288,3 +289,107 @@ fun DashboardSkeleton(
     }
 }
 
+/**
+ * Esqueleto de carregamento completo para a tela de Cartões e Faturas (CardsAndInvoicesScreen).
+ */
+@Composable
+fun CardsAndInvoicesSkeleton(
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // 1. Seletor de mês
+        ShimmerBox(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp),
+            shape = RoundedCornerShape(12.dp)
+        )
+
+        // 2. Carrossel de Chips de Cartões
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            repeat(3) {
+                ShimmerBox(
+                    modifier = Modifier
+                        .width(130.dp)
+                        .height(98.dp),
+                    shape = RoundedCornerShape(18.dp)
+                )
+            }
+        }
+
+        // 3. Card Virtual Moderno da Fatura (Summary)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(DarkSurface)
+                .border(1.dp, DarkBorder.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    ShimmerBox(modifier = Modifier.width(120.dp).height(18.dp), shape = RoundedCornerShape(4.dp))
+                    ShimmerBox(modifier = Modifier.width(70.dp).height(22.dp), shape = RoundedCornerShape(8.dp))
+                }
+                ShimmerBox(modifier = Modifier.width(180.dp).height(30.dp), shape = RoundedCornerShape(6.dp))
+                ShimmerBox(modifier = Modifier.fillMaxWidth().height(6.dp), shape = RoundedCornerShape(3.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    ShimmerBox(modifier = Modifier.width(110.dp).height(12.dp), shape = RoundedCornerShape(4.dp))
+                    ShimmerBox(modifier = Modifier.width(85.dp).height(12.dp), shape = RoundedCornerShape(4.dp))
+                }
+            }
+        }
+
+        // 4. Barra de pesquisa / filtros skeleton
+        ShimmerBox(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(42.dp),
+            shape = RoundedCornerShape(10.dp)
+        )
+
+        // 5. Linhas de itens de fatura
+        repeat(3) {
+            TransactionItemSkeleton()
+        }
+    }
+}
+
+@Preview(name = "Transactions Skeleton", showBackground = true, backgroundColor = 0xFF090D16)
+@Composable
+fun TransactionsSkeletonPreview() {
+    SaldoLivreTheme {
+        TransactionsSkeleton()
+    }
+}
+
+@Preview(name = "Dashboard Skeleton", showBackground = true, backgroundColor = 0xFF090D16)
+@Composable
+fun DashboardSkeletonPreview() {
+    SaldoLivreTheme {
+        DashboardSkeleton()
+    }
+}
+
+@Preview(name = "Cards & Invoices Skeleton", showBackground = true, backgroundColor = 0xFF090D16)
+@Composable
+fun CardsAndInvoicesSkeletonPreview() {
+    SaldoLivreTheme {
+        CardsAndInvoicesSkeleton()
+    }
+}

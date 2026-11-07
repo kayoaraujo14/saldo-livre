@@ -53,7 +53,12 @@ import {
   Lock,
   Receipt,
   Calendar,
+  Plus,
+  SearchX,
+  ReceiptText,
 } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 import { MobileTransactionCard } from './mobile/MobileTransactionCard'
 import { consolidateMonthTransactions, type ConsolidatedTransaction } from '@/lib/invoices'
@@ -95,6 +100,7 @@ interface TransactionTableProps {
   onToggleExpand?: () => void
   isExpanded?: boolean
   onOpenInvoices?: (cardId?: string) => void
+  onNewTx?: () => void
 }
 
 export function TransactionTable({
@@ -102,6 +108,7 @@ export function TransactionTable({
   onToggleExpand,
   isExpanded,
   onOpenInvoices,
+  onNewTx,
 }: TransactionTableProps) {
   const {
     summary,
@@ -119,6 +126,7 @@ export function TransactionTable({
     updateInstallmentGroup,
     deleteTransaction,
     respondChargeRequest,
+    isLoading,
   } = useFinance()
 
   const [activeTab, setActiveTab] = useState<TabFilter>('all')
@@ -560,6 +568,28 @@ export function TransactionTable({
     setCategorySearchQuery('')
     setPersonSearchQuery('')
     setSearch('')
+  }
+
+  const isFiltered = useMemo(() => {
+    return (
+      Boolean(search.trim()) ||
+      activeTab !== 'all' ||
+      columnFilters.categories.length > 0 ||
+      columnFilters.subcategories.length > 0 ||
+      columnFilters.splits.length > 0 ||
+      columnFilters.persons.length > 0 ||
+      Boolean(columnFilters.dateStart) ||
+      Boolean(columnFilters.dateEnd) ||
+      columnFilters.specificDays.length > 0 ||
+      Boolean(columnFilters.amountMin) ||
+      Boolean(columnFilters.amountMax) ||
+      columnFilters.amountType !== 'all'
+    )
+  }, [search, activeTab, columnFilters])
+
+  const handleClearAllFilters = () => {
+    clearAllFilters()
+    setActiveTab('all')
   }
 
 
@@ -1062,12 +1092,47 @@ export function TransactionTable({
             </span>
           </div>
         )}
-        {filteredTxs.length === 0 ? (
-          <div className="text-center py-12 text-slate-400">
-            <Filter className="size-8 mx-auto mb-2 opacity-30" />
-            <p className="font-medium text-slate-300">Nenhuma transação encontrada</p>
-            <p className="text-[11px] text-slate-500 mt-1">Tente ajustar os filtros ou adicione uma nova transação.</p>
+        {isLoading ? (
+          <div className="space-y-2 p-1" role="status" aria-label="Carregando transações">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={`mob-tx-skel-${i}`}
+                className="glass-card rounded-2xl p-3 border border-white/[0.08] space-y-2.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <Skeleton className="size-8 rounded-full shrink-0" />
+                    <div className="space-y-1">
+                      <Skeleton className="h-3 w-28" />
+                      <Skeleton className="h-2.5 w-20" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-4 w-16" />
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-white/[0.04]">
+                  <Skeleton className="h-3 w-16 rounded-full" />
+                  <Skeleton className="h-3 w-14 rounded-full" />
+                </div>
+              </div>
+            ))}
           </div>
+        ) : filteredTxs.length === 0 ? (
+          <EmptyState
+            icon={isFiltered ? SearchX : ReceiptText}
+            title={isFiltered ? 'Nenhuma transação encontrada' : 'Nenhum lançamento neste mês'}
+            description={
+              isFiltered
+                ? 'Nenhum lançamento corresponde aos filtros ativos ou termo pesquisado.'
+                : 'Você ainda não possui transações registradas para este período. Cadastre uma despesa para começar!'
+            }
+            action={
+              isFiltered
+                ? { label: 'Limpar Filtros', onClick: handleClearAllFilters, icon: X }
+                : onNewTx
+                  ? { label: 'Novo Lançamento', onClick: onNewTx, icon: Plus }
+                  : undefined
+            }
+          />
         ) : (
           mobileGroupedTxs.map(({ dateKey, items, totalAmount, isNetIncome }) => {
             const hdr = formatNubankDateHeader(dateKey)
@@ -1757,12 +1822,54 @@ export function TransactionTable({
                 </td>
               </tr>
             )}
-            {filteredTxs.length === 0 ? (
+            {isLoading ? (
+              Array.from({ length: 7 }).map((_, i) => (
+                <tr key={`desk-tx-skel-${i}`} className="border-b border-white/[0.04]">
+                  <td className="py-2.5 px-3">
+                    <Skeleton className="size-4 rounded-full" />
+                  </td>
+                  <td className="py-2.5 px-2">
+                    <Skeleton className="h-3 w-16" />
+                  </td>
+                  <td className="py-2.5 px-2">
+                    <div className="space-y-1.5">
+                      <Skeleton className="h-3.5 w-40" />
+                      <Skeleton className="h-2.5 w-24" />
+                    </div>
+                  </td>
+                  <td className="py-2.5 px-2">
+                    <Skeleton className="h-4 w-16 rounded-full" />
+                  </td>
+                  <td className="py-2.5 px-2">
+                    <Skeleton className="h-3 w-20" />
+                  </td>
+                  <td className="py-2.5 px-3 text-right">
+                    <Skeleton className="h-4 w-20 ml-auto" />
+                  </td>
+                  <td className="py-2.5 px-1.5 text-center">
+                    <Skeleton className="h-4 w-12 mx-auto rounded" />
+                  </td>
+                </tr>
+              ))
+            ) : filteredTxs.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-12 text-slate-400">
-                  <Filter className="size-8 mx-auto mb-2 opacity-30" />
-                  <p className="font-medium text-slate-300">Nenhuma transação encontrada</p>
-                  <p className="text-[11px] text-slate-500 mt-1">Tente ajustar os filtros ou adicione uma nova transação.</p>
+                <td colSpan={7} className="py-8">
+                  <EmptyState
+                    icon={isFiltered ? SearchX : ReceiptText}
+                    title={isFiltered ? 'Nenhuma transação encontrada' : 'Nenhum lançamento neste mês'}
+                    description={
+                      isFiltered
+                        ? 'Nenhum lançamento corresponde aos filtros ativos ou termo pesquisado.'
+                        : 'Você ainda não possui transações registradas para este período. Comece cadastrando sua primeira despesa ou receita!'
+                    }
+                    action={
+                      isFiltered
+                        ? { label: 'Limpar Filtros', onClick: handleClearAllFilters, icon: X }
+                        : onNewTx
+                          ? { label: 'Novo Lançamento', onClick: onNewTx, icon: Plus }
+                          : undefined
+                    }
+                  />
                 </td>
               </tr>
             ) : (

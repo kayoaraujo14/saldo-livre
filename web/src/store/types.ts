@@ -86,6 +86,7 @@ export interface FinanceContextValue {
   mode: Mode
   firebaseAvailable: boolean
   authLoading: boolean
+  isLoading: boolean
   isAuthenticated: boolean
   authUser: User | null
   // dados

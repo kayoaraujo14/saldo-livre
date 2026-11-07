@@ -46,6 +46,8 @@ import com.saldolivre.app.data.model.SplitType
 import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
+import com.saldolivre.app.ui.components.CardsAndInvoicesSkeleton
+import com.saldolivre.app.ui.components.EmptyState
 import com.saldolivre.app.ui.screens.invoices.InvoiceItemFilter
 import com.saldolivre.app.ui.theme.*
 import java.util.Locale
@@ -97,7 +99,8 @@ private fun itemStatusColor(status: TransactionStatus): Color = when (status) {
 fun CardsAndInvoicesScreen(
     viewModel: CardsAndInvoicesViewModel,
     onNavigateBack: (() -> Unit)? = null,
-    onEditTransaction: (String) -> Unit = {}
+    onEditTransaction: (String) -> Unit = {},
+    onNavigateToAddTransaction: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -325,7 +328,8 @@ fun CardsAndInvoicesScreen(
                         visibleItems = visibleInvoiceItems,
                         categorySlices = activeCategorySlices,
                         viewModel = viewModel,
-                        onEditTransaction = onEditTransaction
+                        onEditTransaction = onEditTransaction,
+                        onNavigateToAddTransaction = onNavigateToAddTransaction
                     )
                 }
                 1 -> {
@@ -394,7 +398,8 @@ private fun InvoicesTabContent(
     visibleItems: List<Transaction>,
     categorySlices: List<InvoiceCategorySlice>,
     viewModel: CardsAndInvoicesViewModel,
-    onEditTransaction: (String) -> Unit
+    onEditTransaction: (String) -> Unit,
+    onNavigateToAddTransaction: () -> Unit = {}
 ) {
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
     val participant = if (uiState.selectedParticipantName != null) {
@@ -432,9 +437,23 @@ private fun InvoicesTabContent(
             )
         }
 
-        if (!uiState.isLoading && uiState.invoices.isEmpty()) {
+        if (uiState.isLoading) {
+            item(key = "inv_loading_skeleton") {
+                CardsAndInvoicesSkeleton()
+            }
+            return@LazyColumn
+        }
+
+        if (uiState.invoices.isEmpty()) {
             item(key = "inv_empty_state") {
-                EmptyCardsPlaceholder(onAddNew = { viewModel.openNewCard() })
+                EmptyState(
+                    icon = Icons.Default.CreditCard,
+                    title = "Nenhum cartão cadastrado",
+                    description = "Cadastre seus cartões de crédito para acompanhar faturas abertas, datas de fechamento e limites disponíveis.",
+                    buttonText = "Cadastrar Cartão",
+                    buttonIcon = Icons.Default.Add,
+                    onButtonClick = { viewModel.openNewCard() }
+                )
             }
             return@LazyColumn
         }
@@ -573,24 +592,30 @@ private fun InvoicesTabContent(
 
             // 4.7 Lista de Lançamentos
             if (visibleItems.isEmpty()) {
+                val isFiltered = uiState.searchQuery.isNotBlank() ||
+                    uiState.selectedParticipantName != null ||
+                    uiState.selectedCategory != null ||
+                    uiState.itemFilter != InvoiceItemFilter.ALL
+
                 item(key = "inv_items_empty") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "Nenhum lançamento para este filtro.",
-                            fontSize = 12.sp,
-                            color = TextMuted
+                    if (isFiltered) {
+                        EmptyState(
+                            icon = Icons.Default.Search,
+                            title = "Nenhum lançamento encontrado",
+                            description = "Não encontramos compras correspondentes aos filtros aplicados nesta fatura.",
+                            buttonText = "Limpar Filtros",
+                            buttonIcon = Icons.Default.Close,
+                            onButtonClick = { viewModel.clearAllInvoiceFilters() }
                         )
-                        if (uiState.searchQuery.isNotBlank()) {
-                            TextButton(onClick = { viewModel.setSearchQuery("") }) {
-                                Text("Limpar busca", fontSize = 11.sp, color = Cyan400)
-                            }
-                        }
+                    } else {
+                        EmptyState(
+                            icon = Icons.Default.ReceiptLong,
+                            title = "Fatura Zerada",
+                            description = "Nenhum lançamento registrado no cartão ${selectedInvoice?.card?.cardName.orEmpty()} para a fatura de ${FinanceEngine.formatMonthLabel(uiState.viewMonth)}.",
+                            buttonText = "Nova Despesa",
+                            buttonIcon = Icons.Default.Add,
+                            onButtonClick = onNavigateToAddTransaction
+                        )
                     }
                 }
             } else {
@@ -693,7 +718,14 @@ private fun CardsManagementTabContent(
         // Lista de Cartões
         if (uiState.cardsWithInvoices.isEmpty()) {
             item(key = "empty_cards_placeholder") {
-                EmptyCardsPlaceholder(onAddNew = { viewModel.openNewCard() })
+                EmptyState(
+                    icon = Icons.Default.CreditCard,
+                    title = "Nenhum cartão cadastrado",
+                    description = "Adicione cartões de crédito para organizar suas faturas, acompanhar compras e limites.",
+                    buttonText = "Adicionar Cartão",
+                    buttonIcon = Icons.Default.Add,
+                    onButtonClick = { viewModel.openNewCard() }
+                )
             }
         } else {
             items(
