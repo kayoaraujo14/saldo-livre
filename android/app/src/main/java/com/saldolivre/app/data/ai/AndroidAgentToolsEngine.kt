@@ -2980,7 +2980,7 @@ class AndroidAgentToolsEngine(
         val month = repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
         val summary = FinanceEngine.computeSummary(all, user.uid, month, cards, closures)
         val expectedIncome = if (summary.income > 0.0) summary.income else user.monthlyIncome
-        val currentBudgets = user.categoryBudgets.toMutableMap()
+        val currentBudgets = (user.monthlyCategoryBudgets[month] ?: user.categoryBudgets).toMutableMap()
         val report = FinanceEngine.computeCategoryBudgets(
             summary = summary,
             categoryBudgets = currentBudgets,
@@ -2999,7 +2999,7 @@ class AndroidAgentToolsEngine(
                 val budgetLine = if (health.budgetConfiguredCount > 0) {
                     "${health.budgetAdherenceScore}% de aderência (${health.budgetConfiguredCount - health.budgetOverspentCount}/${health.budgetConfiguredCount} dentro do teto)"
                 } else {
-                    "Nenhum envelope configurado ainda (configure para ganhar +4 pts de bônus!)"
+                    "Nenhum envelope configurado ainda"
                 }
 
                 val text = """
@@ -3009,13 +3009,14 @@ class AndroidAgentToolsEngine(
   *${health.description}*
 
 📊 **Raio-X dos 4 Pilares:**
-1. **Taxa de Poupança & Investimento**: **${health.savingsScore}/35 pts**
+1. **Taxa de Poupança & Investimento**: **${health.savingsScore}/30 pts**
    ↳ Taxa real aportada: **${health.savingsRatePercentage}%** (${FinanceEngine.formatCurrency(summary.totalInvested)}) | Potencial com Saldo Livre: **${health.potentialSavingsRatePercentage}%** (Meta ideal: ≥ 20%)
-2. **Controle de Custo de Vida**: **${health.spendingLimitScore}/35 pts**
+2. **Controle de Custo de Vida**: **${health.spendingLimitScore}/30 pts**
    ↳ Custo de vida real (excluindo aportes): **${health.spendingRatioPercentage}%** da renda (${FinanceEngine.formatCurrency(health.monthlyLivingCost)}) (Meta ideal: ≤ 70%)
-3. **Reserva de Emergência**: **${health.emergencyReserveScore}/30 pts**
+3. **Reserva de Emergência**: **${health.emergencyReserveScore}/25 pts**
    ↳ Cobertura atual: **${health.emergencyCoverageMonths} meses** do custo de vida (${FinanceEngine.formatCurrency(emergencyReserve)}) (Meta ideal: 6 meses)
-4. **Aderência aos Envelopes**: **$budgetLine**$tipsBlock
+4. **Disciplina nos Envelopes**: **${health.envelopeScore}/15 pts**
+   ↳ Status: **$budgetLine**$tipsBlock
 """.trimIndent()
 
                 ToolExecutionResult(
@@ -3023,7 +3024,7 @@ class AndroidAgentToolsEngine(
                     actionCard = ActionCardData(
                         title = "Saúde Financeira: ${health.score}/100 (${health.label})",
                         description = health.actionableTips.firstOrNull() ?: health.description,
-                        detail = "Poupança ${health.savingsScore}/35 • Custo ${health.spendingLimitScore}/35 • Reserva ${health.emergencyReserveScore}/30",
+                        detail = "Poupança ${health.savingsScore}/30 • Custo ${health.spendingLimitScore}/30 • Reserva ${health.emergencyReserveScore}/25 • Envelopes ${health.envelopeScore}/15",
                         newFreeBalance = "Saldo Livre: ${FinanceEngine.formatCurrency(summary.freeBalance)}"
                     )
                 )

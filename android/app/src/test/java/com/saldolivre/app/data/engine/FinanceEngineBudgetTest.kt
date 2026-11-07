@@ -335,4 +335,67 @@ class FinanceEngineBudgetTest {
         assertEquals(450.0, limit!!, 0.01)
         assertEquals(0.0, limit % 50.0, 0.001)
     }
+
+    @Test
+    fun `sanitizeAndValidateBudgetPlan locks envelopes to spent floor and issues deficit warning if commitments exceed income`() {
+        val rawPlan = SmartBudgetPlan(
+            summaryInsight = "Plano com valores altos",
+            allocations = listOf(
+                SmartBudgetAllocation("Alimentação", 2500.0, "Comida boa"),
+                SmartBudgetAllocation("Moradia", 2000.0, "Aluguel"),
+                SmartBudgetAllocation("Lazer", 1000.0, "Diversão"),
+                SmartBudgetAllocation("Investimentos", 1000.0, "Futuro")
+            )
+        )
+        // Renda de R$ 3.000, mas já tem R$ 1.800 de moradia e R$ 1.400 de alimentação gastos (Total = R$ 3.200)
+        val spent = mapOf("Alimentação" to 1400.0, "Moradia" to 1800.0)
+        val validated = FinanceEngine.sanitizeAndValidateBudgetPlan(rawPlan, 3000.0, spent, emptyMap())
+
+        assertTrue(validated.summaryInsight.contains("Atenção: Seus gastos e contas já comprometidos"))
+        assertTrue(validated.summaryInsight.contains("excedem a renda disponível"))
+
+        val food = validated.allocations.find { it.category == "Alimentação" }
+        val rent = validated.allocations.find { it.category == "Moradia" }
+        val leisure = validated.allocations.find { it.category == "Lazer" }
+        val inv = validated.allocations.find { it.category == "Investimentos" }
+
+        assertNotNull(food)
+        assertNotNull(rent)
+        assertNotNull(leisure)
+        assertNotNull(inv)
+
+        assertEquals(1400.0, food!!.suggestedLimit, 0.01)
+        assertEquals(1800.0, rent!!.suggestedLimit, 0.01)
+        assertEquals(0.0, leisure!!.suggestedLimit, 0.01)
+        assertEquals(0.0, inv!!.suggestedLimit, 0.01)
+    }
+
+    @Test
+    fun `sanitizeAndValidateBudgetPlan distributes flex within available income rounded to multiples of 10`() {
+        val rawPlan = SmartBudgetPlan(
+            summaryInsight = "Plano padrão",
+            allocations = listOf(
+                SmartBudgetAllocation("Alimentação", 1500.0, "Alimentação"),
+                SmartBudgetAllocation("Transporte", 800.0, "Transporte"),
+                SmartBudgetAllocation("Lazer", 700.0, "Lazer")
+            )
+        )
+        val spent = mapOf("Alimentação" to 400.0, "Transporte" to 200.0)
+        val validated = FinanceEngine.sanitizeAndValidateBudgetPlan(rawPlan, 2000.0, spent, emptyMap())
+
+        val totalAllocated = validated.allocations.sumOf { it.suggestedLimit }
+        assertTrue(totalAllocated <= 2000.0)
+
+        for (a in validated.allocations) {
+            assertEquals(0.0, a.suggestedLimit % 10.0, 0.001)
+        }
+
+        val food = validated.allocations.find { it.category == "Alimentação" }
+        val trans = validated.allocations.find { it.category == "Transporte" }
+
+        assertNotNull(food)
+        assertNotNull(trans)
+        assertTrue(food!!.suggestedLimit >= 400.0)
+        assertTrue(trans!!.suggestedLimit >= 200.0)
+    }
 }

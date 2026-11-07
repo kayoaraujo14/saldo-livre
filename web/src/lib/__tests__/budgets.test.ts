@@ -5,6 +5,7 @@ import {
   suggestBudgetRebalance,
   calculateFinancialHealthScore,
   buildBudgetInsights,
+  sanitizeAndValidateBudgetPlan,
 } from '../finance'
 import { createToolExecutor } from '../agentTools'
 import type { MonthSummary, Transaction, UserProfile } from '@/types'
@@ -648,6 +649,64 @@ describe('Envelopes Orçamentários Inteligentes (Smart Budgets)', () => {
       expect(dangerInsight?.action).toBeDefined()
       expect(dangerInsight?.action?.type).toBe('adjust_limit')
       expect(dangerInsight?.action?.category).toBe('Alimentação')
+    })
+  })
+
+  describe('sanitizeAndValidateBudgetPlan (Guarda Realista Pós-IA)', () => {
+    it('trava os envelopes nos pisos já gastos e emite alerta de déficit se os compromissos superarem a renda', () => {
+      const rawPlan = {
+        summaryInsight: 'Plano com valores altos',
+        allocations: [
+          { category: 'Alimentação', suggestedLimit: 2500, reason: 'Comida boa' },
+          { category: 'Moradia', suggestedLimit: 2000, reason: 'Aluguel' },
+          { category: 'Lazer', suggestedLimit: 1000, reason: 'Diversão' },
+          { category: 'Investimentos', suggestedLimit: 1000, reason: 'Futuro' },
+        ],
+      }
+      // Renda de R$ 3.000, mas já tem R$ 1.800 de moradia e R$ 1.400 de alimentação gastos (Total = R$ 3.200)
+      const spent = { Alimentação: 1400, Moradia: 1800 }
+      const validated = sanitizeAndValidateBudgetPlan(rawPlan, 3000, spent, {})
+
+      expect(validated.summaryInsight).toContain('Atenção: Seus gastos e contas já comprometidos')
+      expect(validated.summaryInsight).toContain('excedem a renda disponível')
+
+      const food = validated.allocations.find((a) => a.category === 'Alimentação')!
+      const rent = validated.allocations.find((a) => a.category === 'Moradia')!
+      const leisure = validated.allocations.find((a) => a.category === 'Lazer')!
+      const inv = validated.allocations.find((a) => a.category === 'Investimentos')!
+
+      // Pisos reais: 1400 e 1800
+      expect(food.suggestedLimit).toBe(1400)
+      expect(rent.suggestedLimit).toBe(1800)
+      expect(leisure.suggestedLimit).toBe(0) // sem piso e sem renda
+      expect(inv.suggestedLimit).toBe(0) // investimentos pausados em déficit
+    })
+
+    it('distribui a folga respeitando exatamente a renda disponível sem ultrapassar o teto e em múltiplos de 10', () => {
+      const rawPlan = {
+        summaryInsight: 'Plano padrão',
+        allocations: [
+          { category: 'Alimentação', suggestedLimit: 1500, reason: 'Alimentação' },
+          { category: 'Transporte', suggestedLimit: 800, reason: 'Transporte' },
+          { category: 'Lazer', suggestedLimit: 700, reason: 'Lazer' },
+        ],
+      }
+      // Renda disponível de R$ 2.000. Já gastou 400 em alimentação e 200 em transporte (pisos: 400 + 200 = 600)
+      // Folga para despesas: 1.400.
+      const spent = { Alimentação: 400, Transporte: 200 }
+      const validated = sanitizeAndValidateBudgetPlan(rawPlan, 2000, spent, {})
+
+      const totalAllocated = validated.allocations.reduce((sum, a) => sum + a.suggestedLimit, 0)
+      expect(totalAllocated).toBeLessThanOrEqual(2000)
+
+      for (const a of validated.allocations) {
+        expect(a.suggestedLimit % 10).toBe(0)
+      }
+
+      const food = validated.allocations.find((a) => a.category === 'Alimentação')!
+      expect(food.suggestedLimit).toBeGreaterThanOrEqual(400)
+      const trans = validated.allocations.find((a) => a.category === 'Transporte')!
+      expect(trans.suggestedLimit).toBeGreaterThanOrEqual(200)
     })
   })
 })

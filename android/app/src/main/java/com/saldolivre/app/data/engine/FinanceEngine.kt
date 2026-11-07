@@ -2402,13 +2402,7 @@ object FinanceEngine {
 
         val income = summary.income
         val rawTotalOutflow = when {
-            summary.paid > 0.0 || summary.committed > 0.0 -> {
-                if (summary.paid == summary.committed && summary.committedEstimated == 0.0 && summary.committedPending == 0.0) {
-                    summary.committed
-                } else {
-                    summary.paid + summary.committed
-                }
-            }
+            summary.paid > 0.0 || summary.committed > 0.0 -> summary.paid + summary.committed
             summary.byCategory.isNotEmpty() -> summary.byCategory.sumOf { it.amount }
             else -> 0.0
         }
@@ -2456,8 +2450,8 @@ object FinanceEngine {
             spendingRatioPercentage = kotlin.math.round(ratio * 100.0).toInt()
             spendingLimitScore = when {
                 ratio <= 0.70 -> 30
-                ratio <= 1.00 -> kotlin.math.max(10, kotlin.math.round(30.0 - ((ratio - 0.70) / 0.30) * 20.0).toInt())
-                ratio <= 1.10 -> 5
+                ratio <= 1.00 -> kotlin.math.max(8, kotlin.math.round(30.0 - ((ratio - 0.70) / 0.30) * 22.0).toInt())
+                ratio <= 1.10 -> 4
                 else -> 0
             }
         } else if (totalExpenses == 0.0) {
@@ -2482,8 +2476,8 @@ object FinanceEngine {
         val emergencyReserveScore = when {
             coverageMonths >= 6.0 -> 25
             coverageMonths >= 3.0 -> kotlin.math.round(18.0 + ((coverageMonths - 3.0) / 3.0) * 7.0).toInt()
-            coverageMonths >= 1.0 -> kotlin.math.round(10.0 + ((coverageMonths - 1.0) / 2.0) * 8.0).toInt()
-            coverageMonths > 0.0 -> kotlin.math.min(10, kotlin.math.round(coverageMonths * 10.0).toInt())
+            coverageMonths >= 1.0 -> kotlin.math.round(8.0 + ((coverageMonths - 1.0) / 2.0) * 10.0).toInt()
+            coverageMonths > 0.0 -> kotlin.math.min(8, kotlin.math.round(coverageMonths * 8.0).toInt())
             else -> 0
         }
 
@@ -3534,6 +3528,213 @@ object FinanceEngine {
             surplusTotal = surplusTotal,
             suggestions = suggestions,
             summaryText = summaryText
+        )
+    }
+
+    /**
+     * Validador matemático determinístico pós-IA para envelopes orçamentários.
+     * Garante que:
+     * 1. O teto sugerido NUNCA seja inferior ao que já foi pago + contas a vencer (piso inegociável).
+     * 2. A soma dos tetos de despesas NUNCA ultrapasse a renda líquida real disponível no mês.
+     * 3. Se os gastos já comprometidos consumirem ou superarem toda a renda disponível,
+     *    os tetos são travados estritamente nos pisos reais consumidos e um alerta de déficit é gerado.
+     * 4. Toda folga flexível é distribuída proporcionalmente apenas em despesas variáveis em múltiplos de R$ 10.
+     */
+    fun sanitizeAndValidateBudgetPlan(
+        plan: SmartBudgetPlan,
+        availableIncome: Double,
+        spentByCategory: Map<String, Double> = emptyMap(),
+        pendingByCategory: Map<String, Double> = emptyMap()
+    ): SmartBudgetPlan {
+        val maxAvailable = round2(kotlin.math.max(0.0, availableIncome))
+        val rawAllocs = plan.allocations
+
+        if (rawAllocs.isEmpty()) {
+            return SmartBudgetPlan(
+                summaryInsight = plan.summaryInsight.ifBlank { "Nenhuma alocação fornecida para calibrar." },
+                allocations = emptyList()
+            )
+        }
+
+        data class ItemCalc(
+            val category: String,
+            val reason: String,
+            val isInvestment: Boolean,
+            val isFixed: Boolean,
+            val committed: Double,
+            val floor: Double,
+            val rawSuggested: Double
+        )
+
+        var totalFloorExpenses = 0.0
+        val items = mutableListOf<ItemCalc>()
+
+        for (alloc in rawAllocs) {
+            val cat = alloc.category.trim()
+            if (cat.isBlank()) continue
+            val isInv = cat.contains("investimento", ignoreCase = true)
+            val isFix = isFixedBudgetCategory(cat)
+            val spent = kotlin.math.max(0.0, spentByCategory[cat] ?: 0.0)
+            val pending = kotlin.math.max(0.0, pendingByCategory[cat] ?: 0.0)
+            val committed = round2(spent + pending)
+
+            val floor = if (isInv) 0.0 else kotlin.math.ceil(committed / 10.0) * 10.0
+            val rawSuggested = kotlin.math.max(floor, kotlin.math.ceil((alloc.suggestedLimit.takeIf { it > 0.0 } ?: floor) / 10.0) * 10.0)
+
+            if (!isInv) {
+                totalFloorExpenses += floor
+            }
+
+            items.add(
+                ItemCalc(
+                    category = cat,
+                    reason = alloc.reason,
+                    isInvestment = isInv,
+                    isFixed = isFix,
+                    committed = committed,
+                    floor = floor,
+                    rawSuggested = rawSuggested
+                )
+            )
+        }
+
+        // 2. Se os pisos das despesas já consom ou superam a renda líquida disponível:
+        if (totalFloorExpenses >= maxAvailable && maxAvailable > 0.0) {
+            val calibratedAllocs = items.map { item ->
+                SmartBudgetAllocation(
+                    category = item.category,
+                    suggestedLimit = if (item.isInvestment) 0.0 else item.floor,
+                    reason = if (item.isInvestment) {
+                        "Aportes pausados: gastos essenciais e compromissos consom toda a renda do mês."
+                    } else if (item.committed > 0.0) {
+                        "Travado no piso real de ${formatCurrency(item.committed)} já comprometido neste mês."
+                    } else {
+                        "Teto mínimo de segurança mantido."
+                    }
+                )
+            }
+
+            val deficit = round2(totalFloorExpenses - maxAvailable)
+            val deficitMsg = if (deficit > 0.0) {
+                "Atenção: Seus gastos e contas já comprometidos (${formatCurrency(totalFloorExpenses)}) excedem a renda disponível (${formatCurrency(maxAvailable)}) em ${formatCurrency(deficit)}. Os envelopes foram travados estritamente no piso real já consumido para evitar endividamento adicional."
+            } else {
+                "Atenção: Seus gastos já comprometidos consom exatamente 100% da sua renda disponível do mês (${formatCurrency(maxAvailable)}). Os tetos foram travados nos pisos reais já consumidos sem margem flexível."
+            }
+
+            return SmartBudgetPlan(
+                summaryInsight = deficitMsg,
+                allocations = calibratedAllocs
+            )
+        }
+
+        // Se a renda disponível for 0 ou negativa:
+        if (maxAvailable <= 0.0) {
+            val calibratedAllocs = items.map { item ->
+                SmartBudgetAllocation(
+                    category = item.category,
+                    suggestedLimit = item.floor,
+                    reason = if (item.floor > 0.0) {
+                        "Travado no gasto já realizado de ${formatCurrency(item.committed)}."
+                    } else {
+                        "Sem renda disponível registrada para alocação."
+                    }
+                )
+            }
+            return SmartBudgetPlan(
+                summaryInsight = "Renda líquida disponível não identificada ou zerada. Envelopes travados no piso dos gastos já ocorridos.",
+                allocations = calibratedAllocs
+            )
+        }
+
+        // 3. Há folga disponível acima dos pisos de despesas (maxAvailable > totalFloorExpenses):
+        val availableFlex = maxAvailable - totalFloorExpenses
+        val expenseItems = items.filter { !it.isInvestment }
+        val investmentItem = items.firstOrNull { it.isInvestment }
+
+        var targetInvestment = 0.0
+        if (investmentItem != null) {
+            val rawInv = investmentItem.rawSuggested
+            val ideal20pct = kotlin.math.floor((maxAvailable * 0.20) / 10.0) * 10.0
+            targetInvestment = kotlin.math.min(availableFlex, if (rawInv > 0.0) rawInv else ideal20pct)
+            if (availableFlex - targetInvestment < 50.0 && expenseItems.any { !it.isFixed }) {
+                targetInvestment = kotlin.math.max(0.0, kotlin.math.floor((availableFlex * 0.5) / 10.0) * 10.0)
+            }
+        }
+
+        val flexForExpenses = availableFlex - targetInvestment
+
+        var sumDesiredFlex = 0.0
+        for (item in expenseItems) {
+            if (!item.isFixed) {
+                val desired = kotlin.math.max(0.0, item.rawSuggested - item.floor)
+                sumDesiredFlex += desired
+            }
+        }
+
+        var allocatedExpenseFlex = 0.0
+        var largestFlexItem: ItemCalc? = null
+        var maxDesired = -1.0
+
+        val calibratedAllocs = mutableListOf<SmartBudgetAllocation>()
+
+        for (item in expenseItems) {
+            val finalLimit: Double
+            if (item.isFixed) {
+                finalLimit = if (item.floor > 0.0) item.floor else kotlin.math.min(flexForExpenses, item.rawSuggested)
+            } else {
+                val desired = kotlin.math.max(0.0, item.rawSuggested - item.floor)
+                val share = if (sumDesiredFlex > 0.0) {
+                    kotlin.math.floor(((desired / sumDesiredFlex) * flexForExpenses) / 10.0) * 10.0
+                } else if (expenseItems.isNotEmpty()) {
+                    kotlin.math.floor((flexForExpenses / expenseItems.size) / 10.0) * 10.0
+                } else 0.0
+
+                finalLimit = item.floor + share
+                allocatedExpenseFlex += share
+
+                if (desired > maxDesired) {
+                    maxDesired = desired
+                    largestFlexItem = item
+                }
+            }
+
+            calibratedAllocs.add(
+                SmartBudgetAllocation(
+                    category = item.category,
+                    suggestedLimit = finalLimit,
+                    reason = item.reason.ifBlank { if (item.isFixed) "Teto de custo fixo contratual." else "Calibrado com base no histórico e folga real." }
+                )
+            )
+        }
+
+        val expenseResidue = kotlin.math.floor((flexForExpenses - allocatedExpenseFlex) / 10.0) * 10.0
+        if (largestFlexItem != null && expenseResidue > 0.0) {
+            val idx = calibratedAllocs.indexOfFirst { it.category == largestFlexItem.category }
+            if (idx >= 0) {
+                val current = calibratedAllocs[idx]
+                calibratedAllocs[idx] = current.copy(suggestedLimit = current.suggestedLimit + expenseResidue)
+                allocatedExpenseFlex += expenseResidue
+            }
+        }
+
+        if (investmentItem != null) {
+            val finalInvestment = kotlin.math.max(0.0, maxAvailable - (totalFloorExpenses + allocatedExpenseFlex))
+            calibratedAllocs.add(
+                SmartBudgetAllocation(
+                    category = investmentItem.category,
+                    suggestedLimit = finalInvestment,
+                    reason = if (finalInvestment > 0.0) {
+                        "Meta de aporte protegida (${formatCurrency(finalInvestment)} garantidos no saldo disponível)."
+                    } else {
+                        "Sem margem para investimentos este mês após cobrir compromissos essenciais."
+                    }
+                )
+            )
+        }
+
+        return SmartBudgetPlan(
+            summaryInsight = plan.summaryInsight.ifBlank { "Plano de envelopes calibrado com sucesso respeitando 100% da sua renda líquida disponível." },
+            allocations = calibratedAllocs
         )
     }
 }

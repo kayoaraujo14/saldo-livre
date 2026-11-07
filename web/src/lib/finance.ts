@@ -30,6 +30,8 @@ import type {
   CategoryBudgetStatus,
   BudgetInsight,
   BudgetInsightAction,
+  SmartBudgetPlan,
+  SmartBudgetAllocation,
 } from '@/types'
 import { INCOME_CATEGORIES, normalizeCategory } from '@/types'
 import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
@@ -2398,7 +2400,9 @@ export function calculateFinancialHealthScore(
   }
 
   const income = summary.income || 0
-  const rawTotalOutflow = (summary.paid || 0) + (summary.committed || 0)
+  const rawTotalOutflow = (summary.paid || 0) > 0 || (summary.committed || 0) > 0
+    ? (summary.paid || 0) + (summary.committed || 0)
+    : (Array.isArray(summary.byCategory) ? summary.byCategory.reduce((acc, c) => acc + (c.amount || 0), 0) : 0)
   const totalInvested = Math.max(0, summary.totalInvested || 0)
   const positiveFreeBalance = Math.max(0, summary.freeBalance || 0)
 
@@ -3489,5 +3493,195 @@ export function suggestBudgetRebalance(
     deficitTotal,
     surplusTotal,
     suggestions,
+  }
+}
+
+/**
+ * Validador matemático determinístico pós-IA para envelopes orçamentários.
+ * Garante que:
+ * 1. O teto sugerido NUNCA seja inferior ao que já foi pago + contas a vencer (piso inegociável).
+ * 2. A soma dos tetos de despesas NUNCA ultrapasse a renda líquida real disponível no mês.
+ * 3. Se os gastos já comprometidos consumirem ou superarem toda a renda disponível,
+ *    os tetos são travados estritamente nos pisos reais consumidos e um alerta de déficit é gerado.
+ * 4. Toda folga flexível é distribuída proporcionalmente apenas em despesas variáveis em múltiplos de R$ 10.
+ */
+export function sanitizeAndValidateBudgetPlan(
+  plan: SmartBudgetPlan,
+  availableIncome: number,
+  spentByCategory: Record<string, number> = {},
+  pendingByCategory: Record<string, number> = {},
+): SmartBudgetPlan {
+  const maxAvailable = round2(Math.max(0, Number(availableIncome) || 0))
+  const rawAllocs = Array.isArray(plan?.allocations) ? plan.allocations : []
+
+  if (rawAllocs.length === 0) {
+    return {
+      summaryInsight: plan?.summaryInsight || 'Nenhuma alocação fornecida para calibrar.',
+      allocations: [],
+    }
+  }
+
+  interface ItemCalc {
+    category: string
+    reason: string
+    isInvestment: boolean
+    isFixed: boolean
+    committed: number
+    floor: number
+    rawSuggested: number
+  }
+
+  let totalFloorExpenses = 0
+  const items: ItemCalc[] = []
+
+  for (const alloc of rawAllocs) {
+    const cat = (alloc.category || '').trim()
+    if (!cat) continue
+    const isInv = /investimento/i.test(cat)
+    const isFix = FIXED_MONTHLY_CATEGORIES.has(cat) || FIXED_MONTHLY_CATEGORIES.has(normalizeBudgetCategory(cat))
+    const spent = Math.max(0, Number(spentByCategory[cat]) || 0)
+    const pending = Math.max(0, Number(pendingByCategory[cat]) || 0)
+    const committed = round2(spent + pending)
+
+    // Piso: múltiplo de 10 cobrindo todo o comprometido (mínimo 0)
+    const floor = isInv ? 0 : Math.ceil(committed / 10) * 10
+    const rawSuggested = Math.max(floor, Math.ceil((Number(alloc.suggestedLimit) || floor) / 10) * 10)
+
+    if (!isInv) {
+      totalFloorExpenses += floor
+    }
+
+    items.push({
+      category: cat,
+      reason: alloc.reason || '',
+      isInvestment: isInv,
+      isFixed: isFix,
+      committed,
+      floor,
+      rawSuggested,
+    })
+  }
+
+  // 2. Se os pisos das despesas já consom ou superam a renda líquida disponível:
+  if (totalFloorExpenses >= maxAvailable && maxAvailable > 0) {
+    const calibratedAllocs: SmartBudgetAllocation[] = items.map((item) => ({
+      category: item.category,
+      suggestedLimit: item.isInvestment ? 0 : item.floor,
+      reason: item.isInvestment
+        ? 'Aportes pausados: gastos essenciais e compromissos consom toda a renda do mês.'
+        : (item.committed > 0
+            ? `Travado no piso real de R$ ${formatBRL(item.committed)} já comprometido neste mês.`
+            : 'Teto mínimo de segurança mantido.'),
+    }))
+
+    const deficit = round2(totalFloorExpenses - maxAvailable)
+    const deficitMsg = deficit > 0
+      ? `Atenção: Seus gastos e contas já comprometidos (R$ ${formatBRL(totalFloorExpenses)}) excedem a renda disponível (R$ ${formatBRL(maxAvailable)}) em R$ ${formatBRL(deficit)}. Os envelopes foram travados estritamente no piso real já consumido para evitar endividamento adicional.`
+      : `Atenção: Seus gastos já comprometidos consom exatamente 100% da sua renda disponível do mês (R$ ${formatBRL(maxAvailable)}). Os tetos foram travados nos pisos reais já consumidos sem margem flexível.`
+
+    return {
+      summaryInsight: deficitMsg,
+      allocations: calibratedAllocs,
+    }
+  }
+
+  // Se a renda disponível for 0 ou negativa:
+  if (maxAvailable <= 0) {
+    const calibratedAllocs: SmartBudgetAllocation[] = items.map((item) => ({
+      category: item.category,
+      suggestedLimit: item.floor,
+      reason: item.floor > 0
+        ? `Travado no gasto já realizado de R$ ${formatBRL(item.committed)}.`
+        : 'Sem renda disponível registrada para alocação.',
+    }))
+    return {
+      summaryInsight: 'Renda líquida disponível não identificada ou zerada. Envelopes travados no piso dos gastos já ocorridos.',
+      allocations: calibratedAllocs,
+    }
+  }
+
+  // 3. Há folga disponível acima dos pisos de despesas (maxAvailable > totalFloorExpenses):
+  const availableFlex = maxAvailable - totalFloorExpenses
+
+  // Separa despesas de investimentos
+  const expenseItems = items.filter((i) => !i.isInvestment)
+  const investmentItem = items.find((i) => i.isInvestment)
+
+  let targetInvestment = 0
+  if (investmentItem) {
+    const rawInv = investmentItem.rawSuggested
+    const ideal20pct = Math.floor((maxAvailable * 0.20) / 10) * 10
+    targetInvestment = Math.min(availableFlex, rawInv > 0 ? rawInv : ideal20pct)
+    if (availableFlex - targetInvestment < 50 && expenseItems.some((e) => !e.isFixed)) {
+      targetInvestment = Math.max(0, Math.floor((availableFlex * 0.5) / 10) * 10)
+    }
+  }
+
+  const flexForExpenses = availableFlex - targetInvestment
+
+  let sumDesiredFlex = 0
+  for (const item of expenseItems) {
+    if (!item.isFixed) {
+      const desired = Math.max(0, item.rawSuggested - item.floor)
+      sumDesiredFlex += desired
+    }
+  }
+
+  let allocatedExpenseFlex = 0
+  let largestFlexItem: ItemCalc | null = null
+  let maxDesired = -1
+
+  const calibratedAllocs: SmartBudgetAllocation[] = []
+
+  for (const item of expenseItems) {
+    let finalLimit = item.floor
+
+    if (item.isFixed) {
+      finalLimit = item.floor > 0 ? item.floor : Math.min(flexForExpenses, item.rawSuggested)
+    } else {
+      const desired = Math.max(0, item.rawSuggested - item.floor)
+      const share = sumDesiredFlex > 0
+        ? Math.floor(((desired / sumDesiredFlex) * flexForExpenses) / 10) * 10
+        : (expenseItems.length > 0 ? Math.floor((flexForExpenses / expenseItems.length) / 10) * 10 : 0)
+
+      finalLimit = item.floor + share
+      allocatedExpenseFlex += share
+
+      if (desired > maxDesired) {
+        maxDesired = desired
+        largestFlexItem = item
+      }
+    }
+
+    calibratedAllocs.push({
+      category: item.category,
+      suggestedLimit: finalLimit,
+      reason: item.reason || (item.isFixed ? 'Teto de custo fixo contratual.' : 'Calibrado com base no histórico e folga real.'),
+    })
+  }
+
+  const expenseResidue = Math.floor((flexForExpenses - allocatedExpenseFlex) / 10) * 10
+  if (largestFlexItem && expenseResidue > 0) {
+    const targetAlloc = calibratedAllocs.find((a) => a.category === largestFlexItem!.category)
+    if (targetAlloc) {
+      targetAlloc.suggestedLimit += expenseResidue
+      allocatedExpenseFlex += expenseResidue
+    }
+  }
+
+  if (investmentItem) {
+    const finalInvestment = Math.max(0, maxAvailable - (totalFloorExpenses + allocatedExpenseFlex))
+    calibratedAllocs.push({
+      category: investmentItem.category,
+      suggestedLimit: finalInvestment,
+      reason: finalInvestment > 0
+        ? `Meta de aporte protegida (R$ ${formatBRL(finalInvestment)} garantidos no saldo disponível).`
+        : 'Sem margem para investimentos este mês após cobrir compromissos essenciais.',
+    })
+  }
+
+  return {
+    summaryInsight: plan.summaryInsight || 'Plano de envelopes calibrado com sucesso respeitando 100% da sua renda líquida disponível.',
+    allocations: calibratedAllocs,
   }
 }

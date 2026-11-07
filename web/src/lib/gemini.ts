@@ -19,6 +19,7 @@ import type {
   FinancialHealthAiDiagnosis,
 } from '@/types'
 import { CATEGORIES } from '@/types'
+import { sanitizeAndValidateBudgetPlan } from './finance'
 
 export const GEMINI_MODEL = 'gemini-3.5-flash'
 export const DEFAULT_MODELS_POOL = [
@@ -1830,21 +1831,12 @@ REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
           if (text) {
             const parsed = JSON.parse(text) as SmartBudgetPlan
             if (parsed && Array.isArray(parsed.allocations) && parsed.allocations.length > 0) {
-              const sanitizedAllocations = parsed.allocations.map((a) => {
-                const spent = params.spentByCategory[a.category] || 0
-                const pending = params.pendingByCategory[a.category] || 0
-                const minFloor = Math.ceil((spent + pending) / 10) * 10
-                const rawSuggested = Math.ceil((Number(a.suggestedLimit) || minFloor) / 10) * 10
-                return {
-                  category: a.category,
-                  suggestedLimit: Math.max(minFloor, rawSuggested, 50),
-                  reason: a.reason || 'Sugerido com base no histórico recente e compromissos.',
-                }
-              })
-              return {
-                summaryInsight: parsed.summaryInsight || 'Plano de envelopes gerado pelo Gemini com base no seu padrão de gastos e contas a vencer.',
-                allocations: sanitizedAllocations,
-              }
+              return sanitizeAndValidateBudgetPlan(
+                parsed,
+                income,
+                params.spentByCategory,
+                params.pendingByCategory,
+              )
             }
           }
         } catch (err) {
@@ -1877,10 +1869,16 @@ REGRAS OBRIGATÓRIAS DE PLANEJAMENTO:
   }
 
   const totalPending = Object.values(params.pendingByCategory || {}).reduce((a, b) => a + b, 0)
-  return {
+  const rawFallback: SmartBudgetPlan = {
     summaryInsight: `Plano inteligente calculado com Regra 50/30/20 protegendo R$ ${totalPending.toFixed(2)} em contas a vencer com tetos arredondados.`,
     allocations: fallbackAllocations,
   }
+  return sanitizeAndValidateBudgetPlan(
+    rawFallback,
+    income,
+    params.spentByCategory,
+    params.pendingByCategory,
+  )
 }
 
 export interface FinancialHealthDiagnosisParams {

@@ -442,25 +442,27 @@ export async function gerenciarEnvelopesOrcamentarios(
         descricao: health.description,
         pilares: {
           poupancaEInvestimentos: {
-            nota: `${health.savingsScore}/35`,
-            peso: '35%',
+            nota: `${health.savingsScore}/30`,
+            peso: '30%',
             taxaInvestidaReal: `${health.savingsRatePercentage}% da renda (${formatBRL(summary.totalInvested || 0)})`,
             taxaPoupancaPotencialComSaldoLivre: `${health.potentialSavingsRatePercentage ?? health.savingsRatePercentage}% da renda`,
           },
           controleCustoDeVida: {
-            nota: `${health.spendingLimitScore}/35`,
-            peso: '35%',
+            nota: `${health.spendingLimitScore}/30`,
+            peso: '30%',
             custoDeVidaReal: `${formatBRL(health.monthlyLivingCost ?? summary.committed)} (${health.spendingRatioPercentage}% da renda, descontados aportes)`,
             metaRecomendada: 'Até 70% da renda líquida',
           },
           reservaDeEmergencia: {
-            nota: `${health.emergencyReserveScore}/30`,
-            peso: '30%',
+            nota: `${health.emergencyReserveScore}/25`,
+            peso: '25%',
             saldoReservaAtual: formatBRL(reserveBalance),
             coberturaEmMeses: `${health.emergencyCoverageMonths} meses do seu custo de vida`,
             metaIdeal6Meses: formatBRL(round2((health.monthlyLivingCost ?? summary.committed) * 6)),
           },
           disciplinaNosEnvelopes: {
+            nota: `${health.envelopeScore}/15`,
+            peso: '15%',
             aderencia: `${health.budgetAdherenceScore ?? 100}%`,
             envelopesConfigurados: health.budgetConfiguredCount ?? 0,
             envelopesEstourados: health.budgetOverspentCount ?? 0,
@@ -475,19 +477,24 @@ export async function gerenciarEnvelopesOrcamentarios(
         title: `Saúde Financeira: ${health.score}/100 (${health.label})`,
         lines: [
           {
-            label: 'Pilar Poupança (35 pts)',
-            value: `${health.savingsScore}/35 (${health.savingsRatePercentage}% inv.)`,
-            tone: health.savingsScore >= 24 ? 'positive' : health.savingsScore < 14 ? 'negative' : 'neutral',
+            label: 'Pilar Poupança (30 pts)',
+            value: `${health.savingsScore}/30 (${health.savingsRatePercentage}% inv.)`,
+            tone: health.savingsScore >= 20 ? 'positive' : health.savingsScore < 10 ? 'negative' : 'neutral',
           },
           {
-            label: 'Pilar Custo de Vida (35 pts)',
-            value: `${health.spendingLimitScore}/35 (${health.spendingRatioPercentage}% renda)`,
-            tone: health.spendingLimitScore >= 24 ? 'positive' : health.spendingLimitScore < 14 ? 'negative' : 'neutral',
+            label: 'Pilar Custo de Vida (30 pts)',
+            value: `${health.spendingLimitScore}/30 (${health.spendingRatioPercentage}% renda)`,
+            tone: health.spendingLimitScore >= 20 ? 'positive' : health.spendingLimitScore < 10 ? 'negative' : 'neutral',
           },
           {
-            label: 'Pilar Reserva (30 pts)',
-            value: `${health.emergencyReserveScore}/30 (${health.emergencyCoverageMonths}m)`,
-            tone: health.emergencyReserveScore >= 20 ? 'positive' : health.emergencyReserveScore < 12 ? 'negative' : 'neutral',
+            label: 'Pilar Reserva (25 pts)',
+            value: `${health.emergencyReserveScore}/25 (${health.emergencyCoverageMonths}m)`,
+            tone: health.emergencyReserveScore >= 18 ? 'positive' : health.emergencyReserveScore < 10 ? 'negative' : 'neutral',
+          },
+          {
+            label: 'Pilar Envelopes (15 pts)',
+            value: `${health.envelopeScore}/15 (${health.budgetAdherenceScore ?? 100}% ad.)`,
+            tone: health.envelopeScore >= 10 ? 'positive' : health.envelopeScore < 5 ? 'negative' : 'neutral',
           },
           {
             label: 'Aderência Envelopes',

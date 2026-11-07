@@ -706,7 +706,13 @@ class DashboardViewModel(
         val user = _uiState.value.currentUser
         val report = _uiState.value.categoryBudgetReport
         val summary = _uiState.value.summary
-        val expectedIncome = if ((summary?.income ?: 0.0) > 0.0) summary!!.income else user.monthlyIncome
+        val availableIncome = if (report.totalAvailableIncome > 0.0) {
+            report.totalAvailableIncome
+        } else if ((summary?.income ?: 0.0) > 0.0) {
+            summary!!.income
+        } else {
+            user.monthlyIncome
+        }
 
         val spentMap = report.items.associate { it.category to it.spentAmount }
         val pendingMap = report.items.associate { it.category to it.pendingAmount }
@@ -716,14 +722,20 @@ class DashboardViewModel(
         _uiState.update { it.copy(isGeneratingSmartBudget = true) }
         viewModelScope.launch {
             try {
-                val plan = geminiLoadBalancer.generateSmartBudgetPlan(
-                    monthlyIncome = expectedIncome,
+                val rawPlan = geminiLoadBalancer.generateSmartBudgetPlan(
+                    monthlyIncome = availableIncome,
                     spentByCategory = spentMap,
                     pendingByCategory = pendingMap,
                     history3mAverages = histAverages,
                     existingLimits = currentLimits
                 )
-                _uiState.update { it.copy(isGeneratingSmartBudget = false, smartBudgetPlan = plan) }
+                val validatedPlan = FinanceEngine.sanitizeAndValidateBudgetPlan(
+                    plan = rawPlan,
+                    availableIncome = availableIncome,
+                    spentByCategory = spentMap,
+                    pendingByCategory = pendingMap
+                )
+                _uiState.update { it.copy(isGeneratingSmartBudget = false, smartBudgetPlan = validatedPlan) }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao gerar Smart Budget Plan com Gemini", e)
                 _uiState.update { it.copy(isGeneratingSmartBudget = false) }
