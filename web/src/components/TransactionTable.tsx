@@ -1037,7 +1037,7 @@ export function TransactionTable({
       )}
 
       {/* Mobile Transaction Cards Feed (Visible on screens < md) */}
-      <div className="md:hidden flex-1 overflow-y-auto p-3 space-y-2.5">
+      <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 space-y-2.5">
         {Boolean(summary?.carryoverAmount || summary?.previousMonthDeficit) && (
           <div className={`p-3 rounded-xl border flex items-center justify-between ${
             summary?.previousMonthDeficit 
@@ -2594,7 +2594,7 @@ export function TransactionTable({
       </div>
 
       {/* 3. Rodapé Dinâmico de Somatório (Sticky Footer) */}
-      <div className="sticky bottom-0 bg-[#090d16]/95 backdrop-blur-md border-t border-white/[0.08] px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs z-20 shrink-0">
+      <div className="sticky bottom-0 bg-[#090d16]/95 backdrop-blur-md border-t border-white/[0.08] px-3 sm:px-4 py-2.5 pb-[max(0.65rem,env(safe-area-inset-bottom,0px))] flex flex-wrap items-center justify-between gap-2 text-xs z-20 shrink-0">
         <div className="flex items-center gap-2 text-slate-400">
           <span>
             Exibindo <strong className="text-white font-mono">{filteredTxs.length}</strong> de <span className="font-mono">{monthTransactions.length}</span> lançamentos

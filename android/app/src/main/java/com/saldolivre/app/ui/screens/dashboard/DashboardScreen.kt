@@ -145,6 +145,7 @@ fun DashboardScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
                     .padding(horizontal = 16.dp),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
             // 1. Seletor de Mês
@@ -931,7 +932,7 @@ fun DashboardScreen(
         }
 
         item(key = "bottom_spacer", contentType = "bottom_spacer") {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(28.dp))
         }
         }
         }

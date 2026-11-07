@@ -1539,7 +1539,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
           </div>
 
           {/* Footer com Ações (Sempre fixado na base do modal) */}
-          <DialogFooter className="p-3 sm:p-4 border-t border-white/[0.08] shrink-0 bg-[#0a0f1d]/90 backdrop-blur-md flex-col-reverse sm:flex-row items-center justify-between gap-2">
+          <DialogFooter className="p-3 sm:p-4 pb-[max(0.75rem,calc(env(safe-area-inset-bottom,0px)+0.5rem))] border-t border-white/[0.08] shrink-0 bg-[#0a0f1d]/90 backdrop-blur-md flex-col-reverse sm:flex-row items-center justify-between gap-2">
             {editingTx && canEdit && (
               <Button
                 type="button"

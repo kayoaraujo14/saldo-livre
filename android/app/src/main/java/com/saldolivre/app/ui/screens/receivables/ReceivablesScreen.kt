@@ -33,6 +33,7 @@ import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.ReceivableItem
 import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.theme.*
+import com.saldolivre.app.ui.util.safeNavigationBarBottomPadding
 
 private val DarkAmberHeroTint = Color(0xFF78350F)
 private val DarkRoseHeroTint = Color(0xFF4C0519)
@@ -206,7 +207,7 @@ fun ReceivablesScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = safeNavigationBarBottomPadding(extraDp = 24.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 1. Hero Banner Consolidado do Mês

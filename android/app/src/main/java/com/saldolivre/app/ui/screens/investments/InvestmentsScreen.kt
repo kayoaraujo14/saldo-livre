@@ -38,6 +38,7 @@ import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.ui.components.MonthSelector
 import com.saldolivre.app.ui.theme.*
+import com.saldolivre.app.ui.util.safeNavigationBarBottomPadding
 import kotlin.math.min
 
 private val DarkPurpleHeroTint = Color(0xFF3B0764)
@@ -212,7 +213,7 @@ fun InvestmentsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = safeNavigationBarBottomPadding(extraDp = 24.dp)),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // MonthSelector

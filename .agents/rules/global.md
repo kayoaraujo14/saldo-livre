@@ -31,21 +31,33 @@ Nunca versione chaves de API; garanta isolamento por `uid` em toda query.
 - Nenhuma tarefa está concluída até que linters e testes unitários das plataformas afetadas sejam executados via terminal e passem com 100% de sucesso (Web: `npm run lint` + `npm test` em `web/`; Android: `./gradlew testDebugUnitTest`).
 - UI alterada: siga a skill `ui-ux-validator`.
 
-## 5. Rastreamento Contínuo de Issues no GitHub
-Sempre que uma tarefa corresponder a uma Issue cadastrada no GitHub:
-- **Ao Iniciar (`start`):** Registre a branch de trabalho, aplique a label `status: in-progress` e comente o início do desenvolvimento na Issue:
-  ```bash
-  node scripts/github-issue-helper.cjs start <issueNumber> <nomeDaBranch>
-  ```
-- **Em Andamento (`comment`):** Registre decisões técnicas ou marcos parciais relevantes na Issue:
-  ```bash
-  node scripts/github-issue-helper.cjs comment <issueNumber> "<mensagem>"
-  ```
-- **Ao Concluir (`close`):** Nenhuma issue pode ser finalizada sem antes:
-  1. Validar que linters e testes unitários das plataformas afetadas passaram 100% verdes.
-  2. Atualizar o checklist/critérios de aceite da Issue para concluídos (`[x]`).
-  3. Publicar o comentário de fechamento com resumo das entregas e marcar como `status: done`:
+## 5. Rastreamento de Issues no GitHub & Metodologia de Branches (GitHub Flow)
+Sempre que o usuário pedir para resolver ou trabalhar em uma Issue do GitHub (ex: "resolva a issue #52"):
+1. **Branch Obrigatória (Nunca commitar direto na `main`):**
+   - Atualize a `main` e crie a branch dedicada a partir dela no padrão:
+     - `fix/issue-<ID>-<slug>` (para bugs/limpeza)
+     - `feat/issue-<ID>-<slug>` (para novas funcionalidades/telas)
+     - `perf/issue-<ID>-<slug>` (para performance/virtualização)
+     - `sec/issue-<ID>-<slug>` (para segurança/regras/app check)
+   - Exemplo: `git checkout -b fix/issue-52-lint-cleanup`.
+2. **Notificar Início no GitHub:**
+   - Execute o helper de rastreamento para aplicar a label `status: in-progress` e postar o comentário de início na Issue:
      ```bash
-     node scripts/github-issue-helper.cjs close <issueNumber> "<resumo das entregas e testes>"
+     npm run issue:start <issueNumber> <nomeDaBranch>
      ```
-  4. Garantir commits semânticos referenciando a issue (ex: `fix(web): ... (closes #ID)`).
+3. **Desenvolvimento com Ciclo Plan-Act-Verify:**
+   - Implemente o código de forma focada e cirúrgica.
+   - Se houver decisões intermediárias relevantes, registre: `npm run issue:comment <issueNumber> "<mensagem>"`.
+   - Garanta 100% de sucesso nos linters e testes unitários locais antes de qualquer commit.
+4. **Commit Semântico & Referência Explícita:**
+   - Faça o commit semântico vinculando o fechamento:
+     ```bash
+     git commit -m "tipo(escopo): descrição concisa da entrega (closes #<issueNumber>)"
+     ```
+5. **Push, Pull Request & Fechamento:**
+   - Suba a branch (`git push -u origin <nomeDaBranch>`).
+   - Crie o Pull Request para disparar os Quality Gates de CI/CD.
+   - Atualize a Issue no GitHub, marcando os checkboxes de aceite como `[x]`, adicionando comentário com o relatório de testes e rotulando como `status: done`:
+     ```bash
+     npm run issue:close <issueNumber> "<resumo das entregas, testes executados e status>"
+     ```
