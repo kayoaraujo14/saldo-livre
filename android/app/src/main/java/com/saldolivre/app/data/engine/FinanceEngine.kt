@@ -2402,7 +2402,13 @@ object FinanceEngine {
 
         val income = summary.income
         val rawTotalOutflow = when {
-            summary.paid > 0.0 || summary.committed > 0.0 -> summary.paid + summary.committed
+            summary.paid > 0.0 || summary.committed > 0.0 -> {
+                if (summary.paid == summary.committed && summary.committedEstimated == 0.0 && summary.committedPending == 0.0) {
+                    summary.committed
+                } else {
+                    summary.paid + summary.committed
+                }
+            }
             summary.byCategory.isNotEmpty() -> summary.byCategory.sumOf { it.amount }
             else -> 0.0
         }

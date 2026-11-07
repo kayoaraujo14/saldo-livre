@@ -130,4 +130,33 @@ describe('calculateFinancialHealthScore', () => {
     expect(result.score).toBe(50)
     expect(result.classification).toBe('warning')
   })
+
+  it('applies 4-pillar synergy and discounts investments from living cost when committed equals paid without estimates', () => {
+    const summary = {
+      monthKey: '2026-10',
+      income: 10000,
+      committed: 8000,
+      paid: 8000,
+      committedEstimated: 0,
+      committedPending: 0,
+      freeBalance: 2000,
+      totalInvested: 3000,
+      byCategory: [
+        { category: 'Moradia', amount: 3000 },
+        { category: 'Alimentação', amount: 2000 },
+        { category: 'Investimentos', amount: 3000 },
+      ],
+    } as unknown as MonthSummary
+
+    const result = calculateFinancialHealthScore(summary, 30000)
+
+    expect(result.monthlyLivingCost).toBe(5000)
+    expect(result.spendingRatioPercentage).toBe(50)
+    expect(result.spendingLimitScore).toBe(30)
+    expect(result.savingsScore).toBe(30)
+    expect(result.emergencyReserveScore).toBe(25)
+    expect(result.envelopeScore).toBe(15)
+    expect(result.score).toBe(100)
+    expect(result.classification).toBe('excellent')
+  })
 })

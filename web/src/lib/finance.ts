@@ -2401,7 +2401,9 @@ export function calculateFinancialHealthScore(
 
   const income = summary.income || 0
   const rawTotalOutflow = (summary.paid || 0) > 0 || (summary.committed || 0) > 0
-    ? (summary.paid || 0) + (summary.committed || 0)
+    ? (summary.paid === summary.committed && !summary.committedEstimated && !summary.committedPending
+        ? summary.committed
+        : (summary.paid || 0) + (summary.committed || 0))
     : (Array.isArray(summary.byCategory) ? summary.byCategory.reduce((acc, c) => acc + (c.amount || 0), 0) : 0)
   const totalInvested = Math.max(0, summary.totalInvested || 0)
   const positiveFreeBalance = Math.max(0, summary.freeBalance || 0)
