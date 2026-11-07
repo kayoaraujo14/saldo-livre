@@ -30,3 +30,22 @@ Nunca versione chaves de API; garanta isolamento por `uid` em toda query.
 - Mudanças médias/grandes: apresente um plano enxuto antes de codar.
 - Nenhuma tarefa está concluída até que linters e testes unitários das plataformas afetadas sejam executados via terminal e passem com 100% de sucesso (Web: `npm run lint` + `npm test` em `web/`; Android: `./gradlew testDebugUnitTest`).
 - UI alterada: siga a skill `ui-ux-validator`.
+
+## 5. Rastreamento Contínuo de Issues no GitHub
+Sempre que uma tarefa corresponder a uma Issue cadastrada no GitHub:
+- **Ao Iniciar (`start`):** Registre a branch de trabalho, aplique a label `status: in-progress` e comente o início do desenvolvimento na Issue:
+  ```bash
+  node scripts/github-issue-helper.cjs start <issueNumber> <nomeDaBranch>
+  ```
+- **Em Andamento (`comment`):** Registre decisões técnicas ou marcos parciais relevantes na Issue:
+  ```bash
+  node scripts/github-issue-helper.cjs comment <issueNumber> "<mensagem>"
+  ```
+- **Ao Concluir (`close`):** Nenhuma issue pode ser finalizada sem antes:
+  1. Validar que linters e testes unitários das plataformas afetadas passaram 100% verdes.
+  2. Atualizar o checklist/critérios de aceite da Issue para concluídos (`[x]`).
+  3. Publicar o comentário de fechamento com resumo das entregas e marcar como `status: done`:
+     ```bash
+     node scripts/github-issue-helper.cjs close <issueNumber> "<resumo das entregas e testes>"
+     ```
+  4. Garantir commits semânticos referenciando a issue (ex: `fix(web): ... (closes #ID)`).

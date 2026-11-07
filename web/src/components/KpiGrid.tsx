@@ -213,7 +213,7 @@ export function KpiGrid({
 
             <Badge
               variant="outline"
-              className={`text-[9px] px-1.5 py-0 font-mono border-0 shrink-0 ${incomeRemainingPct > 0
+              className={`text-[9px] px-1.5 py-0 font-mono border-0 shrink-0 whitespace-nowrap ${incomeRemainingPct > 0
                 ? 'bg-emerald-500/15 text-emerald-300'
                 : 'bg-rose-500/15 text-rose-300'
                 }`}
@@ -223,24 +223,24 @@ export function KpiGrid({
           </div>
 
           {/* Saldo Principal com Number Ticker */}
-          <div className="my-1">
+          <div className="my-1 min-w-0 overflow-hidden">
             <NumberTicker
               value={summary.freeBalance}
-              className={`text-2xl sm:text-3xl font-extrabold tracking-tight drop-shadow-xs font-mono ${isPositiveBalance ? 'text-emerald-400' : 'text-rose-400'
+              className={`text-2xl sm:text-3xl font-extrabold tracking-tight drop-shadow-xs font-mono truncate block ${isPositiveBalance ? 'text-emerald-400' : 'text-rose-400'
                 }`}
             />
           </div>
 
           {/* Contexto de Receitas e Despesas (e Sobra/Déficit) */}
-          <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400">
-            <span>Receitas: <strong className="text-slate-300 font-semibold">{formatBRL(summary.income)}</strong></span>
-            <span>• Despesas: <strong className="text-slate-300 font-semibold">{formatBRL(summary.paid + summary.committed)}</strong></span>
+          <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-400 min-w-0">
+            <span className="whitespace-nowrap">Receitas: <strong className="text-slate-300 font-semibold">{formatBRL(summary.income)}</strong></span>
+            <span className="whitespace-nowrap">• Despesas: <strong className="text-slate-300 font-semibold">{formatBRL(summary.paid + summary.committed)}</strong></span>
             {summary.carryoverAmount && summary.carryoverAmount > 0 ? (
-              <span className="font-semibold text-cyan-400 font-mono">
+              <span className="font-semibold text-cyan-400 font-mono whitespace-nowrap">
                 • +{formatBRL(summary.carryoverAmount)} sobra
               </span>
             ) : summary.previousMonthDeficit && summary.previousMonthDeficit > 0 ? (
-              <span className="font-semibold text-rose-400 font-mono">
+              <span className="font-semibold text-rose-400 font-mono whitespace-nowrap">
                 • -{formatBRL(summary.previousMonthDeficit)} déficit
               </span>
             ) : null}
@@ -266,10 +266,10 @@ export function KpiGrid({
                 }
               }}
               title="Clique para desfazer fechamento do mês anterior"
-              className="flex items-center gap-1.5 text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors font-medium mt-1.5 text-left cursor-pointer group"
+              className="flex items-center gap-1.5 text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors font-medium mt-1.5 text-left cursor-pointer group min-w-0 max-w-full"
             >
               <RotateCcw className="size-3 shrink-0 group-hover:-rotate-45 transition-transform" />
-              <span className="underline decoration-dotted truncate">
+              <span className="underline decoration-dotted truncate min-w-0">
                 Fechamento de {monthLabel(summary.previousMonthClosure?.closedMonth || shiftMonth(month, -1))}: {summary.carryoverAmount && summary.carryoverAmount > 0 ? `+${formatBRL(summary.carryoverAmount)} na conta` : 'Desfazer'}
               </span>
             </button>
@@ -295,7 +295,7 @@ export function KpiGrid({
 
             <Badge
               variant="outline"
-              className={`text-[9px] px-1.5 py-0 border-0 shrink-0 ${consumptionColor === 'rose'
+              className={`text-[9px] px-1.5 py-0 border-0 shrink-0 whitespace-nowrap ${consumptionColor === 'rose'
                 ? 'bg-rose-500/15 text-rose-300'
                 : consumptionColor === 'amber'
                   ? 'bg-amber-500/15 text-amber-300'
@@ -312,7 +312,7 @@ export function KpiGrid({
           </div>
 
           {/* Valor Principal */}
-          <div className="text-base sm:text-lg font-extrabold tracking-tight font-mono text-slate-100">
+          <div className="text-base sm:text-lg font-extrabold tracking-tight font-mono text-slate-100 truncate">
             {consumptionPct}% Consumido
           </div>
 
@@ -331,10 +331,10 @@ export function KpiGrid({
         </div>
 
         <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-1.5 min-w-0 gap-1 border-t border-white/[0.04]">
-          <span className="truncate min-w-0 text-slate-400">
+          <span className="truncate min-w-0 text-slate-400 whitespace-nowrap">
             Pago: <strong className="text-slate-300 font-semibold">{formatBRL(summary.paid)}</strong>
           </span>
-          <span className="truncate min-w-0 text-slate-500 font-mono">
+          <span className="truncate min-w-0 text-slate-500 font-mono whitespace-nowrap shrink-0">
             Comprom.: {committedPct}%
           </span>
         </div>
@@ -343,7 +343,7 @@ export function KpiGrid({
       {/* 3. KPI 2: Radar 7 Dias */}
       <div
         onClick={onOpenReceivables}
-        className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between transition-all bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] shadow-sm cursor-pointer group"
+        className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between transition-all bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] shadow-sm cursor-pointer group min-w-0"
       >
         <div>
           {/* Top Row: Ícone à esquerda + Badge à direita */}
@@ -361,7 +361,7 @@ export function KpiGrid({
 
             <Badge
               variant="outline"
-              className={`text-[9px] px-1.5 py-0 border-0 shrink-0 ${radarData.isUrgent
+              className={`text-[9px] px-1.5 py-0 border-0 shrink-0 whitespace-nowrap ${radarData.isUrgent
                 ? 'bg-rose-500/15 text-rose-300'
                 : radarData.total > 0
                   ? 'bg-amber-500/15 text-amber-300'
@@ -378,7 +378,7 @@ export function KpiGrid({
           </div>
 
           {/* Valor Principal com NumberTicker */}
-          <div className="text-base sm:text-lg font-extrabold tracking-tight font-mono text-slate-100">
+          <div className="text-base sm:text-lg font-extrabold tracking-tight font-mono text-slate-100 truncate">
             <NumberTicker value={radarData.total} />
           </div>
 
@@ -395,7 +395,7 @@ export function KpiGrid({
       </div>
 
       {/* 4. KPI 3: Maior Gasto (Top Categoria do Mês) */}
-      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between transition-all bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] shadow-sm">
+      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between transition-all bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] shadow-sm min-w-0">
         <div>
           {/* Top Row: Ícone à esquerda + Badge à direita */}
           <div className="flex items-center justify-between gap-1 mb-1.5">
@@ -405,7 +405,7 @@ export function KpiGrid({
 
             <Badge
               variant="outline"
-              className="text-[9px] px-1.5 py-0 border-0 shrink-0 bg-purple-500/15 text-purple-300 font-mono"
+              className="text-[9px] px-1.5 py-0 border-0 shrink-0 bg-purple-500/15 text-purple-300 font-mono whitespace-nowrap"
             >
               {topCategoryData.badgeText}
             </Badge>
@@ -417,7 +417,7 @@ export function KpiGrid({
           </div>
 
           {/* Valor Principal: valor financeiro da maior categoria */}
-          <div className="text-base sm:text-lg font-extrabold tracking-tight font-mono text-purple-400">
+          <div className="text-base sm:text-lg font-extrabold tracking-tight font-mono text-purple-400 truncate">
             <NumberTicker value={topCategoryData.amount} />
           </div>
 
@@ -434,7 +434,7 @@ export function KpiGrid({
       </div>
 
       {/* 5. KPI 4: Saúde de Investimentos */}
-      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between transition-all bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] shadow-sm">
+      <div className="col-span-1 lg:col-span-2 rounded-2xl p-2.5 sm:p-3 flex flex-col justify-between transition-all bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-white/[0.14] shadow-sm min-w-0">
         <div>
           {/* Top Row: Ícone à esquerda + Badge à direita */}
           <div className="flex items-center justify-between gap-1 mb-1.5">
@@ -447,7 +447,7 @@ export function KpiGrid({
 
             <Badge
               variant="outline"
-              className={`text-[9px] px-1.5 py-0 border-0 shrink-0 ${investmentData.isTargetReached ? 'bg-emerald-500/15 text-emerald-300' : 'bg-cyan-500/15 text-cyan-300'
+              className={`text-[9px] px-1.5 py-0 border-0 shrink-0 whitespace-nowrap ${investmentData.isTargetReached ? 'bg-emerald-500/15 text-emerald-300' : 'bg-cyan-500/15 text-cyan-300'
                 }`}
             >
               {investmentData.badgeText}
@@ -460,9 +460,9 @@ export function KpiGrid({
           </div>
 
           {/* Valor Principal + Mini Circular Progress */}
-          <div className="flex items-center justify-between gap-1.5">
+          <div className="flex items-center justify-between gap-1.5 min-w-0">
             <span
-              className={`text-base sm:text-lg font-extrabold tracking-tight font-mono truncate ${investmentData.isTargetReached ? 'text-emerald-400' : 'text-cyan-300'
+              className={`text-base sm:text-lg font-extrabold tracking-tight font-mono truncate min-w-0 ${investmentData.isTargetReached ? 'text-emerald-400' : 'text-cyan-300'
                 }`}
             >
               {investmentData.incomePercentage}% da Renda
@@ -501,7 +501,7 @@ export function KpiGrid({
         </div>
 
         <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 mt-1.5 min-w-0 gap-1 border-t border-white/[0.04]">
-          <span className="truncate min-w-0 text-slate-400">
+          <span className="truncate min-w-0 text-slate-400 whitespace-nowrap">
             Aportado: <strong className="text-slate-300 font-semibold">{formatBRL(investmentData.totalInvested)}</strong>
           </span>
         </div>
@@ -511,11 +511,11 @@ export function KpiGrid({
       <div
         onClick={onOpenFinancialHealth ?? onOpenInvestments}
         title="Clique para abrir o diagnóstico completo dos 4 pilares de Saúde Financeira"
-        className="col-span-2 lg:col-span-12 rounded-2xl p-2.5 sm:p-3 bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-emerald-500/30 transition-all shadow-sm cursor-pointer group"
+        className="col-span-2 lg:col-span-12 rounded-2xl p-2.5 sm:p-3 bg-slate-900/60 backdrop-blur-md border border-white/[0.08] hover:border-emerald-500/30 transition-all shadow-sm cursor-pointer group min-w-0"
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 min-w-0">
           {/* Lado Esquerdo: Ícone + Título + Score Circular e Classificação */}
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             {/* Medidor Circular Compacto com Score */}
             <div className="relative size-10 sm:size-11 shrink-0 flex items-center justify-center">
               <svg className="size-full -rotate-90" viewBox="0 0 36 36">
@@ -553,14 +553,14 @@ export function KpiGrid({
             </div>
 
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider truncate flex items-center gap-1.5 group-hover:text-emerald-300 transition-colors">
-                  <ShieldCheck className="size-3.5 text-emerald-400 inline" />
+                  <ShieldCheck className="size-3.5 text-emerald-400 inline shrink-0" />
                   Saúde Financeira
                 </span>
                 <Badge
                   variant="outline"
-                  className={`text-[9px] px-1.5 py-0 border-0 font-semibold shrink-0 ${
+                  className={`text-[9px] px-1.5 py-0 border-0 font-semibold shrink-0 whitespace-nowrap ${
                     healthScore.classification === 'excellent'
                       ? 'bg-emerald-500/15 text-emerald-300'
                       : healthScore.classification === 'healthy'
@@ -572,7 +572,7 @@ export function KpiGrid({
                 >
                   {healthScore.label}
                 </Badge>
-                <span className="text-[9px] text-emerald-400/80 hidden md:inline-flex items-center gap-1 font-medium">
+                <span className="text-[9px] text-emerald-400/80 hidden md:inline-flex items-center gap-1 font-medium whitespace-nowrap shrink-0">
                   <Sparkles className="size-2.5" />
                   Ver Diagnóstico & Dicas IA
                 </span>
@@ -585,34 +585,34 @@ export function KpiGrid({
 
           {/* Lado Direito: Os 4 Pilares Fundamentais (Soma Exata: 100 pts) */}
           <div className="grid grid-cols-4 gap-2 sm:flex sm:items-center sm:gap-4 text-center sm:text-right shrink-0 pt-1.5 sm:pt-0 border-t sm:border-t-0 border-white/[0.04]">
-            <div className="flex flex-col sm:items-end">
-              <span className="text-[9px] uppercase tracking-wider text-slate-500">Poupança</span>
-              <span className="text-[11px] font-mono font-bold text-slate-200">
+            <div className="flex flex-col sm:items-end min-w-0">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500 truncate">Poupança</span>
+              <span className="text-[11px] font-mono font-bold text-slate-200 whitespace-nowrap">
                 {healthScore.savingsScore}<span className="text-slate-500 text-[9px]">/30</span>
                 <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.savingsRatePercentage}%)</span>
               </span>
             </div>
 
-            <div className="flex flex-col sm:items-end">
-              <span className="text-[9px] uppercase tracking-wider text-slate-500">Custo Vida</span>
-              <span className="text-[11px] font-mono font-bold text-slate-200">
+            <div className="flex flex-col sm:items-end min-w-0">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500 truncate">Custo Vida</span>
+              <span className="text-[11px] font-mono font-bold text-slate-200 whitespace-nowrap">
                 {healthScore.spendingLimitScore}<span className="text-slate-500 text-[9px]">/30</span>
                 <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.spendingRatioPercentage}%)</span>
               </span>
             </div>
 
-            <div className="flex flex-col sm:items-end">
-              <span className="text-[9px] uppercase tracking-wider text-slate-500">Reserva</span>
-              <span className="text-[11px] font-mono font-bold text-slate-200">
+            <div className="flex flex-col sm:items-end min-w-0">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500 truncate">Reserva</span>
+              <span className="text-[11px] font-mono font-bold text-slate-200 whitespace-nowrap">
                 {healthScore.emergencyReserveScore}<span className="text-slate-500 text-[9px]">/25</span>
                 <span className="text-[9px] text-slate-400 ml-1 hidden sm:inline">({healthScore.emergencyCoverageMonths}m)</span>
               </span>
             </div>
 
-            <div className="flex flex-col sm:items-end">
-              <span className="text-[9px] uppercase tracking-wider text-slate-500">Envelopes</span>
+            <div className="flex flex-col sm:items-end min-w-0">
+              <span className="text-[9px] uppercase tracking-wider text-slate-500 truncate">Envelopes</span>
               <span
-                className={`text-[11px] font-mono font-bold ${
+                className={`text-[11px] font-mono font-bold whitespace-nowrap ${
                   (healthScore.budgetOverspentCount ?? 0) > 0
                     ? 'text-rose-400'
                     : (healthScore.budgetConfiguredCount ?? 0) > 0

@@ -59,21 +59,21 @@ export function MobileTransactionCard({
             : 'bg-slate-900/70 border-sky-500/25 hover:border-sky-500/40'
           }`}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className="size-9 rounded-xl bg-gradient-to-tr from-sky-500/20 to-indigo-500/20 border border-sky-500/30 text-sky-400 flex items-center justify-center shrink-0">
             <CreditCard className="size-4" />
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-bold text-white truncate">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-xs font-bold text-white truncate min-w-0 flex-1">
                 {tx.description}
               </span>
               {tx.status === 'paid' ? (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 whitespace-nowrap shrink-0">
                   <CheckCircle2 className="size-2.5" /> Paga
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30 whitespace-nowrap shrink-0">
                   <Clock className="size-2.5" /> Fatura
                 </span>
               )}
@@ -90,7 +90,7 @@ export function MobileTransactionCard({
         </div>
 
         <div className="text-right shrink-0">
-          <p className="text-xs font-bold text-white font-mono">
+          <p className="text-xs font-bold text-white font-mono whitespace-nowrap">
             {formatBRL(effAmount)}
           </p>
         </div>
@@ -152,26 +152,26 @@ export function MobileTransactionCard({
           onClick={() => onEdit(tx)}
         >
           {/* Linha Superior: Descrição + Tags de Parcela / Terceiro */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-xs font-semibold text-slate-100 truncate">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-xs font-semibold text-slate-100 truncate min-w-0 flex-1">
               {tx.description}
             </span>
 
             {tx.installmentsTotal && tx.installmentsTotal > 1 && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-bold border border-cyan-500/30">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 font-bold border border-cyan-500/30 whitespace-nowrap shrink-0">
                 {tx.installmentNumber}/{tx.installmentsTotal}
               </span>
             )}
 
             {thirdPartyName && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 font-medium border border-amber-500/30 truncate max-w-[130px]">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 font-medium border border-amber-500/30 truncate max-w-[120px] shrink-0">
                 🏷️ {thirdPartyName}
               </span>
             )}
           </div>
 
           {/* Linha Inferior: Categoria › Subcategoria · Cartão / Minha Parte */}
-          <p className="text-[10px] text-slate-400 truncate mt-0.5">
+          <p className="text-[10px] text-slate-400 truncate mt-0.5 min-w-0">
             <span>{tx.category}</span>
             {tx.subcategory && tx.subcategory !== tx.category && (
               <span className="text-slate-400"> › {tx.subcategory}</span>
@@ -188,7 +188,7 @@ export function MobileTransactionCard({
         {/* 3. Coluna Direita: Valor e Status */}
         <div className="text-right shrink-0 space-y-1">
           <p
-            className={`text-xs font-bold tabular-nums ${isRefund
+            className={`text-xs font-bold tabular-nums whitespace-nowrap font-mono ${isRefund
                 ? 'text-cyan-400'
                 : isIncome
                   ? 'text-emerald-400'

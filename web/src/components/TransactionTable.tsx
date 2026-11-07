@@ -1835,17 +1835,17 @@ export function TransactionTable({
                             <CreditCard className="size-3.5 text-sky-400" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-bold text-white tracking-wide">
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                              <span className="text-xs font-bold text-white tracking-wide truncate min-w-0 max-w-[320px]" title={tx.description}>
                                 {tx.description}
                               </span>
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono whitespace-nowrap shrink-0">
                                 {invMeta.itemsCount} {invMeta.itemsCount === 1 ? 'compra' : 'compras'} no ciclo
                               </span>
                               <button
                                 type="button"
                                 onClick={() => onOpenInvoices?.(invMeta.card.id)}
-                                className="text-[10px] text-sky-400 hover:text-sky-300 hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                                className="text-[10px] text-sky-400 hover:text-sky-300 hover:underline flex items-center gap-1 cursor-pointer font-medium whitespace-nowrap shrink-0"
                               >
                                 <span>Ver compras</span>
                                 <Receipt className="size-2.5" />
@@ -1853,7 +1853,7 @@ export function TransactionTable({
                             </div>
 
                             {!isOwner && (
-                              <p className="text-[10px] text-indigo-300 mt-0.5">
+                              <p className="text-[10px] text-indigo-300 mt-0.5 truncate">
                                 Cartão compartilhado por <strong>{invMeta.card.ownerName}</strong>
                               </p>
                             )}
@@ -1863,7 +1863,7 @@ export function TransactionTable({
 
                       {/* 4. Categoria */}
                       <td className="py-2.5 px-3 align-middle">
-                        <Badge variant="outline" className="text-[10px] bg-slate-800/80 text-slate-300 border-slate-700">
+                        <Badge variant="outline" className="text-[10px] bg-slate-800/80 text-slate-300 border-slate-700 whitespace-nowrap shrink-0">
                           Cartão de Crédito
                         </Badge>
                       </td>
@@ -1872,18 +1872,18 @@ export function TransactionTable({
                       <td className="py-2.5 px-3 align-middle text-xs">
                         {isOwner ? (
                           invMeta.othersShare > 0 ? (
-                            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300">🤝 Rateado</span>
+                            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-300 whitespace-nowrap shrink-0">🤝 Rateado</span>
                           ) : (
-                            <span className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/80 px-2 py-0.5 text-[10px] font-semibold text-slate-200">👤 100% Meu</span>
+                            <span className="inline-flex items-center rounded-full border border-slate-600/60 bg-slate-800/80 px-2 py-0.5 text-[10px] font-semibold text-slate-200 whitespace-nowrap shrink-0">👤 100% Meu</span>
                           )
                         ) : (
-                          <span className="inline-flex items-center rounded-full border border-indigo-500/40 bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">🔄 Compartilhado</span>
+                          <span className="inline-flex items-center rounded-full border border-indigo-500/40 bg-indigo-500/15 px-2 py-0.5 text-[10px] font-semibold text-indigo-300 whitespace-nowrap shrink-0">🔄 Compartilhado</span>
                         )}
                       </td>
 
                       {/* 6. Valor da Fatura */}
                       <td className="py-2.5 px-3 align-middle text-right">
-                        <div className="font-mono font-bold text-xs text-white">
+                        <div className="font-mono font-bold text-xs text-white whitespace-nowrap shrink-0">
                           {formatBRL(tx.totalAmount)}
                         </div>
                       </td>
@@ -1982,7 +1982,7 @@ export function TransactionTable({
                     </td>
 
                     {/* 3. Description & Metadata Badges */}
-                    <td className="py-2 px-3 align-middle">
+                    <td className="py-2 px-3 align-middle max-w-[340px]">
                       {isEditing ? (
                         <Input
                           value={editDesc}
@@ -1994,12 +1994,12 @@ export function TransactionTable({
                           }}
                         />
                       ) : (
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                             <span
                               onDoubleClick={() => { if (canEdit) startEdit(tx) }}
-                              className={`font-medium text-slate-200 ${canEdit ? 'hover:text-white cursor-pointer' : 'cursor-default'}`}
-                              title={canEdit ? "Duplo clique para editar" : undefined}
+                              className={`font-medium text-slate-200 truncate min-w-0 max-w-[280px] ${canEdit ? 'hover:text-white cursor-pointer' : 'cursor-default'}`}
+                              title={canEdit ? `${tx.description} (Duplo clique para editar)` : tx.description}
                             >
                               {tx.description}
                             </span>
@@ -2008,7 +2008,7 @@ export function TransactionTable({
                             {thirdParty && (
                               <Badge
                                 variant="outline"
-                                className={`text-[10px] py-0 px-2 gap-1 font-semibold inline-flex items-center shadow-2xs ${
+                                className={`text-[10px] py-0 px-2 gap-1 font-semibold inline-flex items-center shadow-2xs whitespace-nowrap shrink-0 max-w-[160px] truncate ${
                                   thirdParty.type === 'external'
                                     ? 'bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25'
                                     : thirdParty.type === 'friend'
@@ -2018,7 +2018,7 @@ export function TransactionTable({
                                 title={`${thirdParty.label}: ${thirdParty.name}`}
                               >
                                 <User className="size-2.5 shrink-0" />
-                                <span>
+                                <span className="truncate">
                                   {thirdParty.label}: <strong className="text-white font-bold">{thirdParty.name}</strong>
                                 </span>
                               </Badge>
@@ -2026,7 +2026,7 @@ export function TransactionTable({
 
                             {/* Estorno / Reembolso Tag */}
                             {isRefund && (
-                              <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-500/15 text-emerald-300 border-emerald-500/40 gap-1 font-semibold shadow-xs">
+                              <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-emerald-500/15 text-emerald-300 border-emerald-500/40 gap-1 font-semibold shadow-xs whitespace-nowrap shrink-0">
                                 <RotateCcw className="size-2.5 text-emerald-400" />
                                 <span>Estorno / Crédito</span>
                               </Badge>
@@ -2034,16 +2034,16 @@ export function TransactionTable({
 
                             {/* Recurring bill indicator */}
                             {tx.recurringBillId && (
-                              <span title="Conta gerada a partir de molde recorrente">
+                              <span title="Conta gerada a partir de molde recorrente" className="shrink-0">
                                 <RefreshCw className="size-3 text-amber-400/80" />
                               </span>
                             )}
 
                             {/* Shared card badge */}
                             {card && (
-                              <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-slate-800/80 text-slate-300 border-slate-700 gap-1">
-                                <CreditCard className="size-2.5 text-violet-400" />
-                                {(card.cardName || 'Cartão').split(' ')[0]}
+                              <Badge variant="outline" className="text-[9px] py-0 px-1.5 bg-slate-800/80 text-slate-300 border-slate-700 gap-1 whitespace-nowrap shrink-0">
+                                <CreditCard className="size-2.5 text-violet-400 shrink-0" />
+                                <span className="truncate max-w-[90px]">{(card.cardName || 'Cartão').split(' ')[0]}</span>
                               </Badge>
                             )}
 
@@ -2404,7 +2404,7 @@ export function TransactionTable({
                     </td>
 
                     {/* 6. Total Amount & My Impact */}
-                    <td className="py-2 px-3 text-right align-middle font-mono">
+                    <td className="py-2 px-3 text-right align-middle font-mono whitespace-nowrap shrink-0">
                       {isEditing ? (
                         <div className="flex items-center justify-end gap-1">
                           <Input
@@ -2420,25 +2420,25 @@ export function TransactionTable({
                           />
                         </div>
                       ) : (
-                        <div className="flex flex-col items-end gap-0.5">
+                        <div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
                           {/* My Real Impact on Free Balance */}
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 whitespace-nowrap">
                             {isRefund ? (
                               <div className="flex flex-col items-end">
-                                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
+                                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 whitespace-nowrap">
                                   +{formatBRL(Math.abs(myImpact))}
                                 </span>
-                                <Badge variant="outline" className="text-[9px] py-0 px-1 bg-emerald-950/60 text-emerald-300 border-emerald-600/50">
+                                <Badge variant="outline" className="text-[9px] py-0 px-1 bg-emerald-950/60 text-emerald-300 border-emerald-600/50 whitespace-nowrap shrink-0">
                                   Crédito na fatura
                                 </Badge>
                               </div>
                             ) : myImpact === 0 ? (
-                              <span className="text-xs font-semibold text-slate-500">
+                              <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">
                                 R$ 0,00 <span className="text-[10px] font-normal text-slate-500">(Neutro)</span>
                               </span>
                             ) : (
                               <span
-                                className={`text-xs font-bold ${
+                                className={`text-xs font-bold whitespace-nowrap ${
                                   tx.type === 'income' ? 'text-emerald-400' : isRefund ? 'text-cyan-400' : 'text-slate-100'
                                 }`}
                               >
@@ -2450,13 +2450,13 @@ export function TransactionTable({
                           {/* Total gross amount if split or external or refund */}
                           {isRefund ? (
                             Math.abs(effAmount) !== Math.abs(myImpact) && (
-                              <span className="text-[10px] text-emerald-500/80">
+                              <span className="text-[10px] text-emerald-500/80 whitespace-nowrap">
                                 Estorno total: −{formatBRL(Math.abs(effAmount))}
                               </span>
                             )
                           ) : (
                             effAmount !== myImpact && (
-                              <span className="text-[10px] text-slate-400">
+                              <span className="text-[10px] text-slate-400 whitespace-nowrap">
                                 Total compra: {formatBRL(effAmount)}
                               </span>
                             )

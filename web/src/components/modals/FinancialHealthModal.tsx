@@ -56,6 +56,7 @@ export function FinancialHealthModal({
   )
 
   const livingCost = health.monthlyLivingCost ?? (summary ? summary.paid + summary.committed : 0)
+  const monthlyIncome = summary?.income || 0
   const targetReserve6m = livingCost * 6
   const targetReserve3m = livingCost * 3
   const configuredEnvelopes = health.budgetConfiguredCount ?? 0
@@ -76,7 +77,7 @@ export function FinancialHealthModal({
         spendingRatioPercentage: health.spendingRatioPercentage,
         emergencyCoverageMonths: health.emergencyCoverageMonths,
         monthlyLivingCost: livingCost,
-        monthlyIncome: summary?.income || 0,
+        monthlyIncome,
         actionableTips: health.actionableTips,
       })
         .then((res) => {
@@ -92,7 +93,7 @@ export function FinancialHealthModal({
         isMounted = false
       }
     }
-  }, [open, health.score, livingCost, summary?.income])
+  }, [open, health, livingCost, monthlyIncome])
 
   const handleAskCopilot = () => {
     onOpenChange(false)

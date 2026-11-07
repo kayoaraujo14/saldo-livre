@@ -504,28 +504,28 @@ export function CategoryBudgetsCard() {
                             title={`Clique para ajustar o teto de ${item.category}`}
                             className="p-3 flex flex-col gap-2 cursor-pointer"
                           >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold text-xs text-slate-100 truncate">{item.category}</span>
+                            <div className="flex items-center justify-between gap-2 min-w-0">
+                              <span className="font-semibold text-xs text-slate-100 truncate min-w-0 flex-1">{item.category}</span>
                               <div className="flex items-center gap-1 shrink-0">
                                 <Badge
                                   variant="outline"
-                                  className={`text-[9px] px-1.5 py-0 border-0 font-mono whitespace-nowrap ${TONE[tone].bg} ${TONE[tone].text}`}
+                                  className={`text-[9px] px-1.5 py-0 border-0 font-mono whitespace-nowrap shrink-0 ${TONE[tone].bg} ${TONE[tone].text}`}
                                 >
                                   {badgeText(item.badgeLabel)}
                                 </Badge>
-                                {isOpen ? <ChevronUp className="size-3.5 text-slate-500" /> : <ChevronDown className="size-3.5 text-slate-500" />}
+                                {isOpen ? <ChevronUp className="size-3.5 text-slate-500 shrink-0" /> : <ChevronDown className="size-3.5 text-slate-500 shrink-0" />}
                               </div>
                             </div>
 
-                            <div className="flex items-end justify-between gap-2">
-                              <div className="flex items-baseline gap-1 min-w-0">
-                                <span className="font-mono font-extrabold text-white text-sm">{formatBRL(item.committedAmount)}</span>
-                                <span className="text-[11px] text-slate-400 font-mono truncate">
+                            <div className="flex items-end justify-between gap-2 min-w-0">
+                              <div className="flex items-baseline gap-1 min-w-0 flex-1 truncate">
+                                <span className="font-mono font-extrabold text-white text-sm shrink-0">{formatBRL(item.committedAmount)}</span>
+                                <span className="text-[11px] text-slate-400 font-mono truncate min-w-0">
                                   {item.limit > 0 ? `de ${formatBRL(item.limit)}` : '(sem teto)'}
                                 </span>
                               </div>
                               {item.limit > 0 && (
-                                <span className={`text-[11.5px] font-bold font-mono whitespace-nowrap ${TONE[tone].text}`}>
+                                <span className={`text-[11.5px] font-bold font-mono whitespace-nowrap shrink-0 ${TONE[tone].text}`}>
                                   {isOver
                                     ? `${formatBRL(item.committedAmount - item.limit)} acima`
                                     : `sobra ${formatBRL(item.realRemaining)}`}

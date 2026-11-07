@@ -14,6 +14,9 @@
     "check:all": "npm --prefix web run lint && npm --prefix web test -- --run && npm --prefix web run build",
     "backend:build": "npm --prefix backend run build",
     "backend:serve": "npm --prefix backend run serve",
-    "deploy:all": "npm run check:all && npm run backend:build && firebase deploy"
+    "deploy:all": "npm run check:all && npm run backend:build && firebase deploy",
+    "issue:start": "node scripts/github-issue-helper.cjs start",
+    "issue:comment": "node scripts/github-issue-helper.cjs comment",
+    "issue:close": "node scripts/github-issue-helper.cjs close"
   }
 }

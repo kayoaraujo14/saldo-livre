@@ -156,7 +156,9 @@ fun TransactionItem(
                     text = "- " + FinanceEngine.formatCurrency(transaction.effectiveAmount),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
             }
@@ -298,6 +300,7 @@ fun TransactionItem(
                     Spacer(Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
+                            .widthIn(max = 110.dp)
                             .clip(CircleShape)
                             .background(Amber500.copy(alpha = 0.14f))
                             .border(1.dp, Amber500.copy(alpha = 0.3f), CircleShape)
@@ -374,7 +377,8 @@ fun TransactionItem(
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = amountColor,
-                maxLines = 1
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
 
             if (toReceive > 0.01) {
@@ -383,14 +387,16 @@ fun TransactionItem(
                     fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Emerald400,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             } else if (isSharedAndDifferent && transaction.effectiveAmount > 0.0) {
                 Text(
                     text = "de " + FinanceEngine.formatCurrency(transaction.effectiveAmount),
                     fontSize = 10.sp,
                     color = TextMuted,
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 

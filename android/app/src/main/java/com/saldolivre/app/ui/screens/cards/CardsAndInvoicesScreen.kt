@@ -880,7 +880,10 @@ private fun InvoiceSummaryCard(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White.copy(alpha = 0.85f),
-                            letterSpacing = 1.sp
+                            letterSpacing = 1.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Box(
                             modifier = Modifier
@@ -892,7 +895,9 @@ private fun InvoiceSummaryCard(
                                 invoice.card.ownerName.ifBlank { "Titular" },
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White.copy(alpha = 0.9f)
+                                color = Color.White.copy(alpha = 0.9f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -901,13 +906,17 @@ private fun InvoiceSummaryCard(
                         FinanceEngine.formatCurrency(invoice.total),
                         fontSize = 30.sp,
                         fontWeight = FontWeight.Black,
-                        color = Color.White
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         InvoiceEngine.countdownLabel(invoice),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (invoice.status == InvoiceStatus.OVERDUE) Rose400 else Color.White.copy(alpha = 0.9f)
+                        color = if (invoice.status == InvoiceStatus.OVERDUE) Rose400 else Color.White.copy(alpha = 0.9f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -2176,7 +2185,8 @@ private fun CardItemView(
                                     text = "Compartilhado",
                                     fontSize = 10.sp,
                                     color = Color.White,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }

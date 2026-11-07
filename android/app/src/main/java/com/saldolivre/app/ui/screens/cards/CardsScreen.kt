@@ -539,7 +539,8 @@ private fun CardItemView(
                                     text = "Compartilhado",
                                     fontSize = 10.sp,
                                     color = Color.White,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
