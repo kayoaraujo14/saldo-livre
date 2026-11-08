@@ -6,6 +6,7 @@ import type {
   RecurringBill,
   Transaction,
   UserProfile,
+  PublicUserProfile,
 } from '@/types'
 import type { Party } from '../finance'
 import type { ToolExecutor, ToolName, ToolResult } from '../gemini'
@@ -20,7 +21,7 @@ export interface AgentEnv {
   getClosures?: () => MonthClosure[]
   getPendingTransactions?: () => PendingBatchTransaction[] | undefined
   setPendingTransactions?: (txs: PendingBatchTransaction[]) => void
-  lookupUserByEmail?: (email: string) => Promise<UserProfile | null>
+  lookupUserByEmail?: (email: string) => Promise<PublicUserProfile | UserProfile | null>
   me: Party
   partner: Party | null
   monthKey: string

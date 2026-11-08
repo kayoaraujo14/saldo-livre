@@ -16,6 +16,7 @@ import type {
   Transaction,
   TransactionStatus,
   UserProfile,
+  PublicUserProfile,
   CategoryBudgetReport,
 } from '@/types'
 import type { Party } from '@/lib/finance'
@@ -137,7 +138,7 @@ export interface FinanceContextValue {
   saveRecurring: (bill: RecurringBill) => Promise<void>
   deleteRecurring: (id: string) => Promise<void>
   updateProfile: (patch: Partial<UserProfile>) => Promise<void>
-  lookupUserByEmail: (email: string) => Promise<UserProfile | null>
+  lookupUserByEmail: (email: string) => Promise<PublicUserProfile | UserProfile | null>
   // Envelopes Orçamentários
   categoryBudgetReport: CategoryBudgetReport
   setCategoryBudget: (category: string, limit: number, targetMonth?: string) => Promise<void>

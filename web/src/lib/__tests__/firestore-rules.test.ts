@@ -57,19 +57,37 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
     }
   })
 
-  describe('1. Coleção /users/{userId} (Perfis de Usuário)', () => {
-    it('permite que qualquer usuário autenticado leia perfis', async () => {
+  describe('1. Coleção /users/{userId} (Perfis de Usuário Privados)', () => {
+    it('permite que o próprio usuário leia seu perfil privado (/users/{userId})', async () => {
       if (!isEmulatorRunning || !testEnv) return
 
       await testEnv.withSecurityRulesDisabled(async (context) => {
-        await setDoc(doc(context.firestore(), 'users', 'alice'), { displayName: 'Alice' })
+        await setDoc(doc(context.firestore(), 'users', 'alice'), {
+          displayName: 'Alice',
+          monthlyIncome: 5000,
+          emergencyReserveBalance: 20000,
+        })
+      })
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      await assertSucceeds(getDoc(doc(aliceDb, 'users', 'alice')))
+    })
+
+    it('bloqueia outro usuário autenticado (ex: Bob) de ler o perfil privado de outrem (/users/alice)', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'users', 'alice'), {
+          displayName: 'Alice',
+          monthlyIncome: 5000,
+        })
       })
 
       const bobDb = testEnv.authenticatedContext('bob').firestore()
-      await assertSucceeds(getDoc(doc(bobDb, 'users', 'alice')))
+      await assertFails(getDoc(doc(bobDb, 'users', 'alice')))
     })
 
-    it('impede que usuários anônimos/não autenticados leiam perfis', async () => {
+    it('impede que usuários anônimos/não autenticados leiam perfis privados', async () => {
       if (!isEmulatorRunning || !testEnv) return
 
       await testEnv.withSecurityRulesDisabled(async (context) => {
@@ -88,6 +106,110 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
 
       await assertSucceeds(setDoc(doc(aliceDb, 'users', 'alice'), { displayName: 'Alice Silva' }))
       await assertFails(setDoc(doc(bobDb, 'users', 'alice'), { displayName: 'Bob Hacking Alice' }))
+    })
+  })
+
+  describe('1.1 Coleção /public_profiles/{userId} (Perfis Públicos para Amizades)', () => {
+    it('permite que qualquer usuário autenticado leia perfis públicos', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'public_profiles', 'alice'), {
+          uid: 'alice',
+          email: 'alice@example.com',
+          displayName: 'Alice Silva',
+          photoURL: 'https://example.com/alice.png',
+          updatedAt: Date.now(),
+        })
+      })
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      await assertSucceeds(getDoc(doc(bobDb, 'public_profiles', 'alice')))
+    })
+
+    it('impede que usuários anônimos/não autenticados leiam perfis públicos', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'public_profiles', 'alice'), {
+          uid: 'alice',
+          displayName: 'Alice Silva',
+        })
+      })
+
+      const unauthDb = testEnv.unauthenticatedContext().firestore()
+      await assertFails(getDoc(doc(unauthDb, 'public_profiles', 'alice')))
+    })
+
+    it('permite que apenas o proprietário crie ou atualize seu perfil público', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+
+      // Alice (proprietária) cria seu perfil público com sucesso
+      await assertSucceeds(
+        setDoc(doc(aliceDb, 'public_profiles', 'alice'), {
+          uid: 'alice',
+          email: 'alice@example.com',
+          displayName: 'Alice Silva',
+          photoURL: 'https://example.com/avatar.jpg',
+          updatedAt: Date.now(),
+        })
+      )
+
+      // Alice atualiza seu perfil público com sucesso
+      await assertSucceeds(
+        updateDoc(doc(aliceDb, 'public_profiles', 'alice'), {
+          displayName: 'Alice Santos',
+        })
+      )
+
+      // Bob tenta criar o perfil de Alice -> falha
+      await assertFails(
+        setDoc(doc(bobDb, 'public_profiles', 'alice'), {
+          uid: 'alice',
+          displayName: 'Bob Hacking',
+        })
+      )
+
+      // Bob tenta atualizar o perfil de Alice -> falha
+      await assertFails(
+        updateDoc(doc(bobDb, 'public_profiles', 'alice'), {
+          displayName: 'Bob Overwrite',
+        })
+      )
+    })
+
+    it('bloqueia injeção de campos não autorizados (ex: monthlyIncome) em /public_profiles devido a hasOnly', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const aliceRef = doc(aliceDb, 'public_profiles', 'alice')
+
+      // Tentativa de criar com campo não autorizado (monthlyIncome)
+      await assertFails(
+        setDoc(aliceRef, {
+          uid: 'alice',
+          displayName: 'Alice',
+          monthlyIncome: 10000,
+        })
+      )
+
+      // Criação inicial válida
+      await assertSucceeds(
+        setDoc(aliceRef, {
+          uid: 'alice',
+          displayName: 'Alice',
+        })
+      )
+
+      // Tentativa de injetar campo não autorizado em update
+      await assertFails(
+        updateDoc(aliceRef, {
+          monthlyIncome: 10000,
+        })
+      )
     })
   })
 

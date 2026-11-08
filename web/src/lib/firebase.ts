@@ -33,13 +33,14 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
   writeBatch,
   type Firestore,
 } from 'firebase/firestore'
-import type { Card, ChatSession, Friendship, MonthClosure, NewTransaction, RecurringBill, SharedUser, Transaction, UserLearnedRule, UserProfile } from '@/types'
+import type { Card, ChatSession, Friendship, MonthClosure, NewTransaction, PublicUserProfile, RecurringBill, SharedUser, Transaction, UserLearnedRule, UserProfile } from '@/types'
 import { dateInMonth, daysInMonth, monthLabel, stripUndefined } from './utils'
 
 const FIREBASE_CONFIG_STORAGE_KEY = 'saldo-livre:firebase-config'
@@ -176,6 +177,7 @@ function ensure() {
 
 export const COLLECTIONS = {
   users: 'users',
+  publicProfiles: 'public_profiles',
   cards: 'cards',
   recurring: 'recurring_bills',
   transactions: 'transactions',
@@ -208,23 +210,56 @@ export function signOutUser() {
 // ------------------------------------------------------------------
 export async function upsertUserProfile(user: User): Promise<UserProfile> {
   const { db } = ensure()
-  const ref = doc(db, COLLECTIONS.users, user.uid)
-  const snap = await getDoc(ref)
+  const userRef = doc(db, COLLECTIONS.users, user.uid)
+  const publicRef = doc(db, COLLECTIONS.publicProfiles, user.uid)
+  const snap = await getDoc(userRef)
+  const emailLower = (user.email ?? '').toLowerCase()
+  const displayName = user.displayName ?? user.email ?? 'Usuário'
+  const photoURL = user.photoURL
+
   const base: UserProfile = {
     uid: user.uid,
-    email: user.email ?? '',
-    displayName: user.displayName ?? user.email ?? 'Usuário',
-    photoURL: user.photoURL,
+    email: emailLower,
+    displayName,
+    photoURL,
     monthlyIncome: 0,
   }
-  if (!snap.exists()) {
-    await setDoc(ref, base)
-    return base
+
+  const publicData: PublicUserProfile = {
+    uid: user.uid,
+    email: emailLower,
+    displayName,
+    photoURL,
+    updatedAt: serverTimestamp(),
   }
-  const existing = snap.data() as UserProfile
-  const merged = { ...existing, email: base.email, displayName: existing.displayName || base.displayName, photoURL: base.photoURL }
-  await setDoc(ref, merged, { merge: true })
-  return merged
+
+  const batch = writeBatch(db)
+  if (!snap.exists()) {
+    batch.set(userRef, base)
+  } else {
+    const existing = snap.data() as UserProfile
+    const merged = {
+      ...existing,
+      email: emailLower,
+      displayName: existing.displayName || displayName,
+      photoURL: photoURL ?? existing.photoURL ?? null,
+    }
+    batch.set(userRef, merged, { merge: true })
+    publicData.displayName = merged.displayName
+  }
+  batch.set(publicRef, publicData, { merge: true })
+  await batch.commit()
+
+  if (snap.exists()) {
+    const existing = snap.data() as UserProfile
+    return {
+      ...existing,
+      email: emailLower,
+      displayName: existing.displayName || displayName,
+      photoURL: photoURL ?? existing.photoURL ?? null,
+    }
+  }
+  return base
 }
 
 export function subscribeUserProfile(uid: string, cb: (u: UserProfile | null) => void) {
@@ -240,15 +275,34 @@ export function subscribeUserProfile(uid: string, cb: (u: UserProfile | null) =>
   }
 }
 
-export function updateUserProfile(uid: string, patch: Partial<UserProfile>) {
-  return updateDoc(doc(ensure().db, COLLECTIONS.users, uid), stripUndefined(patch))
+export async function updateUserProfile(uid: string, patch: Partial<UserProfile>) {
+  const { db } = ensure()
+  const userRef = doc(db, COLLECTIONS.users, uid)
+  await updateDoc(userRef, stripUndefined(patch))
+
+  if (patch.displayName !== undefined || patch.photoURL !== undefined || patch.email !== undefined) {
+    try {
+      const publicRef = doc(db, COLLECTIONS.publicProfiles, uid)
+      const publicPatch: Record<string, any> = { updatedAt: serverTimestamp() }
+      if (patch.displayName !== undefined) publicPatch.displayName = patch.displayName
+      if (patch.photoURL !== undefined) publicPatch.photoURL = patch.photoURL
+      if (patch.email !== undefined) publicPatch.email = patch.email.toLowerCase()
+      await setDoc(publicRef, publicPatch, { merge: true })
+    } catch (err) {
+      console.warn('Erro ao sincronizar perfil público:', err)
+    }
+  }
 }
 export const fsUpdateUserProfile = updateUserProfile
 
-export async function findUserByEmail(email: string): Promise<UserProfile | null> {
-  const q = query(collection(ensure().db, COLLECTIONS.users), where('email', '==', email.trim().toLowerCase()), limit(1))
+export async function findUserByEmail(email: string): Promise<PublicUserProfile | null> {
+  const q = query(
+    collection(ensure().db, COLLECTIONS.publicProfiles),
+    where('email', '==', email.trim().toLowerCase()),
+    limit(1)
+  )
   const res = await getDocs(q)
-  return res.empty ? null : (res.docs[0].data() as UserProfile)
+  return res.empty ? null : (res.docs[0].data() as PublicUserProfile)
 }
 export const lookupUserByEmail = findUserByEmail
 
@@ -665,7 +719,7 @@ export function subscribeFriendships(uid: string, cb: (fs: Friendship[]) => void
 
 export async function fsCreateFriendship(
   requester: UserProfile,
-  recipient: UserProfile,
+  recipient: PublicUserProfile | UserProfile,
 ) {
   const { db } = ensure()
   const docRef = await addDoc(collection(db, COLLECTIONS.friendships), {

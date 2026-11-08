@@ -3,6 +3,14 @@ package com.saldolivre.app.data.model
 import androidx.compose.runtime.Immutable
 
 @Immutable
+data class PublicUserProfile(
+    val uid: String = "",
+    val email: String = "",
+    val displayName: String = "",
+    val photoURL: String? = null
+)
+
+@Immutable
 data class UserProfile(
     val uid: String = "",
     val email: String = "",

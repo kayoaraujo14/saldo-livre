@@ -100,6 +100,25 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #73 (Conclusão Integral):**
+  - **1. Segregação de Perfil Público (`/public_profiles`) e Blindagem de Dados Patrimoniais (`/users/{userId}`):**
+    - **Firestore Security Rules (`firestore.rules`):**
+      - Coleção `/users/{userId}`: leitura fechada exclusivamente para o proprietário (`allow read, create: if isOwner(userId);`), eliminando o antigo `allow read: if isAuthenticated();` e blindando dados patrimoniais confidenciais (`monthlyIncome`, `emergencyReserveBalance`, `investmentAssetBalances`, etc.).
+      - Nova coleção `/public_profiles/{userId}`: leitura aberta para usuários autenticados (`allow read: if isAuthenticated();`), e escrita restrita ao dono com validação estrita de campos autorizados (`request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'updatedAt']) && request.resource.data.uid == userId`).
+    - **Camada Web (`web/src/types/index.ts`, `lib/firebase.ts`, `store/types.ts`):**
+      - Criação da interface tipada `PublicUserProfile`.
+      - Atualização de `upsertUserProfile` para persistência atômica via `writeBatch` em `/users/{uid}` e `/public_profiles/{uid}`.
+      - Atualização de `findUserByEmail` para consultar em `COLLECTIONS.publicProfiles`.
+      - Sincronização em `updateUserProfile` de alterações em `displayName`, `photoURL` e `email` para `/public_profiles`.
+    - **Camada Android (`data/model/UserProfile.kt`, `FirestoreFinanceRepository.kt`):**
+      - Criação de `@Immutable data class PublicUserProfile`.
+      - Atualização de `saveUserProfile` e inicialização de sessão para persistir em lote em `/users` e `/public_profiles`.
+      - Atualização de `sendFriendRequest` para buscar destinatários por e-mail na coleção `public_profiles`.
+  - **2. Qualidade & Testes Automatizados:**
+    - Suíte `web/src/lib/__tests__/firestore-rules.test.ts` expandida de 27 para **32 testes verdes** cobrindo isolamento de `/users/{userId}` contra terceiros/anônimos, permissão de leitura em `/public_profiles` e bloqueio de injeção de campos não autorizados via `hasOnly`.
+    - Android: **`compileDebugKotlin` e `compileDebugSources` aprovados com BUILD SUCCESSFUL**.
+    - Web: **`oxlint` (0 warnings, 0 erros)**, **`vitest` (148 testes verdes em 13 suítes)**, **`vite build` aprovado em 835ms**.
+
 - **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #64 (Conclusão Integral):**
   - **1. Correção Contratual e Idempotência no Autolançamento de Contas Recorrentes (`backend/`):**
     - **Módulo de Domínio Serverless (`backend/src/recurringBills.ts`):**
