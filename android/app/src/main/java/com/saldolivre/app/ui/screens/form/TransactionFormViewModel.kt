@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.form
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -11,6 +13,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.math.max
 
+@Immutable
 data class TransactionFormState(
     val isEditing: Boolean = false,
     val editingTx: Transaction? = null,

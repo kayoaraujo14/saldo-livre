@@ -1,6 +1,7 @@
 package com.saldolivre.app.ui.screens.auth
 
 import android.content.Context
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+@Immutable
 data class AuthUiState(
     val isLoading: Boolean = false,
     val errorMessage: String? = null

@@ -1,6 +1,7 @@
 package com.saldolivre.app.ui.screens.chat
 
 import android.content.Context
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -32,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
+@Immutable
 data class ChatUiState(
     val messages: List<ChatMessage> = emptyList(),
     val isTyping: Boolean = false,

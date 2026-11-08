@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.invoices
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.CardInvoice
@@ -25,6 +27,7 @@ enum class InvoiceItemFilter(val label: String) {
     INSTALLMENTS("Parcelados")
 }
 
+@Immutable
 data class CardInvoicesUiState(
     val viewMonth: String = FinanceEngine.currentMonthKey(),
     val currentUser: com.saldolivre.app.data.model.UserProfile = com.saldolivre.app.data.model.UserProfile(),

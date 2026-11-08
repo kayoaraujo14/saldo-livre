@@ -1016,8 +1016,11 @@ private fun LearnedRulesSheetContent(
 // -------------------------------------------------------------
 // MODELO DE BLOCOS DE CONTEÚDO DA MENSAGEM (TEXTO, DIVISOR E TABELA NATIVA)
 // -------------------------------------------------------------
+@Immutable
 private sealed class MessageContentBlock {
+    @Immutable
     data class Text(val text: String) : MessageContentBlock()
+    @Immutable
     data class Table(val headers: List<String>, val rows: List<List<String>>) : MessageContentBlock()
     object Divider : MessageContentBlock()
 }

@@ -1,5 +1,6 @@
 package com.saldolivre.app.data.engine
 
+import androidx.compose.runtime.Immutable
 import com.saldolivre.app.data.model.*
 import java.text.NumberFormat
 import java.time.LocalDate
@@ -99,6 +100,7 @@ object FinanceEngine {
         return clean
     }
 
+    @Immutable
     data class NubankDateHeader(
         val title: String,
         val subtitle: String? = null,
@@ -348,6 +350,7 @@ object FinanceEngine {
         return impact
     }
 
+    @Immutable
     data class SplitResult(
         val allocations: List<Allocation>,
         val userImpact: Map<String, Double>,
@@ -1314,6 +1317,7 @@ object FinanceEngine {
         )
     }
 
+    @Immutable
     data class AccountCashFlowSummary(
         val previousMonthsSurplus: Double,
         val previousMonthLabel: String,
@@ -1388,6 +1392,7 @@ object FinanceEngine {
         )
     }
 
+    @Immutable
     data class EstimateResult(
         val amount: Double,
         val basis: String
@@ -1432,11 +1437,13 @@ object FinanceEngine {
         }
     }
 
+    @Immutable
     data class GenerateBillsResult(
         val created: List<Transaction>,
         val skipped: Int
     )
 
+    @Immutable
     data class AutoLaunchBillsResult(
         val created: List<Transaction>,
         val skipped: Int,
@@ -1464,6 +1471,7 @@ object FinanceEngine {
         return date.toString()
     }
 
+    @Immutable
     data class PendingRecurringCandidate(
         val id: String,
         val bill: RecurringBill? = null,

@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.cards
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.CardInvoice
@@ -21,6 +23,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import kotlin.math.max
 
+@Immutable
 data class CardsAndInvoicesUiState(
     val selectedTabIndex: Int = 0, // 0: Faturas, 1: Meus Cartões
     val viewMonth: String = FinanceEngine.currentMonthKey(),

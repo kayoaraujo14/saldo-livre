@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.cards
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -14,6 +16,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import kotlin.math.max
 
+@Immutable
 data class CardWithInvoice(
     val card: Card,
     val isOwner: Boolean,
@@ -28,6 +31,7 @@ data class CardWithInvoice(
     val totalCommitted: Double = invoiceAmount + futureInvoicesAmount
 )
 
+@Immutable
 data class CardsUiState(
     val currentUser: UserProfile = UserProfile(),
     val partner: UserProfile? = null,

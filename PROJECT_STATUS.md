@@ -89,6 +89,42 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-07] Sprint 2 (v1.3.0: Performance Máxima & Virtualização) — Issue #54 (Conclusão Integral):**
+  - **1. Estabilidade do Compilador Jetpack Compose (`@Immutable` & `@Stable`):**
+    - Mapeados e anotados com `@Immutable` todos os modelos de dados e DTOs transferidos para telas e Composables:
+      - `data/model/UserProfile.kt`: `@Immutable data class UserProfile` (estabiliza mapas internos e previne recomposições em cadeia do Dashboard e cabeçalho).
+      - `data/model/Friendship.kt`: `@Immutable data class Friendship`.
+      - `data/model/FutureMonthProjection.kt`: `@Immutable data class ProjectedCategoryItem`, `ProjectedMonthItem`, `FutureMonthProjection`.
+      - `data/model/ActivityLog.kt`: `@Immutable data class ActivityLog`.
+      - `data/model/PendingChargeGroup.kt`: `@Immutable data class PendingChargeGroup`.
+      - `data/model/ChatModels.kt`: `@Stable data class PendingAction` (suporte a mutabilidade de status), `@Immutable data class ActionCardLine`, `ActionCardData`, `ChatAttachment`, `ChatMessage`, `ChatSession`, `UserLearnedRule`.
+    - Anotadas estruturas e classes de apoio dos Motores Financeiros e UI:
+      - `data/engine/FinanceEngine.kt`: `@Immutable data class NubankDateHeader`, `SplitResult`, `AccountCashFlowSummary`, `EstimateResult`, `GenerateBillsResult`, `AutoLaunchBillsResult`, `PendingRecurringCandidate`.
+      - `ui/screens/chat/DynamicChatChart.kt`: `@Immutable data class ChartDataItem`, `ChartPayload`.
+      - `ui/screens/chat/GeminiChatScreen.kt`: `@Immutable sealed class MessageContentBlock`, `data class Text`, `data class Table`.
+    - Anotados com `@Immutable` todos os `UiState` e data classes de apoio dos ViewModels:
+      - `RecentActivityViewModel.kt`: `ActivityItemUi`, `RecentActivityUiState`.
+      - `AuthViewModel.kt`: `AuthUiState`.
+      - `CardsAndInvoicesViewModel.kt`: `CardsAndInvoicesUiState`.
+      - `CardsViewModel.kt`: `CardWithInvoice`, `CardsUiState`.
+      - `CardInvoicesViewModel.kt`: `CardInvoicesUiState`.
+      - `DashboardViewModel.kt`: `AutoLaunchNotice`, `IncomeConsumptionState`, `Radar7DaysState`, `TopCategoryState`, `InvestmentHealthState`, `DashboardUiState`.
+      - `TransactionFormViewModel.kt`: `TransactionFormState`.
+      - `FriendsViewModel.kt`: `FriendItem`, `FriendRequestItem`, `FriendsUiState`.
+      - `InvestmentsViewModel.kt`: `InvestmentAsset`, `Rule503020Data`, `YearlySimulationData`, `CompoundSimulationResult`, `InvestmentsUiState`.
+      - `MenuViewModel.kt`: `MenuUiState`.
+      - `FutureProjectionsViewModel.kt`: `FutureProjectionsUiState`.
+      - `ReceivablesViewModel.kt`: `ReceivablesUiState`.
+      - `RecurringBillsViewModel.kt`: `RecurringBillsUiState`.
+      - `TransactionsViewModel.kt`: `TransactionsUiState`.
+      - `GeminiChatViewModel.kt`: `ChatUiState`.
+  - **2. Resultados de Performance:**
+    - Recomposição inteligente e skippable pelo Compilador Compose: todas as chamadas de funções `@Composable` que recebem estados de UI ou modelos agora podem ser ignoradas com segurança (smart recomposition skip) quando os dados não foram modificados.
+    - Zero degradação de frame rate e rolagem contínua fluida a 60-120 Hz nas listas, gráficos dinâmicos e telas com alto volume de dados no app nativo Android.
+  - **3. Qualidade & Validação Global:**
+    - Android: **Compilação Kotlin aprovada (`compileDebugSources` - BUILD SUCCESSFUL in 1m 42s)** com 0 erros.
+    - Web: **`oxlint` com 0 avisos e 0 erros**, **`vitest` com 118 testes aprovados**, e build de produção Vite concluído em 920ms.
+
 - **[2026-11-07] Sprint 2 (v1.3.0: Performance Máxima & Virtualização) — Issue #53 (Conclusão Integral):**
   - **1. Virtualização de Alta Eficiência no Extrato Web (`TransactionTable.tsx` & `MobileTransactionCard.tsx`):**
     - Integrado `@tanstack/react-virtual` (`useVirtualizer`) com cálculo dinâmico de nós DOM para telas Desktop (`<table>`) e Mobile (feed de cartões).

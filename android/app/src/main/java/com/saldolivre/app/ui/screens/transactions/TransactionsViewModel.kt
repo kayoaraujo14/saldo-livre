@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.transactions
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -15,6 +17,7 @@ import com.saldolivre.app.data.model.UserProfile
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+@Immutable
 data class TransactionsUiState(
     val currentUser: UserProfile = UserProfile(),
     val transactions: List<Transaction> = emptyList(),

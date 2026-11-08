@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.menu
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.SaldoLivreApplication
@@ -13,6 +15,7 @@ import com.saldolivre.app.data.repository.MockFinanceRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+@Immutable
 data class MenuUiState(
     val currentUser: UserProfile = UserProfile(),
     val partnerUser: UserProfile? = null,
