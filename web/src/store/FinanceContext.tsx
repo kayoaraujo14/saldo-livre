@@ -25,11 +25,14 @@ import {
   amountPatch,
   buildSplit,
   calculateCardInvoiceDates,
+  calculateInstallmentAmount,
+  calculateInstallmentCompetenceMonths,
   canUserEditTransaction,
   clampPct,
   computeCategoryBudgets,
   computeSummary,
   estimateRecurring,
+  fractionCustomAllocations,
   friendPctOf,
   friendShareOf,
   getPendingRecurringLaunches,
@@ -1600,35 +1603,32 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
       const initialStatus = assignedFriend ? ('pending_approval' as const) : undefined
 
-      // Cálculo de valor das parcelas
-      let perInstallmentAmount = input.amount
-      if (isInstallment) {
-        if (input.installmentMode === 'total') {
-          perInstallmentAmount = round2(input.amount / installmentsTotal)
-        } else {
-          perInstallmentAmount = round2(input.amount)
-        }
-      }
+      // Cálculo de valor das parcelas e competências
+      const isPerInstallment = input.installmentMode === 'per_installment'
+      const competenceMonths = calculateInstallmentCompetenceMonths(
+        input.date,
+        card,
+        installmentsTotal,
+        input.paymentMethod === 'credit_card'
+      )
 
       const installmentGroupId = isInstallment ? makeId('inst') : null
       const txsToCreate: NewTransaction[] = []
 
       for (let i = 1; i <= installmentsTotal; i++) {
-        let curAmount = perInstallmentAmount
-        if (isInstallment && input.installmentMode === 'total' && i === installmentsTotal) {
-          curAmount = round2(input.amount - perInstallmentAmount * (installmentsTotal - 1))
-        }
-
+        const curAmount = calculateInstallmentAmount(input.amount, i, installmentsTotal, isPerInstallment)
         const curDate = isInstallment ? shiftDateMonth(input.date, i - 1) : input.date
-        let curDueDate = curDate
-        let curCompetenceMonth = curDate.slice(0, 7)
-
-        if (input.paymentMethod === 'credit_card' && card) {
-          const cardDates = calculateCardInvoiceDates(curDate, card)
-          curDueDate = curDate
-          curCompetenceMonth = cardDates.competenceMonth
-        }
+        const curDueDate = curDate
+        const curCompetenceMonth = competenceMonths[i - 1] ?? curDate.slice(0, 7)
         const curDesc = stripInstallmentSuffix(input.description)
+
+        // Fracionamento de cotas de rateio customizado com absorção residual de centavos na última parcela
+        const curCustomAllocs = fractionCustomAllocations(
+          input.customAllocations,
+          i,
+          installmentsTotal,
+          isPerInstallment
+        )
 
         const split = buildSplit({
           splitType: input.type === 'income' ? 'mine' : input.splitType,
@@ -1640,9 +1640,15 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           externalName: input.externalName,
           assignedFriend,
           friendSharePct,
-          customAllocations: input.customAllocations,
+          customAllocations: curCustomAllocs,
           acceptanceStatus: initialStatus,
         })
+
+        // Status: Parcela 1 recebe o status original informado (ex: paid se já quitada).
+        // Parcelas subsequentes permanecem pending (ou estimated se a compra era previsão orçamentária).
+        const effectiveStatus = i === 1
+          ? input.status
+          : (input.status === 'estimated' ? 'estimated' : 'pending')
 
         txsToCreate.push({
           createdByUid: me.uid,
@@ -1653,9 +1659,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           subcategory: input.subcategory || null,
           type: input.type,
           paymentMethod: input.paymentMethod,
-          status: input.status,
-          estimatedAmount: input.status === 'estimated' ? curAmount : null,
-          actualAmount: input.status === 'estimated' ? null : curAmount,
+          status: effectiveStatus,
+          estimatedAmount: effectiveStatus === 'estimated' ? curAmount : null,
+          actualAmount: effectiveStatus === 'estimated' ? null : curAmount,
           totalAmount: curAmount,
           dueDate: curDueDate,
           competenceMonth: curCompetenceMonth,

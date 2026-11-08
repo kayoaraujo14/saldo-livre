@@ -101,6 +101,28 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Sprint — Correções Críticas: Motor de Parcelamentos & Faturas — Issue #77 (Conclusão Integral):**
+  - **1. Avanço Estrito de Competência (Extinção do Colapso de Parcelas na Virada de Mês):**
+    - **Web (`store/FinanceContext.tsx`, `lib/finance.ts`) & Android (`TransactionFormViewModel.kt`, `FinanceEngine.kt`):**
+      - Criação da função pura `calculateInstallmentCompetenceMonths(purchaseDate, card, installmentsTotal, isCreditCard)`.
+      - Apenas a 1ª parcela calcula o ciclo de fechamento (`calculateCardInvoiceDates`); todas as parcelas subsequentes avançam deterministicamente via `shiftMonth(initialCompetenceMonth, i - 1)`.
+      - Elimina o bug crítico onde compras feitas no fim do mês (ex: 31 de janeiro com fechamento no dia 30) colapsavam as parcelas 1 e 2 na mesma fatura de março devido ao mês de fevereiro possuir menos dias.
+  - **2. Fracionamento de Cotas de Amigos e Extinção da Multiplicação de Rateio:**
+    - Criação da função pura `fractionCustomAllocations(allocations, installmentNumber, installmentsTotal, isPerInstallment)`.
+    - Elimina a atribuição integral de cotas no Web onde compras parceladas com divisão customizada multiplicavam as dívidas dos participantes por N.
+    - No modo `per_installment`, preserva os valores pré-calculados por parcela.
+  - **3. Arredondamento Residual de Centavos Ímpares na Parcela e no Rateio:**
+    - Criação da função pura `calculateInstallmentAmount(total, installmentNumber, installmentsTotal, isPerInstallment)`.
+    - No Android e Web, a última parcela absorve estritamente a diferença de centavos em divisões com dízimas periódicas (ex: R$ 100 em 3x = 33,33 + 33,33 + 33,34), garantindo soma contábil perfeita.
+    - As cotas dos amigos no rateio customizado também absorvem os resíduos na última parcela.
+  - **4. Isolamento do Status Inicial das Parcelas:**
+    - Apenas a Parcela 1 recebe o status informado (`input.status`), permitindo lançar a primeira parcela como paga sem marcar indevidamente parcelas futuras.
+    - Parcelas futuras permanecem `pending` (ou `estimated` se a compra for estimativa orçamentária).
+  - **5. Qualidade & Testes Automatizados (100% Verdes):**
+    - Expandida a suíte `web/src/lib/__tests__/installmentGroup.test.ts` (16 testes verdes no Vitest).
+    - Expandida a suíte `android/app/src/test/java/com/saldolivre/app/data/engine/FinanceEngineInstallmentTest.kt` (10 testes verdes na JVM).
+    - Quality gates 100% aprovados: `npm run check:all` (Oxlint 0 erros/warnings, 192 testes Vitest Web, 10 testes Backend, builds TypeScript e Vite) e Gradle (`testDebugUnitTest` 100% verde).
+
 - **[2026-11-08] Sprint — Correções Críticas: Motor de Parcelamentos & Faturas — Issue #76 (Conclusão Integral):**
   - **1. Isolamento Estrito de Status por Parcela (`updateInstallmentGroup`):**
     - **Web (`store/FinanceContext.tsx`) & Android (`FirestoreFinanceRepository.kt`, `MockFinanceRepository.kt`):**

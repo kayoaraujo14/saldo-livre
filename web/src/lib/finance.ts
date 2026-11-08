@@ -34,7 +34,7 @@ import type {
   SmartBudgetAllocation,
 } from '@/types'
 import { INCOME_CATEGORIES, normalizeCategory } from '@/types'
-import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftMonth, todayKey } from './utils'
+import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftDateMonth, shiftMonth, todayKey } from './utils'
 import { buildCardInvoice } from './invoices'
 
 export interface Party {
@@ -123,6 +123,83 @@ export function calculateCardInvoiceDates(
   const dueDate = `${competenceMonth}-${String(card.dueDay).padStart(2, '0')}`
 
   return { dueDate, competenceMonth }
+}
+
+/**
+ * Calcula o valor de uma parcela específica (1-based index) absorvendo
+ * a diferença residual de arredondamento de centavos na última parcela.
+ */
+export function calculateInstallmentAmount(
+  total: number,
+  installmentNumber: number,
+  installmentsTotal: number,
+  isPerInstallment: boolean = false
+): number {
+  if (installmentsTotal <= 1 || isPerInstallment) {
+    return round2(total)
+  }
+  const perInstallment = round2(total / installmentsTotal)
+  if (installmentNumber === installmentsTotal) {
+    return round2(total - perInstallment * (installmentsTotal - 1))
+  }
+  return perInstallment
+}
+
+/**
+ * Determina a lista de meses de competência para uma série de parcelas,
+ * garantindo avanço determinístico estrito mês a mês a partir da 1ª parcela
+ * e impedindo o colapso de faturas em meses com menos dias (ex: 31 de janeiro).
+ */
+export function calculateInstallmentCompetenceMonths(
+  purchaseDate: string,
+  card: Card | null | undefined,
+  installmentsTotal: number,
+  isCreditCard: boolean
+): string[] {
+  if (installmentsTotal <= 0) return []
+  if (installmentsTotal === 1) {
+    if (isCreditCard && card) {
+      return [calculateCardInvoiceDates(purchaseDate, card).competenceMonth]
+    }
+    return [purchaseDate.slice(0, 7)]
+  }
+
+  const initialCompetenceMonth = isCreditCard && card
+    ? calculateCardInvoiceDates(purchaseDate, card).competenceMonth
+    : purchaseDate.slice(0, 7)
+
+  const months: string[] = []
+  for (let i = 1; i <= installmentsTotal; i++) {
+    if (isCreditCard && card) {
+      months.push(shiftMonth(initialCompetenceMonth, i - 1))
+    } else {
+      const curDate = shiftDateMonth(purchaseDate, i - 1)
+      months.push(curDate.slice(0, 7))
+    }
+  }
+  return months
+}
+
+/**
+ * Fraciona alocações customizadas (rateio com amigos/participantes) para uma
+ * parcela específica, absorvendo a diferença residual de centavos na última parcela.
+ */
+export function fractionCustomAllocations(
+  allocations: Allocation[] | undefined,
+  installmentNumber: number,
+  installmentsTotal: number,
+  isPerInstallment: boolean = false
+): Allocation[] | undefined {
+  if (!allocations || allocations.length === 0) return allocations
+  if (installmentsTotal <= 1 || isPerInstallment) return allocations
+
+  return allocations.map((a) => {
+    const perInst = round2(a.amount / installmentsTotal)
+    const partAmount = installmentNumber === installmentsTotal
+      ? round2(a.amount - perInst * (installmentsTotal - 1))
+      : perInst
+    return { ...a, amount: partAmount }
+  })
 }
 
 

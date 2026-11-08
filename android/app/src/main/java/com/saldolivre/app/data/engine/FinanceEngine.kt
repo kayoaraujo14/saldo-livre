@@ -337,6 +337,86 @@ object FinanceEngine {
         }
     }
 
+    /**
+     * Calcula o valor de uma parcela específica (1-based index) absorvendo
+     * a diferença residual de arredondamento de centavos na última parcela.
+     */
+    fun calculateInstallmentAmount(
+        total: Double,
+        installmentNumber: Int,
+        installmentsTotal: Int,
+        isPerInstallment: Boolean = false
+    ): Double {
+        if (installmentsTotal <= 1 || isPerInstallment) {
+            return round2(total)
+        }
+        val perInstallment = round2(total / installmentsTotal)
+        if (installmentNumber == installmentsTotal) {
+            return round2(total - perInstallment * (installmentsTotal - 1))
+        }
+        return perInstallment
+    }
+
+    /**
+     * Determina a lista de meses de competência para uma série de parcelas,
+     * garantindo avanço determinístico estrito mês a mês a partir da 1ª parcela
+     * e impedindo o colapso de faturas em meses com menos dias (ex: 31 de janeiro).
+     */
+    fun calculateInstallmentCompetenceMonths(
+        purchaseDate: String,
+        card: Card?,
+        installmentsTotal: Int,
+        isCreditCard: Boolean
+    ): List<String> {
+        if (installmentsTotal <= 0) return emptyList()
+        if (installmentsTotal == 1) {
+            return if (isCreditCard && card != null) {
+                listOf(calculateCardInvoiceDates(purchaseDate, card).second)
+            } else {
+                listOf(purchaseDate.take(7))
+            }
+        }
+
+        val initialCompetenceMonth = if (isCreditCard && card != null) {
+            calculateCardInvoiceDates(purchaseDate, card).second
+        } else {
+            purchaseDate.take(7)
+        }
+
+        return (1..installmentsTotal).map { i ->
+            if (isCreditCard && card != null) {
+                shiftMonth(initialCompetenceMonth, i - 1)
+            } else {
+                val curDate = shiftDateMonth(purchaseDate, i - 1)
+                curDate.take(7)
+            }
+        }
+    }
+
+    /**
+     * Fraciona alocações customizadas (rateio com amigos/participantes) para uma
+     * parcela específica, absorvendo a diferença residual de centavos na última parcela.
+     */
+    fun fractionCustomAllocations(
+        allocations: List<Allocation>?,
+        installmentNumber: Int,
+        installmentsTotal: Int,
+        isPerInstallment: Boolean = false
+    ): List<Allocation>? {
+        if (allocations == null || allocations.isEmpty()) return allocations
+        if (installmentsTotal <= 1 || isPerInstallment) return allocations
+
+        return allocations.map { a ->
+            val perInst = round2(a.amount / installmentsTotal)
+            val partAmount = if (installmentNumber == installmentsTotal) {
+                round2(a.amount - perInst * (installmentsTotal - 1))
+            } else {
+                perInst
+            }
+            a.copy(amount = partAmount)
+        }
+    }
+
     fun deriveImpact(allocations: List<Allocation>, visibleToUids: List<String>): Map<String, Double> {
         val impact = mutableMapOf<String, Double>()
         for (u in visibleToUids) {
