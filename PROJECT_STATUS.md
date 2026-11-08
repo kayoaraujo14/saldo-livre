@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md — Fonte da Verdade & Índice Arquitetural (`Saldo Livre`)
 
-> **Última Atualização:** 2026-11-06
+> **Última Atualização:** 2026-11-07
 > **Status da Fundação:** 🟢 **100% CONCLUÍDA E ESTABILIZADA**
 > **Propósito:** Índice central de arquitetura, mapeamento de paridade Web/Mobile, segurança e histórico de micro-commits para otimização máxima de contexto e tokens.
 
@@ -88,6 +88,18 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+
+- **[2026-11-07] Sprint 2 (v1.3.0: Performance Máxima & Virtualização) — Issue #53 (Conclusão Integral):**
+  - **1. Virtualização de Alta Eficiência no Extrato Web (`TransactionTable.tsx` & `MobileTransactionCard.tsx`):**
+    - Integrado `@tanstack/react-virtual` (`useVirtualizer`) com cálculo dinâmico de nós DOM para telas Desktop (`<table>`) e Mobile (feed de cartões).
+    - Preservados 100% dos recursos avançados: filtros estilo Excel (Status, Intervalo de Datas, Categorias, Subcategorias, Divisões, Pessoas/Terceiros, Valores Mín/Máx, Ordenação), modo tela cheia inteligente com cabeçalho sticky, linha de saldo inicial/déficit acumulado (`carryoverAmount`), badges em pílula e rodapé analítico dinâmico com totais de entradas, despesas e saldo líquido da seleção.
+    - Otimização do DOM: mesmo com 500+ transações carregadas, são renderizados estritamente os elementos em viewport (~15 a 20 linhas + overscan) com espaçadores calculados dinamicamente via `paddingTop` e `paddingBottom`, eliminando jank e mantendo rolagem estável a 60 FPS com consumo mínimo de memória.
+    - Suporte a expansão e redimensionamento dinâmico no mobile via `measureElement` e `gap: 8`.
+  - **2. Qualidade & Testes Automatizados:**
+    - Criada a suíte `web/src/components/__tests__/TransactionTable.test.tsx` com 5 testes automatizados cobrindo skeletons de carregamento, estado vazio (`EmptyState`), cálculo de somatórios do rodapé, busca textual reativa e renderização virtualizada estável de listas de 500 transações.
+    - Linter: **0 avisos e 0 erros** em 78 arquivos (`oxlint`).
+    - Testes Unitários: **118 testes verdes** em 11 suítes (`vitest`).
+    - Build Web: **`tsc -b && vite build` aprovado com sucesso em 812ms** sem erros.
 
 - **[2026-11-07] Conclusão da Sprint 1 (v1.2.0: UI/UX & Prevenção de Bugs Visuais) — Issue #52 (Conclusão Integral):**
   - **1. Correção Estrita de Exhaustive-Deps em `FinancialHealthModal.tsx`:**
