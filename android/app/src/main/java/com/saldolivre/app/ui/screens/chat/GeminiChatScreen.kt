@@ -2415,6 +2415,22 @@ private fun StatementItemRow(
                     }
                 }
 
+                if (item.isDuplicate) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Amber500.copy(alpha = 0.15f))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = item.duplicateReason ?: "Já Cadastrada",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Amber400
+                        )
+                    }
+                }
+
                 if (item.isIgnored && !item.ignoredReason.isNullOrBlank()) {
                     Box(
                         modifier = Modifier

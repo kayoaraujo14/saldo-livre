@@ -1669,6 +1669,10 @@ export interface PendingBatchTransaction {
   emailAmigo?: string
   porcentagemAmigo?: number
   motivoIgnorado?: string
+  isDuplicate?: boolean
+  duplicateReason?: string
+  fitId?: string
+  selected?: boolean
 }
 
 export interface ActionCardData {
