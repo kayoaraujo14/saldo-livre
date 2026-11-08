@@ -100,7 +100,7 @@ android {
     }
     testOptions {
         unitTests.all {
-            it.systemProperty("file.encoding", "UTF-8")
+            it.jvmArgs("-Dfile.encoding=UTF-8")
             it.testLogging {
                 events("passed", "skipped", "failed", "standardOut", "standardError")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
