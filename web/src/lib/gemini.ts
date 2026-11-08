@@ -249,7 +249,8 @@ export const functionDeclarations: FunctionDeclaration[] = [
       type: Type.OBJECT,
       properties: {
         descricao: { type: Type.STRING, description: 'Descrição da despesa ou receita. Ex: "Decolar", "Amazon", "Uber".' },
-        valorTotal: { type: Type.NUMBER, description: 'Valor da compra em reais (aceita valores negativos para estornos/reembolsos na fatura).' },
+        valorTotal: { type: Type.NUMBER, description: 'Valor total da compra em reais (ou valor total do parcelamento). Se informado junto com totalParcelas, o sistema divide automaticamente entre as parcelas. Aceita valores negativos para estornos.' },
+        valorParcela: { type: Type.NUMBER, description: 'Valor de cada parcela em reais quando a compra for parcelada (ex: R$ 50 para 3x de R$ 50).' },
         categoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Categoria oficial da despesa ou receita (ex: Alimentação, Moradia, Transporte, Salário & Remuneração, etc.).' },
         subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Aluguel & Condomínio", "Energia Elétrica", "Presentes", etc.).' },
         metodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Padrão: credit_card.' },
@@ -447,6 +448,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
         emLote: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir para excluir múltiplos itens ou "todas as compras de X".' },
         tudoDoMes: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir para limpar ou apagar o mês inteiro.' },
         apenasRecentes: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir expressamente "desfazer último lote" ou "apagar os últimos cadastrados".' },
+        deleteAllInstallments: { type: Type.BOOLEAN, description: 'Se true, exclui todas as parcelas do grupo de parcelamento quando o usuário pedir para cancelar ou excluir a compra parcelada inteira (ex: "exclua o parcelamento do celular"). Padrão: false.' },
         limiteQuantidade: { type: Type.NUMBER, description: 'Quantidade máxima a excluir (padrão 1 para exclusão de item único).' },
       },
     },

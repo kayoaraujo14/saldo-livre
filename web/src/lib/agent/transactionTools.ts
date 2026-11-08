@@ -13,11 +13,13 @@ import { extractCounterparty } from '../pdfParser'
 import {
   buildSplit,
   calculateCardInvoiceDates,
+  calculateInstallmentAmount,
   canUserEditTransaction,
   clampPct,
   computeSummary,
   detectSplit,
   effectiveAmount,
+  fractionCustomAllocations,
   guessCategoryAndSubcategory,
   pickCard,
   SPLIT_LABELS,
@@ -54,18 +56,20 @@ function getAgentSummary(env: AgentEnv, txs: Transaction[], monthKey: string) {
 import type { AgentEnv, ToolResult } from './types'
 
 export async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
-  const sanitizedTotal = sanitizeAmount(args.valorTotal ?? args.amount)
-  if (sanitizedTotal === null || sanitizedTotal <= 0) {
+  const rawValorParcela = sanitizeAmount(args.valorParcela ?? args.installmentAmount)
+  const rawValorTotal = sanitizeAmount(args.valorTotal ?? args.amount ?? args.valor ?? args.totalAmount)
+  const inputAmount = rawValorTotal ?? rawValorParcela
+  if (inputAmount === null || inputAmount === 0) {
     return {
       response: {
         ok: false,
         precisaClarificacao: true,
         campoFaltante: 'valorTotal',
-        erro: 'Qual foi o valor dessa transação? (Deve ser um valor numérico válido maior que zero)',
+        erro: 'Qual foi o valor dessa transação? (Deve ser um valor numérico válido diferente de zero)',
       },
     }
   }
-  let total = sanitizedTotal
+  let total = inputAmount
 
   const description = sanitizeText(args.descricao ?? args.description ?? '', 300)
   if (!description || description.toLowerCase() === 'lançamento' || description.toLowerCase() === 'despesa' || description.toLowerCase() === 'gasto') {
@@ -366,6 +370,15 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
   const isInstallment = !isNaN(parcelaAtual) && !isNaN(totalParcelas) && totalParcelas > 1
   const cleanBaseDesc = cleanBaseDescription(description)
 
+  // Determina se a entrada foi por parcela (valorParcela) ou valor total (valorTotal)
+  const isPerInstallment = Boolean(rawValorParcela && rawValorParcela > 0 && (!rawValorTotal || rawValorTotal <= 0))
+  const purchaseTotal = isInstallment && isPerInstallment && rawValorParcela
+    ? round2(rawValorParcela * totalParcelas)
+    : inputAmount!
+  const currentInstallmentAmt = isInstallment
+    ? (isPerInstallment ? rawValorParcela! : calculateInstallmentAmount(purchaseTotal, parcelaAtual, totalParcelas, false))
+    : purchaseTotal
+
   // Cálculo da data de vencimento da fatura e mês de competência que comprometerá a renda
   const explicitMonth = typeof args.mesFatura === 'string' && /^\d{4}-\d{2}$/.test(args.mesFatura)
     ? args.mesFatura
@@ -396,10 +409,17 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     ? formatInstallmentDesc(cleanBaseDesc, parcelaAtual, totalParcelas)
     : (cleanBaseDesc || description)
 
+  const currentCustomAllocs = fractionCustomAllocations(
+    customAllocations,
+    parcelaAtual,
+    totalParcelas,
+    isPerInstallment
+  )
+
   // Split para cálculo do impacto e divisão
   const splitForCurrent = buildSplit({
     splitType,
-    total,
+    total: currentInstallmentAmt,
     me: env.me,
     partner: env.partner,
     payerUid,
@@ -407,11 +427,11 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     externalName: args.nomeTerceiro as string | undefined,
     assignedFriend,
     friendSharePct: assignedFriend ? friendSharePct : 100,
-    customAllocations,
+    customAllocations: currentCustomAllocs,
   })
 
   const myImpact = splitForCurrent.userImpact[env.me.uid] ?? 0
-  const receivable = payerUid === env.me.uid ? round2(total - myImpact) : 0
+  const receivable = payerUid === env.me.uid ? round2(currentInstallmentAmt - myImpact) : 0
   const label = SPLIT_LABELS[splitForCurrent.splitType]
 
   const firstMonth = isInstallment ? shiftMonth(competenceMonth, 1 - parcelaAtual) : competenceMonth
@@ -423,15 +443,15 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
 
   // Se ainda não foi confirmado pelo usuário, gera pedido de confirmação sem alterar o banco de dados
   if (isPendingConfirmation) {
-    const netDiff = type === 'income' ? total : -myImpact
+    const netDiff = type === 'income' ? currentInstallmentAmt : -myImpact
     const estimatedAfter = round2(before.freeBalance + netDiff)
     const actionKind = type === 'income' ? 'Receita' : isRefund ? 'Estorno / Reembolso' : 'Despesa'
     const actionTitle = `${actionKind}: ${finalDescription}`
 
     const confirmationLines = [
-      { label: type === 'income' ? 'Valor da receita' : isRefund ? 'Valor do estorno' : 'Valor da parcela', value: money(Math.abs(total)) },
+      { label: type === 'income' ? 'Valor da receita' : isRefund ? 'Valor do estorno' : isInstallment ? 'Valor da parcela' : 'Valor da despesa', value: money(Math.abs(currentInstallmentAmt)) },
       ...(isInstallment
-        ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(total)})` }]
+        ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(Math.abs(currentInstallmentAmt))} cada • Total: ${money(Math.abs(purchaseTotal))})` }]
         : []),
       { label: 'Categoria', value: subcategory ? `${category} › ${subcategory}` : category },
       { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
@@ -451,7 +471,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
       ...(card ? [{ label: 'Cartão', value: card.cardName || 'Cartão' }] : []),
       {
         label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
-        value: type === 'income' ? `+${money(Math.abs(total))}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
+        value: type === 'income' ? `+${money(Math.abs(currentInstallmentAmt))}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
         tone: type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
       },
       ...(receivable > 0 ? [{ label: assignedFriend ? `A receber (${assignedFriend.name})` : 'A receber', value: money(receivable), tone: 'positive' as const }] : []),
@@ -462,9 +482,10 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
       response: {
         ok: true,
         aguardandoConfirmacao: true,
-        mensagem: `Entendi que você deseja cadastrar ${type === 'income' ? 'uma receita' : isRefund ? 'um estorno/crédito' : 'uma despesa'}: "${finalDescription}" no valor de ${money(Math.abs(total))}${card ? ` no cartão ${card.cardName}` : ''} realizada em ${formatShortDate(date)} para a fatura de ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
+        mensagem: `Entendi que você deseja cadastrar ${type === 'income' ? 'uma receita' : isRefund ? 'um estorno/crédito' : 'uma despesa'}: "${finalDescription}" no valor de ${money(Math.abs(currentInstallmentAmt))}${isInstallment ? ` (Parcela ${parcelaAtual} de ${totalParcelas} • Total: ${money(Math.abs(purchaseTotal))})` : ''}${card ? ` no cartão ${card.cardName}` : ''} realizada em ${formatShortDate(date)} para a fatura de ${monthLabel(competenceMonth)}. Por favor, confirme se está correto para lançar no sistema.`,
         descricao: finalDescription,
-        valorParcela: total,
+        valorParcela: currentInstallmentAmt,
+        valorTotal: purchaseTotal,
         tipo: type,
         categoria: category,
         subcategoria: subcategory,
@@ -504,6 +525,9 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     const txsToCreate: NewTransaction[] = []
 
     for (let i = 1; i <= totalParcelas; i++) {
+      const curInstAmt = isPerInstallment
+        ? rawValorParcela!
+        : calculateInstallmentAmount(purchaseTotal, i, totalParcelas, false)
       const delta = i - parcelaAtual
       const instMonth = shiftMonth(competenceMonth, delta)
       const instDueDate = shiftDateMonth(finalDueDate, delta)
@@ -512,9 +536,16 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
       const isCurrent = i === parcelaAtual
       const instStatus: TransactionStatus = isPast ? 'paid' : (isCurrent ? status : 'pending')
 
+      const curCustomAllocs = fractionCustomAllocations(
+        customAllocations,
+        i,
+        totalParcelas,
+        isPerInstallment
+      )
+
       const instSplit = buildSplit({
         splitType,
-        total,
+        total: curInstAmt,
         me: env.me,
         partner: env.partner,
         payerUid,
@@ -522,7 +553,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
         externalName: args.nomeTerceiro as string | undefined,
         assignedFriend,
         friendSharePct: assignedFriend ? friendSharePct : 100,
-        customAllocations,
+        customAllocations: curCustomAllocs,
       })
 
       txsToCreate.push({
@@ -535,9 +566,9 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
         type,
         paymentMethod: method,
         status: instStatus,
-        estimatedAmount: instStatus === 'estimated' ? total : null,
-        actualAmount: instStatus === 'estimated' ? null : total,
-        totalAmount: total,
+        estimatedAmount: instStatus === 'estimated' ? curInstAmt : null,
+        actualAmount: instStatus === 'estimated' ? null : curInstAmt,
+        totalAmount: curInstAmt,
         dueDate: instDueDate,
         competenceMonth: instMonth,
         visibleToUids: instSplit.visibleToUids,
@@ -570,7 +601,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     // Transação individual comum (à vista / parcela única)
     const split = buildSplit({
       splitType,
-      total,
+      total: currentInstallmentAmt,
       me: env.me,
       partner: env.partner,
       payerUid,
@@ -591,9 +622,9 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
       type,
       paymentMethod: method,
       status,
-      estimatedAmount: status === 'estimated' ? total : null,
-      actualAmount: status === 'estimated' ? null : total,
-      totalAmount: total,
+      estimatedAmount: status === 'estimated' ? currentInstallmentAmt : null,
+      actualAmount: status === 'estimated' ? null : currentInstallmentAmt,
+      totalAmount: currentInstallmentAmt,
       dueDate: finalDueDate,
       competenceMonth,
       visibleToUids: split.visibleToUids,
@@ -1373,6 +1404,18 @@ export async function excluir(env: AgentEnv, args: Record<string, unknown>): Pro
     targets = candidates.slice(0, limite)
   }
 
+  const deleteAllInstallments =
+    Boolean(args.deleteAllInstallments) ||
+    Boolean(args.excluirTodasAsParcelas) ||
+    Boolean(args.excluirParcelamento)
+
+  if (deleteAllInstallments && targets.length > 0) {
+    const groupIds = new Set(targets.map((t) => t.installmentGroupId).filter(Boolean) as string[])
+    if (groupIds.size > 0) {
+      targets = all.filter((t) => t.installmentGroupId && groupIds.has(t.installmentGroupId))
+    }
+  }
+
   if (targets.length === 0) {
     return {
       response: { ok: false, erro: 'Nenhuma transação encontrada com os filtros informados para exclusão.' },
@@ -1393,12 +1436,15 @@ export async function excluir(env: AgentEnv, args: Record<string, unknown>): Pro
   const totalDeletedValue = targets.reduce((sum, t) => sum + effectiveAmount(t), 0)
   const deletedDescriptions = targets.map((t) => t.description)
   const affectedMonth = targets[0]?.competenceMonth || env.monthKey
+  const isGroupDelete = deleteAllInstallments && targets.some((t) => Boolean(t.installmentGroupId))
 
   if (isPendingConfirmation) {
-    const title = `Excluir: ${targets.length === 1 ? targets[0].description : `${targets.length} lançamentos`}`
+    const title = isGroupDelete
+      ? `Excluir Parcelamento Completo (${targets.length} parcelas)`
+      : `Excluir: ${targets.length === 1 ? targets[0].description : `${targets.length} lançamentos`}`
     const confirmationLines = [
-      { label: 'Ação', value: 'Exclusão de Lançamento(s)' },
-      { label: 'Quantidade', value: `${targets.length} item(ns)` },
+      { label: 'Ação', value: isGroupDelete ? 'Exclusão de Parcelamento Completo' : 'Exclusão de Lançamento(s)' },
+      { label: 'Quantidade', value: `${targets.length} parcela(s)` },
       { label: 'Itens a Excluir', value: deletedDescriptions.slice(0, 4).join(', ') + (deletedDescriptions.length > 4 ? ` (+${deletedDescriptions.length - 4})` : '') },
       { label: 'Valor a Remover', value: money(totalDeletedValue), tone: 'positive' as const },
       { label: 'Mês Afetado', value: monthLabel(affectedMonth) },
@@ -1409,7 +1455,9 @@ export async function excluir(env: AgentEnv, args: Record<string, unknown>): Pro
       response: {
         ok: true,
         aguardandoConfirmacao: true,
-        mensagem: `Entendi que você deseja excluir ${targets.length === 1 ? `o lançamento "${targets[0].description}" no valor de ${money(totalDeletedValue)}` : `${targets.length} lançamentos totalizando ${money(totalDeletedValue)}`}. Por favor, confirme no botão abaixo se está correto para excluir do sistema.`,
+        mensagem: isGroupDelete
+          ? `Entendi que você deseja excluir o parcelamento completo de "${targets[0]?.description || 'compra parcelada'}" (${targets.length} parcelas no total de ${money(totalDeletedValue)}). Por favor, confirme no botão abaixo se está correto para excluir do sistema.`
+          : `Entendi que você deseja excluir ${targets.length === 1 ? `o lançamento "${targets[0].description}" no valor de ${money(totalDeletedValue)}` : `${targets.length} lançamentos totalizando ${money(totalDeletedValue)}`}. Por favor, confirme no botão abaixo se está correto para excluir do sistema.`,
         quantidadeExcluir: targets.length,
         valorTotal: round2(totalDeletedValue),
         itens: deletedDescriptions,

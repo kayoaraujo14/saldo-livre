@@ -620,6 +620,24 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
   - **Prompt de IA Blindado:** reforço no prompt do sistema do Gemini para garantir que compras de fatura usem `origemDocumento: "fatura_cartao"` e `metodoPagamentoPadrao: "credit_card"`.
   - **Validação:** `npm run build` OK e `./gradlew.bat compileDebugKotlin` OK.
 
+- **[2026-11-08] Sincronização de Contrato de Parcelamento e Exclusão em Grupo no Chat (Web & Android — Issue #78):**
+  - **Sincronização de Contrato de Parcelamento (`valorTotal` vs `valorParcela`):** alinhamento do schema do Gemini (`gemini.ts`) e engines de execução (`transactionTools.ts` e `AndroidAgentToolsEngine.kt`). Compras com `valorTotal` informado (ex: R$ 1.200 em 10x) agora distribuem as parcelas dividindo o total (R$ 120 por parcela), eliminando a multiplicação catastrófica para R$ 12.000. Preservação de compras onde o valor informado é expressamente a parcela individual (`valorParcela`). Fracionamento automático de `customAllocations` e absorção residual de dízimas de centavos na última parcela.
+  - **Exclusão Atômica de Parcelas no Chat (`deleteAllInstallments`):** implementado suporte ao parâmetro booleano e aliases em português no Web e Android. Quando ativado, a ferramenta identifica o `installmentGroupId` e remove atomicamente todas as parcelas do parcelamento no repositório.
+  - **Proteção de Datas em Edições (Android):** isolamento estrito de alterações de `dueDate` e `competenceMonth` na ferramenta de edição do Android, impedindo que a modificação de vencimento de uma parcela colapse as datas das parcelas irmãs.
+  - **Testes Automatizados:** 5 novos testes unitários no Vitest Web (`agentInstallmentTools.test.ts`) e 6 novos testes JUnit JVM no Android (`AndroidAgentInstallmentToolsTest.kt`), todos 100% aprovados.
+
+- **[2026-11-08] Prevenção de Colapso de Parcelas na Virada de Ano/Mês e Isolamento de Rateio (Web & Android — Issue #77):**
+  - **Motor Puro de Competência e Parcelamento:** criação e espelhamento das funções puras `calculateInstallmentAmount`, `calculateInstallmentCompetenceMonths` e `fractionCustomAllocations` em `finance.ts` e `FinanceEngine.kt`.
+  - **Avanço Cronológico Rigoroso:** geração de competências mês a mês garantindo a transição segura entre anos (ex: Dezembro -> Janeiro) sem colapso de parcelas no mesmo mês.
+  - **Preservação de Cartão e Fracionamento de Rateio:** vínculo de cartão de crédito blindado e cotas personalizadas de amigos (`customAllocations`) fracionadas por parcela sem inflar o valor do rateio.
+  - **Testes Automatizados:** 16 testes unitários no Vitest (`installmentGroup.test.ts`) e 10 testes unitários no JUnit JVM (`FinanceEngineInstallmentTest.kt`), 100% aprovados.
+
+- **[2026-11-08] Isolamento de Status por Parcela, Preservação de Reembolsos e Extinção de Sufixo (Web & Android — Issue #76):**
+  - **Isolamento de Status:** criação de compras parceladas preserva status (`paid`) apenas na parcela 1; parcelas futuras (2..N) nascem como `pending` / `estimated`.
+  - **Preservação de Reembolsos Rápidos:** ações de estorno e quitação rápida preservam o vínculo com `installmentGroupId` e a numeração da parcela.
+  - **Extinção de Sufixo Duplicado:** padronização da descrição limpa sem concatenação redundante de "(1/N)" em títulos já formatados.
+  - **Testes Automatizados:** baterias de testes unitários integradas no Web e Android com 100% de cobertura.
+
 - **[2026-11-01] Fase 3 — Refatoração da Feature de Investimentos (Sincronização Cloud, Aportes, Resgates e Caixinhas):**
   - **Sincronização Cloud Firestore:** migração de saldos de caixinhas (`investmentAssetBalances`) e da meta mensal (`investmentMonthlyTarget`) de `SharedPreferences`/`localStorage` para o documento do usuário em `/users/{uid}`, garantindo persistência multiplataforma em tempo real.
   - **Paridade Web & Mobile:** implementação completa em `InvestmentsModal.tsx` com separação em buckets (Caixinhas & Reservas Seguras vs Investimentos de Risco & Renda Variável), ações rápidas de **Novo Aporte**, **Resgate** e **Ajuste de Saldo Real**, apuração automática de lucro/rendimento e histórico detalhado.
