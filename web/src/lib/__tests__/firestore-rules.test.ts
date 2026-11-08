@@ -333,5 +333,326 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       await assertFails(deleteDoc(aliceLogRef))
     })
   })
+
+  describe('6. Coleção /friendships/{friendshipId} (Rede de Amizades e Anti-Spoofing)', () => {
+    it('permite que o solicitante crie pedido de amizade válido', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const fRef = doc(aliceDb, 'friendships', 'friendship_alice_bob')
+
+      await assertSucceeds(
+        setDoc(fRef, {
+          requesterUid: 'alice',
+          recipientUid: 'bob',
+          status: 'pending',
+          createdAt: Date.now(),
+        })
+      )
+    })
+
+    it('impede criação com requesterUid forjado ou auto-amizade (recipientUid == requesterUid)', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+
+      // Bob tenta se passar por Alice no requesterUid
+      await assertFails(
+        setDoc(doc(bobDb, 'friendships', 'fake_request'), {
+          requesterUid: 'alice',
+          recipientUid: 'charlie',
+          status: 'pending',
+        })
+      )
+
+      // Bob tenta adicionar a si mesmo
+      await assertFails(
+        setDoc(doc(bobDb, 'friendships', 'self_request'), {
+          requesterUid: 'bob',
+          recipientUid: 'bob',
+          status: 'pending',
+        })
+      )
+    })
+
+    it('permite leitura apenas por requester e recipient; bloqueia terceiros', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'friendships', 'f_alice_bob'), {
+          requesterUid: 'alice',
+          recipientUid: 'bob',
+          status: 'pending',
+        })
+      })
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const eveDb = testEnv.authenticatedContext('eve').firestore()
+
+      await assertSucceeds(getDoc(doc(aliceDb, 'friendships', 'f_alice_bob')))
+      await assertSucceeds(getDoc(doc(bobDb, 'friendships', 'f_alice_bob')))
+      await assertFails(getDoc(doc(eveDb, 'friendships', 'f_alice_bob')))
+    })
+
+    it('garante que requesterUid e recipientUid sejam estritamente imutáveis no update', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'friendships', 'f_mutable_test'), {
+          requesterUid: 'alice',
+          recipientUid: 'bob',
+          status: 'pending',
+        })
+      })
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const fRef = doc(bobDb, 'friendships', 'f_mutable_test')
+
+      // Bob aceita o pedido -> PERMITIDO
+      await assertSucceeds(updateDoc(fRef, { status: 'accepted' }))
+
+      // Bob tenta adulterar o recipientUid para outra pessoa -> BLOQUEADO
+      await assertFails(updateDoc(fRef, { recipientUid: 'eve' }))
+
+      // Bob tenta adulterar o requesterUid -> BLOQUEADO
+      await assertFails(updateDoc(fRef, { requesterUid: 'eve' }))
+    })
+
+    it('permite exclusão por requester ou recipient, bloqueando terceiros', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'friendships', 'f_del_test'), {
+          requesterUid: 'alice',
+          recipientUid: 'bob',
+          status: 'accepted',
+        })
+      })
+
+      const eveDb = testEnv.authenticatedContext('eve').firestore()
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+
+      await assertFails(deleteDoc(doc(eveDb, 'friendships', 'f_del_test')))
+      await assertSucceeds(deleteDoc(doc(aliceDb, 'friendships', 'f_del_test')))
+    })
+  })
+
+  describe('7. Coleções Top-Level (/agent_rules, /chat_sessions, /month_closures) - Issue #57 Hardening', () => {
+    it('bloqueia ataque de sobrescrita cruzada em /agent_rules (Update Bypass)', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      // Alice cria sua regra legítima
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'agent_rules', 'rule_alice_top'), {
+          ownerUid: 'alice',
+          rule: 'Regra legítima de Alice',
+          active: true,
+        })
+      })
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const targetRefForBob = doc(bobDb, 'agent_rules', 'rule_alice_top')
+      const targetRefForAlice = doc(aliceDb, 'agent_rules', 'rule_alice_top')
+
+      // Bob tenta sobrescrever a regra de Alice injetando seu próprio ownerUid no payload
+      await assertFails(
+        updateDoc(targetRefForBob, {
+          ownerUid: 'bob',
+          rule: 'Invasão por Bob',
+        })
+      )
+
+      // Bob tenta alterar a regra mantendo ownerUid de Alice
+      await assertFails(
+        updateDoc(targetRefForBob, {
+          rule: 'Invasão sutil',
+        })
+      )
+
+      // Bob tenta ler ou deletar a regra de Alice
+      await assertFails(getDoc(targetRefForBob))
+      await assertFails(deleteDoc(targetRefForBob))
+
+      // Alice pode atualizar legitimamente sua regra
+      await assertSucceeds(
+        updateDoc(targetRefForAlice, {
+          rule: 'Regra atualizada pela Alice',
+        })
+      )
+
+      // Alice tenta trocar ownerUid para outra pessoa -> BLOQUEADO (imutabilidade)
+      await assertFails(
+        updateDoc(targetRefForAlice, {
+          ownerUid: 'charlie',
+        })
+      )
+    })
+
+    it('bloqueia ataque de sobrescrita cruzada em /chat_sessions', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'chat_sessions', 'sess_alice'), {
+          ownerUid: 'alice',
+          title: 'Conversa Secreta de Alice',
+        })
+      })
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobTargetRef = doc(bobDb, 'chat_sessions', 'sess_alice')
+      const aliceTargetRef = doc(aliceDb, 'chat_sessions', 'sess_alice')
+
+      // Bob tenta sobrescrever com seu próprio ownerUid
+      await assertFails(
+        updateDoc(bobTargetRef, {
+          ownerUid: 'bob',
+          title: 'Sessão Sequestrada',
+        })
+      )
+
+      // Bob não pode ler nem excluir
+      await assertFails(getDoc(bobTargetRef))
+      await assertFails(deleteDoc(bobTargetRef))
+
+      // Alice pode atualizar
+      await assertSucceeds(updateDoc(aliceTargetRef, { title: 'Conversa Atualizada' }))
+
+      // Alice não pode transferir ownership
+      await assertFails(updateDoc(aliceTargetRef, { ownerUid: 'bob' }))
+    })
+
+    it('bloqueia ataque de sobrescrita cruzada em /month_closures', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'month_closures', 'cls_alice_2026_04'), {
+          uid: 'alice',
+          closedMonth: '2026-04',
+          totalSurplus: 1500,
+        })
+      })
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobTargetRef = doc(bobDb, 'month_closures', 'cls_alice_2026_04')
+      const aliceTargetRef = doc(aliceDb, 'month_closures', 'cls_alice_2026_04')
+
+      // Bob tenta sobrescrever passando seu próprio uid
+      await assertFails(
+        updateDoc(bobTargetRef, {
+          uid: 'bob',
+          totalSurplus: 0,
+        })
+      )
+
+      // Bob não pode ler nem excluir
+      await assertFails(getDoc(bobTargetRef))
+      await assertFails(deleteDoc(bobTargetRef))
+
+      // Alice pode atualizar legitimamente
+      await assertSucceeds(updateDoc(aliceTargetRef, { totalSurplus: 1800 }))
+
+      // Alice não pode alterar o campo uid (imutabilidade)
+      await assertFails(updateDoc(aliceTargetRef, { uid: 'charlie' }))
+    })
+  })
+
+  describe('8. Subcoleções de Usuário (/users/{userId}/chat_sessions e month_closures)', () => {
+    it('garante isolamento estrito de /chat_sessions e /month_closures sob /users/{userId}', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+
+      const aliceChatRef = doc(aliceDb, 'users', 'alice', 'chat_sessions', 'sess_sub_1')
+      const aliceClosureRef = doc(aliceDb, 'users', 'alice', 'month_closures', 'cls_sub_1')
+
+      await assertSucceeds(setDoc(aliceChatRef, { title: 'Chat Alice', updatedAt: Date.now() }))
+      await assertSucceeds(setDoc(aliceClosureRef, { closedMonth: '2026-04', surplus: 500 }))
+
+      // Bob não pode ler, escrever nem deletar as subcoleções de Alice
+      const bobChatRef = doc(bobDb, 'users', 'alice', 'chat_sessions', 'sess_sub_1')
+      const bobClosureRef = doc(bobDb, 'users', 'alice', 'month_closures', 'cls_sub_1')
+
+      await assertFails(getDoc(bobChatRef))
+      await assertFails(updateDoc(bobChatRef, { title: 'Hackeado' }))
+      await assertFails(deleteDoc(bobChatRef))
+
+      await assertFails(getDoc(bobClosureRef))
+      await assertFails(updateDoc(bobClosureRef, { surplus: 0 }))
+      await assertFails(deleteDoc(bobClosureRef))
+    })
+  })
+
+  describe('9. Imutabilidade de Campos Críticos (/cards, /recurring_bills, /transactions)', () => {
+    it('impede alteração do titular em /cards/{cardId}', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const cardRef = doc(aliceDb, 'cards', 'card_immut_test')
+
+      await assertSucceeds(
+        setDoc(cardRef, {
+          ownerUid: 'alice',
+          cardName: 'Cartão Alice',
+        })
+      )
+
+      await assertFails(
+        updateDoc(cardRef, {
+          ownerUid: 'bob',
+        })
+      )
+    })
+
+    it('impede alteração do titular em /recurring_bills/{billId}', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const billRef = doc(aliceDb, 'recurring_bills', 'bill_immut_test')
+
+      await assertSucceeds(
+        setDoc(billRef, {
+          ownerUid: 'alice',
+          description: 'Internet',
+          amount: 120,
+        })
+      )
+
+      await assertFails(
+        updateDoc(billRef, {
+          ownerUid: 'bob',
+        })
+      )
+    })
+
+    it('impede alteração do createdByUid em /transactions/{txId} (anti-spoofing)', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const txRef = doc(aliceDb, 'transactions', 'tx_immut_test')
+
+      await assertSucceeds(
+        setDoc(txRef, {
+          createdByUid: 'alice',
+          paidByUid: 'alice',
+          visibleToUids: ['alice'],
+          totalAmount: 50,
+          description: 'Café',
+        })
+      )
+
+      // Alice tenta transferir a autoria para Bob -> BLOQUEADO
+      await assertFails(
+        updateDoc(txRef, {
+          createdByUid: 'bob',
+        })
+      )
+    })
+  })
 })
+
 
