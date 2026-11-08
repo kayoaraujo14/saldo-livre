@@ -42,6 +42,8 @@ import {
   matchesSearch,
   money,
   SPLIT_MAP,
+  sanitizeAmount,
+  sanitizeText,
 } from './common'
 
 function getAgentSummary(env: AgentEnv, txs: Transaction[], monthKey: string) {
@@ -52,20 +54,20 @@ function getAgentSummary(env: AgentEnv, txs: Transaction[], monthKey: string) {
 import type { AgentEnv, ToolResult } from './types'
 
 export async function registrar(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
-  const rawTotal = Number(args.valorTotal ?? args.amount)
-  if (isNaN(rawTotal) || rawTotal <= 0) {
+  const sanitizedTotal = sanitizeAmount(args.valorTotal ?? args.amount)
+  if (sanitizedTotal === null || sanitizedTotal <= 0) {
     return {
       response: {
         ok: false,
         precisaClarificacao: true,
         campoFaltante: 'valorTotal',
-        erro: 'Qual foi o valor dessa transação?',
+        erro: 'Qual foi o valor dessa transação? (Deve ser um valor numérico válido maior que zero)',
       },
     }
   }
-  let total = round2(rawTotal)
+  let total = sanitizedTotal
 
-  const description = String(args.descricao ?? args.description ?? '').trim()
+  const description = sanitizeText(args.descricao ?? args.description ?? '', 300)
   if (!description || description.toLowerCase() === 'lançamento' || description.toLowerCase() === 'despesa' || description.toLowerCase() === 'gasto') {
     return {
       response: {

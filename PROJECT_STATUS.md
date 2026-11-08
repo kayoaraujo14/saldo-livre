@@ -72,12 +72,23 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 1. **Firestore Security Rules (`firestore.rules`):**
    - **Isolamento Estrito por `uid`:** Nenhuma leitura ou escrita ocorre sem `request.auth != null`.
-   - **Proteção de Rateios em `/transactions/{txId}`:** Apenas o criador/pagador pode editar dados estruturais ou excluir; o amigo atribuído (`assignedFriendUid`) possui permissão restrita (`hasOnly(['acceptanceStatus', 'respondedAt'])`) apenas para aceitar ou recusar a despesa compartilhada.
+   - **Eliminação Completa de Update Bypass:** Separação estrita de permissões `create`, `read`, `update` e `delete` em `/agent_rules`, `/chat_sessions` e `/month_closures`, impedindo injeção forjada de `ownerUid` / `uid` no payload de modificação.
+   - **Imutabilidade Estrita de Identidade (Zero Trust):**
+     - `/friendships/{friendshipId}`: verificação estrita de imutabilidade de `requesterUid` e `recipientUid` no `update` e proibição de auto-amizade (`requesterUid != recipientUid`).
+     - `/cards/{cardId}`: `ownerUid` estritamente imutável no `update`.
+     - `/recurring_bills/{billId}`: isolamento total por `ownerUid` com imutabilidade estrita.
+     - `/transactions/{txId}`: criador com `createdByUid` imutável contra spoofing; amigos atribuídos no rateio restritos estritamente a `acceptanceStatus` e `respondedAt`.
    - **Cartões Compartilhados (`/cards/{cardId}`):** Titular (`ownerUid`) possui controle total (`CRUD`); convidados (`sharedWithUids`) possuem permissão exclusiva de leitura (`read`) no cartão e nas transações vinculadas a ele.
-   - **Subcoleções Privadas:** `agent_rules`, `chat_sessions` e `month_closures` blindadas exclusivamente para o próprio `userId` / `ownerUid`.
-2. **Ofuscação e Blindagem Android (`android/app/proguard-rules.pro`):**
+   - **Subcoleções Privadas:** `agent_rules`, `chat_sessions`, `month_closures` e `activity_logs` blindadas exclusivamente para o próprio `userId` autenticado.
+2. **Firebase App Check Ativo (Play Integrity & reCAPTCHA Enterprise):**
+   - **Web:** Integrado em `firebase.ts` com `ReCaptchaEnterpriseProvider` e fallback para `ReCaptchaV3Provider`, protegendo as APIs do Firestore/Auth contra tráfego malicioso de bots e automações não autorizadas.
+   - **Android:** Integrado em `SaldoLivreApplication.kt` com seleção dinâmica entre `DebugAppCheckProviderFactory` (compilações debug com token no Logcat) e `PlayIntegrityAppCheckProviderFactory` (compilações de produção assinadas com atestação de hardware do Google Play).
+3. **Sanitização Estrita do Copiloto Gemini & Defesa contra Prompt Injection:**
+   - **Web (`agent/security.ts`):** Validação defensiva de todas as chamadas de Function Calling com `detectPromptInjection`, `sanitizeText` (remoção de tags HTML/scripts e caracteres invisíveis, neutralização de prompt injection marcada como `[neutralizado]`), `sanitizeAmount` (rejeição de `NaN`, `Infinity` e estouros de valor), `sanitizePercentage` e coerção de datas/meses.
+   - **Android (`ai/AgentSecuritySanitizer.kt`):** Espelhamento com 100% de paridade das rotinas de sanitização, expressões regulares e validação prévia na execução de ferramentas no `AndroidAgentToolsEngine.kt`.
+4. **Ofuscação e Blindagem Android (`android/app/proguard-rules.pro`):**
    - Regras R8/ProGuard ativas preservando `data.model.**`, serializadores `Gson` (`@SerializedName`, `TypeToken`), anotações do `Firebase Firestore` (`@PropertyName`, `@DocumentId`) e classes internas do SDK `com.google.ai.client.generativeai` (`kotlinx.serialization` e `Ktor`), prevenindo crashes em builds de Release.
-3. **Gestão de Segredos, Chaves de API e CI/CD Mobile:**
+5. **Gestão de Segredos, Chaves de API e CI/CD Mobile:**
    - Zero chaves ou keystores hardcoded no código-fonte versionado (`.gitignore` bloqueia `*.jks`, `*.keystore`, `local.properties`, `google-services.json`).
    - `android/app/build.gradle.kts` resolve segredos e assinatura `release` dinamicamente via propriedades injetadas (`-Pandroid.injected.signing.*`), `local.properties` ou variáveis de ambiente do CI, com fallback seguro para debug local.
    - Esteira `.github/workflows/android-release.yml` automatiza a decodificação de `KEYSTORE_BASE64`, compilação assinada via flags `-Pandroid.injected.signing.*` (`assembleRelease`), upload do `app-release.apk` como Artifact e distribuição contínua para o grupo `qa-team` no **Firebase App Distribution** (além de `.github/workflows/android-distribution.yml` para AAB/Play Store).
@@ -88,6 +99,32 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+
+- **[2026-11-07] Sprint 3 (v1.4.0: Segurança em Camadas & App Check) — Issue #56 (Conclusão Integral & Encerramento da Sprint 3):**
+  - **1. Sanitização Estrita de Parâmetros de Function Calling e Blindagem contra Injection:**
+    - **Módulo de Segurança Web (`web/src/lib/agent/security.ts`):**
+      - `detectPromptInjection(text)`: Detecção por regex contra comandos de jailbreak, descarte de instruções prévias, elevação a developer mode e exfiltração de dados.
+      - `sanitizeText(raw, maxLength, fallback)`: Remoção de caracteres de controle invisíveis, strip de tags HTML perigosas (`<script>`, `<iframe>`, etc.), detecção/neutralização de prompt injection (substituição do trecho malicioso por `[neutralizado]`) e truncamento defensivo a 300 caracteres.
+      - `sanitizeAmount(raw, fallback, allowNegative, maxLimit)`: Coerção rigorosa de números com rejeição imediata de `NaN`, `Infinity` e valores que excedam o limite seguro de R$ 10.000.000,00.
+      - `sanitizePercentage(raw, fallback, min, max)`: Clamping seguro entre 0 e 100 com rejeição de valores não numéricos.
+      - `sanitizeIsoDate(raw, fallback)`: Validação contra regex `YYYY-MM-DD` com restrição defensiva de datas válidas de calendário.
+      - `sanitizeMonthKey(raw, fallback)`: Validação estrita do padrão de competência `YYYY-MM`.
+      - `escapeHtmlAndMarkdown(text)`: Escapamento de caracteres especiais para prevenir injeção em renderizadores de Markdown/HTML.
+    - **Espelho Nativo Android (`android/app/.../ai/AgentSecuritySanitizer.kt`):**
+      - Paridade de 100% com as mesmas funções, expressões regulares de injeção e sanitização estrita em Kotlin para o ecossistema móvel.
+    - **Blindagem nos Motores de Ferramentas (Web & Android):**
+      - Web: Integrado em `transactionTools.ts`, `budgetTools.ts`, `managementTools.ts` e `chartTools.ts` com validação de payload antes de qualquer efeito colateral.
+      - Android: Integrado em `AndroidAgentToolsEngine.kt` com validação defensiva em `executeCreateFromJson`, `executeCreateTransaction`, regras e orçamentos, prevenindo mutações de estado por payloads malformados ou injeções de contexto.
+  - **2. Qualidade & Testes Automatizados:**
+    - Criada a suíte `web/src/lib/__tests__/agentSecurity.test.ts` (11 testes verdes) cobrindo detecção de injeções, limpeza de HTML, rejeição de NaN/Infinity e neutralização dentro de `registrarTransacao`.
+    - Criada a suíte Android `android/app/src/test/java/com/saldolivre/app/data/ai/AgentSecuritySanitizerTest.kt` validando todas as rotinas em testes unitários JVM.
+    - Web: **`oxlint` (0 warnings, 0 erros)**, **`vitest` (143 testes verdes em 13 suítes)**, **`vite build` aprovado em 861ms**.
+    - Android: **Compilação Kotlin e testes unitários JVM aprovados** (`compileDebugSources` e `compileDebugUnitTestSources`).
+  - **3. Encerramento da Sprint 3 (v1.4.0: Segurança em Camadas & App Check):**
+    - Todas as 3 issues do Milestone 3 concluídas com sucesso e 100% de paridade Web/Android:
+      - #57: Hardening das Firestore Security Rules & Testes de Violação (PR #63).
+      - #55: Firebase App Check (reCAPTCHA Enterprise & Play Integrity) (PR #72).
+      - #56: Sanitização Estrita de Function Calling e Blindagem contra Injection.
 
 - **[2026-11-07] Sprint 3 (v1.4.0: Segurança em Camadas & App Check) — Issue #55 (Conclusão Integral):**
   - **1. Integração Universal do Firebase App Check (Web & Android):**

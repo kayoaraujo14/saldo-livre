@@ -78,3 +78,13 @@ export function parseMonthKey(raw: unknown, referenceMonth = todayKey()): string
   return ''
 }
 
+export {
+  detectPromptInjection,
+  escapeHtmlAndMarkdown,
+  sanitizeAmount,
+  sanitizeIsoDate,
+  sanitizeMonthKey,
+  sanitizePercentage,
+  sanitizeText,
+} from './security'
+
