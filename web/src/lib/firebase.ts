@@ -5,6 +5,12 @@
  */
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import {
+  initializeAppCheck,
+  ReCaptchaEnterpriseProvider,
+  ReCaptchaV3Provider,
+  type AppCheck,
+} from 'firebase/app-check'
+import {
   GoogleAuthProvider,
   getAuth,
   onAuthStateChanged,
@@ -107,11 +113,49 @@ export const isFirebaseConfigured = Boolean(
 let app: FirebaseApp | null = null
 let auth: Auth | null = null
 let db: Firestore | null = null
+let appCheck: AppCheck | null = null
+
+export function initFirebaseAppCheck(firebaseApp: FirebaseApp): AppCheck | null {
+  if (typeof window === 'undefined') return null
+  if (appCheck) return appCheck
+
+  try {
+    const isDebug = import.meta.env.DEV || Boolean(import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG)
+    if (isDebug) {
+      const debugToken = (import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN as string) || true
+      const globalScope = typeof self !== 'undefined' ? self : typeof window !== 'undefined' ? window : globalThis
+      ;(globalScope as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean | string }).FIREBASE_APPCHECK_DEBUG_TOKEN = debugToken
+    }
+
+    const enterpriseKey =
+      (import.meta.env.VITE_FIREBASE_APPCHECK_ENTERPRISE_KEY as string) ||
+      (import.meta.env.VITE_FIREBASE_APPCHECK_KEY as string) ||
+      ''
+    const v3Key = (import.meta.env.VITE_FIREBASE_APPCHECK_RECAPTCHA_V3_KEY as string) || ''
+
+    if (enterpriseKey) {
+      appCheck = initializeAppCheck(firebaseApp, {
+        provider: new ReCaptchaEnterpriseProvider(enterpriseKey),
+        isTokenAutoRefreshEnabled: true,
+      })
+    } else if (v3Key) {
+      appCheck = initializeAppCheck(firebaseApp, {
+        provider: new ReCaptchaV3Provider(v3Key),
+        isTokenAutoRefreshEnabled: true,
+      })
+    }
+  } catch (err) {
+    console.warn('[AppCheck] Inicialização defensiva do Firebase App Check (Web):', err)
+  }
+
+  return appCheck
+}
 
 function ensure() {
   if (!isFirebaseConfigured || !firebaseConfig) throw new Error('Firebase não configurado (Modo Demo ativo).')
   if (!app) {
     app = initializeApp(firebaseConfig as Record<string, string>)
+    initFirebaseAppCheck(app)
     auth = getAuth(app)
     try {
       if (typeof window !== 'undefined' && typeof window.indexedDB !== 'undefined') {

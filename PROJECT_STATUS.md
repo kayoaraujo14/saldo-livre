@@ -89,6 +89,22 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-07] Sprint 3 (v1.4.0: Segurança em Camadas & App Check) — Issue #55 (Conclusão Integral):**
+  - **1. Integração Universal do Firebase App Check (Web & Android):**
+    - **Web (`web/src/lib/firebase.ts`):**
+      - Implementada a função `initFirebaseAppCheck(app)` com suporte transparente a `ReCaptchaEnterpriseProvider` (`VITE_FIREBASE_APPCHECK_ENTERPRISE_KEY` / `VITE_FIREBASE_APPCHECK_KEY`) e fallback para `ReCaptchaV3Provider` (`VITE_FIREBASE_APPCHECK_RECAPTCHA_V3_KEY`).
+      - Suporte a tokens de depuração em desenvolvimento local (`globalScope.FIREBASE_APPCHECK_DEBUG_TOKEN`) ativado dinamicamente por `VITE_FIREBASE_APPCHECK_DEBUG`.
+      - Fallback defensivo e resiliente para não interromper execuções de teste, SSR ou modo demo offline.
+      - Documentadas variáveis de ambiente no modelo `web/.env.example`.
+    - **Android (`android/app/.../SaldoLivreApplication.kt` & `build.gradle.kts`):**
+      - Adicionadas dependências oficiais `firebase-appcheck-playintegrity` e `firebase-appcheck-debug` via BOM do Firebase.
+      - Inicialização de segurança no ciclo de vida da aplicação com seleção automática de provedor: `DebugAppCheckProviderFactory` em compilações Debug (gerando token de depuração no Logcat) e `PlayIntegrityAppCheckProviderFactory` em compilações Release (atestação de integridade nativa do Google Play).
+      - Tratamento defensivo em bloco `try/catch` para preservar inicialização graciosa em testes ou em ambientes desprovidos de Google Play Services.
+  - **2. Qualidade & Testes Automatizados:**
+    - Criada a suíte `web/src/lib/__tests__/appCheck.test.ts` cobrindo resiliência contra ausência de chaves e injeção de tokens de debug.
+    - Android: **Compilação Kotlin aprovada (`compileDebugSources` - BUILD SUCCESSFUL in 3m 9s)**.
+    - Web: **`oxlint` (0 warnings, 0 erros)**, **`vitest` (132 testes verdes em 12 suítes)**, **`vite build` aprovado em 926ms**.
+
 - **[2026-11-07] Sprint 3 (v1.4.0: Segurança em Camadas & App Check) — Issue #57 (Conclusão Integral):**
   - **1. Auditoria e Hardening das Firestore Security Rules (`firestore.rules`):**
     - **Eliminação Completa do Update Bypass:** Refatoração de `/agent_rules`, `/chat_sessions` e `/month_closures` com separação explícita de `create`, `read`, `update` e `delete`, bloqueando a injeção forjada de `ownerUid` / `uid` no payload de atualização.
