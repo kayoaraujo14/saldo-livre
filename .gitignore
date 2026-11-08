@@ -31,9 +31,11 @@ dist-ssr
 
 # Android & Security Secrets
 .gradle/
+.gradle-user/
 build/
 android/app/build/
 android/.gradle/
+.gradle-user/
 local.properties
 android/local.properties
 *.apk

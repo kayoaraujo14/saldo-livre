@@ -89,6 +89,23 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-07] Sprint 3 (v1.4.0: Segurança em Camadas & App Check) — Issue #57 (Conclusão Integral):**
+  - **1. Auditoria e Hardening das Firestore Security Rules (`firestore.rules`):**
+    - **Eliminação Completa do Update Bypass:** Refatoração de `/agent_rules`, `/chat_sessions` e `/month_closures` com separação explícita de `create`, `read`, `update` e `delete`, bloqueando a injeção forjada de `ownerUid` / `uid` no payload de atualização.
+    - **Imutabilidade Estrita de Identidade (Zero Trust):**
+      - `/friendships/{friendshipId}`: verificação estrita de imutabilidade de `requesterUid` e `recipientUid` no `update` e proibição de auto-amizade (`requesterUid != recipientUid`).
+      - `/cards/{cardId}`: `ownerUid` estritamente imutável no `update`.
+      - `/recurring_bills/{billId}`: isolamento total por `ownerUid` com imutabilidade estrita.
+      - `/transactions/{txId}`: criador com `createdByUid` imutável contra spoofing; amigos atribuídos no rateio restritos estritamente a `acceptanceStatus` e `respondedAt`.
+    - **Subcoleções Privadas Blindadas:** Isolamento integral de `/users/{userId}/activity_logs`, `/users/{userId}/agent_rules`, `/users/{userId}/chat_sessions` e `/users/{userId}/month_closures` pelo UID autenticado.
+    - **Funções Auxiliares Expressivas:** Criação de `isAuthenticated()`, `isOwner()`, `isTxParticipant()`, `isTxSharedCardHolder()` e `isTxCreator()`.
+  - **2. Expansão da Suíte de Testes Unitários de Segurança:**
+    - Testes de regras em `web/src/lib/__tests__/firestore-rules.test.ts` expandidos de 15 para **27 testes unitários**, cobrindo exaustivamente tentativas de Update Bypass, spoofing de amizade, adulteração de campos imutáveis e violações de privacidade.
+  - **3. Quality Gates:**
+    - Linter: **0 erros e 0 warnings** em 78 arquivos (`oxlint`).
+    - Testes Unitários: **130 testes aprovados** em 11 suítes (`vitest`).
+    - Build Web: **`tsc -b && vite build` aprovado em 812ms**.
+
 - **[2026-11-07] Sprint 2 (v1.3.0: Performance Máxima & Virtualização) — Issue #54 (Conclusão Integral):**
   - **1. Estabilidade do Compilador Jetpack Compose (`@Immutable` & `@Stable`):**
     - Mapeados e anotados com `@Immutable` todos os modelos de dados e DTOs transferidos para telas e Composables:
