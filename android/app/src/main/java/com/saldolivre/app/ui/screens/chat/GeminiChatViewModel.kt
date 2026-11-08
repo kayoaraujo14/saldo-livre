@@ -1766,7 +1766,8 @@ Exemplo de Lote de Fatura de Cartão:
   "searchTerm": "Burger King",
   "amount": 50.0,
   "month": "2026-10",
-  "deleteAllInstallments": false
+  "deleteAllInstallments": false,
+  "deleteFutureOnly": false
 }
 ```
 
@@ -1893,6 +1894,28 @@ Todos os campos são opcionais e combináveis entre si!)*
 ```
 *(Use "acao": "diagnostico_saude_financeira" sempre que o usuário pedir análise de Saúde Financeira, Score ou como melhorar os 4 pilares; use "acao": "simular_compra" com "valorSimulacao" e "categoria"/"descricaoSimulacao" quando o usuário perguntar "posso gastar X em Y?"; use "acao": "rebalancear_automatico" ou "aplicar_sugestao_ia" para executar ajustes com 1 clique).*
 
+14. Antecipar Parcelas de Compra Parcelada (com desconto opcional):
+```json
+{
+  "action": "ANTICIPATE_INSTALLMENTS",
+  "searchTerm": "Notebook",
+  "installmentGroupId": null,
+  "quantidadeParcelas": 3,
+  "mesDestino": "2026-11",
+  "desconto": 50.0
+}
+```
+
+15. Estornar Integralmente Compra Parcelada (cancelamento total e reembolso de parcelas já pagas):
+```json
+{
+  "action": "REFUND_FULL_INSTALLMENTS",
+  "searchTerm": "Curso de Inglês",
+  "installmentGroupId": null,
+  "mesDestino": "2026-11"
+}
+```
+
 REGRAS DE FUNCIONAMENTO:
 
 1. CARTÕES DE CRÉDITO, FATURA E MÊS DE COMPETÊNCIA:
@@ -1960,6 +1983,12 @@ REGRAS DE FUNCIONAMENTO:
 - O sistema aloca AUTOMATICAMENTE toda a série de parcelas pelos meses correspondentes (passadas como pagas, atual e futuras como pendentes).
 - AO EDITAR CATEGORIA OU SUBCATEGORIA DE COMPRA PARCELADA: passe APENAS searchTerm, newCategory e newSubcategory. NUNCA passe newCompetenceMonth nem newDueDate, pois cada parcela tem sua própria data!
 - Se o usuário pedir para gerar, expandir ou sincronizar as parcelas de compras já existentes: use EXPAND_INSTALLMENTS.
+- ANTECIPAÇÃO DE PARCELAS ("antecipar parcelas", "adiantar parcelas", "puxar parcelas restantes com desconto"):
+  * Chame a ferramenta "anteciparParcelas" ou emita a ação "ANTICIPATE_INSTALLMENTS" informando searchTerm (ou installmentGroupId), quantidadeParcelas (número de parcelas finais a antecipar; se omitido, antecipa todas as pendentes), mesDestino (mês atual por padrão) e desconto (valor do desconto concedido em reais, se houver).
+- CANCELAMENTO DE PARCELAS RESTANTES/FUTURAS ("cancele as parcelas futuras", "cancele o restante da compra parcelada"):
+  * Chame a ferramenta "excluirTransacoes" ou emita a ação "DELETE_TRANSACTION" informando searchTerm e deleteFutureOnly: true (cancela as parcelas pendentes da atual em diante e preserva as parcelas passadas já quitadas).
+- ESTORNO INTEGRAL DE COMPRA PARCELADA ("estorne a compra completa", "devolvi o produto parcelado", "cancelei a compra em 10x"):
+  * Chame a ferramenta "estornarCompraParcelada" ou emita a ação "REFUND_FULL_INSTALLMENTS" informando searchTerm e mesDestino (cancela obrigações futuras e reembolsa o total já pago).
 
 6. REGISTRO EM LOTE:
 - Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE BATCH_TRANSACTIONS (uma única ação com todos os itens).

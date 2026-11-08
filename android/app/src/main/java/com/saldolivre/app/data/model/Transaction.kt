@@ -183,6 +183,9 @@ data class Transaction(
     val splitType: SplitType? = null,
     val externalName: String? = null,
     val refundedTransactionId: String? = null,
+    val isAnticipated: Boolean? = null,
+    val anticipatedFromMonth: String? = null,
+    val discountAmount: Double? = null,
     val invoiceMeta: com.saldolivre.app.data.engine.ConsolidatedInvoiceMeta? = null
 ) {
     val effectiveAmount: Double

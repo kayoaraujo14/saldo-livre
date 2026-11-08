@@ -34,7 +34,7 @@ import type {
   SmartBudgetAllocation,
 } from '@/types'
 import { INCOME_CATEGORIES, normalizeCategory } from '@/types'
-import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftDateMonth, shiftMonth, todayKey } from './utils'
+import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftDateMonth, shiftMonth, stripInstallmentSuffix, todayKey } from './utils'
 import { buildCardInvoice } from './invoices'
 
 export interface Party {
@@ -3843,5 +3843,63 @@ export function sanitizeAndValidateBudgetPlan(
   return {
     summaryInsight: plan.summaryInsight || 'Plano de envelopes calibrado com sucesso respeitando 100% da sua renda líquida disponível.',
     allocations: calibratedAllocs,
+  }
+}
+
+export interface FullInstallmentRefundResult {
+  toDeleteIds: string[]
+  totalPaidAmount: number
+  refundTransaction: Transaction | null
+}
+
+/**
+ * Calcula o estorno integral de uma compra parcelada:
+ * - Cancela e lista para exclusão todas as parcelas futuras e pendentes (status !== 'paid').
+ * - Se houver parcelas já pagas (status === 'paid'), gera um lançamento consolidado de crédito/estorno
+ *   com o valor total já desembolsado pelo usuário na competência desejada.
+ * - Se nenhuma parcela foi paga ainda, cancela e exclui todo o parcelamento sem necessidade de crédito residual.
+ */
+export function calculateFullInstallmentRefund(
+  groupTxs: Transaction[],
+  currentUser: { uid: string; displayName?: string },
+  todayIso: string = todayKey(),
+  targetCompetenceMonth?: string
+): FullInstallmentRefundResult {
+  if (!groupTxs || groupTxs.length === 0) {
+    return { toDeleteIds: [], totalPaidAmount: 0, refundTransaction: null }
+  }
+
+  const paidTxs = groupTxs.filter((t) => t.status === 'paid')
+  const futureTxs = groupTxs.filter((t) => t.status !== 'paid')
+
+  // Se nenhuma parcela foi paga, cancela o grupo integralmente
+  if (paidTxs.length === 0) {
+    return {
+      toDeleteIds: groupTxs.map((t) => t.id),
+      totalPaidAmount: 0,
+      refundTransaction: null,
+    }
+  }
+
+  const toDeleteIds = futureTxs.map((t) => t.id)
+  const totalPaidAmount = round2(paidTxs.reduce((sum, t) => sum + effectiveAmount(t), 0))
+
+  let refundTransaction: Transaction | null = null
+  if (totalPaidAmount > 0) {
+    const baseTx = paidTxs[0]
+    const cleanDesc = baseTx.description.replace(/^Estorno:\s*/i, '').trim()
+    const baseRefund = createRefundForTransaction(baseTx, totalPaidAmount, currentUser, todayIso)
+    refundTransaction = {
+      ...baseRefund,
+      description: `Estorno Integral: ${stripInstallmentSuffix(cleanDesc)}`,
+      competenceMonth: targetCompetenceMonth || currentMonthKey(),
+      installmentGroupId: baseTx.installmentGroupId,
+    }
+  }
+
+  return {
+    toDeleteIds,
+    totalPaidAmount,
+    refundTransaction,
   }
 }

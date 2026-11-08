@@ -844,6 +844,54 @@ object FinanceEngine {
         )
     }
 
+    data class FullInstallmentRefundResult(
+        val toDeleteIds: List<String>,
+        val totalPaidAmount: Double,
+        val refundTransaction: Transaction?
+    )
+
+    fun calculateFullInstallmentRefund(
+        groupTxs: List<Transaction>,
+        currentUser: UserProfile,
+        todayIso: String = todayKey(),
+        targetCompetenceMonth: String? = null
+    ): FullInstallmentRefundResult {
+        if (groupTxs.isEmpty()) {
+            return FullInstallmentRefundResult(emptyList(), 0.0, null)
+        }
+
+        val paidTxs = groupTxs.filter { it.status == TransactionStatus.PAID }
+        val futureTxs = groupTxs.filter { it.status != TransactionStatus.PAID }
+
+        if (paidTxs.isEmpty()) {
+            return FullInstallmentRefundResult(
+                toDeleteIds = groupTxs.map { it.id },
+                totalPaidAmount = 0.0,
+                refundTransaction = null
+            )
+        }
+
+        val toDeleteIds = futureTxs.map { it.id }
+        val totalPaidAmount = round2(paidTxs.sumOf { it.effectiveAmount })
+
+        val refundTx = if (totalPaidAmount > 0.0) {
+            val baseTx = paidTxs.first()
+            val cleanDesc = stripInstallmentSuffix(baseTx.description.removePrefix("Estorno:").trim())
+            val baseRefund = createRefundTransaction(baseTx, totalPaidAmount, currentUser, todayIso)
+            baseRefund.copy(
+                description = "Estorno Integral: $cleanDesc",
+                competenceMonth = targetCompetenceMonth ?: currentMonthKey(),
+                installmentGroupId = baseTx.installmentGroupId
+            )
+        } else null
+
+        return FullInstallmentRefundResult(
+            toDeleteIds = toDeleteIds,
+            totalPaidAmount = totalPaidAmount,
+            refundTransaction = refundTx
+        )
+    }
+
     fun applyStatusPatch(tx: Transaction, newStatus: TransactionStatus, customActualAmount: Double? = null): Transaction {
         val resolvedActual = when {
             customActualAmount != null && customActualAmount > 0.0 -> round2(customActualAmount)

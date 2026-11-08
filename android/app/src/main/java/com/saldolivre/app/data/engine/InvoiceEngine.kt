@@ -747,4 +747,84 @@ object InvoiceEngine {
             detail = detail
         )
     }
+
+    data class AnticipateInstallmentsResult(
+        val updatedTransactions: List<Transaction>,
+        val discountTransaction: Transaction?,
+        val anticipatedCount: Int,
+        val totalAnticipatedAmount: Double
+    )
+
+    fun anticipateInstallments(
+        transactions: List<Transaction>,
+        groupId: String,
+        count: Int,
+        targetMonth: String,
+        discount: Double = 0.0,
+        todayIso: String = FinanceEngine.todayKey(),
+        currentUserUid: String = ""
+    ): AnticipateInstallmentsResult {
+        if (groupId.isBlank() || count <= 0) {
+            return AnticipateInstallmentsResult(emptyList(), null, 0, 0.0)
+        }
+
+        val groupTxs = transactions.filter { it.installmentGroupId == groupId }
+        val pendingTxs = groupTxs
+            .filter { it.status != TransactionStatus.PAID && it.competenceMonth != targetMonth }
+            .sortedByDescending { it.installmentNumber ?: 0 }
+
+        val toAnticipate = pendingTxs.take(min(count, pendingTxs.size))
+        if (toAnticipate.isEmpty()) {
+            return AnticipateInstallmentsResult(emptyList(), null, 0, 0.0)
+        }
+
+        val updatedTransactions = toAnticipate.map { tx ->
+            tx.copy(
+                anticipatedFromMonth = tx.anticipatedFromMonth ?: tx.competenceMonth,
+                competenceMonth = targetMonth,
+                isAnticipated = true
+            )
+        }
+
+        val totalAnticipatedAmount = FinanceEngine.round2(toAnticipate.sumOf { it.effectiveAmount })
+
+        val cleanDiscount = abs(discount)
+        val discountTransaction = if (cleanDiscount > 0.0) {
+            val baseTx = toAnticipate.first()
+            val baseDesc = FinanceEngine.stripInstallmentSuffix(baseTx.description)
+            val signedDiscount = -FinanceEngine.round2(cleanDiscount)
+            val effectiveUserUid = currentUserUid.ifBlank { baseTx.createdByUid }
+            Transaction(
+                id = "tx_" + java.util.UUID.randomUUID().toString().take(8),
+                createdByUid = effectiveUserUid,
+                paidByUid = baseTx.paidByUid.ifBlank { effectiveUserUid },
+                cardId = baseTx.cardId,
+                description = "Desconto por Antecipação: $baseDesc",
+                category = "Outros",
+                subcategory = "Crédito na Fatura",
+                type = TransactionType.EXPENSE,
+                paymentMethod = baseTx.paymentMethod,
+                status = TransactionStatus.PENDING,
+                estimatedAmount = null,
+                actualAmount = signedDiscount,
+                totalAmount = signedDiscount,
+                dueDate = todayIso.ifBlank { baseTx.dueDate },
+                competenceMonth = targetMonth,
+                visibleToUids = baseTx.visibleToUids.ifEmpty { listOf(effectiveUserUid) },
+                userImpact = mapOf(effectiveUserUid to signedDiscount),
+                allocations = emptyList(),
+                splitType = com.saldolivre.app.data.model.SplitType.MINE,
+                installmentGroupId = groupId,
+                discountAmount = FinanceEngine.round2(cleanDiscount),
+                createdAt = System.currentTimeMillis()
+            )
+        } else null
+
+        return AnticipateInstallmentsResult(
+            updatedTransactions = updatedTransactions,
+            discountTransaction = discountTransaction,
+            anticipatedCount = toAnticipate.size,
+            totalAnticipatedAmount = totalAnticipatedAmount
+        )
+    }
 }

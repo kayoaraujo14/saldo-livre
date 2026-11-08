@@ -28,7 +28,7 @@ export function DeleteInstallmentDialog({
   tx,
   onDeleted,
 }: DeleteInstallmentDialogProps) {
-  const { transactions, deleteTransaction, deleteInstallmentGroup } = useFinance()
+  const { transactions, deleteTransaction, deleteInstallmentGroup, deleteFutureInstallments } = useFinance()
   const [loading, setLoading] = useState(false)
 
   if (!tx) return null
@@ -47,6 +47,11 @@ export function DeleteInstallmentDialog({
   const baseDesc = stripInstallmentSuffix(tx.description)
   const installmentBadgeText = totalCount === 1 ? '1 parcela' : `${totalCount} parcelas`
   const deleteAllButtonTitle = totalCount === 1 ? 'Excluir esta parcela' : `Excluir TODAS as ${totalCount} parcelas`
+  const futureTxs = isInstallment
+    ? groupTxs.filter((t) => (t.installmentNumber ?? 1) >= (tx.installmentNumber ?? 1) && t.status !== 'paid')
+    : [tx]
+  const futureTotal = futureTxs.reduce((s, t) => s + effectiveAmount(t), 0)
+  const hasPastPaid = isInstallment && groupTxs.some((t) => t.status === 'paid' && (t.installmentNumber ?? 1) < (tx.installmentNumber ?? 1))
 
   const handleDeleteSingle = async () => {
     setLoading(true)
@@ -67,6 +72,21 @@ export function DeleteInstallmentDialog({
     setLoading(true)
     try {
       await deleteInstallmentGroup(groupId)
+      onOpenChange(false)
+      onDeleted?.()
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleDeleteFuture = async () => {
+    if (!groupId) {
+      await handleDeleteSingle()
+      return
+    }
+    setLoading(true)
+    try {
+      await deleteFutureInstallments(groupId, tx.installmentNumber || 1)
       onOpenChange(false)
       onDeleted?.()
     } finally {
@@ -126,6 +146,33 @@ export function DeleteInstallmentDialog({
         <div className="text-xs text-slate-300 space-y-2.5">
           <p className="font-semibold text-slate-200">Como você deseja realizar a exclusão?</p>
           <div className="space-y-2">
+            {/* Opção Recomendada: Excluir esta e as parcelas futuras */}
+            {isInstallment && totalCount > 1 && futureTxs.length > 0 && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={handleDeleteFuture}
+                className={`w-full p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center justify-between gap-3 group active:scale-[0.99] shadow-sm ${
+                  hasPastPaid
+                    ? 'border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-200'
+                    : 'border-slate-800 bg-slate-900/60 hover:bg-slate-800/80 text-slate-200'
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-xs text-amber-300">
+                    <Trash2 className="size-3.5" />
+                    <span>
+                      Excluir esta e as parcelas futuras ({futureTxs.length} {futureTxs.length === 1 ? 'parcela' : 'parcelas'})
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                    Cancela as parcelas {tx.installmentNumber || 1} a {totalCount} pendentes ({formatBRL(futureTotal)}), mantendo as parcelas já pagas intactas no histórico.
+                  </p>
+                </div>
+                <ArrowRight className="size-4 text-amber-400 shrink-0 opacity-70 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+              </button>
+            )}
+
             {/* Opção 1: Excluir TODAS de uma vez */}
             <button
               type="button"

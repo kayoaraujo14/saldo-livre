@@ -104,6 +104,8 @@ class AndroidAgentToolsEngine(
             "BATCH_TRANSACTIONS", "registrarTransacoesLote" -> executeBatchFromJson(jsonObj)
             "EDIT_TRANSACTION", "editarTransacoes", "EDIT_TRANSACTIONS", "BATCH_EDIT", "batchEdit", "editarTransacao" -> executeEditFromJson(jsonObj)
             "DELETE_TRANSACTION", "excluirTransacoes", "DELETE_TRANSACTIONS", "excluirTransacao" -> executeDeleteFromJson(jsonObj)
+            "ANTICIPATE_INSTALLMENTS", "anteciparParcelas" -> executeAnticipateInstallmentsFromJson(jsonObj)
+            "REFUND_FULL_INSTALLMENTS", "estornarCompraParcelada" -> executeRefundFullInstallmentsFromJson(jsonObj)
             "UPDATE_ESTIMATED", "atualizarContaPrevista" -> executeUpdateEstimatedFromJson(jsonObj)
             "SEARCH_TRANSACTIONS", "buscarTransacoes", "QUERY_TRANSACTIONS", "consultarTransacoes" -> executeSearchFromJson(jsonObj)
             "REPORT_PROJECTION", "PROJECT_MONTH", "obterRelatorioEProjecaoMensal" -> executeReportProjectionFromJson(jsonObj)
@@ -1584,6 +1586,7 @@ class AndroidAgentToolsEngine(
         amount: Double? = null,
         month: String? = null,
         deleteAllInstallments: Boolean = false,
+        deleteFutureOnly: Boolean = false,
         confirmed: Boolean = false
     ): ToolExecutionResult {
         val all = repository.getTransactions().first()
@@ -1609,9 +1612,23 @@ class AndroidAgentToolsEngine(
             )
         }
 
-        val primaryTarget = targets.first()
+        val rawPrimary = targets.first()
+        val isFutureOnlyDelete = deleteFutureOnly && !rawPrimary.installmentGroupId.isNullOrBlank()
+        val primaryTarget = if (isFutureOnlyDelete && month.isNullOrBlank()) {
+            all.filter { it.installmentGroupId == rawPrimary.installmentGroupId && it.status != TransactionStatus.PAID }
+                .minByOrNull { it.installmentNumber ?: 1 } ?: rawPrimary
+        } else {
+            rawPrimary
+        }
         val isGroupDelete = deleteAllInstallments && !primaryTarget.installmentGroupId.isNullOrBlank()
-        val finalTargets = if (isGroupDelete) {
+        val finalTargets = if (isFutureOnlyDelete) {
+            val fromNum = primaryTarget.installmentNumber ?: 1
+            all.filter {
+                it.installmentGroupId == primaryTarget.installmentGroupId &&
+                (it.installmentNumber ?: 1) >= fromNum &&
+                it.status != TransactionStatus.PAID
+            }
+        } else if (isGroupDelete) {
             all.filter { it.installmentGroupId == primaryTarget.installmentGroupId }
         } else {
             targets
@@ -1677,7 +1694,9 @@ class AndroidAgentToolsEngine(
             )
         }
 
-        if (isGroupDelete) {
+        if (isFutureOnlyDelete) {
+            repository.deleteFutureInstallments(primaryTarget.installmentGroupId!!, primaryTarget.installmentNumber ?: 1)
+        } else if (isGroupDelete) {
             repository.deleteInstallmentGroup(primaryTarget.installmentGroupId!!)
         } else {
             for (t in finalTargets) {
@@ -1721,6 +1740,11 @@ class AndroidAgentToolsEngine(
         val targetIds = targetIdsArray?.mapNotNull { it.asString }
         val amount = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor")
         val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
+        val deleteFutureOnly = jsonObj.getBooleanOrNull("deleteFutureOnly")
+            ?: jsonObj.getBooleanOrNull("cancelFutureOnly")
+            ?: jsonObj.getBooleanOrNull("cancelarFuturas")
+            ?: jsonObj.getBooleanOrNull("excluirFuturas")
+            ?: false
         val deleteAll = jsonObj.getBooleanOrNull("deleteAllInstallments")
             ?: jsonObj.getBooleanOrNull("excluirTodasAsParcelas")
             ?: jsonObj.getBooleanOrNull("excluirParcelamento")
@@ -1736,7 +1760,168 @@ class AndroidAgentToolsEngine(
             amount = amount,
             month = month,
             deleteAllInstallments = deleteAll,
+            deleteFutureOnly = deleteFutureOnly,
             confirmed = confirmed
+        )
+    }
+
+    private suspend fun executeAnticipateInstallmentsFromJson(jsonObj: JsonObject): ToolExecutionResult {
+        val searchTerm = jsonObj.getStringOrNull("searchTerm")
+            ?: jsonObj.getStringOrNull("termoBusca")
+            ?: jsonObj.getStringOrNull("description")
+            ?: jsonObj.getStringOrNull("descricao")
+            ?: ""
+        val groupId = jsonObj.getStringOrNull("installmentGroupId")
+        val count = jsonObj.getIntOrNull("quantidadeParcelas") ?: jsonObj.getIntOrNull("count") ?: 999
+        val targetMonth = jsonObj.getStringOrNull("mesDestino") ?: jsonObj.getStringOrNull("targetMonth")
+            ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val discount = jsonObj.getDoubleOrNull("desconto") ?: jsonObj.getDoubleOrNull("discount") ?: 0.0
+        val confirmed = jsonObj.getBooleanOrNull("confirmed") ?: jsonObj.getBooleanOrNull("__confirmed") ?: false
+
+        val all = repository.getTransactions().first()
+        val group = if (!groupId.isNullOrBlank()) {
+            all.filter { it.installmentGroupId == groupId }
+        } else if (searchTerm.isNotBlank()) {
+            val cand = all.find { !it.installmentGroupId.isNullOrBlank() && matchesSearch(it.description, searchTerm) }
+            if (cand != null) all.filter { it.installmentGroupId == cand.installmentGroupId } else emptyList()
+        } else emptyList()
+
+        if (group.isEmpty()) {
+            return ToolExecutionResult(text = "⚠️ Não encontrei nenhuma compra parcelada pendente correspondente a \"$searchTerm\".")
+        }
+
+        val baseTx = group.first()
+        val user = repository.currentUser.value
+        val result = InvoiceEngine.anticipateInstallments(
+            transactions = all,
+            groupId = baseTx.installmentGroupId!!,
+            count = count,
+            targetMonth = targetMonth,
+            discount = discount,
+            todayIso = FinanceEngine.todayKey(),
+            currentUserUid = user.uid
+        )
+
+        if (result.anticipatedCount == 0) {
+            return ToolExecutionResult(text = "⚠️ Não há parcelas pendentes disponíveis para antecipar para a fatura de ${FinanceEngine.monthLabel(targetMonth)}.")
+        }
+
+        val baseDesc = FinanceEngine.stripInstallmentSuffix(baseTx.description)
+
+        if (!confirmed) {
+            val pendingAction = PendingAction(
+                id = "act_" + UUID.randomUUID().toString().take(8),
+                toolName = "ANTICIPATE_INSTALLMENTS",
+                title = "Antecipar ${result.anticipatedCount} parcelas: $baseDesc",
+                description = "$baseDesc — ${FinanceEngine.formatCurrency(result.totalAnticipatedAmount)}",
+                detail = "Mover para fatura de ${FinanceEngine.monthLabel(targetMonth)}" + if (discount > 0.0) " (desconto: -${FinanceEngine.formatCurrency(discount)})" else "",
+                args = mapOf(
+                    "installmentGroupId" to baseTx.installmentGroupId!!,
+                    "quantidadeParcelas" to count,
+                    "mesDestino" to targetMonth,
+                    "desconto" to discount,
+                    "confirmed" to true
+                ),
+                status = PendingActionStatus.PENDING
+            )
+            return ToolExecutionResult(
+                text = "Entendi que você deseja antecipar **${result.anticipatedCount} parcelas** da compra **\"$baseDesc\"** no valor de **${FinanceEngine.formatCurrency(result.totalAnticipatedAmount)}** para a fatura de **${FinanceEngine.monthLabel(targetMonth)}**" +
+                        (if (discount > 0.0) " com desconto de **${FinanceEngine.formatCurrency(discount)}**." else ".") +
+                        "\n\nPor favor, confirme no botão abaixo para efetivar a antecipação.",
+                actionCard = ActionCardData(
+                    title = "Confirmar Antecipação (${result.anticipatedCount} parcelas)",
+                    description = "$baseDesc — ${FinanceEngine.formatCurrency(result.totalAnticipatedAmount)}",
+                    detail = "Fatura: ${FinanceEngine.monthLabel(targetMonth)}",
+                    pendingAction = pendingAction
+                )
+            )
+        }
+
+        repository.anticipateInstallments(
+            groupId = baseTx.installmentGroupId!!,
+            count = count,
+            targetMonth = targetMonth,
+            discount = discount
+        )
+
+        return ToolExecutionResult(
+            text = "🎉 **${result.anticipatedCount} parcelas antecipadas com sucesso!**\n\n" +
+                    "• **Compra**: $baseDesc\n" +
+                    "• **Total antecipado**: ${FinanceEngine.formatCurrency(result.totalAnticipatedAmount)}\n" +
+                    "• **Fatura de destino**: ${FinanceEngine.monthLabel(targetMonth)}" +
+                    (if (discount > 0.0) "\n• **Crédito de desconto**: -${FinanceEngine.formatCurrency(discount)}" else "")
+        )
+    }
+
+    private suspend fun executeRefundFullInstallmentsFromJson(jsonObj: JsonObject): ToolExecutionResult {
+        val searchTerm = jsonObj.getStringOrNull("searchTerm")
+            ?: jsonObj.getStringOrNull("termoBusca")
+            ?: jsonObj.getStringOrNull("description")
+            ?: jsonObj.getStringOrNull("descricao")
+            ?: ""
+        val groupId = jsonObj.getStringOrNull("installmentGroupId")
+        val targetMonth = jsonObj.getStringOrNull("mesDestino") ?: jsonObj.getStringOrNull("targetMonth")
+            ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
+        val confirmed = jsonObj.getBooleanOrNull("confirmed") ?: jsonObj.getBooleanOrNull("__confirmed") ?: false
+
+        val all = repository.getTransactions().first()
+        val group = if (!groupId.isNullOrBlank()) {
+            all.filter { it.installmentGroupId == groupId }
+        } else if (searchTerm.isNotBlank()) {
+            val cand = all.find { !it.installmentGroupId.isNullOrBlank() && matchesSearch(it.description, searchTerm) }
+            if (cand != null) all.filter { it.installmentGroupId == cand.installmentGroupId } else emptyList()
+        } else emptyList()
+
+        if (group.isEmpty()) {
+            return ToolExecutionResult(text = "⚠️ Não encontrei nenhuma compra parcelada correspondente a \"$searchTerm\" para estorno integral.")
+        }
+
+        val baseTx = group.first()
+        val user = repository.currentUser.value
+        val result = FinanceEngine.calculateFullInstallmentRefund(
+            groupTxs = group,
+            currentUser = user,
+            todayIso = FinanceEngine.todayKey(),
+            targetCompetenceMonth = targetMonth
+        )
+
+        val baseDesc = FinanceEngine.stripInstallmentSuffix(baseTx.description)
+
+        if (!confirmed) {
+            val pendingAction = PendingAction(
+                id = "act_" + UUID.randomUUID().toString().take(8),
+                toolName = "REFUND_FULL_INSTALLMENTS",
+                title = "Estorno Integral: $baseDesc",
+                description = "Cancelar ${result.toDeleteIds.size} parcelas pendentes",
+                detail = if (result.totalPaidAmount > 0.0) "Estorno de ${FinanceEngine.formatCurrency(result.totalPaidAmount)} na fatura de ${FinanceEngine.monthLabel(targetMonth)}" else "Cancelamento sem custos",
+                args = mapOf(
+                    "installmentGroupId" to baseTx.installmentGroupId!!,
+                    "mesDestino" to targetMonth,
+                    "confirmed" to true
+                ),
+                status = PendingActionStatus.PENDING
+            )
+            return ToolExecutionResult(
+                text = "Entendi que você deseja realizar o **estorno integral da compra \"$baseDesc\"**.\n\n" +
+                        "• **Parcelas futuras a cancelar**: ${result.toDeleteIds.size} parcelas\n" +
+                        (if (result.totalPaidAmount > 0.0) "• **Crédito a reembolsar**: ${FinanceEngine.formatCurrency(result.totalPaidAmount)} na fatura de ${FinanceEngine.monthLabel(targetMonth)}\n" else "• **Valor pago anterior**: R$ 0,00 (nenhuma parcela paga ainda)\n") +
+                        "\nPor favor, confirme no botão abaixo para executar o cancelamento definitivo.",
+                actionCard = ActionCardData(
+                    title = "Confirmar Estorno Integral",
+                    description = "$baseDesc — ${result.toDeleteIds.size} parcelas",
+                    detail = if (result.totalPaidAmount > 0.0) "Crédito: ${FinanceEngine.formatCurrency(result.totalPaidAmount)}" else "Sem custos",
+                    pendingAction = pendingAction
+                )
+            )
+        }
+
+        repository.refundFullInstallmentGroup(baseTx.installmentGroupId!!, targetMonth)
+
+        return ToolExecutionResult(
+            text = "🔄 **Estorno integral de compra parcelada concluído com sucesso!**\n\n" +
+                    "• **Compra**: $baseDesc\n" +
+                    "• **Parcelas canceladas**: ${result.toDeleteIds.size} pendentes\n" +
+                    (if (result.totalPaidAmount > 0.0) "• **Crédito de estorno lançado**: +${FinanceEngine.formatCurrency(result.totalPaidAmount)} na fatura de ${FinanceEngine.monthLabel(targetMonth)}" else "• **Status**: todas as parcelas futuras foram canceladas sem ônus.")
         )
     }
 
@@ -3571,6 +3756,7 @@ class AndroidAgentToolsEngine(
                     ?: (args["valor"] as? Number)?.toDouble() ?: (args["valor"] as? String)?.toDoubleOrNull()
                 val month = args["month"] as? String ?: args["mes"] as? String
                 val deleteAll = (args["deleteAllInstallments"] as? Boolean) ?: false
+                val deleteFuture = (args["deleteFutureOnly"] as? Boolean) ?: false
 
                 executeDeleteTransaction(
                     searchTerm = term,
@@ -3579,6 +3765,7 @@ class AndroidAgentToolsEngine(
                     amount = amt,
                     month = month,
                     deleteAllInstallments = deleteAll,
+                    deleteFutureOnly = deleteFuture,
                     confirmed = true
                 )
             }
@@ -3758,12 +3945,14 @@ class AndroidAgentToolsEngine(
             val targetPart = deleteMatch.groupValues[1].trim()
             val parsedAmt = neuralClassifier.parseAmount(targetPart)
             val cleanTerm = targetPart.replace(Regex("""r?\$?\s*[\d.,]+"""), "").trim()
-            val deleteAll = lower.contains("todas as parcelas") || lower.contains("parcelamento")
+            val deleteFuture = lower.contains("futuras") || lower.contains("restantes")
+            val deleteAll = !deleteFuture && (lower.contains("todas as parcelas") || lower.contains("parcelamento"))
 
             return executeDeleteTransaction(
                 searchTerm = cleanTerm.ifBlank { null },
                 amount = parsedAmt,
                 deleteAllInstallments = deleteAll,
+                    deleteFutureOnly = deleteFuture,
                 confirmed = false
             )
         }

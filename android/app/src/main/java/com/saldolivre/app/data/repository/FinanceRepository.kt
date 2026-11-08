@@ -25,6 +25,9 @@ interface FinanceRepository {
     suspend fun saveMonthClosure(closure: MonthClosure)
     suspend fun deleteMonthClosure(closedMonth: String)
     suspend fun deleteInstallmentGroup(groupId: String): Int
+    suspend fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int): Int
+    suspend fun refundFullInstallmentGroup(groupId: String, targetMonth: String? = null): Pair<Int, Double>
+    suspend fun anticipateInstallments(groupId: String, count: Int, targetMonth: String, discount: Double = 0.0): Pair<Int, Double>
     suspend fun updateInstallmentGroup(groupId: String, input: InstallmentGroupUpdateInput): Int
     suspend fun markTransactionPaid(id: String)
     suspend fun toggleTransactionStatus(id: String)

@@ -6,6 +6,7 @@ import com.google.firebase.firestore.Filter
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.model.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
@@ -431,6 +432,87 @@ class FirestoreFinanceRepository(
         if (id.isNotBlank()) {
             firestore.collection("transactions").document(id).delete().await()
         }
+    }
+
+    override suspend fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int): Int {
+        if (groupId.isBlank()) return 0
+        val all = getTransactions().first()
+        val targetIds = all.filter {
+            it.installmentGroupId == groupId &&
+            (it.installmentNumber ?: 1) >= fromInstallmentNumber &&
+            it.status != TransactionStatus.PAID
+        }.map { it.id }
+        if (targetIds.isEmpty()) return 0
+
+        for (chunk in targetIds.chunked(450)) {
+            val batch = firestore.batch()
+            for (id in chunk) {
+                batch.delete(firestore.collection("transactions").document(id))
+            }
+            batch.commit().await()
+        }
+        return targetIds.size
+    }
+
+    override suspend fun refundFullInstallmentGroup(groupId: String, targetMonth: String?): Pair<Int, Double> {
+        if (groupId.isBlank()) return Pair(0, 0.0)
+        val all = getTransactions().first()
+        val group = all.filter { it.installmentGroupId == groupId }
+        if (group.isEmpty()) return Pair(0, 0.0)
+
+        val result = FinanceEngine.calculateFullInstallmentRefund(
+            groupTxs = group,
+            currentUser = _currentUser.value,
+            todayIso = FinanceEngine.todayKey(),
+            targetCompetenceMonth = targetMonth
+        )
+
+        if (result.toDeleteIds.isNotEmpty()) {
+            for (chunk in result.toDeleteIds.chunked(450)) {
+                val batch = firestore.batch()
+                for (id in chunk) {
+                    batch.delete(firestore.collection("transactions").document(id))
+                }
+                batch.commit().await()
+            }
+        }
+
+        if (result.refundTransaction != null) {
+            addTransaction(result.refundTransaction)
+        }
+
+        return Pair(result.toDeleteIds.size, result.totalPaidAmount)
+    }
+
+    override suspend fun anticipateInstallments(groupId: String, count: Int, targetMonth: String, discount: Double): Pair<Int, Double> {
+        if (groupId.isBlank() || count <= 0) return Pair(0, 0.0)
+        val all = getTransactions().first()
+        val result = InvoiceEngine.anticipateInstallments(
+            transactions = all,
+            groupId = groupId,
+            count = count,
+            targetMonth = targetMonth,
+            discount = discount,
+            todayIso = FinanceEngine.todayKey(),
+            currentUserUid = _currentUser.value.uid
+        )
+
+        if (result.anticipatedCount == 0) return Pair(0, 0.0)
+
+        for (chunk in result.updatedTransactions.chunked(450)) {
+            val batch = firestore.batch()
+            for (tx in chunk) {
+                val docRef = firestore.collection("transactions").document(tx.id)
+                batch.update(docRef, "competenceMonth", tx.competenceMonth, "anticipatedFromMonth", tx.anticipatedFromMonth ?: "", "isAnticipated", true)
+            }
+            batch.commit().await()
+        }
+
+        if (result.discountTransaction != null) {
+            addTransaction(result.discountTransaction)
+        }
+
+        return Pair(result.anticipatedCount, discount)
     }
 
     override suspend fun deleteInstallmentGroup(groupId: String): Int {

@@ -1431,6 +1431,10 @@ export interface Transaction {
   targetFriendName?: string | null
   /** ID da compra original no cartão que foi estornada */
   refundedTransactionId?: string | null
+  /** Antecipação inteligente de parcelas */
+  isAnticipated?: boolean | null
+  anticipatedFromMonth?: string | null
+  discountAmount?: number | null
 }
 
 export interface FriendSplitInput {
