@@ -910,34 +910,41 @@ class TransactionFormViewModel(
             if (isInstallmentActive) {
                 // Gera parcelas
                 val groupId = "inst_grp_" + UUID.randomUUID().toString().take(8)
-                val (installmentAmount, totalPurchase) = if (current.installmentMode == "per_installment") {
-                    Pair(total, FinanceEngine.round2(total * current.installmentsCount))
+                val isPerInstallment = current.installmentMode == "per_installment"
+                val totalPurchase = if (isPerInstallment) {
+                    FinanceEngine.round2(total * current.installmentsCount)
                 } else {
-                    Pair(FinanceEngine.round2(total / current.installmentsCount), total)
+                    total
                 }
+                val competenceMonths = FinanceEngine.calculateInstallmentCompetenceMonths(
+                    purchaseDate = isoInputDate,
+                    card = card,
+                    installmentsTotal = current.installmentsCount,
+                    isCreditCard = current.paymentMethod == PaymentMethod.CREDIT_CARD
+                )
                 val installmentList = mutableListOf<Transaction>()
 
-                val instCustomAllocs = customAllocations?.map { a ->
-                    if (current.installmentMode == "per_installment") {
-                        a
-                    } else {
-                        a.copy(amount = FinanceEngine.round2(a.amount / current.installmentsCount))
-                    }
-                }
-
                 for (i in 1..current.installmentsCount) {
+                    val curAmount = FinanceEngine.calculateInstallmentAmount(
+                        total = total,
+                        installmentNumber = i,
+                        installmentsTotal = current.installmentsCount,
+                        isPerInstallment = isPerInstallment
+                    )
                     val purchaseDate = FinanceEngine.shiftDateMonth(isoInputDate, i - 1)
+                    val dueDate = purchaseDate
+                    val competenceMonth = competenceMonths.getOrElse(i - 1) { purchaseDate.take(7) }
 
-                    val (dueDate, competenceMonth) = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) {
-                        val cardDates = FinanceEngine.calculateCardInvoiceDates(purchaseDate, card)
-                        Pair(purchaseDate, cardDates.second)
-                    } else {
-                        Pair(purchaseDate, purchaseDate.take(7))
-                    }
+                    val curCustomAllocs = FinanceEngine.fractionCustomAllocations(
+                        allocations = customAllocations,
+                        installmentNumber = i,
+                        installmentsTotal = current.installmentsCount,
+                        isPerInstallment = isPerInstallment
+                    )
 
                     val split = FinanceEngine.buildSplit(
                         splitType = current.splitType,
-                        total = installmentAmount,
+                        total = curAmount,
                         myUid = user.uid,
                         myName = user.displayName,
                         partnerUid = partner?.uid,
@@ -947,12 +954,20 @@ class TransactionFormViewModel(
                         assignedFriendUid = assignedFriendUid,
                         assignedFriendName = assignedFriendName,
                         friendSharePct = friendSharePct,
-                        customAllocations = instCustomAllocs
+                        customAllocations = curCustomAllocs
                     )
 
                     val cardSharedUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.sharedWithUids.orEmpty() else emptyList()
-                    val customUids = instCustomAllocs?.mapNotNull { it.uid } ?: emptyList()
+                    val customUids = curCustomAllocs?.mapNotNull { it.uid } ?: emptyList()
                     val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
+
+                    val effectiveStatus = if (i == 1) {
+                        current.status
+                    } else if (current.status == TransactionStatus.ESTIMATED) {
+                        TransactionStatus.ESTIMATED
+                    } else {
+                        TransactionStatus.PENDING
+                    }
 
                     val tx = Transaction(
                         id = "tx_" + UUID.randomUUID().toString().take(8),
@@ -964,10 +979,10 @@ class TransactionFormViewModel(
                         subcategory = current.subcategory,
                         type = current.type,
                         paymentMethod = current.paymentMethod,
-                        status = if (i == 1) current.status else TransactionStatus.PENDING,
-                        estimatedAmount = if (current.status == TransactionStatus.ESTIMATED) installmentAmount else null,
-                        actualAmount = if (current.status != TransactionStatus.ESTIMATED) installmentAmount else null,
-                        totalAmount = installmentAmount,
+                        status = effectiveStatus,
+                        estimatedAmount = if (effectiveStatus == TransactionStatus.ESTIMATED) curAmount else null,
+                        actualAmount = if (effectiveStatus != TransactionStatus.ESTIMATED) curAmount else null,
+                        totalAmount = curAmount,
                         dueDate = dueDate,
                         competenceMonth = competenceMonth,
                         visibleToUids = effectiveVisible,
@@ -991,7 +1006,7 @@ class TransactionFormViewModel(
                     ActivityLog(
                         actionType = ActivityActionType.TRANSACTION_CREATED,
                         title = current.description.trim(),
-                        description = "Série parcelada criada (${current.installmentsCount}x de ${FinanceEngine.formatCurrency(installmentAmount)}) • ${current.category}",
+                        description = "Série parcelada criada (${current.installmentsCount}x de ${FinanceEngine.formatCurrency(FinanceEngine.calculateInstallmentAmount(total, 1, current.installmentsCount, isPerInstallment))}) • ${current.category}",
                         amount = totalPurchase,
                         category = current.category,
                         competenceMonth = installmentList.firstOrNull()?.competenceMonth ?: repository.selectedMonth.value,
