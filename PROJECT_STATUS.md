@@ -100,6 +100,26 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #66 (Conclusão Integral):**
+  - **1. Monitoramento Reativo de Conectividade e Indicador Visual de Modo Offline:**
+    - **Camada Web (`web/src/hooks/useNetworkStatus.ts`, `components/NetworkStatusIndicator.tsx`, `App.tsx`):**
+      - `useNetworkStatus()`: Hook reativo ouvindo eventos 'online' e 'offline' da `window`, expondo `isOnline` e flag transitório `justReconnected` (com timer de reset de 3.5s).
+      - `NetworkStatusIndicator`: Banner sutil com badge acessível em pílula (`WifiOff` / "Modo Offline — Alterações salvas localmente") e transição verde suave ("Conexão restabelecida") ao retornar à rede.
+      - Integrado ao topo de `App.tsx` com renderização condicional sem impacto de layout quando online.
+    - **Degradação Graciosa no Copiloto IA Gemini (`web/src/components/GeminiChat.tsx`):**
+      - Interceptação preventiva de comandos em `handleSend` e `startRecording` quando offline, impedindo chamadas de rede à nuvem e emitindo orientações amigáveis no chat sem disparar erros 500 no console.
+      - Banner de alerta offline no chat acima do campo de entrada e botões de envio/áudio com tooltip informativo.
+    - **Camada Android (`android/app/.../util/NetworkMonitor.kt`, `components/NetworkStatusBanner.kt`):**
+      - `NetworkMonitor`: Monitor reativo com `ConnectivityManager.NetworkCallback` emitindo `Flow<Boolean>` de conectividade validada com a Internet (`NET_CAPABILITY_INTERNET`), seguro para JVM tests com fallback caso o contexto seja nulo.
+      - `NetworkStatusBanner`: Componente Compose animado (`AnimatedVisibility`) com token Amber do Design System.
+      - `DashboardViewModel` e `DashboardScreen`: Observação reativa do estado de rede no `DashboardUiState` e exibição do banner no topo da visualização.
+      - `GeminiChatViewModel` e `GeminiChatScreen`: Interceptação imediata no envio de mensagens e áudio quando offline com feedback amigável no histórico e banner informativo no chat.
+  - **2. Qualidade & Testes Automatizados:**
+    - Criadas as suítes Web `web/src/hooks/__tests__/useNetworkStatus.test.ts` (4 testes verdes) e `web/src/components/__tests__/NetworkStatusIndicator.test.tsx` (3 testes verdes).
+    - Web: **`oxlint` (0 warnings, 0 erros)**, **`vitest` (155 testes verdes em 15 suítes)**, **`vite build` aprovado em 907ms**.
+    - Backend: **`vitest` (10 testes verdes)**, **`tsc` compilação 100% aprovada**.
+    - Android: **`compileDebugSources` aprovado com BUILD SUCCESSFUL** e **56 testes unitários JVM verdes** (`testDebugUnitTest`).
+
 - **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #73 (Conclusão Integral):**
   - **1. Segregação de Perfil Público (`/public_profiles`) e Blindagem de Dados Patrimoniais (`/users/{userId}`):**
     - **Firestore Security Rules (`firestore.rules`):**

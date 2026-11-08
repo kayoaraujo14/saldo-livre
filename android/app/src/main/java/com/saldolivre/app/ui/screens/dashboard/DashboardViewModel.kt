@@ -26,6 +26,7 @@ import com.saldolivre.app.data.model.BudgetInsight
 import com.saldolivre.app.data.model.BudgetInsightAction
 import com.saldolivre.app.data.model.BudgetInsightActionType
 import com.saldolivre.app.data.repository.FinanceRepository
+import com.saldolivre.app.ui.util.NetworkMonitor
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -107,7 +108,8 @@ data class DashboardUiState(
     val budgetInsights: List<BudgetInsight> = emptyList(),
     val aiBudgetInsights: List<BudgetInsight>? = null,
     val aiBudgetInsightsMonth: String? = null,
-    val isGeneratingBudgetInsights: Boolean = false
+    val isGeneratingBudgetInsights: Boolean = false,
+    val isOnline: Boolean = true
 ) {
     /** Insights do Gemini (quando gerados para o mês atual) ou, senão, os insights locais instantâneos. */
     val displayedBudgetInsights: List<BudgetInsight>
@@ -118,12 +120,19 @@ class DashboardViewModel(
     private val repository: FinanceRepository
 ) : ViewModel() {
 
-    private val geminiLoadBalancer by lazy { GeminiLoadBalancer(SaldoLivreApplication.instance) }
+    private val geminiLoadBalancer by lazy { GeminiLoadBalancer(runCatching { SaldoLivreApplication.instance }.getOrNull()) }
+    private val networkMonitor by lazy { NetworkMonitor(runCatching { SaldoLivreApplication.instance }.getOrNull()) }
 
     private val _uiState = MutableStateFlow(DashboardUiState(isLoading = true))
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            networkMonitor.isOnline.collect { online ->
+                _uiState.update { it.copy(isOnline = online) }
+            }
+        }
+
         viewModelScope.launch {
             combine(
                 combine(repository.currentUser, repository.selectedMonth) { u, m -> Pair(u, m) },

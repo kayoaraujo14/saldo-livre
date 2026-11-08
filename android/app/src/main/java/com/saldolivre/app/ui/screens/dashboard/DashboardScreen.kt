@@ -35,6 +35,7 @@ import com.saldolivre.app.ui.components.DeleteInstallmentDialog
 import com.saldolivre.app.ui.components.EmptyState
 import com.saldolivre.app.ui.components.KpiCard
 import com.saldolivre.app.ui.components.MonthSelector
+import com.saldolivre.app.ui.components.NetworkStatusBanner
 import com.saldolivre.app.ui.components.NumberTickerText
 import com.saldolivre.app.ui.components.TransactionDetailDialog
 import com.saldolivre.app.ui.components.TransactionItem
@@ -148,6 +149,13 @@ fun DashboardScreen(
                 contentPadding = PaddingValues(top = 4.dp, bottom = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+            // 0. Banner de Conectividade / Modo Offline
+            if (!uiState.isOnline) {
+                item(key = "offline_status_banner", contentType = "offline_status_banner") {
+                    NetworkStatusBanner(isOnline = false)
+                }
+            }
+
             // 1. Seletor de Mês
             item(key = "month_selector", contentType = "month_selector") {
                 MonthSelector(

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import type { ChatMessage, ChatSession, ChatAttachment, PendingAction, PendingBatchTransaction } from '@/types'
 import {
   getGeminiApiKeys,
@@ -57,6 +58,7 @@ import {
   XCircle,
   Mic,
   Loader2,
+  WifiOff,
 } from 'lucide-react'
 
 interface GeminiChatProps {
@@ -122,6 +124,8 @@ function saveStoredSessions(uid: string, sessions: ChatSession[]) {
 }
 
 export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiChatProps) {
+  const { isOnline } = useNetworkStatus()
+
   const {
     me,
     profile,
@@ -211,6 +215,11 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
   }, [])
 
   const startRecording = async () => {
+    if (!isOnline) {
+      alert('Você está offline. A gravação e transcrição inteligente de áudio requerem conexão ativa com a internet.')
+      return
+    }
+
     if (isRecordingRef.current) {
       stopRecording(true)
       return
@@ -817,6 +826,26 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     const currentAttachment = attachmentToSend || pendingAttachment
 
     if ((!text && !currentAttachment) || loading) return
+
+    if (!isOnline) {
+      const offlineNotice: ChatMessage = {
+        id: `bot_offline_${Date.now()}`,
+        role: 'assistant',
+        content:
+          '⚠️ **Você está offline no momento.**\n\nO Copiloto IA necessita de uma conexão ativa com a internet para consultar o Google Gemini e processar comandos inteligentes. Seus lançamentos manuais continuam sendo salvos localmente e serão sincronizados assim que a conexão retornar.',
+      }
+      if (text) {
+        updateSessionMessages((prev) => [
+          ...prev,
+          { id: `usr_${Date.now()}`, role: 'user', content: text },
+          offlineNotice,
+        ], text)
+        setInput('')
+      } else {
+        updateSessionMessages((prev) => [...prev, offlineNotice])
+      }
+      return
+    }
 
     // Verifica se há alguma confirmação pendente aguardando resposta
     const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant')
@@ -1980,6 +2009,16 @@ Atenção crítica:
             </div>
           )
         })()}
+
+        {/* Indicador de Modo Offline no Chat */}
+        {!isOnline && (
+          <div className="mb-2 px-3 py-1.5 rounded-xl bg-amber-950/80 border border-amber-500/30 flex items-center gap-2 text-xs text-amber-200 shadow-md animate-in fade-in slide-in-from-bottom-1">
+            <WifiOff className="size-3.5 text-amber-400 shrink-0" />
+            <span className="text-[11px] font-medium">
+              Você está offline. O Copiloto IA necessita de conexão com a internet para responder.
+            </span>
+          </div>
+        )}
 
         {/* Live Recording Indicator Bar (aparece acima do input quando gravando, sem cobrir o botão de enviar) */}
         {isRecording && (

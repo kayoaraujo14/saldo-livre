@@ -59,6 +59,7 @@ import com.saldolivre.app.R
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.parser.ParsedStatementItem
+import com.saldolivre.app.ui.components.NetworkStatusBanner
 import com.saldolivre.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -461,6 +462,13 @@ fun GeminiChatScreen(
                             modifier = Modifier.size(16.dp)
                         )
                     }
+                }
+            }
+
+            // Banner de Modo Offline no Chat
+            if (!uiState.isOnline) {
+                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    NetworkStatusBanner(isOnline = false)
                 }
             }
 
