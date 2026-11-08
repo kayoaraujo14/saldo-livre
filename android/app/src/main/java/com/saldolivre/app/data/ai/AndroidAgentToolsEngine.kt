@@ -204,20 +204,20 @@ class AndroidAgentToolsEngine(
         // Para cartão de crédito, a data do lançamento é a data em que a compra foi realizada (baseDate)
         val finalDueDate = if (isCreditCard) baseDate else (customDueDate?.takeIf { it.isNotBlank() } ?: calcDueDate)
 
-        // Categorização inteligente se não informada
-        var finalCat = category?.takeIf { it.isNotBlank() && it != "Outros" }
-        var finalSubcat = subcategory?.takeIf { it.isNotBlank() }
-
-        if (isEstorno && (finalCat == null || finalCat == "Outros")) {
-            finalCat = "Estorno"
-            finalSubcat = "Crédito na Fatura"
-        } else if (finalCat == null) {
-            val guess = neuralClassifier.guessCategoryAndSubcategory(description, absAmount)
-            finalCat = if (type == TransactionType.INCOME) {
-                if (CategoryRegistry.INCOME_CATEGORIES.any { it.name.equals(guess.category, ignoreCase = true) }) guess.category
-                else "Outras Receitas"
-            } else guess.category
-            finalSubcat = guess.subcategory ?: finalSubcat
+        // Categorização estrita e resolução canônica (paridade total com Web)
+        val (finalCat, finalSubcat) = if (isEstorno && (category.isNullOrBlank() || category == "Outros")) {
+            Pair("Estorno", "Crédito na Fatura")
+        } else {
+            CategoryRegistry.resolveStrictCategory(
+                rawCategory = category,
+                rawSubcategory = subcategory,
+                type = type,
+                description = description,
+                guessFallback = { desc, txType ->
+                    val guess = neuralClassifier.guessCategoryAndSubcategory(desc, absAmount)
+                    Pair(guess.category, guess.subcategory)
+                }
+            )
         }
 
         val partner = FinanceEngine.resolvePartner(user.uid, cards, repository.allUsers)
@@ -715,9 +715,19 @@ class AndroidAgentToolsEngine(
             if (amt <= 0.0) continue
 
             val typeStr = item.getStringOrNull("type") ?: item.getStringOrNull("tipo") ?: if (rawAmt < 0) "income" else "expense"
-            val isIncome = typeStr.equals("income", ignoreCase = true) || rawAmt < 0
-            val cat = item.getStringOrNull("category") ?: item.getStringOrNull("categoria") ?: if (isIncome) "Outras Receitas" else "Outros"
-            val subcat = item.getStringOrNull("subcategory") ?: item.getStringOrNull("subcategoria")
+            val isIncome = typeStr.equals("income", ignoreCase = true) || typeStr.equals("receita", ignoreCase = true) || rawAmt < 0
+            val rawCat = item.getStringOrNull("category") ?: item.getStringOrNull("categoria")
+            val rawSubcat = item.getStringOrNull("subcategory") ?: item.getStringOrNull("subcategoria")
+            val (cat, subcat) = CategoryRegistry.resolveStrictCategory(
+                rawCategory = rawCat,
+                rawSubcategory = rawSubcat,
+                type = if (isIncome) TransactionType.INCOME else TransactionType.EXPENSE,
+                description = desc,
+                guessFallback = { d, _ ->
+                    val guess = neuralClassifier.guessCategoryAndSubcategory(d, amt)
+                    Pair(guess.category, guess.subcategory)
+                }
+            )
             val payMethodStr = item.getStringOrNull("paymentMethod") ?: item.getStringOrNull("metodoPagamento") ?: defaultPayMethod
             val dt = item.getStringOrNull("date") ?: item.getStringOrNull("data") ?: item.getStringOrNull("dataVencimento") ?: FinanceEngine.todayKey()
             val comp = item.getStringOrNull("competenceMonth") ?: item.getStringOrNull("mesFatura") ?: defaultMonth
@@ -1116,6 +1126,17 @@ class AndroidAgentToolsEngine(
         val updatedCount = targets.size
         val firstTarget = targets.first()
         val firstDesc = firstTarget.description
+        val resolvedEditPair = if (newCategory != null || newSubcategory != null) {
+            CategoryRegistry.resolveStrictCategory(
+                rawCategory = newCategory ?: firstTarget.category,
+                rawSubcategory = newSubcategory ?: firstTarget.subcategory,
+                type = firstTarget.type,
+                description = newDescription ?: firstTarget.description
+            )
+        } else null
+        val resolvedEditCat = resolvedEditPair?.first
+        val resolvedEditSubcat = resolvedEditPair?.second
+
         val changesList = mutableListOf<String>()
 
         if (newDescription != null) {
@@ -1124,11 +1145,11 @@ class AndroidAgentToolsEngine(
         if (newAmount != null && newAmount > 0.0) {
             changesList.add("Valor: ${FinanceEngine.formatCurrency(firstTarget.effectiveAmount)} → ${FinanceEngine.formatCurrency(newAmount)}")
         }
-        if (newCategory != null) {
-            changesList.add("Categoria: $newCategory")
+        if (newCategory != null || (resolvedEditCat != null && resolvedEditCat != firstTarget.category)) {
+            changesList.add("Categoria: $resolvedEditCat")
         }
-        if (newSubcategory != null) {
-            changesList.add("Subcategoria: $newSubcategory")
+        if (newSubcategory != null || (resolvedEditSubcat != null && resolvedEditSubcat != firstTarget.subcategory)) {
+            changesList.add("Subcategoria: $resolvedEditSubcat")
         }
         if (newStatus != null) {
             changesList.add("Status: ${newStatus.label}")
@@ -1217,8 +1238,8 @@ class AndroidAgentToolsEngine(
                     "editAllMatches" to editAllMatches,
                     "newAmount" to newAmount,
                     "newDescription" to newDescription,
-                    "newCategory" to newCategory,
-                    "newSubcategory" to newSubcategory,
+                    "newCategory" to (resolvedEditCat ?: newCategory),
+                    "newSubcategory" to (resolvedEditSubcat ?: newSubcategory),
                     "newStatus" to newStatus?.name,
                     "newPaymentMethod" to newPaymentMethod?.name,
                     "newCompetenceMonth" to newCompetenceMonth,
@@ -1274,12 +1295,14 @@ class AndroidAgentToolsEngine(
                 )
             }
 
-            if (newCategory != null) {
-                updated = updated.copy(category = newCategory)
-            }
-
-            if (newSubcategory != null) {
-                updated = updated.copy(subcategory = newSubcategory)
+            if (newCategory != null || newSubcategory != null) {
+                val (targetCat, targetSub) = CategoryRegistry.resolveStrictCategory(
+                    rawCategory = newCategory ?: tx.category,
+                    rawSubcategory = newSubcategory ?: tx.subcategory,
+                    type = tx.type,
+                    description = newDescription ?: tx.description
+                )
+                updated = updated.copy(category = targetCat, subcategory = targetSub)
             }
 
             if (newStatus != null) {
@@ -3713,11 +3736,16 @@ class AndroidAgentToolsEngine(
                 return if (amtChange != null) {
                     executeEditTransaction(searchTerm = term, newAmount = amtChange, confirmed = false)
                 } else {
-                    val catGuess = neuralClassifier.guessCategory(targetChange)
-                    if (catGuess != "Outros") {
-                        executeEditTransaction(searchTerm = term, newCategory = catGuess, confirmed = false)
+                    val (strictCat, strictSub) = CategoryRegistry.resolveStrictCategory(targetChange)
+                    if (strictCat != "Outros") {
+                        executeEditTransaction(searchTerm = term, newCategory = strictCat, newSubcategory = strictSub, confirmed = false)
                     } else {
-                        executeEditTransaction(searchTerm = term, newDescription = targetChange, confirmed = false)
+                        val catGuess = neuralClassifier.guessCategory(targetChange)
+                        if (catGuess != "Outros") {
+                            executeEditTransaction(searchTerm = term, newCategory = catGuess, confirmed = false)
+                        } else {
+                            executeEditTransaction(searchTerm = term, newDescription = targetChange, confirmed = false)
+                        }
                     }
                 }
             }
