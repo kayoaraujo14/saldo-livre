@@ -100,6 +100,25 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #64 (Conclusão Integral):**
+  - **1. Correção Contratual e Idempotência no Autolançamento de Contas Recorrentes (`backend/`):**
+    - **Módulo de Domínio Serverless (`backend/src/recurringBills.ts`):**
+      - `buildAutoLaunchTransaction`: Construção canônica de transações autolançadas em 100% de paridade com `web/src/lib/finance.ts` e Android `FinanceEngine.kt`.
+      - Preenchimento estrito de `competenceMonth`, `totalAmount`, `estimatedAmount`, `actualAmount` (preenchido para cartões com `status: 'pending'`, `null` com `status: 'estimated'` para boletos/outros), `allocations` determinísticas e `userImpact` calculados conforme `splitType` (`mine` ou `split_50`).
+      - Preservação de compatibilidade com campos legados (`month` e `amount`).
+      - `dateInMonth`: Clamping seguro de datas de vencimento respeitando limites de dias de cada mês e anos bissextos.
+      - `isBillEligibleForMonth`: Respeito estrito aos limites temporais de início e fim da recorrência (`startMonth` e `endMonth`).
+    - **Cloud Function Agendada (`backend/src/index.ts`):**
+      - Substituída a query legada por dupla checagem simultânea de idempotência por `competenceMonth` (canônico) e `month` (legado), blindando o banco contra qualquer duplicação de lançamentos.
+      - Suporte à resolução dinâmica de valores do mês anterior (`estimationRule: 'last_month'`).
+  - **2. Qualidade & Testes Automatizados no Backend:**
+    - Criada a suíte `backend/src/__tests__/recurringBills.test.ts` com **10 testes unitários verdes** cobrindo manipulação de competência, truncamento de vencimentos, filtros de vigência temporal, construções canônicas de despesas, receitas, divisões 50/50 e regras dinâmicas.
+    - Script `"test"` integrado ao `backend/package.json` e verificação universal no pipeline `"check:all"` da raiz.
+    - Compilação limpa do backend via `tsc` gerando artefatos compactos em `backend/lib/` sem poluição de arquivos de teste.
+  - **3. Validação Global:**
+    - Web: **`oxlint` (0 warnings, 0 erros)**, **`vitest` (143 testes verdes em 13 suítes)**, **`vite build` aprovado em 822ms**.
+    - Backend: **`vitest` (10 testes verdes em 1 suíte)**, **`tsc` compilação 100% aprovada**.
+
 - **[2026-11-07] Sprint 3 (v1.4.0: Segurança em Camadas & App Check) — Issue #56 (Conclusão Integral & Encerramento da Sprint 3):**
   - **1. Sanitização Estrita de Parâmetros de Function Calling e Blindagem contra Injection:**
     - **Módulo de Segurança Web (`web/src/lib/agent/security.ts`):**
