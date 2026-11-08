@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.Transaction
+import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.ui.theme.*
 
 /**
@@ -39,7 +40,8 @@ fun DeleteInstallmentDialog(
     allTransactions: List<Transaction>,
     onDismissRequest: () -> Unit,
     onDeleteSingle: (Transaction) -> Unit,
-    onDeleteAll: (String) -> Unit
+    onDeleteAll: (String) -> Unit,
+    onDeleteFuture: ((groupId: String, fromInstallmentNumber: Int) -> Unit)? = null
 ) {
     val groupId = transaction.installmentGroupId ?: ""
     val isInstallment = groupId.isNotBlank()
@@ -56,6 +58,15 @@ fun DeleteInstallmentDialog(
     } else {
         curAmount * totalCount
     }
+    val currentNumber = transaction.installmentNumber ?: 1
+    val futureTxs = if (isInstallment) {
+        groupTxs.filter { (it.installmentNumber ?: 1) >= currentNumber && it.status != TransactionStatus.PAID }
+    } else {
+        listOf(transaction)
+    }
+    val futureTotal = futureTxs.sumOf { it.effectiveAmount }
+    val hasPastPaid = isInstallment && groupTxs.any { it.status == TransactionStatus.PAID && (it.installmentNumber ?: 1) < currentNumber }
+
     val baseDesc = FinanceEngine.stripInstallmentSuffix(transaction.description)
     val installmentBadgeText = if (totalCount == 1) "1 parcela" else "$totalCount parcelas"
     val deleteAllButtonTitle = if (totalCount == 1) "Excluir parcela" else "Excluir TODAS as $totalCount parcelas"
@@ -241,6 +252,71 @@ fun DeleteInstallmentDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
+
+                // Opção Recomendada: Excluir esta e as parcelas futuras
+                if (isInstallment && totalCount > 1 && futureTxs.isNotEmpty() && onDeleteFuture != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (hasPastPaid) Amber500.copy(alpha = 0.12f) else DarkBackground)
+                            .border(
+                                1.dp,
+                                if (hasPastPaid) Amber500.copy(alpha = 0.4f) else DarkBorder,
+                                RoundedCornerShape(14.dp)
+                            )
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onDeleteFuture(groupId, currentNumber)
+                            }
+                            .padding(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 8.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = Amber400,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Excluir esta e as parcelas futuras (${futureTxs.size} ${if (futureTxs.size == 1) "parcela" else "parcelas"})",
+                                        color = Amber400,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Cancela as parcelas $currentNumber a $totalCount pendentes (${FinanceEngine.formatCurrency(futureTotal)}), mantendo as faturas passadas já pagas intactas.",
+                                    color = if (hasPastPaid) Amber400.copy(alpha = 0.85f) else TextSecondary,
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = Amber400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 // Opção 1: Excluir TODAS as parcelas
                 Box(

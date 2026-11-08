@@ -634,6 +634,24 @@ class DashboardViewModel(
         }
     }
 
+    fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int) {
+        viewModelScope.launch {
+            repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
+        }
+    }
+
+    fun refundFullInstallmentGroup(groupId: String, targetMonth: String? = null) {
+        viewModelScope.launch {
+            repository.refundFullInstallmentGroup(groupId, targetMonth)
+        }
+    }
+
+    fun anticipateInstallments(groupId: String, count: Int, targetMonth: String, discount: Double = 0.0) {
+        viewModelScope.launch {
+            repository.anticipateInstallments(groupId, count, targetMonth, discount)
+        }
+    }
+
     fun generateBills() {
         viewModelScope.launch {
             repository.generateBillsForMonth(_uiState.value.selectedMonth)

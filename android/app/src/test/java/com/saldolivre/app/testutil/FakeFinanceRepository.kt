@@ -1,6 +1,7 @@
 package com.saldolivre.app.testutil
 
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.repository.FinanceRepository
 import kotlinx.coroutines.flow.Flow
@@ -67,6 +68,54 @@ class FakeFinanceRepository(
 
     override suspend fun deleteMonthClosure(closedMonth: String) {
         closuresFlow.value = closuresFlow.value.filterNot { it.closedMonth == closedMonth }
+    }
+
+    override suspend fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int): Int {
+        val initialSize = transactionsFlow.value.size
+        transactionsFlow.value = transactionsFlow.value.filterNot {
+            it.installmentGroupId == groupId &&
+            (it.installmentNumber ?: 1) >= fromInstallmentNumber &&
+            it.status != TransactionStatus.PAID
+        }
+        return initialSize - transactionsFlow.value.size
+    }
+
+    override suspend fun refundFullInstallmentGroup(groupId: String, targetMonth: String?): Pair<Int, Double> {
+        val group = transactionsFlow.value.filter { it.installmentGroupId == groupId }
+        val result = FinanceEngine.calculateFullInstallmentRefund(
+            groupTxs = group,
+            currentUser = currentUser.value,
+            todayIso = FinanceEngine.todayKey(),
+            targetCompetenceMonth = targetMonth
+        )
+        val toRemove = result.toDeleteIds.toSet()
+        var updated = transactionsFlow.value.filterNot { it.id in toRemove }
+        val refund = result.refundTransaction
+        if (refund != null) {
+            updated = listOf(refund) + updated
+        }
+        transactionsFlow.value = updated
+        return Pair(result.toDeleteIds.size, result.totalPaidAmount)
+    }
+
+    override suspend fun anticipateInstallments(groupId: String, count: Int, targetMonth: String, discount: Double): Pair<Int, Double> {
+        val result = InvoiceEngine.anticipateInstallments(
+            transactions = transactionsFlow.value,
+            groupId = groupId,
+            count = count,
+            targetMonth = targetMonth,
+            discount = discount,
+            todayIso = FinanceEngine.todayKey(),
+            currentUserUid = currentUser.value.uid
+        )
+        val updatedMap = result.updatedTransactions.associateBy { it.id }
+        var updated = transactionsFlow.value.map { updatedMap[it.id] ?: it }
+        val discountTx = result.discountTransaction
+        if (discountTx != null) {
+            updated = listOf(discountTx) + updated
+        }
+        transactionsFlow.value = updated
+        return Pair(result.anticipatedCount, discount)
     }
 
     override suspend fun deleteInstallmentGroup(groupId: String): Int {

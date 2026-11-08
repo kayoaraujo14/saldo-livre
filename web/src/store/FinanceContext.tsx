@@ -40,8 +40,10 @@ import {
   nextStatus,
   resolvePartner,
   statusPatch,
+  calculateFullInstallmentRefund,
   type Party,
 } from '@/lib/finance'
+import { anticipateInstallments as calcAnticipateInstallments } from '@/lib/invoices'
 import * as fb from '@/lib/firebase'
 import { createToolExecutor, getLearnedRules, saveLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
 import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, daysInMonth, monthLabel, formatInstallmentDesc, stripInstallmentSuffix, todayKey } from '@/lib/utils'
@@ -976,6 +978,130 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       return targetIds.length
     },
     [mode, commitDemo, currentUid],
+  )
+
+  const deleteFutureInstallments = useCallback(
+    async (groupId: string, fromInstallmentNumber: number): Promise<number> => {
+      if (!groupId) return 0
+      const source = mode === 'demo' ? demoRef.current.transactions : fbTxRef.current
+      const targetTxs = source.filter(
+        (t) =>
+          t.installmentGroupId === groupId &&
+          (t.installmentNumber ?? 1) >= fromInstallmentNumber &&
+          t.status !== 'paid'
+      )
+      if (!targetTxs.length) return 0
+
+      if (targetTxs.some((t) => currentUid && !canUserEditTransaction(t, currentUid))) {
+        throw new Error('Você não pode excluir parcelas feitas por outra pessoa.')
+      }
+
+      const targetIds = targetTxs.map((t) => t.id)
+      if (mode === 'demo') {
+        const set = new Set(targetIds)
+        commitDemo((s) => ({
+          ...s,
+          transactions: s.transactions.filter((t) => !set.has(t.id)),
+        }))
+        return targetIds.length
+      }
+
+      await fb.fsDeleteTransactionsBatch(targetIds)
+      return targetIds.length
+    },
+    [mode, commitDemo, currentUid],
+  )
+
+  const refundFullInstallmentGroup = useCallback(
+    async (groupId: string, targetMonth?: string): Promise<{ refundedCount: number; refundAmount: number }> => {
+      if (!groupId || !me) return { refundedCount: 0, refundAmount: 0 }
+      const source = mode === 'demo' ? demoRef.current.transactions : fbTxRef.current
+      const groupTxs = source.filter((t) => t.installmentGroupId === groupId)
+      if (!groupTxs.length) return { refundedCount: 0, refundAmount: 0 }
+
+      if (groupTxs.some((t) => currentUid && !canUserEditTransaction(t, currentUid))) {
+        throw new Error('Você não pode estornar um parcelamento feito por outra pessoa.')
+      }
+
+      const { toDeleteIds, totalPaidAmount, refundTransaction } = calculateFullInstallmentRefund(
+        groupTxs,
+        { uid: me.uid, displayName: me.name },
+        todayKey(),
+        targetMonth
+      )
+
+      if (mode === 'demo') {
+        commitDemo((s) => {
+          let updated = s.transactions.filter((t) => !toDeleteIds.includes(t.id))
+          if (refundTransaction) {
+            updated = [refundTransaction, ...updated]
+          }
+          return { ...s, transactions: updated }
+        })
+        return { refundedCount: toDeleteIds.length, refundAmount: totalPaidAmount }
+      }
+
+      if (toDeleteIds.length > 0) {
+        await fb.fsDeleteTransactionsBatch(toDeleteIds)
+      }
+      if (refundTransaction) {
+        const { id: _id, ...data } = refundTransaction
+        await fb.fsAddTransaction(data)
+      }
+
+      return { refundedCount: toDeleteIds.length, refundAmount: totalPaidAmount }
+    },
+    [mode, commitDemo, currentUid, me],
+  )
+
+  const anticipateInstallments = useCallback(
+    async (
+      groupId: string,
+      count: number,
+      targetMonth: string,
+      discount: number = 0
+    ): Promise<{ count: number; discount: number }> => {
+      if (!groupId || count <= 0 || !me) return { count: 0, discount: 0 }
+      const source = mode === 'demo' ? demoRef.current.transactions : fbTxRef.current
+      const { updatedTransactions, discountTransaction, anticipatedCount } = calcAnticipateInstallments(
+        source,
+        groupId,
+        count,
+        targetMonth,
+        discount,
+        todayKey(),
+        { uid: me.uid, displayName: me.name }
+      )
+
+      if (anticipatedCount === 0) return { count: 0, discount: 0 }
+
+      if (mode === 'demo') {
+        commitDemo((s) => {
+          const map = new Map(updatedTransactions.map((t) => [t.id, t]))
+          let updated = s.transactions.map((t) => map.get(t.id) || t)
+          if (discountTransaction) {
+            updated = [discountTransaction, ...updated]
+          }
+          return { ...s, transactions: updated }
+        })
+        return { count: anticipatedCount, discount }
+      }
+
+      for (const tx of updatedTransactions) {
+        await fb.fsUpdateTransaction(tx.id, {
+          competenceMonth: tx.competenceMonth,
+          anticipatedFromMonth: tx.anticipatedFromMonth,
+          isAnticipated: true,
+        })
+      }
+      if (discountTransaction) {
+        const { id: _id, ...data } = discountTransaction
+        await fb.fsAddTransaction(data)
+      }
+
+      return { count: anticipatedCount, discount }
+    },
+    [mode, commitDemo, me],
   )
 
   const updateInstallmentGroup = useCallback(
@@ -2041,6 +2167,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     updateTransaction,
     deleteTransaction,
     deleteInstallmentGroup,
+    deleteFutureInstallments,
+    refundFullInstallmentGroup,
+    anticipateInstallments,
     updateInstallmentGroup,
     cycleStatus,
     setStatus,

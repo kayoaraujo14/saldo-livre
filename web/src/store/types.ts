@@ -119,6 +119,9 @@ export interface FinanceContextValue {
   updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<void>
   deleteTransaction: (id: string) => Promise<void>
   deleteInstallmentGroup: (groupId: string) => Promise<number>
+  deleteFutureInstallments: (groupId: string, fromInstallmentNumber: number) => Promise<number>
+  refundFullInstallmentGroup: (groupId: string, targetMonth?: string) => Promise<{ refundedCount: number; refundAmount: number }>
+  anticipateInstallments: (groupId: string, count: number, targetMonth: string, discount?: number) => Promise<{ count: number; discount: number }>
   updateInstallmentGroup: (groupId: string, input: InstallmentGroupUpdateInput) => Promise<number>
   cycleStatus: (tx: Transaction) => Promise<void>
   setStatus: (tx: Transaction, status: TransactionStatus) => Promise<void>

@@ -10,6 +10,7 @@ import type {
 } from '@/types'
 import { INCOME_CATEGORIES, getCategoryDetail, resolveStrictCategory } from '@/types'
 import { extractCounterparty } from '../pdfParser'
+import { anticipateInstallments as calcAnticipateInstallments } from '../invoices'
 import {
   buildSplit,
   calculateCardInvoiceDates,
@@ -19,6 +20,7 @@ import {
   computeSummary,
   detectSplit,
   effectiveAmount,
+  calculateFullInstallmentRefund,
   fractionCustomAllocations,
   guessCategoryAndSubcategory,
   pickCard,
@@ -29,6 +31,7 @@ import {
   currentMonthKey,
   dateInMonth,
   formatInstallmentDesc,
+  stripInstallmentSuffix,
   formatShortDate,
   monthLabel,
   normalize,
@@ -1404,12 +1407,29 @@ export async function excluir(env: AgentEnv, args: Record<string, unknown>): Pro
     targets = candidates.slice(0, limite)
   }
 
+  const deleteFutureOnly =
+    Boolean(args.deleteFutureOnly) ||
+    Boolean(args.cancelFutureOnly) ||
+    Boolean(args.excluirFuturas) ||
+    Boolean(args.cancelarFuturas)
+
   const deleteAllInstallments =
     Boolean(args.deleteAllInstallments) ||
     Boolean(args.excluirTodasAsParcelas) ||
     Boolean(args.excluirParcelamento)
 
-  if (deleteAllInstallments && targets.length > 0) {
+  if (deleteFutureOnly && targets.length > 0) {
+    const primary = targets[0]
+    if (primary.installmentGroupId) {
+      const fromNum = primary.installmentNumber ?? 1
+      targets = all.filter(
+        (t) =>
+          t.installmentGroupId === primary.installmentGroupId &&
+          (t.installmentNumber ?? 1) >= fromNum &&
+          t.status !== 'paid'
+      )
+    }
+  } else if (deleteAllInstallments && targets.length > 0) {
     const groupIds = new Set(targets.map((t) => t.installmentGroupId).filter(Boolean) as string[])
     if (groupIds.size > 0) {
       targets = all.filter((t) => t.installmentGroupId && groupIds.has(t.installmentGroupId))
@@ -1847,6 +1867,203 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
         ...(novaDataVencimento && !(hasInstallments && isOnlyCategorySubcat) ? [{ label: 'Novo Vencimento', value: novaDataVencimento }] : []),
         { label: 'Saldo Livre em ' + monthLabel(targetMonth), value: money(summaryAfter.freeBalance) },
       ],
+    },
+  }
+}
+
+export async function anteciparParcelas(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const searchTerm = sanitizeText(args.termoBusca ?? args.descricao ?? '', 200)
+  const groupId = typeof args.installmentGroupId === 'string' ? args.installmentGroupId.trim() : null
+  const count = typeof args.quantidadeParcelas === 'number' ? Math.max(1, Math.round(args.quantidadeParcelas)) : 999
+  const targetMonth = typeof args.mesDestino === 'string' && /^\d{4}-\d{2}$/.test(args.mesDestino)
+    ? args.mesDestino
+    : env.monthKey
+  const discount = sanitizeAmount(args.desconto ?? args.discount) || 0
+
+  const all = env.getTransactions()
+  let matchedGroupTxs: Transaction[] = []
+  if (groupId) {
+    matchedGroupTxs = all.filter((t) => t.installmentGroupId === groupId)
+  } else if (searchTerm) {
+    const candidate = all.find(
+      (t) => Boolean(t.installmentGroupId) && matchesSearch(t.description, searchTerm)
+    )
+    if (candidate && candidate.installmentGroupId) {
+      matchedGroupTxs = all.filter((t) => t.installmentGroupId === candidate.installmentGroupId)
+    }
+  }
+
+  if (matchedGroupTxs.length === 0) {
+    return {
+      response: {
+        ok: false,
+        erro: `Não encontrei nenhuma compra parcelada pendente correspondente a "${searchTerm}".`,
+      },
+    }
+  }
+
+  const baseTx = matchedGroupTxs[0]
+  if (!canUserEditTransaction(baseTx, env.me.uid)) {
+    return {
+      response: {
+        ok: false,
+        erro: `Você não tem permissão para antecipar parcelas de uma compra feita por outra pessoa.`,
+      },
+    }
+  }
+
+  const { updatedTransactions, discountTransaction, anticipatedCount, totalAnticipatedAmount } = calcAnticipateInstallments(
+    all,
+    baseTx.installmentGroupId!,
+    count,
+    targetMonth,
+    discount,
+    todayKey(),
+    { uid: env.me.uid, displayName: env.me.name }
+  )
+
+  if (anticipatedCount === 0) {
+    return {
+      response: {
+        ok: false,
+        erro: `Não há parcelas pendentes disponíveis para antecipar nesta compra para a fatura de ${monthLabel(targetMonth)}.`,
+      },
+    }
+  }
+
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+  const baseDesc = stripInstallmentSuffix(baseTx.description)
+
+  if (isPendingConfirmation) {
+    return {
+      response: {
+        ok: true,
+        precisaConfirmacao: true,
+        acao: {
+          tipo: 'anteciparParcelas',
+          title: `Antecipar ${anticipatedCount} ${anticipatedCount === 1 ? 'parcela' : 'parcelas'}: ${baseDesc}`,
+          detalhes: [
+            { label: 'Compra', value: baseDesc },
+            { label: 'Parcelas a antecipar', value: `${anticipatedCount} parcelas finais` },
+            { label: 'Valor bruto antecipado', value: money(totalAnticipatedAmount) },
+            ...(discount > 0 ? [{ label: 'Desconto concedido', value: `−${money(discount)}` }] : []),
+            { label: 'Fatura de destino', value: monthLabel(targetMonth) },
+          ],
+          mensagem: `Confirma a antecipação de ${anticipatedCount} parcelas da compra "${baseDesc}" (${money(totalAnticipatedAmount)}) para a fatura de ${monthLabel(targetMonth)}${discount > 0 ? ` com desconto de ${money(discount)}` : ''}?`,
+        },
+      },
+    }
+  }
+
+  // Executa a antecipação
+  for (const tx of updatedTransactions) {
+    await env.updateTransaction(tx.id, {
+      competenceMonth: tx.competenceMonth,
+      anticipatedFromMonth: tx.anticipatedFromMonth,
+      isAnticipated: true,
+    })
+  }
+
+  if (discountTransaction) {
+    const { id: _id, ...data } = discountTransaction
+    await env.addTransaction(data)
+  }
+
+  return {
+    response: {
+      ok: true,
+      mensagem: `🎉 **${anticipatedCount} ${anticipatedCount === 1 ? 'parcela antecipada' : 'parcelas antecipadas'} com sucesso!**\n\n• **Compra**: ${baseDesc}\n• **Total antecipado**: ${money(totalAnticipatedAmount)}\n• **Fatura de destino**: ${monthLabel(targetMonth)}${discount > 0 ? `\n• **Crédito de desconto**: −${money(discount)}` : ''}`,
+    },
+  }
+}
+
+export async function estornarCompraParcelada(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
+  const searchTerm = sanitizeText(args.termoBusca ?? args.descricao ?? '', 200)
+  const groupId = typeof args.installmentGroupId === 'string' ? args.installmentGroupId.trim() : null
+  const targetMonth = typeof args.mesDestino === 'string' && /^\d{4}-\d{2}$/.test(args.mesDestino)
+    ? args.mesDestino
+    : env.monthKey
+
+  const all = env.getTransactions()
+  let matchedGroupTxs: Transaction[] = []
+  if (groupId) {
+    matchedGroupTxs = all.filter((t) => t.installmentGroupId === groupId)
+  } else if (searchTerm) {
+    const candidate = all.find(
+      (t) => Boolean(t.installmentGroupId) && matchesSearch(t.description, searchTerm)
+    )
+    if (candidate && candidate.installmentGroupId) {
+      matchedGroupTxs = all.filter((t) => t.installmentGroupId === candidate.installmentGroupId)
+    }
+  }
+
+  if (matchedGroupTxs.length === 0) {
+    return {
+      response: {
+        ok: false,
+        erro: `Não encontrei nenhuma compra parcelada correspondente a "${searchTerm}" para estorno integral.`,
+      },
+    }
+  }
+
+  const baseTx = matchedGroupTxs[0]
+  if (!canUserEditTransaction(baseTx, env.me.uid)) {
+    return {
+      response: {
+        ok: false,
+        erro: `Você não tem permissão para estornar uma compra feita por outra pessoa.`,
+      },
+    }
+  }
+
+  const { toDeleteIds, totalPaidAmount, refundTransaction } = calculateFullInstallmentRefund(
+    matchedGroupTxs,
+    { uid: env.me.uid, displayName: env.me.name },
+    todayKey(),
+    targetMonth
+  )
+
+  const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
+  const baseDesc = stripInstallmentSuffix(baseTx.description)
+
+  if (isPendingConfirmation) {
+    return {
+      response: {
+        ok: true,
+        precisaConfirmacao: true,
+        acao: {
+          tipo: 'estornarCompraParcelada',
+          title: `Estorno Integral da Compra: ${baseDesc}`,
+          detalhes: [
+            { label: 'Compra', value: baseDesc },
+            { label: 'Parcelas canceladas (futuras)', value: `${toDeleteIds.length} parcelas` },
+            ...(totalPaidAmount > 0
+              ? [
+                  { label: 'Valor pago a estornar', value: money(totalPaidAmount) },
+                  { label: 'Fatura de crédito', value: monthLabel(targetMonth) },
+                ]
+              : [{ label: 'Valor pago anterior', value: 'R$ 0,00 (nenhuma parcela paga ainda)' }]),
+          ],
+          mensagem: `Confirma o estorno integral da compra "${baseDesc}"? ${toDeleteIds.length} parcelas futuras serão canceladas${totalPaidAmount > 0 ? ` e um estorno de ${money(totalPaidAmount)} será lançado na fatura de ${monthLabel(targetMonth)} para reembolsar o valor já pago.` : '.'}`,
+        },
+      },
+    }
+  }
+
+  // Executa o cancelamento e lançamento de estorno
+  for (const id of toDeleteIds) {
+    await env.deleteTransaction(id)
+  }
+
+  if (refundTransaction) {
+    const { id: _id, ...data } = refundTransaction
+    await env.addTransaction(data)
+  }
+
+  return {
+    response: {
+      ok: true,
+      mensagem: `🔄 **Estorno integral de compra parcelada concluído!**\n\n• **Compra**: ${baseDesc}\n• **Parcelas canceladas**: ${toDeleteIds.length} pendentes\n${totalPaidAmount > 0 ? `• **Crédito de estorno gerado**: +${money(totalPaidAmount)} na fatura de ${monthLabel(targetMonth)}` : '• **Status**: todas as obrigações futuras foram removidas sem custos.'}`,
     },
   }
 }

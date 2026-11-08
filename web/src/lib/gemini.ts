@@ -233,6 +233,8 @@ export type ToolName =
   | 'gerenciarRegrasEMemoria'
   | 'gerarGraficoFinanceiro'
   | 'gerenciarEnvelopesOrcamentarios'
+  | 'anteciparParcelas'
+  | 'estornarCompraParcelada'
 
 export interface ToolResult {
   response: Record<string, unknown>
@@ -449,6 +451,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
         tudoDoMes: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir para limpar ou apagar o mês inteiro.' },
         apenasRecentes: { type: Type.BOOLEAN, description: 'Defina como true SOMENTE se o usuário pedir expressamente "desfazer último lote" ou "apagar os últimos cadastrados".' },
         deleteAllInstallments: { type: Type.BOOLEAN, description: 'Se true, exclui todas as parcelas do grupo de parcelamento quando o usuário pedir para cancelar ou excluir a compra parcelada inteira (ex: "exclua o parcelamento do celular"). Padrão: false.' },
+        deleteFutureOnly: { type: Type.BOOLEAN, description: 'Se true, cancela/exclui apenas as parcelas futuras e pendentes da compra parcelada a partir da parcela atual, mantendo as parcelas já pagas intactas no histórico contábil (ex: "cancele as parcelas futuras do curso"). Padrão: false.' },
         limiteQuantidade: { type: Type.NUMBER, description: 'Quantidade máxima a excluir (padrão 1 para exclusão de item único).' },
       },
     },
@@ -734,6 +737,36 @@ export const functionDeclarations: FunctionDeclaration[] = [
         },
       },
       required: ['acao'],
+    },
+  },
+  {
+    name: 'anteciparParcelas',
+    description:
+      'Antecipa parcelas futuras de uma compra parcelada no cartão para a fatura aberta do mês atual (ou competência indicada), com suporte a desconto/amortização opcional. Use quando o usuário pedir "antecipar parcelas", "adiantar parcelas", "puxar as parcelas restantes para este mês com desconto", etc.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        termoBusca: { type: Type.STRING, description: 'Nome da compra ou estabelecimento (ex: "notebook", "iPhone", "TV").' },
+        installmentGroupId: { type: Type.STRING, description: 'ID do grupo de parcelamento (se conhecido).' },
+        quantidadeParcelas: { type: Type.NUMBER, description: 'Quantidade de parcelas finais a antecipar (ex: 3). Se não informado, antecipa todas as parcelas pendentes.' },
+        mesDestino: { type: Type.STRING, description: 'Mês de competência da fatura para onde antecipar (YYYY-MM). Padrão: mês atual.' },
+        desconto: { type: Type.NUMBER, description: 'Valor do desconto obtido pela antecipação em reais (ex: 50.0). Gera uma linha de crédito/estorno na fatura.' },
+      },
+      required: ['termoBusca'],
+    },
+  },
+  {
+    name: 'estornarCompraParcelada',
+    description:
+      'Estorna integralmente uma compra parcelada que foi cancelada ou devolvida na loja: cancela todas as parcelas futuras pendentes e gera um crédito/estorno consolidado referente às parcelas que já foram pagas pelo usuário. Use quando o usuário disser "devolvi a compra parcelada", "estorne a compra completa do curso", "cancelei a compra em 10x", etc.',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        termoBusca: { type: Type.STRING, description: 'Nome da compra parcelada a ser estornada (ex: "curso", "passagens").' },
+        installmentGroupId: { type: Type.STRING, description: 'ID do grupo de parcelamento (se conhecido).' },
+        mesDestino: { type: Type.STRING, description: 'Mês onde o crédito do que já foi pago deve ser lançado (YYYY-MM). Padrão: mês atual.' },
+      },
+      required: ['termoBusca'],
     },
   },
 ]
@@ -1046,6 +1079,12 @@ REGRAS DE FUNCIONAMENTO:
 - IMPORTANTE: Confirme a operação de forma simples e direta no mês atual. NÃO fique gerando previsões ou projeções detalhadas de meses futuros ao final da resposta a menos que o usuário peça especificamente.
 - Se o usuário pedir para gerar, expandir ou sincronizar as parcelas passadas e futuras de compras já existentes:
   Chame a ferramenta "expandirParcelamentos" com mes: "2026-11"!
+- ANTECIPAÇÃO DE PARCELAS ("antecipar parcelas", "adiantar parcelas", "puxar parcelas restantes com desconto"):
+  * Chame a ferramenta "anteciparParcelas" informando termoBusca, quantidadeParcelas, mesDestino (mês atual por padrão) e desconto (se houver).
+- CANCELAMENTO DE PARCELAS RESTANTES/FUTURAS ("cancele as parcelas futuras", "cancele o restante da compra parcelada"):
+  * Chame a ferramenta "excluirTransacoes" informando termoBusca e deleteFutureOnly: true (cancela as parcelas futuras e preserva as passadas já pagas).
+- ESTORNO INTEGRAL DE COMPRA PARCELADA ("estorne a compra completa", "devolvi o produto parcelado", "cancelei a compra em 10x"):
+  * Chame a ferramenta "estornarCompraParcelada" informando termoBusca e mesDestino (cancela obrigações futuras e reembolsa o total já pago).
 
 5. REGISTRO EM LOTE:
 - Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE a ferramenta "registrarTransacoesLote". Isso processa todas as despesas em uma única chamada rápida!

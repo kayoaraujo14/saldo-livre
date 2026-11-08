@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.saldolivre.app.SaldoLivreApplication
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.model.*
 import kotlinx.coroutines.flow.*
 import java.util.UUID
@@ -369,6 +370,76 @@ class MockFinanceRepository(
             persistTransactions(updated)
             updated
         }
+    }
+
+    override suspend fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int): Int {
+        if (groupId.isBlank()) return 0
+        var count = 0
+        _transactions.update { current ->
+            val toRemove = current.filter {
+                it.installmentGroupId == groupId &&
+                (it.installmentNumber ?: 1) >= fromInstallmentNumber &&
+                it.status != TransactionStatus.PAID
+            }
+            count = toRemove.size
+            val toRemoveIds = toRemove.map { it.id }.toSet()
+            val updated = current.filter { it.id !in toRemoveIds }
+            persistTransactions(updated)
+            updated
+        }
+        return count
+    }
+
+    override suspend fun refundFullInstallmentGroup(groupId: String, targetMonth: String?): Pair<Int, Double> {
+        if (groupId.isBlank()) return Pair(0, 0.0)
+        val currentTxs = _transactions.value
+        val group = currentTxs.filter { it.installmentGroupId == groupId }
+        if (group.isEmpty()) return Pair(0, 0.0)
+
+        val result = FinanceEngine.calculateFullInstallmentRefund(
+            groupTxs = group,
+            currentUser = _currentUser.value,
+            todayIso = FinanceEngine.todayKey(),
+            targetCompetenceMonth = targetMonth
+        )
+
+        _transactions.update { current ->
+            val toRemoveIds = result.toDeleteIds.toSet()
+            var updated = current.filter { it.id !in toRemoveIds }
+            if (result.refundTransaction != null) {
+                updated = listOf(result.refundTransaction) + updated
+            }
+            persistTransactions(updated)
+            updated
+        }
+        return Pair(result.toDeleteIds.size, result.totalPaidAmount)
+    }
+
+    override suspend fun anticipateInstallments(groupId: String, count: Int, targetMonth: String, discount: Double): Pair<Int, Double> {
+        if (groupId.isBlank() || count <= 0) return Pair(0, 0.0)
+        val currentTxs = _transactions.value
+        val result = InvoiceEngine.anticipateInstallments(
+            transactions = currentTxs,
+            groupId = groupId,
+            count = count,
+            targetMonth = targetMonth,
+            discount = discount,
+            todayIso = FinanceEngine.todayKey(),
+            currentUserUid = _currentUser.value.uid
+        )
+
+        if (result.anticipatedCount == 0) return Pair(0, 0.0)
+
+        _transactions.update { current ->
+            val updatedMap = result.updatedTransactions.associateBy { it.id }
+            var updated = current.map { updatedMap[it.id] ?: it }
+            if (result.discountTransaction != null) {
+                updated = listOf(result.discountTransaction) + updated
+            }
+            persistTransactions(updated)
+            updated
+        }
+        return Pair(result.anticipatedCount, discount)
     }
 
     override suspend fun deleteInstallmentGroup(groupId: String): Int {

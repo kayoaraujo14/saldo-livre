@@ -990,6 +990,10 @@ fun DashboardScreen(
                 onDeleteAll = { groupId ->
                     viewModel.deleteInstallmentGroup(groupId)
                     txToDelete = null
+                },
+                onDeleteFuture = { groupId, fromNum ->
+                    viewModel.deleteFutureInstallments(groupId, fromNum)
+                    txToDelete = null
                 }
             )
         } else {

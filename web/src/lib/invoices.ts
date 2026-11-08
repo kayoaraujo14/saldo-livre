@@ -7,7 +7,7 @@
  */
 import type { Card, Transaction } from '@/types'
 import { clampPct, effectiveAmount } from './finance'
-import { daysInMonth, formatBRL, round2, shiftMonth, todayKey } from './utils'
+import { daysInMonth, formatBRL, round2, shiftMonth, stripInstallmentSuffix, todayKey } from './utils'
 
 export type InvoiceStatus = 'empty' | 'open' | 'closed' | 'overdue' | 'paid'
 
@@ -742,5 +742,102 @@ export function computePredictiveAlert(
     daysRemaining,
     headline,
     detail,
+  }
+}
+
+export interface AnticipateInstallmentsResult {
+  updatedTransactions: Transaction[]
+  discountTransaction: Transaction | null
+  anticipatedCount: number
+  totalAnticipatedAmount: number
+}
+
+/**
+ * Antecipa as últimas N parcelas pendentes de um parcelamento para a fatura aberta desejada:
+ * - Seleciona as parcelas pendentes com maior número de parcela (fim da série).
+ * - Transfere a competência para targetMonth, marcando isAnticipated: true e preservando anticipatedFromMonth.
+ * - Se houver desconto informado, gera um crédito proporcional/estorno na fatura de destino.
+ */
+export function anticipateInstallments(
+  transactions: Transaction[],
+  groupId: string,
+  count: number,
+  targetMonth: string,
+  discount: number = 0,
+  todayIso: string = todayKey(),
+  currentUser: { uid: string; displayName?: string } = { uid: '' }
+): AnticipateInstallmentsResult {
+  if (!groupId || count <= 0) {
+    return {
+      updatedTransactions: [],
+      discountTransaction: null,
+      anticipatedCount: 0,
+      totalAnticipatedAmount: 0,
+    }
+  }
+
+  const groupTxs = transactions.filter((t) => t.installmentGroupId === groupId)
+  // Apenas parcelas não pagas e que ainda não estão no mês de destino
+  const pendingTxs = groupTxs
+    .filter((t) => t.status !== 'paid' && t.competenceMonth !== targetMonth)
+    .sort((a, b) => (b.installmentNumber ?? 0) - (a.installmentNumber ?? 0))
+
+  const toAnticipate = pendingTxs.slice(0, Math.min(count, pendingTxs.length))
+  if (toAnticipate.length === 0) {
+    return {
+      updatedTransactions: [],
+      discountTransaction: null,
+      anticipatedCount: 0,
+      totalAnticipatedAmount: 0,
+    }
+  }
+
+  const updatedTransactions: Transaction[] = toAnticipate.map((tx) => ({
+    ...tx,
+    anticipatedFromMonth: tx.anticipatedFromMonth || tx.competenceMonth,
+    competenceMonth: targetMonth,
+    isAnticipated: true,
+  }))
+
+  const totalAnticipatedAmount = round2(
+    toAnticipate.reduce((sum, t) => sum + effectiveAmount(t), 0)
+  )
+
+  let discountTransaction: Transaction | null = null
+  const cleanDiscount = Math.abs(discount)
+  if (cleanDiscount > 0) {
+    const baseTx = toAnticipate[0]
+    const baseDesc = stripInstallmentSuffix(baseTx.description)
+    discountTransaction = {
+      id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      createdByUid: currentUser.uid || baseTx.createdByUid,
+      paidByUid: baseTx.paidByUid || currentUser.uid,
+      cardId: baseTx.cardId,
+      description: `Desconto por Antecipação: ${baseDesc}`,
+      category: 'Outros',
+      subcategory: 'Crédito na Fatura',
+      type: 'expense',
+      paymentMethod: baseTx.paymentMethod || 'credit_card',
+      status: 'pending',
+      estimatedAmount: null,
+      actualAmount: -round2(cleanDiscount),
+      totalAmount: -round2(cleanDiscount),
+      dueDate: todayIso || baseTx.dueDate,
+      competenceMonth: targetMonth,
+      visibleToUids: baseTx.visibleToUids || [currentUser.uid],
+      userImpact: { [currentUser.uid || baseTx.createdByUid]: -round2(cleanDiscount) },
+      allocations: [],
+      splitType: 'mine',
+      installmentGroupId: groupId,
+      discountAmount: round2(cleanDiscount),
+      createdAt: Date.now(),
+    }
+  }
+
+  return {
+    updatedTransactions,
+    discountTransaction,
+    anticipatedCount: toAnticipate.length,
+    totalAnticipatedAmount,
   }
 }

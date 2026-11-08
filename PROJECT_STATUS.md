@@ -101,6 +101,26 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Sprint — Correções Críticas: Motor de Parcelamentos & Faturas — Issue #79 (Conclusão Integral):**
+  - **1. Cancelamento / Exclusão de Parcelas Futuras (`deleteFutureInstallments`):**
+    - **Web (`store/FinanceContext.tsx`, `components/modals/DeleteInstallmentDialog.tsx`) & Android (`DeleteInstallmentDialog.kt`, `FirestoreFinanceRepository.kt`, `MockFinanceRepository.kt`, `TransactionsViewModel.kt`, `DashboardViewModel.kt`):**
+      - Adicionada opção recomendada "Excluir esta e as parcelas futuras ($N$ parcelas)" no diálogo de exclusão de parcelamento, calculando a soma restante pendente e mantendo o histórico de parcelas passadas já quitadas intacto.
+      - Copiloto IA: suporte ao parâmetro booleano `deleteFutureOnly` (e sinônimos `cancelFutureOnly`, `excluirFuturas`, `cancelarFuturas`) na ferramenta `excluirTransacoes` / ação `DELETE_TRANSACTION`.
+  - **2. Estorno Integral de Compra Parcelada (`refundFullInstallmentGroup`):**
+    - **Web (`lib/finance.ts`, `lib/agent/transactionTools.ts`) & Android (`FinanceEngine.kt`, `AndroidAgentToolsEngine.kt`):**
+      - Função pura `calculateFullInstallmentRefund`: calcula o total desembolsado pelo usuário em parcelas pagas, cancela e exclui todas as parcelas pendentes/futuras e gera um lançamento de estorno/crédito na fatura aberta da competência desejada (`targetMonth`).
+      - Caso nenhuma parcela tenha sido paga ainda, cancela e exclui todo o parcelamento sem gerar crédito residual.
+      - Copiloto IA: ferramenta `estornarCompraParcelada` / ação `REFUND_FULL_INSTALLMENTS` no Web e Android com confirmação visual e suporte ao human-in-the-loop.
+  - **3. Antecipação Inteligente de Parcelas com Desconto (`anticipateInstallments`):**
+    - **Web (`lib/invoices.ts`, `lib/agent/transactionTools.ts`) & Android (`InvoiceEngine.kt`, `AndroidAgentToolsEngine.kt`):**
+      - Função pura `anticipateInstallments`: seleciona as últimas $N$ parcelas pendentes da série decrescentemente (do fim para o início), transferindo sua competência para a fatura aberta do mês atual (ou indicado), com `isAnticipated: true`, `anticipatedFromMonth` preservado e recálculo de vencimento no cartão.
+      - Quando informado desconto (`discount > 0`), gera automaticamente linha de crédito/estorno com a dedução na fatura de destino.
+      - Copiloto IA: ferramenta `anteciparParcelas` / ação `ANTICIPATE_INSTALLMENTS` em Web e Android.
+  - **4. Qualidade & Testes Automatizados (100% Verdes):**
+    - Criada a suíte `web/src/lib/__tests__/installmentLifecycle.test.ts` (8 testes cobrindo os 3 pilares e as tools do agente) — 100% verde no Vitest.
+    - Criada a suíte `android/app/src/test/java/com/saldolivre/app/data/engine/InstallmentLifecycleTest.kt` (5 testes unitários na JVM) — 100% verde.
+    - Quality gates 100% aprovados: Web (`oxlint` 0 erros/warnings, Vitest 205 testes verdes, build Vite de produção aprovado), Backend (10 testes verdes) e Android (`testDebugUnitTest` 100% verde).
+
 - **[2026-11-08] Sprint — Correções Críticas: Motor de Parcelamentos & Faturas — Issue #77 (Conclusão Integral):**
   - **1. Avanço Estrito de Competência (Extinção do Colapso de Parcelas na Virada de Mês):**
     - **Web (`store/FinanceContext.tsx`, `lib/finance.ts`) & Android (`TransactionFormViewModel.kt`, `FinanceEngine.kt`):**

@@ -8,6 +8,8 @@ import {
   excluir,
   expandirParcelamentos,
   registrar,
+  anteciparParcelas,
+  estornarCompraParcelada,
   registrarLote,
 } from './agent/transactionTools'
 import { atualizar } from './agent/billTools'
@@ -72,6 +74,10 @@ export function createToolExecutor(getEnv: () => AgentEnv): ToolExecutor {
         return gerarGrafico(env, args)
       case 'gerenciarEnvelopesOrcamentarios':
         return gerenciarEnvelopesOrcamentarios(env, args)
+      case 'anteciparParcelas':
+        return anteciparParcelas(env, args)
+      case 'estornarCompraParcelada':
+        return estornarCompraParcelada(env, args)
       default:
         return { response: { ok: false, erro: `Ferramenta desconhecida: ${name}` } }
     }
