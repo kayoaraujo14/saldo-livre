@@ -101,6 +101,25 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Sprint — Correções Críticas: Motor de Parcelamentos & Faturas — Issue #76 (Conclusão Integral):**
+  - **1. Isolamento Estrito de Status por Parcela (`updateInstallmentGroup`):**
+    - **Web (`store/FinanceContext.tsx`) & Android (`FirestoreFinanceRepository.kt`, `MockFinanceRepository.kt`):**
+      - Eliminada a propagação indevida de status que revertia parcelas quitadas (`paid`/`reconciled`) para pendentes ou acelerava parcelas futuras para pagas ao editar metadados do grupo.
+      - Cada parcela preserva estritamente seu próprio status individual (`effectiveStatus = tx.status`), mantendo a integridade histórica de faturas fechadas e limites de crédito.
+  - **2. Preservação de Reembolsos de Amigos:**
+    - Adicionado suporte ao histórico de rateio prévio (`previous`) em `FinanceEngine.buildSplit` (Kotlin) e em `FinanceContext.tsx` (TypeScript).
+    - Parcelas com alocações de amigos ou participantes previamente liquidadas (`reimbursed: true`) têm seus status de reembolso integralmente preservados durante qualquer recálculo em lote.
+  - **3. Extinção Oficial do Sufixo `(X/Y)` nas Descrições:**
+    - Regex unificada e robusta `\s*\(\s*\d+\s*(?:/|de)\s*\d+\s*\)\s*$` em `stripInstallmentSuffix` e `formatInstallmentDesc` (Web `utils.ts` e Android `FinanceEngine.kt`).
+    - Nomes de despesas armazenados de forma 100% limpa, confiando exclusivamente nos metadados numéricos e nos componentes dedicados de `Badge` na UI.
+  - **4. Recálculo Automático de Ciclo ao Mudar Cartão ou Data:**
+    - Quando o usuário troca o cartão ou data da compra parcelada, a competência e vencimentos são recalculados deterministicamente via `calculateCardInvoiceDates` e projetados cronologicamente via `shiftMonth`.
+    - Preservação de `cardId` em edições inline na tabela da Web quando `paymentMethod` não é enviado no payload.
+  - **5. Qualidade & Testes Automatizados (100% Verdes):**
+    - Criada a suíte `web/src/lib/__tests__/installmentGroup.test.ts` (7 testes verdes no Vitest).
+    - Criada a suíte `android/app/src/test/java/com/saldolivre/app/data/engine/FinanceEngineInstallmentTest.kt` (4 testes verdes na JVM).
+    - Validação global: Web (`oxlint` 0 erros/warnings, Vitest 183 testes verdes, Vite build 820ms), Backend (Vitest 10 testes verdes, TypeScript clean) e Android (67 testes JVM verdes, Gradle build aprovado).
+
 - **[2026-11-08] 🚀 Release Oficial v1.5.0 — Milestone 4 (Robustez Serverless & Resiliência Multiplataforma):**
   - Tag Git e Release oficial publicadas no GitHub: [`v1.5.0`](https://github.com/kayoaraujo14/saldo-livre/releases/tag/v1.5.0).
   - Consolida todas as 4 frentes do Milestone: Autolançamento de recorrentes no backend (#64 / PR #80), Segregação de `/public_profiles` no Firestore (#73 / PR #81), Indicador reativo de rede/offline (#66 / PR #83) e Telemetria Crashlytics/Error Boundary (#65 / PR #84).

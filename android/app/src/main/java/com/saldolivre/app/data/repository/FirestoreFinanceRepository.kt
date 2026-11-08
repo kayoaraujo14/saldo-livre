@@ -459,13 +459,28 @@ class FirestoreFinanceRepository(
         val user = _currentUser.value
         val partner = allUsers.find { it.uid != user.uid }
         val cards = getCards().first()
-        val card = input.cardId?.let { cid -> cards.find { it.id == cid } }
-        val payerUid = if (input.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) card.ownerUid else user.uid
+
+        val firstTx = group.first()
+        val firstNum = firstTx.installmentNumber ?: 1
+        val effectivePaymentMethod = input.paymentMethod ?: firstTx.paymentMethod
+        val isCardChange = input.cardId != null && input.cardId != firstTx.cardId
+        val targetCardId = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD) {
+            input.cardId ?: firstTx.cardId
+        } else null
+
+        val card = targetCardId?.let { cid -> cards.find { it.id == cid } }
+        val payerUid = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD && card != null) card.ownerUid else user.uid
+
+        val firstPurchaseDate = input.date ?: firstTx.dueDate.takeIf { it.isNotBlank() } ?: FinanceEngine.todayKey()
+        val shouldRecalcCycle = effectivePaymentMethod == PaymentMethod.CREDIT_CARD && card != null && (isCardChange || input.date != null)
+        val initialCardDates = if (shouldRecalcCycle && card != null) {
+            FinanceEngine.calculateCardInvoiceDates(firstPurchaseDate, card)
+        } else null
+        val initialMonth = initialCardDates?.second
 
         val newDay = input.date?.takeIf { it.length >= 10 }?.substring(8, 10)?.toIntOrNull()
-        val firstNum = group.first().installmentNumber ?: 1
-        val baseMonth = group.first().competenceMonth.takeIf { it.isNotBlank() }
-            ?: group.first().dueDate.take(7).takeIf { it.isNotBlank() }
+        val baseMonth = firstTx.competenceMonth.takeIf { it.isNotBlank() }
+            ?: firstTx.dueDate.take(7).takeIf { it.isNotBlank() }
             ?: FinanceEngine.currentMonthKey()
 
         val updatedTxs = group.mapIndexed { idx, tx ->
@@ -473,16 +488,28 @@ class FirestoreFinanceRepository(
             val total = tx.installmentsTotal ?: group.size
             val curAmount = if (input.amount != null && input.amount > 0.0) FinanceEngine.round2(input.amount) else tx.totalAmount
 
-            val newDesc = if (!input.description.isNullOrBlank()) {
-                FinanceEngine.formatInstallmentDesc(input.description, num, total)
-            } else tx.description
+            // 3. Extinção do sufixo (X/Y)
+            val rawDesc = if (!input.description.isNullOrBlank()) input.description else tx.description
+            val newDesc = FinanceEngine.formatInstallmentDesc(rawDesc, num, total)
 
-            val targetMonth = FinanceEngine.shiftMonth(baseMonth, num - firstNum)
-            val newDueDate = if (newDay != null) {
-                FinanceEngine.dateInMonth(targetMonth, newDay)
+            // 4. Recálculo de Ciclo ao Mudar Cartão / Data
+            var targetMonth = tx.competenceMonth.takeIf { it.isNotBlank() } ?: tx.dueDate.take(7).takeIf { it.isNotBlank() } ?: FinanceEngine.currentMonthKey()
+            var newDueDate = tx.dueDate
+
+            if (shouldRecalcCycle && initialMonth != null) {
+                targetMonth = FinanceEngine.shiftMonth(initialMonth, num - firstNum)
+                newDueDate = FinanceEngine.shiftDateMonth(firstPurchaseDate, num - firstNum)
+            } else if (effectivePaymentMethod != PaymentMethod.CREDIT_CARD && input.date != null) {
+                newDueDate = FinanceEngine.shiftDateMonth(firstPurchaseDate, num - firstNum)
+                targetMonth = newDueDate.take(7)
             } else {
-                val origDay = tx.dueDate.takeIf { it.length >= 10 }?.substring(8, 10)?.toIntOrNull() ?: 10
-                FinanceEngine.dateInMonth(targetMonth, origDay)
+                targetMonth = FinanceEngine.shiftMonth(baseMonth, num - firstNum)
+                newDueDate = if (newDay != null) {
+                    FinanceEngine.dateInMonth(targetMonth, newDay)
+                } else {
+                    val origDay = tx.dueDate.takeIf { it.length >= 10 }?.substring(8, 10)?.toIntOrNull() ?: 10
+                    FinanceEngine.dateInMonth(targetMonth, origDay)
+                }
             }
 
             val targetFriendUid = input.friend?.uid ?: tx.assignedFriendUid
@@ -490,6 +517,7 @@ class FirestoreFinanceRepository(
             val targetFriendPct = input.friend?.pct ?: tx.friendSharePct
             val hasFriend = !targetFriendUid.isNullOrBlank()
 
+            // 2. Preservação de Reembolsos de Amigos
             val split = FinanceEngine.buildSplit(
                 splitType = input.splitType ?: tx.splitType ?: SplitType.MINE,
                 total = curAmount,
@@ -502,23 +530,27 @@ class FirestoreFinanceRepository(
                 assignedFriendUid = targetFriendUid,
                 assignedFriendName = targetFriendName,
                 friendSharePct = targetFriendPct,
-                customAllocations = input.customAllocations
+                customAllocations = input.customAllocations,
+                previous = tx.allocations
             )
 
             val customUids = input.customAllocations?.mapNotNull { it.uid } ?: emptyList()
             val effectiveVisible = (split.visibleToUids + listOfNotNull(targetFriendUid) + card?.sharedWithUids.orEmpty() + customUids).distinct()
 
+            // 1. Isolamento de Status: cada parcela preserva seu próprio status
+            val effectiveStatus = tx.status
+
             tx.copy(
                 description = newDesc,
                 category = input.category ?: tx.category,
                 subcategory = if (input.subcategory != null) input.subcategory else tx.subcategory,
-                paymentMethod = input.paymentMethod ?: tx.paymentMethod,
-                cardId = if (input.paymentMethod == PaymentMethod.CREDIT_CARD) (input.cardId ?: tx.cardId) else null,
-                status = input.status ?: tx.status,
+                paymentMethod = effectivePaymentMethod,
+                cardId = targetCardId,
+                status = effectiveStatus,
                 dueDate = newDueDate,
                 competenceMonth = targetMonth,
-                estimatedAmount = if ((input.status ?: tx.status) == TransactionStatus.ESTIMATED) curAmount else null,
-                actualAmount = if ((input.status ?: tx.status) != TransactionStatus.ESTIMATED) curAmount else null,
+                estimatedAmount = if (effectiveStatus == TransactionStatus.ESTIMATED) curAmount else null,
+                actualAmount = if (effectiveStatus != TransactionStatus.ESTIMATED) curAmount else null,
                 totalAmount = curAmount,
                 allocations = split.allocations,
                 userImpact = split.userImpact,

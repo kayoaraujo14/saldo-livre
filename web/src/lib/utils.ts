@@ -253,10 +253,10 @@ export function normalize(s: string) {
     .trim()
 }
 
-/** Extrai a descrição base sem o sufixo numérico de parcela (ex: "Celular (1/10)" → "Celular") */
+/** Extrai a descrição base sem o sufixo numérico de parcela (ex: "Celular (1/10)" → "Celular" ou "Notebook ( 1 de 10 )" → "Notebook") */
 export function stripInstallmentSuffix(desc?: string): string {
   if (!desc) return ''
-  return desc.replace(/\s*\(\d+\/\d+\)\s*$/, '').trim()
+  return desc.replace(/\s*\(\s*\d+\s*(?:\/|de)\s*\d+\s*\)\s*$/i, '').trim()
 }
 
 /** Retorna a descrição limpa da parcela sem o número embutido, pois a tag visual de parcela já é exibida na interface */

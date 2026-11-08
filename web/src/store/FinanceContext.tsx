@@ -1016,17 +1016,37 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       const isFriend = Boolean(targetFriendUid)
       const assignedFriend: Party | null = isFriend ? { uid: targetFriendUid!, name: targetFriendName! } : null
 
-      const card = cards.find((c) => c.id === input.cardId)
-      const payerUid = input.paymentMethod === 'credit_card' && card ? card.ownerUid : me.uid
+      const firstTx = groupTxs[0]
+      const firstNum = firstTx.installmentNumber ?? 1
+      const effectivePaymentMethod = input.paymentMethod ?? firstTx.paymentMethod
+      const isCardChange = input.cardId !== undefined && input.cardId !== firstTx.cardId
+      const targetCardId = effectivePaymentMethod === 'credit_card'
+        ? (input.cardId !== undefined ? input.cardId : firstTx.cardId)
+        : null
+      const effectiveCard = targetCardId ? cards.find((c) => c.id === targetCardId) : null
+      const payerUid = effectivePaymentMethod === 'credit_card' && effectiveCard ? effectiveCard.ownerUid : me.uid
 
       const updates: { id: string; patch: Partial<Transaction> }[] = []
       const newDay = input.date ? parseInt(input.date.slice(8, 10), 10) : null
 
+      // Data de compra base da 1ª parcela
+      const firstPurchaseDate = input.date || firstTx.dueDate || todayKey()
+
+      // Se mudou de cartão ou data e é cartão de crédito, recalcula competência inicial via ciclo do cartão
+      const shouldRecalcCycle = Boolean(
+        effectivePaymentMethod === 'credit_card' &&
+        effectiveCard &&
+        (isCardChange || input.date)
+      )
+      const initialCardDates = shouldRecalcCycle && effectiveCard
+        ? calculateCardInvoiceDates(firstPurchaseDate, effectiveCard)
+        : null
+      const initialMonth = initialCardDates?.competenceMonth
+
       // Detecta se as parcelas sofreram corrupção de datas (todas colapsadas no mesmo mês)
       const monthsSet = new Set(groupTxs.map((t) => t.competenceMonth || t.dueDate.slice(0, 7)))
       const isCorruptedSameMonth = groupTxs.length > 1 && monthsSet.size === 1
-      const firstNum = groupTxs[0].installmentNumber ?? 1
-      const baseMonth = groupTxs[0].competenceMonth || groupTxs[0].dueDate.slice(0, 7) || currentMonthKey()
+      const baseMonth = firstTx.competenceMonth || firstTx.dueDate.slice(0, 7) || currentMonthKey()
 
       for (let idx = 0; idx < groupTxs.length; idx++) {
         const t = groupTxs[idx]
@@ -1036,30 +1056,42 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         const curAmount =
           input.amount !== undefined && input.amount > 0 ? round2(input.amount) : t.totalAmount
 
-        const newDesc = input.description ? formatInstallmentDesc(input.description, num, total) : t.description
+        // 3. Extinção do sufixo (X/Y) na descrição
+        const rawDesc = input.description || t.description
+        const newDesc = formatInstallmentDesc(rawDesc, num, total)
 
-        // Se estavam corrompidas no mesmo mês, redistribui cada uma para seu respectivo mês cronológico
+        // 4. Recálculo de Ciclo ao Mudar Cartão / Data
         let targetMonth = t.competenceMonth || t.dueDate.slice(0, 7) || currentMonthKey()
-        if (isCorruptedSameMonth) {
-          targetMonth = shiftMonth(baseMonth, num - firstNum)
-        }
-
         let newDueDate = t.dueDate
-        if (newDay && !isNaN(newDay)) {
-          newDueDate = dateInMonth(targetMonth, newDay)
-        } else if (isCorruptedSameMonth) {
-          const origDay = parseInt(t.dueDate.slice(8, 10), 10) || 10
-          newDueDate = dateInMonth(targetMonth, origDay)
+
+        if (shouldRecalcCycle && initialMonth) {
+          targetMonth = shiftMonth(initialMonth, num - firstNum)
+          newDueDate = shiftDateMonth(firstPurchaseDate, num - firstNum)
+        } else if (effectivePaymentMethod !== 'credit_card' && input.date) {
+          newDueDate = shiftDateMonth(firstPurchaseDate, num - firstNum)
+          targetMonth = newDueDate.slice(0, 7)
+        } else {
+          if (isCorruptedSameMonth) {
+            targetMonth = shiftMonth(baseMonth, num - firstNum)
+          }
+          if (newDay && !isNaN(newDay)) {
+            newDueDate = dateInMonth(targetMonth, newDay)
+          } else if (isCorruptedSameMonth) {
+            const origDay = parseInt(t.dueDate.slice(8, 10), 10) || 10
+            newDueDate = dateInMonth(targetMonth, origDay)
+          }
         }
 
         const friendSharePct = isFriend ? clampPct(input.friend?.pct ?? t.friendSharePct ?? 100) : null
         const effectiveSplitType = input.splitType ?? (isFriend ? 'custom' : (t.splitType ?? 'mine'))
 
+        // 2. Preservação de Reembolsos de Amigos
         let customAllocs = input.customAllocations
         if (isFriend && (!customAllocs || customAllocs.length === 0)) {
           const fPct = friendSharePct ?? 100
           const fAmt = round2((curAmount * fPct) / 100)
           const myAmt = round2(curAmount - fAmt)
+          const prevFriendAlloc = t.allocations?.find((a) => (a.uid ?? a.name) === targetFriendUid)
           customAllocs = []
           if (Math.abs(myAmt) > 0.0001) {
             customAllocs.push({
@@ -1075,7 +1107,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
             uid: targetFriendUid!,
             name: targetFriendName!,
             amount: fAmt,
-            reimbursed: false,
+            reimbursed: prevFriendAlloc?.reimbursed ?? false,
           })
         }
 
@@ -1095,8 +1127,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         })
 
         const cardForGroup =
-          (input.paymentMethod ?? t.paymentMethod) === 'credit_card'
-            ? cards.find((c) => c.id === (input.cardId ?? t.cardId))
+          effectivePaymentMethod === 'credit_card'
+            ? cards.find((c) => c.id === targetCardId)
             : null
         const effectiveVisible = t.reserveCardId
           ? [t.createdByUid]
@@ -1107,17 +1139,21 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
               ]),
             )
 
+        // 1. Isolamento de Status: cada parcela preserva seu próprio status
+        // Parcelas 'paid' ou 'reconciled' jamais são alteradas por edições do grupo
+        const effectiveStatus = t.status
+
         const patch: Partial<Transaction> = {
           description: newDesc,
           category: input.category ?? t.category,
           subcategory: input.subcategory !== undefined ? input.subcategory : (t.subcategory ?? null),
-          paymentMethod: input.paymentMethod ?? t.paymentMethod,
-          cardId: input.paymentMethod === 'credit_card' ? (input.cardId ?? null) : null,
-          status: input.status ?? t.status,
+          paymentMethod: effectivePaymentMethod,
+          cardId: targetCardId,
+          status: effectiveStatus,
           dueDate: newDueDate,
           competenceMonth: targetMonth,
-          estimatedAmount: (input.status ?? t.status) === 'estimated' ? curAmount : null,
-          actualAmount: (input.status ?? t.status) === 'estimated' ? null : curAmount,
+          estimatedAmount: effectiveStatus === 'estimated' ? curAmount : null,
+          actualAmount: effectiveStatus === 'estimated' ? null : curAmount,
           totalAmount: curAmount,
           allocations: split.allocations,
           userImpact: split.userImpact,

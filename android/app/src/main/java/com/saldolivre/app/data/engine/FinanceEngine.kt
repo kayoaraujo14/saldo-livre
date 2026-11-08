@@ -18,7 +18,7 @@ object FinanceEngine {
         override fun initialValue(): NumberFormat = NumberFormat.getCurrencyInstance(ptBrLocale)
     }
     private val monthLabelFormatter = DateTimeFormatter.ofPattern("MMMM 'de' yyyy", ptBrLocale)
-    private val installmentSuffixRegex = Regex("""\s*\(\d+/\d+\)\s*$""")
+    private val installmentSuffixRegex = Regex("""\s*\(\s*\d+\s*(?:/|de)\s*\d+\s*\)\s*$""", RegexOption.IGNORE_CASE)
     private val fullDateRegex = Regex("""^\d{4}-\d{2}-\d{2}$""")
     private val yearMonthRegex = Regex("""^\d{4}-\d{2}$""")
 
@@ -369,13 +369,17 @@ object FinanceEngine {
         assignedFriendUid: String? = null,
         assignedFriendName: String? = null,
         friendSharePct: Double? = null,
-        customAllocations: List<Allocation>? = null
+        customAllocations: List<Allocation>? = null,
+        previous: List<Allocation>? = null
     ): SplitResult {
         val allocations = mutableListOf<Allocation>()
         val visible = mutableSetOf(myUid, payerUid)
         if (!assignedFriendUid.isNullOrBlank()) {
             visible.add(assignedFriendUid)
         }
+
+        fun wasReimbursed(key: String): Boolean =
+            previous?.find { (it.uid ?: it.name) == key }?.reimbursed ?: false
 
         when (splitType) {
             SplitType.MINE -> {
@@ -409,12 +413,13 @@ object FinanceEngine {
                             uid = partnerUid,
                             name = partnerName,
                             amount = otherHalf,
-                            reimbursed = (partnerUid == payerUid)
+                            reimbursed = if (partnerUid == payerUid) true else wasReimbursed(partnerUid)
                         )
                     )
                 } else {
                     val half = round2(total / 2.0)
                     val otherHalf = round2(total - half)
+                    val extName = partnerName?.ifBlank { "Parceiro(a)" } ?: "Parceiro(a)"
                     allocations.add(
                         Allocation(
                             type = "PLATFORM_USER",
@@ -428,9 +433,9 @@ object FinanceEngine {
                         Allocation(
                             type = "EXTERNAL",
                             uid = null,
-                            name = partnerName?.ifBlank { "Parceiro(a)" } ?: "Parceiro(a)",
+                            name = extName,
                             amount = otherHalf,
-                            reimbursed = false
+                            reimbursed = wasReimbursed(extName)
                         )
                     )
                 }
@@ -444,17 +449,18 @@ object FinanceEngine {
                             uid = partnerUid,
                             name = partnerName,
                             amount = round2(total),
-                            reimbursed = (partnerUid == payerUid)
+                            reimbursed = if (partnerUid == payerUid) true else wasReimbursed(partnerUid)
                         )
                     )
                 } else {
+                    val extName = partnerName?.ifBlank { "Parceiro(a)" } ?: "Parceiro(a)"
                     allocations.add(
                         Allocation(
                             type = "EXTERNAL",
                             uid = null,
-                            name = partnerName?.ifBlank { "Parceiro(a)" } ?: "Parceiro(a)",
+                            name = extName,
                             amount = round2(total),
-                            reimbursed = false
+                            reimbursed = wasReimbursed(extName)
                         )
                     )
                 }
@@ -482,7 +488,7 @@ object FinanceEngine {
                         uid = assignedFriendUid,
                         name = fName,
                         amount = friendAmount,
-                        reimbursed = false
+                        reimbursed = if (assignedFriendUid == payerUid) true else wasReimbursed(assignedFriendUid ?: fName)
                     )
                 )
                 if (!assignedFriendUid.isNullOrBlank()) {
@@ -496,7 +502,7 @@ object FinanceEngine {
                         type = "EXTERNAL",
                         name = label,
                         amount = round2(total),
-                        reimbursed = false
+                        reimbursed = wasReimbursed(label)
                     )
                 )
             }
@@ -504,13 +510,14 @@ object FinanceEngine {
                 if (!customAllocations.isNullOrEmpty()) {
                     for (a in customAllocations) {
                         val signedAmount = if (total < 0.0) -Math.abs(a.amount) else Math.abs(a.amount)
+                        val allocKey = a.uid ?: a.name
                         allocations.add(
                             Allocation(
                                 type = a.type,
                                 uid = a.uid,
                                 name = a.name.ifBlank { "Participante" },
                                 amount = round2(signedAmount),
-                                reimbursed = (a.uid == payerUid)
+                                reimbursed = if (a.uid == payerUid) true else wasReimbursed(allocKey)
                             )
                         )
                         if (!a.uid.isNullOrBlank()) {
