@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -64,6 +65,42 @@ import { MobileTransactionCard } from './mobile/MobileTransactionCard'
 import { consolidateMonthTransactions, type ConsolidatedTransaction } from '@/lib/invoices'
 
 type TabFilter = 'all' | 'income' | 'expense' | 'my_expenses' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
+
+
+interface DesktopCarryoverItem {
+  type: 'carryover'
+  id: string
+}
+
+interface DesktopTxItem {
+  type: 'transaction'
+  id: string
+  tx: ConsolidatedTransaction
+}
+
+type DesktopRowItem = DesktopCarryoverItem | DesktopTxItem
+
+interface MobileCarryoverItem {
+  type: 'carryover'
+  id: string
+}
+
+interface MobileHeaderItem {
+  type: 'header'
+  id: string
+  dateKey: string
+  totalAmount: number
+  isNetIncome: boolean
+  hdr: ReturnType<typeof formatNubankDateHeader>
+}
+
+interface MobileCardItem {
+  type: 'card'
+  id: string
+  tx: Transaction
+}
+
+type MobileRowItem = MobileCarryoverItem | MobileHeaderItem | MobileCardItem
 
 interface ColumnFilters {
   status: ('paid' | 'pending' | 'estimated')[]
@@ -522,6 +559,83 @@ export function TransactionTable({
       return { dateKey, items, totalAmount, isNetIncome }
     })
   }, [filteredTxs, currentUid, monthTransactions])
+
+  const desktopItems = useMemo<DesktopRowItem[]>(() => {
+    const items: DesktopRowItem[] = []
+    if (summary?.carryoverAmount || summary?.previousMonthDeficit) {
+      items.push({ type: 'carryover', id: '__carryover__' })
+    }
+    filteredTxs.forEach((tx) => {
+      items.push({ type: 'transaction', id: tx.id, tx })
+    })
+    return items
+  }, [summary?.carryoverAmount, summary?.previousMonthDeficit, filteredTxs])
+
+  const mobileItems = useMemo<MobileRowItem[]>(() => {
+    const items: MobileRowItem[] = []
+    if (summary?.carryoverAmount || summary?.previousMonthDeficit) {
+      items.push({ type: 'carryover', id: '__mobile_carryover__' })
+    }
+    mobileGroupedTxs.forEach(({ dateKey, items: groupTxs, totalAmount, isNetIncome }) => {
+      items.push({
+        type: 'header',
+        id: `hdr-${dateKey}`,
+        dateKey,
+        totalAmount,
+        isNetIncome,
+        hdr: formatNubankDateHeader(dateKey),
+      })
+      groupTxs.forEach((tx) => {
+        items.push({
+          type: 'card',
+          id: `mob-${tx.id}`,
+          tx,
+        })
+      })
+    })
+    return items
+  }, [summary?.carryoverAmount, summary?.previousMonthDeficit, mobileGroupedTxs])
+
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+  const mobileContainerRef = useRef<HTMLDivElement>(null)
+
+  // eslint-disable-next-line react/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    count: desktopItems.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 48,
+    overscan: 10,
+    initialRect: { width: 1024, height: 600 },
+  })
+
+  const mobileVirtualizer = useVirtualizer({
+    count: mobileItems.length,
+    getScrollElement: () => mobileContainerRef.current,
+    estimateSize: (index) => {
+      const item = mobileItems[index]
+      if (item?.type === 'carryover') return 64
+      if (item?.type === 'header') return 36
+      return 88
+    },
+    gap: 8,
+    overscan: 6,
+    initialRect: { width: 375, height: 667 },
+  })
+
+  useEffect(() => {
+    if (tableContainerRef.current) {
+      tableContainerRef.current.scrollTop = 0
+    }
+    if (mobileContainerRef.current) {
+      mobileContainerRef.current.scrollTop = 0
+    }
+  }, [activeTab, search, columnFilters])
+
+  const virtualRows = rowVirtualizer.getVirtualItems()
+  const totalSize = rowVirtualizer.getTotalSize()
+  const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0
+  const paddingBottom = virtualRows.length > 0 ? totalSize - virtualRows[virtualRows.length - 1].end : 0
+
 
   // Handlers for toggling specific filter items
   const toggleStatusFilter = (st: 'paid' | 'pending' | 'estimated') => {
@@ -1066,32 +1180,8 @@ export function TransactionTable({
         </div>
       )}
 
-      {/* Mobile Transaction Cards Feed (Visible on screens < md) */}
-      <div className="md:hidden flex-1 overflow-y-auto p-3 pb-24 space-y-2.5">
-        {Boolean(summary?.carryoverAmount || summary?.previousMonthDeficit) && (
-          <div className={`p-3 rounded-xl border flex items-center justify-between ${
-            summary?.previousMonthDeficit 
-              ? 'bg-rose-950/20 border-rose-500/30' 
-              : 'bg-emerald-950/20 border-emerald-500/30'
-          }`}>
-            <div className="flex items-center gap-2.5">
-              <div className={`p-2 rounded-lg ${summary?.previousMonthDeficit ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
-                <Landmark className="size-4" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-200">
-                  {summary?.previousMonthDeficit ? 'Déficit Anterior Acumulado' : 'Saldo Inicial do Mês'}
-                </p>
-                <p className="text-[10px] text-slate-400">
-                  {summary?.previousMonthDeficit ? 'Débito herdado do período anterior' : 'Sobra transferida do mês anterior'}
-                </p>
-              </div>
-            </div>
-            <span className={`text-sm font-mono font-bold ${summary?.previousMonthDeficit ? 'text-rose-400' : 'text-emerald-400'}`}>
-              {summary?.previousMonthDeficit ? `-${formatBRL(summary.previousMonthDeficit)}` : `+${formatBRL(summary?.carryoverAmount || 0)}`}
-            </span>
-          </div>
-        )}
+      {/* Mobile Transaction Cards Feed (Visible on screens < md) - Virtualized 60 FPS */}
+      <div ref={mobileContainerRef} className="md:hidden flex-1 overflow-y-auto p-3 pb-24">
         {isLoading ? (
           <div className="space-y-2 p-1" role="status" aria-label="Carregando transações">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -1134,55 +1224,155 @@ export function TransactionTable({
             }
           />
         ) : (
-          mobileGroupedTxs.map(({ dateKey, items, totalAmount, isNetIncome }) => {
-            const hdr = formatNubankDateHeader(dateKey)
-            return (
-              <div key={dateKey} className="space-y-1.5">
-                <div className="flex items-center justify-between px-2 pt-2 text-[11px]">
-                  <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-slate-300">
-                    <span className={hdr.isToday ? 'text-cyan-400' : hdr.isYesterday ? 'text-amber-400' : 'text-slate-200'}>
-                      {hdr.title}
-                    </span>
-                    {hdr.subtitle && <span className="font-normal text-slate-500">· {hdr.subtitle}</span>}
+          <div
+            style={{
+              height: `${mobileVirtualizer.getTotalSize()}px`,
+              width: '100%',
+              position: 'relative',
+            }}
+          >
+            {mobileVirtualizer.getVirtualItems().map((virtualItem) => {
+              const item = mobileItems[virtualItem.index]
+              if (!item) return null
+
+              if (item.type === 'carryover') {
+                return (
+                  <div
+                    key={item.id}
+                    data-index={virtualItem.index}
+                    ref={mobileVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
+                    <div
+                      className={`p-3 rounded-xl border flex items-center justify-between ${
+                        summary?.previousMonthDeficit
+                          ? 'bg-rose-950/20 border-rose-500/30'
+                          : 'bg-emerald-950/20 border-emerald-500/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className={`p-2 rounded-lg ${
+                            summary?.previousMonthDeficit ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'
+                          }`}
+                        >
+                          <Landmark className="size-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-200">
+                            {summary?.previousMonthDeficit ? 'Déficit Anterior Acumulado' : 'Saldo Inicial do Mês'}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            {summary?.previousMonthDeficit
+                              ? 'Débito herdado do período anterior'
+                              : 'Sobra transferida do mês anterior'}
+                          </p>
+                        </div>
+                      </div>
+                      <span
+                        className={`text-sm font-mono font-bold ${
+                          summary?.previousMonthDeficit ? 'text-rose-400' : 'text-emerald-400'
+                        }`}
+                      >
+                        {summary?.previousMonthDeficit
+                          ? `-${formatBRL(summary.previousMonthDeficit)}`
+                          : `+${formatBRL(summary?.carryoverAmount || 0)}`}
+                      </span>
+                    </div>
                   </div>
-                  <span className={`font-semibold tabular-nums text-[11px] ${isNetIncome ? 'text-emerald-400' : 'text-slate-400'}`}>
-                    {isNetIncome ? `+ ${formatBRL(totalAmount)}` : formatBRL(totalAmount)}
-                  </span>
+                )
+              }
+
+              if (item.type === 'header') {
+                return (
+                  <div
+                    key={item.id}
+                    data-index={virtualItem.index}
+                    ref={mobileVirtualizer.measureElement}
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      transform: `translateY(${virtualItem.start}px)`,
+                    }}
+                  >
+                    <div className="flex items-center justify-between px-2 pt-2 text-[11px]">
+                      <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-slate-300">
+                        <span
+                          className={
+                            item.hdr.isToday
+                              ? 'text-cyan-400'
+                              : item.hdr.isYesterday
+                                ? 'text-amber-400'
+                                : 'text-slate-200'
+                          }
+                        >
+                          {item.hdr.title}
+                        </span>
+                        {item.hdr.subtitle && <span className="font-normal text-slate-500">· {item.hdr.subtitle}</span>}
+                      </div>
+                      <span
+                        className={`font-semibold tabular-nums text-[11px] ${
+                          item.isNetIncome ? 'text-emerald-400' : 'text-slate-400'
+                        }`}
+                      >
+                        {item.isNetIncome ? `+ ${formatBRL(item.totalAmount)}` : formatBRL(item.totalAmount)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              }
+
+              return (
+                <div
+                  key={item.id}
+                  data-index={virtualItem.index}
+                  ref={mobileVirtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <MobileTransactionCard
+                    tx={item.tx}
+                    currentUid={currentUid}
+                    allTransactions={effectiveTransactions}
+                    cards={cards}
+                    onEdit={(targetTx) => {
+                      if (targetTx.id.startsWith('invoice_') && targetTx.cardId) {
+                        onOpenInvoices?.(targetTx.cardId)
+                      } else {
+                        onEditTx(targetTx)
+                      }
+                    }}
+                    onDelete={(targetTx) => {
+                      if (targetTx.installmentGroupId) {
+                        setDeleteGroupTx(targetTx)
+                      } else {
+                        deleteTransaction(targetTx.id)
+                      }
+                    }}
+                    onCycleStatus={cycleStatus}
+                  />
                 </div>
-                <div className="space-y-1.5">
-                  {items.map((tx: Transaction) => (
-                    <MobileTransactionCard
-                      key={tx.id}
-                      tx={tx}
-                      currentUid={currentUid}
-                      allTransactions={effectiveTransactions}
-                      cards={cards}
-                      onEdit={(targetTx) => {
-                        if (targetTx.id.startsWith('invoice_') && targetTx.cardId) {
-                          onOpenInvoices?.(targetTx.cardId)
-                        } else {
-                          onEditTx(targetTx)
-                        }
-                      }}
-                      onDelete={(targetTx) => {
-                        if (targetTx.installmentGroupId) {
-                          setDeleteGroupTx(targetTx)
-                        } else {
-                          deleteTransaction(targetTx.id)
-                        }
-                      }}
-                      onCycleStatus={cycleStatus}
-                    />
-                  ))}
-                </div>
-              </div>
-            )
-          })
+              )
+            })}
+          </div>
         )}
       </div>
 
       {/* Main Table (Visible on md and above) */}
-      <div className="hidden md:block flex-1 overflow-x-auto overflow-y-auto">
+      <div ref={tableContainerRef} className="hidden md:block flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-left text-xs border-collapse">
           <thead className="sticky top-0 bg-slate-950/95 backdrop-blur-md text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-white/[0.08] z-10 select-none shadow-xs">
             <tr>
@@ -1783,45 +1973,6 @@ export function TransactionTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.04]">
-            {Boolean(summary?.carryoverAmount || summary?.previousMonthDeficit) && (
-              <tr className={summary?.previousMonthDeficit ? "bg-rose-950/20 hover:bg-rose-950/30 transition-colors" : "bg-emerald-950/20 hover:bg-emerald-950/30 transition-colors"}>
-                <td className="py-2.5 px-3 text-center">
-                  <span className="text-[10px] font-mono text-slate-400">01</span>
-                </td>
-                <td className="py-2.5 px-3">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-1 rounded-md ${summary?.previousMonthDeficit ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
-                      <Landmark className="size-3.5" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-200">
-                        {summary?.previousMonthDeficit ? 'Déficit Anterior Acumulado' : 'Saldo Inicial do Mês'}
-                      </p>
-                      <p className="text-[10px] text-slate-400">
-                        {summary?.previousMonthDeficit ? 'Débito acumulado de meses anteriores' : 'Sobra transferida do mês anterior'}
-                      </p>
-                    </div>
-                  </div>
-                </td>
-                <td className="py-2.5 px-2">
-                  <span className="text-[10px] text-slate-400 font-medium">Saldo de Abertura</span>
-                </td>
-                <td className="py-2.5 px-2">
-                  <span className="text-[10px] text-slate-500">—</span>
-                </td>
-                <td className="py-2.5 px-2">
-                  <span className="text-[10px] text-slate-500">Conta Corrente</span>
-                </td>
-                <td className="py-2.5 px-3 text-right">
-                  <span className={`text-xs font-mono font-bold ${summary?.previousMonthDeficit ? 'text-rose-400' : 'text-emerald-400'}`}>
-                    {summary?.previousMonthDeficit ? `-${formatBRL(summary.previousMonthDeficit)}` : `+${formatBRL(summary?.carryoverAmount || 0)}`}
-                  </span>
-                </td>
-                <td className="py-2.5 px-1.5 text-center">
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400 font-medium">Fixo</span>
-                </td>
-              </tr>
-            )}
             {isLoading ? (
               Array.from({ length: 7 }).map((_, i) => (
                 <tr key={`desk-tx-skel-${i}`} className="border-b border-white/[0.04]">
@@ -1873,13 +2024,94 @@ export function TransactionTable({
                 </td>
               </tr>
             ) : (
-              filteredTxs.map((tx: ConsolidatedTransaction) => {
+              <>
+                {paddingTop > 0 && (
+                  <tr aria-hidden="true">
+                    <td colSpan={7} style={{ height: `${paddingTop}px`, padding: 0, border: 0 }} />
+                  </tr>
+                )}
+                {virtualRows.map((virtualRow) => {
+                  const item = desktopItems[virtualRow.index]
+                  if (!item) return null
+
+                  if (item.type === 'carryover') {
+                    return (
+                      <tr
+                        key={item.id}
+                        data-index={virtualRow.index}
+                        ref={rowVirtualizer.measureElement}
+                        className={
+                          summary?.previousMonthDeficit
+                            ? 'bg-rose-950/20 hover:bg-rose-950/30 transition-colors'
+                            : 'bg-emerald-950/20 hover:bg-emerald-950/30 transition-colors'
+                        }
+                      >
+                        <td className="py-2.5 px-3 text-center">
+                          <span className="text-[10px] font-mono text-slate-400">01</span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className={`p-1 rounded-md ${
+                                summary?.previousMonthDeficit
+                                  ? 'bg-rose-500/20 text-rose-300'
+                                  : 'bg-emerald-500/20 text-emerald-300'
+                              }`}
+                            >
+                              <Landmark className="size-3.5" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-slate-200">
+                                {summary?.previousMonthDeficit
+                                  ? 'Déficit Anterior Acumulado'
+                                  : 'Saldo Inicial do Mês'}
+                              </p>
+                              <p className="text-[10px] text-slate-400">
+                                {summary?.previousMonthDeficit
+                                  ? 'Débito acumulado de meses anteriores'
+                                  : 'Sobra transferida do mês anterior'}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2">
+                          <span className="text-[10px] text-slate-400 font-medium">Saldo de Abertura</span>
+                        </td>
+                        <td className="py-2.5 px-2">
+                          <span className="text-[10px] text-slate-500">—</span>
+                        </td>
+                        <td className="py-2.5 px-2">
+                          <span className="text-[10px] text-slate-500">Conta Corrente</span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <span
+                            className={`text-xs font-mono font-bold ${
+                              summary?.previousMonthDeficit ? 'text-rose-400' : 'text-emerald-400'
+                            }`}
+                          >
+                            {summary?.previousMonthDeficit
+                              ? `-${formatBRL(summary.previousMonthDeficit)}`
+                              : `+${formatBRL(summary?.carryoverAmount || 0)}`}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-1.5 text-center">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400 font-medium">
+                            Fixo
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  }
+
+                  const tx = item.tx
                 if (tx.invoiceMeta) {
                   const invMeta = tx.invoiceMeta
                   const isOwner = invMeta.isOwner
                   return (
                     <tr
-                      key={tx.id}
+                      key={item.id}
+                      data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
                       className="hover:bg-slate-800/40 transition-colors bg-sky-950/15 border-l-2 border-l-sky-500 group select-none"
                     >
                       {/* 1. Status da Fatura */}
@@ -2044,7 +2276,9 @@ export function TransactionTable({
 
                 return (
                   <tr
-                    key={tx.id}
+                    key={item.id}
+                    data-index={virtualRow.index}
+                      ref={rowVirtualizer.measureElement}
                     className="hover:bg-slate-800/30 transition-colors group"
                   >
                     {/* 1. Status Badge (Interactive Click to Cycle) */}
@@ -2694,7 +2928,13 @@ export function TransactionTable({
                     </td>
                   </tr>
                 )
-              })
+              })}
+              {paddingBottom > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={7} style={{ height: `${paddingBottom}px`, padding: 0, border: 0 }} />
+                </tr>
+              )}
+            </>
             )}
           </tbody>
         </table>
