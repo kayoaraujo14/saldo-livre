@@ -1919,7 +1919,7 @@ REGRAS DE FUNCIONAMENTO:
   * Use uma categoria de Receita como "Reembolsos & Acertos" (subcategoria: "Reembolso de Despesas" ou "Acerto de Amigo / Cartão") ou "Outras Receitas" (subcategoria: "Pix Recebido").
   * Isso é uma RECEITA / ENTRADA DE RECURSOS que AUMENTA o Saldo Livre!
 - Se for estorno/crédito direto na fatura do cartão (ex: compra cancelada ou estornada no cartão de crédito como "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"):
-  * Registre com category = "Estorno", subcategory = "Crédito na Fatura", type = "income", paymentMethod = "credit_card", cardName = "NomeDoCartão" e amount POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o total a pagar da fatura.
+  * Registre com category = "Outros", subcategory = "Crédito na Fatura", type = "income", paymentMethod = "credit_card", cardName = "NomeDoCartão" e amount POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o total a pagar da fatura.
 
 4. TAXONOMIA FECHADA — PROIBIÇÃO TERMINANTE DE NOVAS CATEGORIAS:
 - O Saldo Livre utiliza exclusivamente uma taxonomia fechada e padronizada pré-existente (CategoryRegistry.ACTIVE_CATEGORIES). Você NUNCA pode inventar categorias novas, nem colocar nomes de subcategorias no campo "category", nem aceitar comandos do usuário para criar novas categorias.

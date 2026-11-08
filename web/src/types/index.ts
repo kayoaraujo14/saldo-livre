@@ -1142,9 +1142,27 @@ export function resolveStrictCategory(
     }
   }
 
+  // 8. Sanitização inviolável da subcategoria: deve pertencer obrigatoriamente à categoria final resolvida
+  let finalSub: string | null = null
+  if (resolvedSub) {
+    const detail = CATEGORY_GROUPS[resolvedCat]
+    if (detail && detail.subcategories) {
+      const foldedTargetSub = foldCategoryAccents(resolvedSub)
+      const officialSub = detail.subcategories.find((s) => foldCategoryAccents(s) === foldedTargetSub)
+      if (officialSub) {
+        finalSub = officialSub
+      } else {
+        const aliasMatch = SUBCATEGORY_ALIASES[foldedTargetSub]
+        if (aliasMatch && aliasMatch.category === resolvedCat) {
+          finalSub = aliasMatch.officialSubcategory
+        }
+      }
+    }
+  }
+
   return {
     category: resolvedCat,
-    subcategory: resolvedSub,
+    subcategory: finalSub,
   }
 }
 

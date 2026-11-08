@@ -205,8 +205,8 @@ class AndroidAgentToolsEngine(
         val finalDueDate = if (isCreditCard) baseDate else (customDueDate?.takeIf { it.isNotBlank() } ?: calcDueDate)
 
         // Categorização estrita e resolução canônica (paridade total com Web)
-        val (finalCat, finalSubcat) = if (isEstorno && (category.isNullOrBlank() || category == "Outros")) {
-            Pair("Estorno", "Crédito na Fatura")
+        val (finalCat, finalSubcat) = if (isEstorno && (category.isNullOrBlank() || category == "Outros" || category.equals("Estorno", ignoreCase = true))) {
+            Pair("Outros", "Crédito na Fatura")
         } else {
             CategoryRegistry.resolveStrictCategory(
                 rawCategory = category,
@@ -3737,7 +3737,13 @@ class AndroidAgentToolsEngine(
                     executeEditTransaction(searchTerm = term, newAmount = amtChange, confirmed = false)
                 } else {
                     val (strictCat, strictSub) = CategoryRegistry.resolveStrictCategory(targetChange)
-                    if (strictCat != "Outros") {
+                    val foldedTarget = CategoryRegistry.foldCategoryAccents(targetChange)
+                    val isExplicitCategoryOrSubcategory = CategoryRegistry.ACTIVE_CATEGORIES.any { CategoryRegistry.foldCategoryAccents(it) == foldedTarget } ||
+                        CategoryRegistry.CATEGORY_CANONICAL_MAP.containsKey(foldedTarget) ||
+                        CategoryRegistry.SUBCATEGORY_TO_CATEGORY_MAP.containsKey(foldedTarget) ||
+                        foldedTarget == "outros" || foldedTarget == "outro"
+
+                    if (isExplicitCategoryOrSubcategory || strictCat != "Outros") {
                         executeEditTransaction(searchTerm = term, newCategory = strictCat, newSubcategory = strictSub, confirmed = false)
                     } else {
                         val catGuess = neuralClassifier.guessCategory(targetChange)

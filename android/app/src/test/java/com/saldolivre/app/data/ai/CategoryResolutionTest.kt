@@ -114,6 +114,29 @@ class CategoryResolutionTest {
     }
 
     @Test
+    fun `nullifies invalid subcategories and cross-group mismatches strictly`() {
+        // Arbitrary subcategory alongside valid category -> nullified
+        val res1 = CategoryRegistry.resolveStrictCategory("Alimentação", "SubAlimentacaoInventada", TransactionType.EXPENSE)
+        assertEquals("Alimentação", res1.first)
+        assertNull(res1.second)
+
+        // Cross-category mismatch (IPVA belongs to Impostos & Tributos, not Alimentação) -> nullified
+        val res2 = CategoryRegistry.resolveStrictCategory("Alimentação", "IPVA", TransactionType.EXPENSE)
+        assertEquals("Alimentação", res2.first)
+        assertNull(res2.second)
+
+        // Arbitrary subcategory alongside arbitrary category -> category falls back to Outros and subcategory is nullified
+        val res3 = CategoryRegistry.resolveStrictCategory("Xurupita", "SubXurupita", TransactionType.EXPENSE)
+        assertEquals("Outros", res3.first)
+        assertNull(res3.second)
+
+        // Valid subcategory for Outros is preserved when category falls back to Outros
+        val res4 = CategoryRegistry.resolveStrictCategory("Xurupita", "Imprevistos", TransactionType.EXPENSE)
+        assertEquals("Outros", res4.first)
+        assertEquals("Imprevistos", res4.second)
+    }
+
+    @Test
     fun `uses guessFallback only when category was blank or null`() {
         val res = CategoryRegistry.resolveStrictCategory(
             rawCategory = "",

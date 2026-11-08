@@ -1565,18 +1565,24 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
   const novoValor = typeof args.novoValor === 'number' ? round2(args.novoValor) : undefined
   const novaDescricao = typeof args.novaDescricao === 'string' ? args.novaDescricao.trim() : undefined
   let novaCategoria: Category | undefined
-  let novaSubcategoria = typeof args.novaSubcategoria === 'string' ? args.novaSubcategoria.trim() : undefined
-  if (args.novaCategoria != null && String(args.novaCategoria).trim() !== '') {
+  let novaSubcategoria: string | null | undefined = undefined
+  const hasNovaCat = args.novaCategoria != null && String(args.novaCategoria).trim() !== ''
+  const hasNovaSub = typeof args.novaSubcategoria === 'string' && args.novaSubcategoria.trim() !== ''
+
+  if (hasNovaCat || hasNovaSub) {
     const targetType = targets[0]?.type || 'expense'
+    const rawCatToResolve = hasNovaCat ? String(args.novaCategoria) : targets[0]?.category
+    const rawSubToResolve = hasNovaSub ? String(args.novaSubcategoria).trim() : (hasNovaCat ? null : targets[0]?.subcategory)
+
     const strict = resolveStrictCategory(
-      String(args.novaCategoria),
-      novaSubcategoria,
+      rawCatToResolve,
+      rawSubToResolve,
       targetType,
-      targets[0]?.description,
+      novaDescricao || targets[0]?.description,
       (d, t) => guessCategoryAndSubcategory(d, undefined, t)
     )
     novaCategoria = strict.category
-    novaSubcategoria = strict.subcategory || novaSubcategoria
+    novaSubcategoria = strict.subcategory
   }
   const novoStatus = (['estimated', 'pending', 'paid'].includes(String(args.novoStatus))
     ? args.novoStatus
@@ -1703,7 +1709,7 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
     if (novoTipo) {
       patch.type = novoTipo
       if (novoTipo === 'income') {
-        patch.category = 'Receita'
+        patch.category = 'Outras Receitas'
         patch.paymentMethod = 'pix'
         patch.cardId = null
         patch.status = 'paid'

@@ -64,6 +64,30 @@ describe('Validação Estrita de Categorias no Chat (Web)', () => {
       expect(res.subcategory).toBe('Supermercado')
     })
 
+    it('anula subcategoria arbitrária ou inexistente passada junto com categoria válida', () => {
+      const res = resolveStrictCategory('Alimentação', 'SubAlimentacaoInventada', 'expense')
+      expect(res.category).toBe('Alimentação')
+      expect(res.subcategory).toBeNull()
+    })
+
+    it('anula subcategoria quando há mismatch cruzado de grupos (ex: IPVA sob Alimentação)', () => {
+      const res = resolveStrictCategory('Alimentação', 'IPVA', 'expense')
+      expect(res.category).toBe('Alimentação')
+      expect(res.subcategory).toBeNull()
+    })
+
+    it('anula subcategoria arbitrária em fallback para Outros', () => {
+      const res = resolveStrictCategory('Xurupita', 'SubXurupita', 'expense')
+      expect(res.category).toBe('Outros')
+      expect(res.subcategory).toBeNull()
+    })
+
+    it('preserva subcategoria oficial válida pertencente ao grupo de fallback Outros', () => {
+      const res = resolveStrictCategory('Xurupita', 'Imprevistos', 'expense')
+      expect(res.category).toBe('Outros')
+      expect(res.subcategory).toBe('Imprevistos')
+    })
+
     it('utiliza classificador heurístico via descrição se a categoria não foi informada', () => {
       const res = resolveStrictCategory('', null, 'expense', 'Almoço no restaurante Outback', () => ({
         category: 'Alimentação',
@@ -227,6 +251,38 @@ describe('Validação Estrita de Categorias no Chat (Web)', () => {
       })
       expect(resInvalida.response.ok).toBe(true)
       expect(savedTransactions[0].category).toBe('Outros')
+
+      // Edita apenas novaSubcategoria (sem passar novaCategoria) com normalização
+      savedTransactions[0].category = 'Alimentação'
+      savedTransactions[0].subcategory = null
+      const resApenasSub = await executor('editarTransacoes', {
+        ids: [txId],
+        novaSubcategoria: 'mercado',
+        __confirmed: true,
+      })
+      expect(resApenasSub.response.ok).toBe(true)
+      expect(savedTransactions[0].category).toBe('Alimentação')
+      expect(savedTransactions[0].subcategory).toBe('Supermercado')
+
+      // Edita novaSubcategoria inválida -> anula subcategoria
+      const resSubInvalida = await executor('editarTransacoes', {
+        ids: [txId],
+        novaSubcategoria: 'SubcategoriaMaluca',
+        __confirmed: true,
+      })
+      expect(resSubInvalida.response.ok).toBe(true)
+      expect(savedTransactions[0].category).toBe('Alimentação')
+      expect(savedTransactions[0].subcategory).toBeNull()
+
+      // Edita tipo para income -> define categoria moderna Outras Receitas (não a legada Receita)
+      const resTipoReceita = await executor('editarTransacoes', {
+        ids: [txId],
+        novoTipo: 'income',
+        __confirmed: true,
+      })
+      expect(resTipoReceita.response.ok).toBe(true)
+      expect(savedTransactions[0].type).toBe('income')
+      expect(savedTransactions[0].category).toBe('Outras Receitas')
     })
   })
 })

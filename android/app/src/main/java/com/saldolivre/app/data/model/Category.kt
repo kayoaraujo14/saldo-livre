@@ -988,7 +988,26 @@ object CategoryRegistry {
             }
         }
 
-        return Pair(finalCat, resolvedSub)
+        // 8. Sanitização inviolável da subcategoria: deve pertencer obrigatoriamente à categoria final resolvida
+        val finalSub = if (resolvedSub != null) {
+            val detail = categoryMap[finalCat]
+            val foldedTargetSub = foldCategoryAccents(resolvedSub)
+            val officialSub = detail?.subcategories?.find { foldCategoryAccents(it) == foldedTargetSub }
+            if (officialSub != null) {
+                officialSub
+            } else {
+                val aliasMatch = SUBCATEGORY_ALIASES[foldedTargetSub]
+                if (aliasMatch != null && aliasMatch.first == finalCat) {
+                    aliasMatch.second
+                } else {
+                    null
+                }
+            }
+        } else {
+            null
+        }
+
+        return Pair(finalCat, finalSub)
     }
 
     fun get(name: String): CategoryDetail {
