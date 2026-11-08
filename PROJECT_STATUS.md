@@ -100,6 +100,23 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #65 (Conclusão Integral & Encerramento da Sprint 4):**
+  - **1. Telemetria, Crash Reporting e Error Boundary Nativo (Firebase Crashlytics):**
+    - **Camada Android (`android/`):**
+      - Gradle: Adicionado o plugin `com.google.firebase.crashlytics` (v3.0.2) no root e app `build.gradle.kts` e a dependência `com.google.firebase:firebase-crashlytics-ktx` gerenciada pelo Firebase BoM 33.1.0.
+      - Inicialização defensiva do Crashlytics em `SaldoLivreApplication.kt` com telemetria de chaves customizadas (`is_demo_mode`, `app_version`), ativando coleta contínua em builds de produção.
+      - `MainActivity.kt`: Registro de manipulador global de exceções não tratadas (`Thread.setDefaultUncaughtExceptionHandler`) reportando falhas fatais ao Firebase Crashlytics com stack trace completo.
+      - `CrashFallbackScreen.kt`: Tela de recuperação nativa em Jetpack Compose com Design System escuro/âmbar/esmeralda, contendo ações para "Recarregar Aplicativo" e "Restaurar em Modo Demonstração", com gaveta expansível de detalhes técnicos do erro, prevenindo encerramentos abruptos do app.
+    - **Camada Web (`web/src/lib/telemetry.ts`, `components/ErrorBoundary.tsx`):**
+      - `logClientError()`: Módulo de telemetria de erros para o cliente Web, armazenando histórico estruturado no `sessionStorage` e emitindo logs diagnósticos completos com URL, User Agent, stack trace e component stack.
+      - `ErrorBoundary.tsx`: Conectado a `logClientError` na captura de exceções de ciclo de vida (`componentDidCatch`).
+      - Validação e resolução estrita de categorias no chat e transações com fallback inviolável para categorias oficiais.
+  - **2. Qualidade & Testes Automatizados:**
+    - Criada a suíte `web/src/components/__tests__/ErrorBoundary.test.tsx` (4 testes verdes) e `web/src/lib/__tests__/agentCategoryValidation.test.ts` (13 testes verdes).
+    - Web: **`oxlint` (0 warnings, 0 erros)**, **`vitest` (172 testes verdes em 17 suítes)**, **`vite build` aprovado em 818ms**.
+    - Backend: **`vitest` (10 testes verdes)**, **`tsc` compilação 100% aprovada**.
+    - Android: **`compileDebugSources` aprovado com BUILD SUCCESSFUL** e **56 testes unitários JVM verdes** (`testDebugUnitTest`).
+
 - **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #66 (Conclusão Integral):**
   - **1. Monitoramento Reativo de Conectividade e Indicador Visual de Modo Offline:**
     - **Camada Web (`web/src/hooks/useNetworkStatus.ts`, `components/NetworkStatusIndicator.tsx`, `App.tsx`):**

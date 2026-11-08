@@ -1,3 +1,4 @@
+import { logClientError } from '@/lib/telemetry'
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, RefreshCw, Trash2, Sparkles, Home } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -26,7 +27,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary capturou uma falha não tratada:', error, errorInfo)
+    logClientError(error, errorInfo)
     this.setState({ errorInfo })
   }
 

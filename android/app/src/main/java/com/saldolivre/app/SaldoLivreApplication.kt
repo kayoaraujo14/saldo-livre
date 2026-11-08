@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import com.google.firebase.FirebaseApp
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
@@ -28,6 +29,7 @@ class SaldoLivreApplication : Application() {
         instance = this
 
         initFirebaseAppCheck()
+        initCrashlytics()
 
         val prefs = getSharedPreferences("saldo_livre_auth_prefs", Context.MODE_PRIVATE)
         val isDemo = prefs.getBoolean("pref_is_demo_mode", false)
@@ -56,6 +58,21 @@ class SaldoLivreApplication : Application() {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Inicialização defensiva do Firebase App Check: ${e.message}")
+        }
+    }
+
+    private fun initCrashlytics() {
+        try {
+            val crashlytics = FirebaseCrashlytics.getInstance()
+            val prefs = getSharedPreferences("saldo_livre_auth_prefs", Context.MODE_PRIVATE)
+            val isDemo = prefs.getBoolean("pref_is_demo_mode", false)
+            crashlytics.setCustomKey("is_demo_mode", isDemo)
+            crashlytics.setCustomKey("app_version", BuildConfig.VERSION_NAME)
+            // Telemetria ativa em produção
+            crashlytics.setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG)
+            Log.d(TAG, "Firebase Crashlytics inicializado com sucesso (demo: $isDemo)")
+        } catch (e: Exception) {
+            Log.w(TAG, "Inicialização defensiva do Firebase Crashlytics: ${e.message}")
         }
     }
 

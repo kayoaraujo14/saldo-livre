@@ -8,7 +8,7 @@ import type {
   Transaction,
   TransactionStatus,
 } from '@/types'
-import { CATEGORIES, INCOME_CATEGORIES, getCategoryDetail } from '@/types'
+import { INCOME_CATEGORIES, getCategoryDetail, resolveStrictCategory } from '@/types'
 import { extractCounterparty } from '../pdfParser'
 import {
   buildSplit,
@@ -135,10 +135,16 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     method = 'debit'
   }
 
-  const guessed = guessCategoryAndSubcategory(description, total, type)
-  let category: Category = (CATEGORIES as readonly string[]).includes(String(args.categoria))
-    ? (args.categoria as Category)
-    : guessed.category
+  const strict = resolveStrictCategory(
+    typeof args.categoria === 'string' ? args.categoria : undefined,
+    typeof args.subcategoria === 'string' ? args.subcategoria : null,
+    type,
+    description,
+    (d, t) => guessCategoryAndSubcategory(d, total, t)
+  )
+  let category: Category = strict.category
+  let subcategory: string | null = strict.subcategory
+
   const isRefund =
     type === 'expense' &&
     (total < 0 ||
@@ -148,21 +154,16 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
   if (isRefund && type === 'expense' && total > 0) {
     total = -Math.abs(total)
   }
-  if (isRefund && (category === 'Outros' || category === 'Alimentação')) category = 'Estorno'
-  if (splitType === 'external' && category === 'Outros') category = 'Cartão Terceiros'
+  if (isRefund) {
+    category = 'Outros'
+    subcategory = subcategory || 'Crédito na Fatura'
+  }
   if (type === 'income' && (category === 'Outros' || category === 'Receita')) {
-    category = (INCOME_CATEGORIES as readonly string[]).includes(guessed.category)
-      ? (guessed.category as Category)
-      : 'Outras Receitas'
+    category = 'Outras Receitas'
   }
 
-  let subcategory: string | null = null
-  if (typeof args.subcategoria === 'string' && args.subcategoria.trim()) {
-    subcategory = args.subcategoria.trim()
-  } else if (category === guessed.category && guessed.subcategory) {
-    subcategory = guessed.subcategory
-  } else if (category === 'Receita' || (INCOME_CATEGORIES as readonly string[]).includes(category)) {
-    subcategory = guessed.subcategory || getCategoryDetail(category)?.subcategories?.[0] || 'Outras Receitas'
+  if (!subcategory && (category === 'Outras Receitas' || (INCOME_CATEGORIES as readonly string[]).includes(category))) {
+    subcategory = getCategoryDetail(category)?.subcategories?.[0] || 'Outras Receitas'
   }
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args.data)) ? String(args.data) : todayKey()
@@ -762,20 +763,25 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
         (typeof item.date === 'string' && item.date.trim()) ||
         defaultVenc || `${targetMonth}-01`
 
-      const guessed = guessCategoryAndSubcategory(desc, val, resolvedTipo)
-      const resolvedCategory = typeof item.categoria === 'string'
+      const rawCat = typeof item.categoria === 'string'
         ? item.categoria
         : typeof item.category === 'string'
           ? item.category
-          : guessed.category
+          : undefined
       const rawSub = typeof item.subcategoria === 'string'
         ? item.subcategoria.trim()
         : typeof item.subcategory === 'string'
           ? item.subcategory.trim()
-          : undefined
-      const resolvedSubcat = rawSub
-        ? rawSub
-        : (resolvedCategory === guessed.category ? guessed.subcategory : (resolvedTipo === 'income' ? 'Outras Receitas' : undefined))
+          : null
+      const strict = resolveStrictCategory(
+        rawCat,
+        rawSub,
+        resolvedTipo,
+        desc,
+        (d, t) => guessCategoryAndSubcategory(d, val, t)
+      )
+      const resolvedCategory = strict.category
+      const resolvedSubcat = strict.subcategory || (resolvedTipo === 'income' ? 'Outras Receitas' : undefined)
 
       // Detecção inteligente de rateio / split no item
       let itemFriendName = item.nomeAmigo ?? item.amigo ?? item.friendName
@@ -1558,10 +1564,20 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
   }
   const novoValor = typeof args.novoValor === 'number' ? round2(args.novoValor) : undefined
   const novaDescricao = typeof args.novaDescricao === 'string' ? args.novaDescricao.trim() : undefined
-  const novaCategoria = (CATEGORIES as readonly string[]).includes(String(args.novaCategoria))
-    ? (args.novaCategoria as Category)
-    : undefined
-  const novaSubcategoria = typeof args.novaSubcategoria === 'string' ? args.novaSubcategoria.trim() : undefined
+  let novaCategoria: Category | undefined
+  let novaSubcategoria = typeof args.novaSubcategoria === 'string' ? args.novaSubcategoria.trim() : undefined
+  if (args.novaCategoria != null && String(args.novaCategoria).trim() !== '') {
+    const targetType = targets[0]?.type || 'expense'
+    const strict = resolveStrictCategory(
+      String(args.novaCategoria),
+      novaSubcategoria,
+      targetType,
+      targets[0]?.description,
+      (d, t) => guessCategoryAndSubcategory(d, undefined, t)
+    )
+    novaCategoria = strict.category
+    novaSubcategoria = strict.subcategory || novaSubcategoria
+  }
   const novoStatus = (['estimated', 'pending', 'paid'].includes(String(args.novoStatus))
     ? args.novoStatus
     : undefined) as TransactionStatus | undefined
