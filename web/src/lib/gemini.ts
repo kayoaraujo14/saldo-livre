@@ -18,7 +18,7 @@ import type {
   SmartBudgetAllocation,
   FinancialHealthAiDiagnosis,
 } from '@/types'
-import { CATEGORIES } from '@/types'
+import { ACTIVE_CATEGORIES, CATEGORIES } from '@/types'
 import { sanitizeAndValidateBudgetPlan, normalizeBudgetCategory } from './finance'
 import { round2 } from './utils'
 
@@ -250,7 +250,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
       properties: {
         descricao: { type: Type.STRING, description: 'Descrição da despesa ou receita. Ex: "Decolar", "Amazon", "Uber".' },
         valorTotal: { type: Type.NUMBER, description: 'Valor da compra em reais (aceita valores negativos para estornos/reembolsos na fatura).' },
-        categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria da despesa ou receita (ex: Alimentação, Moradia, Transporte, Salário & Remuneração, etc.).' },
+        categoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Categoria oficial da despesa ou receita (ex: Alimentação, Moradia, Transporte, Salário & Remuneração, etc.).' },
         subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Aluguel & Condomínio", "Energia Elétrica", "Presentes", etc.).' },
         metodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Padrão: credit_card.' },
         status: {
@@ -359,7 +359,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
                 description:
                   '"paid" para extrato de conta corrente (já liquidado na conta); "pending" para compras no cartão na fatura a vencer.',
               },
-              categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Categoria da despesa ou receita (ex: Alimentação, Moradia, Salário & Remuneração, etc.).' },
+              categoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Categoria oficial da despesa ou receita (ex: Alimentação, Moradia, Salário & Remuneração, etc.).' },
               subcategoria: { type: Type.STRING, description: 'Subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Presentes", "Energia Elétrica", etc.).' },
               contraparte: { type: Type.STRING, description: 'Nome limpo do recebedor, pagador ou estabelecimento (ex: "Brisanet Telecom", "João da Silva", "Empresa XPTO").' },
               categoria_filtro: {
@@ -421,7 +421,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
         novaDataVencimento: { type: Type.STRING, description: 'Nova data de vencimento da fatura (YYYY-MM-DD). Ex: "2026-11-14". ATENÇÃO: NUNCA informe este campo ao editar categoria ou subcategoria de compras parceladas!' },
         novoValor: { type: Type.NUMBER, description: 'Novo valor corrigido da compra.' },
         novaDescricao: { type: Type.STRING, description: 'Nova descrição.' },
-        novaCategoria: { type: Type.STRING, enum: [...CATEGORIES] },
+        novaCategoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Nova categoria oficial da despesa ou receita.' },
         novaSubcategoria: { type: Type.STRING, description: 'Nova subcategoria específica.' },
         novoTipo: { type: Type.STRING, enum: ['expense', 'income'], description: 'Altera o tipo da transação para receita ("income") ou despesa ("expense").' },
         novoMetodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Altera o método de pagamento (ex: para "pix", "debit" ou "credit_card").' },
@@ -459,7 +459,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
       type: Type.OBJECT,
       properties: {
         termoBusca: { type: Type.STRING, description: 'Termo de busca na descrição ou estabelecimento (ex: "Uber", "Mercado", "iFood").' },
-        categoria: { type: Type.STRING, enum: [...CATEGORIES], description: 'Filtra por categoria ou grupo principal.' },
+        categoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Filtra por categoria ou grupo principal.' },
         subcategoria: { type: Type.STRING, description: 'Filtra por subcategoria específica (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", etc.).' },
         mes: {
           type: Type.STRING,
@@ -1008,33 +1008,32 @@ REGRAS DE FUNCIONAMENTO:
 - Se for estorno/crédito direto na fatura do cartão (ex: compra cancelada ou estornada no cartão de crédito como "99FOOD -R$ 8,40" ou "UBER -R$ 4,09"):
   * Registre com categoria = "Estorno", subcategoria = "Crédito na Fatura", tipo = "income", metodoPagamento = "credit_card", cartao = "NomeDoCartão" e valorTotal POSITIVO (ex: 8.40). Trata-se de crédito na fatura que alivia o total a pagar da fatura.
 
-4. TAXONOMIA RICA E SUBGRUPOS ESPECÍFICOS (CATEGORIAS E SUBCATEGORIAS):
-- O Saldo Livre conta com inteligência para categorização granular em grupos e subgrupos analíticos:
-  * Despesas (EXPENSE):
-    - Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
-    - Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
-    - Transporte: Combustível, Aplicativos (Uber/99), Transporte Público (Metrô/Ônibus), Estacionamento & Pedágio, Manutenção & Revisão, Seguro & IPVA, Lavagem & Estética Automotiva.
-    - Saúde: Farmácia & Remédios, Consultas & Exames, Plano de Saúde & Dental, Academia & Treinos, Terapia & Psicologia, Cuidados Pessoais & Estética.
-    - Lazer & Entretenimento: Cinema, Shows & Eventos, Viagens & Hospedagem, Passeios & Parques, Jogos & Games, Festas & Baladas, Hobbies.
-    - Assinaturas & Serviços: Streaming de Vídeo, Streaming de Música, Softwares, IA & Cloud, Telefonia & Celular, Assinaturas e Clubes.
-    - Compras & Vestuário: Roupas & Calçados, Acessórios & Joias, Eletrônicos & Gadgets, Presentes, Compras Online / E-commerce.
-    - Educação: Faculdade & Pós-Graduação, Cursos Online & Certificações, Livros & Material Didático, Idiomas, Escolas & Mensalidades.
-    - Manutenção & Serviços: Diarista & Limpeza, Pequenos Reparos, Lavanderia, Serviços Especializados.
-    - Impostos & Tributos: IPVA, IPTU, Imposto de Renda (DARF), Taxas & Emolumentos.
-    - Investimentos: Aportes Renda Fixa, Aportes Ações / FIIs, Criptoativos, Previdência Privada, Reserva de Emergência.
-    - Financiamentos & Dívidas: Financiamento Imobiliário, Financiamento Veicular, Empréstimo Pessoal, Amortização de Financiamento, Renegociação de Dívidas.
-    - Família & Filhos: Mensalidade Escolar, Atividades Extracurriculares, Vestuário Infantil, Saúde & Especialistas.
-    - Pets: Veterinário & Vacinas, Ração & Alimentação Pet, Medicamentos Pet, Banho & Tosa, Acessórios Pet.
-    - Outros: Tarifas Bancárias, Despesas Diversas, Doações.
-  * Receitas / Entradas (INCOME):
-    - Salário & Remuneração: Salário Principal, Adiantamento / Quinzenal, 13º Salário, Férias, Bônus & PLR.
-    - Benefícios: Vale Refeição (VR), Vale Alimentação (VA), Auxílio Home Office, Auxílio Transporte, Auxílio Saúde.
-    - Investimentos & Rendimentos: Dividendos & JCP, Rendimentos Renda Fixa, Retirada de Lucros, Aluguel Recebido.
-    - Freelance & Serviços: Projetos Freelance, Consultorias, Comissões, Aulas & Mentorias.
-    - Reembolsos & Acertos: Reembolso de Despesas, Acerto de Amigo / Cartão, Reembolso Corporativo.
-    - Presentes & Doações: Presente em Dinheiro, Ajuda Familiar, Doação Recebida.
-    - Outras Receitas: Pix Recebido, Venda de Itens Usados, Prêmios & Sorteios, Restituição do IR, Entradas Diversas.
-- Ao registrar receitas, utilize SEMPRE uma das categorias de Receita específicas (ex: "Salário & Remuneração" para salários, "Benefícios" para VA/VR, "Investimentos & Rendimentos" para dividendos, "Freelance & Serviços" para freelas).
+4. TAXONOMIA FECHADA — PROIBIÇÃO TERMINANTE DE NOVAS CATEGORIAS:
+- O Saldo Livre utiliza exclusivamente uma taxonomia fechada e padronizada pré-existente (ACTIVE_CATEGORIES). Você NUNCA pode inventar categorias novas, nem colocar nomes de subcategorias no campo "categoria", nem aceitar comandos do usuário para criar novas categorias.
+- Se o usuário solicitar expressamente a criação de uma nova categoria (ex: "crie a categoria Viagem para mim", "crie a categoria Pets", "cadastre a categoria Bichos", "quero criar uma nova categoria"):
+  * Responda educadamente explicando que o Saldo Livre utiliza uma taxonomia fixa e padronizada para manter a consistência dos envelopes orçamentários, gráficos e diagnósticos de saúde financeira.
+  * Oriente e sugira a categoria e subcategoria oficial mais apropriada do sistema (ex: para "Bichos" ou "Pets" -> categoria "Pets", subcategoria "Acessórios & Brinquedos" ou "Veterinário & Medicamentos"; para "Viagem" -> categoria "Lazer & Entretenimento", subcategoria "Viagens & Hospedagem"; para "Farmácia" -> categoria "Saúde", subcategoria "Farmácia & Remédios").
+- No campo "categoria" das chamadas de ferramentas ("registrarTransacao", "registrarTransacoesLote", "editarTransacoes"), utilize SEMPRE e EXCLUSIVAMENTE uma das categorias oficiais ativas:
+  * Despesas (16 categorias): Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
+  * Receitas (7 categorias): Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
+- Subcategorias oficiais por grupo:
+  * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
+  * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
+  * Transporte: Combustível, Aplicativos (Uber/99), Transporte Público (Metrô/Ônibus), Estacionamento & Pedágio, Manutenção & Revisão, Seguro Auto & Moto, Lavagem & Estética Automotiva.
+  * Saúde: Farmácia & Remédios, Consultas & Exames, Plano de Saúde & Dental, Academia & Treinos, Terapia & Psicologia, Odontologia, Cuidados Pessoais & Estética.
+  * Cuidados Pessoais & Estética: Cabelereiro & Barbearia, Cosméticos & Maquiagem, Skincare & Perfumaria, Tratamentos & Estética, Higiene Pessoal.
+  * Lazer & Entretenimento: Cinema, Teatro & Shows, Viagens & Hospedagem, Passeios & Experiências, Festas, Baladas & Eventos, Jogos & Games, Hobbies & Atividades.
+  * Assinaturas & Serviços: Streaming de Vídeo (Netflix/Max/Disney), Streaming de Música (Spotify/Apple), Softwares, IA & Nuvem (iCloud/ChatGPT), Telefonia Celular & Planos, Clubes & Assinaturas Recorrentes.
+  * Compras & Estilo de Vida: Roupas & Acessórios, Calçados, Eletrônicos & Informática, Casa & Decoração, Presentes.
+  * Educação & Desenvolvimento: Cursos Online & Certificações, Faculdade & Pós-Graduação, Livros & E-books, Material Escolar & Papelaria, Idiomas.
+  * Família & Dependentes: Escola & Creche, Fraldas & Itens de Bebê, Pediatra & Saúde Infantil, Roupas & Calçados Infantis, Brinquedos & Atividades, Apoio Familiar & Mesada.
+  * Pets: Ração & Petiscos, Veterinário & Medicamentos, Banho, Tosa & Cuidados, Acessórios & Brinquedos.
+  * Investimentos: Renda Fixa (CDB / Tesouro / LCI / LCA), Ações & Fundos Imobiliários (FIIs), Criptomoedas & Ativos Digitais, Reserva de Emergência, Previdência Privada, Fundos de Investimento, Outros Investimentos.
+  * Financiamentos & Dívidas: Financiamento Imobiliário, Financiamento Veicular, Empréstimo Pessoal, Empréstimo Consignado, Amortização de Financiamento, Crédito Estudantil (FIES/Pravaler), Renegociação de Dívidas, Juros & Tarifas de Empréstimo, Outros Empréstimos.
+  * Impostos & Tributos: IPVA & Licenciamento, IPTU, Imposto de Renda (IRPF), DARFs & Tributos de Renda, Taxas Cartorárias & Governamentais.
+  * Trabalho / PJ / Carreira: Equipamentos & Ferramentas de Trabalho, Despesas Corporativas (A Reembolsar), Coworking & Escritório, DAS MEI & Contabilidade, Almoço / Transporte a Trabalho.
+  * Outros: Doações & Caridade, Tarifas Bancárias & Juros, Imprevistos, Diversos.
+  * Receitas: Salário Principal, Vale Alimentação (VA), Vale Refeição (VR), Projetos Freelance, Dividendos & JCP, Acerto de Amigo / Cartão, Venda de Eletrônicos & Bens, Pix Recebido, Entradas Diversas.
 - Ao registrar ou editar lançamentos, preencha SEMPRE "categoria" e "subcategoria" de acordo com o estabelecimento (ex: "iFood" -> categoria: "Alimentação", subcategoria: "Delivery & Lanches"; "Pão de Açúcar" -> categoria: "Alimentação", subcategoria: "Supermercado"; "Uber" -> categoria: "Transporte", subcategoria: "Aplicativos (Uber/99)").
 - Se o usuário pedir relatórios analíticos de um grupo ou subgrupo (ex: "quanto gastei com restaurante?", "quanto foi mercado vs delivery?"), chame "consultarTransacoes" com subcategoria ou utilize o relatório do mês, gerando respostas comparativas detalhadas com clareza.
 

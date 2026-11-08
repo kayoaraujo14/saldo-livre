@@ -85,8 +85,10 @@ const CATEGORY_CANONICAL_MAP: Record<string, Category> = {
   'compras': 'Compras & Estilo de Vida',
   'compras & estilo de vida': 'Compras & Estilo de Vida',
   'compras e estilo de vida': 'Compras & Estilo de Vida',
-  'estilo de vida': 'Compras & Estilo de Vida',
+  'compras & vestuario': 'Compras & Estilo de Vida',
+  'compras e vestuario': 'Compras & Estilo de Vida',
   'vestuario': 'Compras & Estilo de Vida',
+  'estilo de vida': 'Compras & Estilo de Vida',
   'cuidados pessoais': 'Cuidados Pessoais & Estética',
   'cuidados pessoais & estetica': 'Cuidados Pessoais & Estética',
   'cuidados pessoais e estetica': 'Cuidados Pessoais & Estética',
@@ -97,6 +99,8 @@ const CATEGORY_CANONICAL_MAP: Record<string, Category> = {
   'dependentes': 'Família & Dependentes',
   'familia & pets': 'Família & Dependentes',
   'familia e pets': 'Família & Dependentes',
+  'familia & filhos': 'Família & Dependentes',
+  'familia e filhos': 'Família & Dependentes',
   'trabalho': 'Trabalho / PJ / Carreira',
   'carreira': 'Trabalho / PJ / Carreira',
   'pj': 'Trabalho / PJ / Carreira',
@@ -119,6 +123,8 @@ const CATEGORY_CANONICAL_MAP: Record<string, Category> = {
   'pet': 'Pets',
   'alimentacao': 'Alimentação',
   'moradia': 'Moradia',
+  'manutencao & servicos': 'Moradia',
+  'manutencao e servicos': 'Moradia',
   'transporte': 'Transporte',
   'transportes': 'Transporte',
   'saude': 'Saúde',
@@ -127,9 +133,35 @@ const CATEGORY_CANONICAL_MAP: Record<string, Category> = {
   'outros': 'Outros',
   'outro': 'Outros',
   'receita': 'Outras Receitas',
+  'receitas': 'Outras Receitas',
   'outras receitas': 'Outras Receitas',
   'cartao terceiros': 'Outros',
   'estorno': 'Outros',
+  'salario': 'Salário & Remuneração',
+  'salario & remuneracao': 'Salário & Remuneração',
+  'salario e remuneracao': 'Salário & Remuneração',
+  'remuneracao': 'Salário & Remuneração',
+  'beneficios': 'Benefícios',
+  'beneficio': 'Benefícios',
+  'freelance': 'Freelance & Serviços',
+  'freelance & servicos': 'Freelance & Serviços',
+  'freelance e servicos': 'Freelance & Serviços',
+  'freela': 'Freelance & Serviços',
+  'rendimentos': 'Rendimentos & Investimentos',
+  'rendimentos & investimentos': 'Rendimentos & Investimentos',
+  'rendimentos e investimentos': 'Rendimentos & Investimentos',
+  'investimentos & rendimentos': 'Rendimentos & Investimentos',
+  'investimentos e rendimentos': 'Rendimentos & Investimentos',
+  'reembolsos': 'Reembolsos & Acertos',
+  'reembolsos & acertos': 'Reembolsos & Acertos',
+  'reembolsos e acertos': 'Reembolsos & Acertos',
+  'reembolso': 'Reembolsos & Acertos',
+  'vendas': 'Vendas & Desapegos',
+  'vendas & desapegos': 'Vendas & Desapegos',
+  'vendas e desapegos': 'Vendas & Desapegos',
+  'desapegos': 'Vendas & Desapegos',
+  'presentes & doacoes': 'Outras Receitas',
+  'presentes e doacoes': 'Outras Receitas',
 }
 
 export function normalizeCategory(cat: string): Category {
@@ -749,6 +781,371 @@ export function getBudgetNature(category: string, subcategory?: string | null): 
   ])
   if (needsCats.has(category)) return 'need'
   return 'want'
+}
+
+export interface StrictCategoryResult {
+  category: Category
+  subcategory: string | null
+}
+
+const SUBCATEGORY_TO_CATEGORY_MAP: Record<string, { category: Category; officialSubcategory: string }> = {}
+
+for (const [catName, detail] of Object.entries(CATEGORY_GROUPS)) {
+  const category = catName as Category
+  if (!detail.subcategories) continue
+  for (const sub of detail.subcategories) {
+    const folded = foldCategoryAccents(sub)
+    if (!SUBCATEGORY_TO_CATEGORY_MAP[folded]) {
+      SUBCATEGORY_TO_CATEGORY_MAP[folded] = { category, officialSubcategory: sub }
+    }
+  }
+}
+
+const SUBCATEGORY_ALIASES: Record<string, { category: Category; officialSubcategory: string }> = {
+  // Alimentação
+  'mercado': { category: 'Alimentação', officialSubcategory: 'Supermercado' },
+  'supermercado': { category: 'Alimentação', officialSubcategory: 'Supermercado' },
+  'restaurante': { category: 'Alimentação', officialSubcategory: 'Restaurante' },
+  'almoco': { category: 'Alimentação', officialSubcategory: 'Restaurante' },
+  'jantar': { category: 'Alimentação', officialSubcategory: 'Restaurante' },
+  'delivery': { category: 'Alimentação', officialSubcategory: 'Delivery & Lanches' },
+  'lanches': { category: 'Alimentação', officialSubcategory: 'Delivery & Lanches' },
+  'lanche': { category: 'Alimentação', officialSubcategory: 'Delivery & Lanches' },
+  'ifood': { category: 'Alimentação', officialSubcategory: 'Delivery & Lanches' },
+  'rappi': { category: 'Alimentação', officialSubcategory: 'Delivery & Lanches' },
+  'padaria': { category: 'Alimentação', officialSubcategory: 'Padaria & Café' },
+  'cafe': { category: 'Alimentação', officialSubcategory: 'Padaria & Café' },
+  'feira': { category: 'Alimentação', officialSubcategory: 'Feira & Hortifruti' },
+  'hortifruti': { category: 'Alimentação', officialSubcategory: 'Feira & Hortifruti' },
+  'sacolao': { category: 'Alimentação', officialSubcategory: 'Feira & Hortifruti' },
+  'acougue': { category: 'Alimentação', officialSubcategory: 'Açougue & Peixaria' },
+  'peixaria': { category: 'Alimentação', officialSubcategory: 'Açougue & Peixaria' },
+  'carnes': { category: 'Alimentação', officialSubcategory: 'Açougue & Peixaria' },
+  'bar': { category: 'Alimentação', officialSubcategory: 'Bares & Bebidas' },
+  'bares': { category: 'Alimentação', officialSubcategory: 'Bares & Bebidas' },
+  'bebidas': { category: 'Alimentação', officialSubcategory: 'Bares & Bebidas' },
+  'cerveja': { category: 'Alimentação', officialSubcategory: 'Bares & Bebidas' },
+  'chope': { category: 'Alimentação', officialSubcategory: 'Bares & Bebidas' },
+
+  // Moradia
+  'aluguel': { category: 'Moradia', officialSubcategory: 'Aluguel & Condomínio' },
+  'condominio': { category: 'Moradia', officialSubcategory: 'Aluguel & Condomínio' },
+  'energia': { category: 'Moradia', officialSubcategory: 'Energia Elétrica' },
+  'energia eletrica': { category: 'Moradia', officialSubcategory: 'Energia Elétrica' },
+  'luz': { category: 'Moradia', officialSubcategory: 'Energia Elétrica' },
+  'enel': { category: 'Moradia', officialSubcategory: 'Energia Elétrica' },
+  'cemig': { category: 'Moradia', officialSubcategory: 'Energia Elétrica' },
+  'copel': { category: 'Moradia', officialSubcategory: 'Energia Elétrica' },
+  'agua': { category: 'Moradia', officialSubcategory: 'Água & Saneamento' },
+  'saneamento': { category: 'Moradia', officialSubcategory: 'Água & Saneamento' },
+  'sabesp': { category: 'Moradia', officialSubcategory: 'Água & Saneamento' },
+  'sanepar': { category: 'Moradia', officialSubcategory: 'Água & Saneamento' },
+  'copasa': { category: 'Moradia', officialSubcategory: 'Água & Saneamento' },
+  'gas': { category: 'Moradia', officialSubcategory: 'Gás' },
+  'botijao': { category: 'Moradia', officialSubcategory: 'Gás' },
+  'internet': { category: 'Moradia', officialSubcategory: 'Internet & TV a Cabo' },
+  'wifi': { category: 'Moradia', officialSubcategory: 'Internet & TV a Cabo' },
+  'tv a cabo': { category: 'Moradia', officialSubcategory: 'Internet & TV a Cabo' },
+    'reforma': { category: 'Moradia', officialSubcategory: 'Manutenção & Reparos' },
+  'manutencao': { category: 'Moradia', officialSubcategory: 'Manutenção & Reparos' },
+  'moveis': { category: 'Moradia', officialSubcategory: 'Móveis & Eletrodomésticos' },
+  'eletrodomesticos': { category: 'Moradia', officialSubcategory: 'Móveis & Eletrodomésticos' },
+
+  // Transporte
+  'combustivel': { category: 'Transporte', officialSubcategory: 'Combustível' },
+  'gasolina': { category: 'Transporte', officialSubcategory: 'Combustível' },
+  'etanol': { category: 'Transporte', officialSubcategory: 'Combustível' },
+  'posto': { category: 'Transporte', officialSubcategory: 'Combustível' },
+  'abastecer': { category: 'Transporte', officialSubcategory: 'Combustível' },
+  'uber': { category: 'Transporte', officialSubcategory: 'Aplicativos (Uber/99)' },
+  '99': { category: 'Transporte', officialSubcategory: 'Aplicativos (Uber/99)' },
+  '99app': { category: 'Transporte', officialSubcategory: 'Aplicativos (Uber/99)' },
+  '99pop': { category: 'Transporte', officialSubcategory: 'Aplicativos (Uber/99)' },
+  'corrida': { category: 'Transporte', officialSubcategory: 'Aplicativos (Uber/99)' },
+  'indrive': { category: 'Transporte', officialSubcategory: 'Aplicativos (Uber/99)' },
+  'taxi': { category: 'Transporte', officialSubcategory: 'Aplicativos (Uber/99)' },
+  'metro': { category: 'Transporte', officialSubcategory: 'Transporte Público (Metrô/Ônibus)' },
+  'onibus': { category: 'Transporte', officialSubcategory: 'Transporte Público (Metrô/Ônibus)' },
+  'trem': { category: 'Transporte', officialSubcategory: 'Transporte Público (Metrô/Ônibus)' },
+  'bilhete unico': { category: 'Transporte', officialSubcategory: 'Transporte Público (Metrô/Ônibus)' },
+  'transporte publico': { category: 'Transporte', officialSubcategory: 'Transporte Público (Metrô/Ônibus)' },
+  'estacionamento': { category: 'Transporte', officialSubcategory: 'Estacionamento & Pedágio' },
+  'pedagio': { category: 'Transporte', officialSubcategory: 'Estacionamento & Pedágio' },
+  'sem parar': { category: 'Transporte', officialSubcategory: 'Estacionamento & Pedágio' },
+  'veloe': { category: 'Transporte', officialSubcategory: 'Estacionamento & Pedágio' },
+  'conectcar': { category: 'Transporte', officialSubcategory: 'Estacionamento & Pedágio' },
+  'oficina': { category: 'Transporte', officialSubcategory: 'Manutenção & Revisão' },
+  'mecanico': { category: 'Transporte', officialSubcategory: 'Manutenção & Revisão' },
+  'revisao': { category: 'Transporte', officialSubcategory: 'Manutenção & Revisão' },
+  'seguro auto': { category: 'Transporte', officialSubcategory: 'Seguro Auto & Moto' },
+  'seguro carro': { category: 'Transporte', officialSubcategory: 'Seguro Auto & Moto' },
+  'lavagem': { category: 'Transporte', officialSubcategory: 'Lavagem & Estética Automotiva' },
+
+  // Saúde
+  'farmacia': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'drogaria': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'remedios': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'remedio': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'medicamentos': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'medicamento': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'drogasil': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'raia': { category: 'Saúde', officialSubcategory: 'Farmácia & Remédios' },
+  'consultas': { category: 'Saúde', officialSubcategory: 'Consultas & Exames' },
+  'consulta': { category: 'Saúde', officialSubcategory: 'Consultas & Exames' },
+  'medico': { category: 'Saúde', officialSubcategory: 'Consultas & Exames' },
+  'exames': { category: 'Saúde', officialSubcategory: 'Consultas & Exames' },
+  'exame': { category: 'Saúde', officialSubcategory: 'Consultas & Exames' },
+  'laboratorio': { category: 'Saúde', officialSubcategory: 'Consultas & Exames' },
+  'plano de saude': { category: 'Saúde', officialSubcategory: 'Plano de Saúde & Dental' },
+  'academia': { category: 'Saúde', officialSubcategory: 'Academia & Treinos' },
+  'treinos': { category: 'Saúde', officialSubcategory: 'Academia & Treinos' },
+  'treino': { category: 'Saúde', officialSubcategory: 'Academia & Treinos' },
+  'smartfit': { category: 'Saúde', officialSubcategory: 'Academia & Treinos' },
+  'gympass': { category: 'Saúde', officialSubcategory: 'Academia & Treinos' },
+  'musculacao': { category: 'Saúde', officialSubcategory: 'Academia & Treinos' },
+  'terapia': { category: 'Saúde', officialSubcategory: 'Terapia & Psicologia' },
+  'psicologia': { category: 'Saúde', officialSubcategory: 'Terapia & Psicologia' },
+  'psicologo': { category: 'Saúde', officialSubcategory: 'Terapia & Psicologia' },
+  'psicologa': { category: 'Saúde', officialSubcategory: 'Terapia & Psicologia' },
+  'dentista': { category: 'Saúde', officialSubcategory: 'Odontologia' },
+  'odontologia': { category: 'Saúde', officialSubcategory: 'Odontologia' },
+
+  // Cuidados Pessoais & Estética
+  'barbearia': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Cabelereiro & Barbearia' },
+  'barbeiro': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Cabelereiro & Barbearia' },
+  'cabelereiro': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Cabelereiro & Barbearia' },
+  'cabeleireiro': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Cabelereiro & Barbearia' },
+  'salao': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Cabelereiro & Barbearia' },
+  'cosmeticos': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Cosméticos & Maquiagem' },
+  'maquiagem': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Cosméticos & Maquiagem' },
+  'skincare': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Skincare & Perfumaria' },
+  'perfume': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Skincare & Perfumaria' },
+  'perfumaria': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Skincare & Perfumaria' },
+  'estetica': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Tratamentos & Estética' },
+  'manicure': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Tratamentos & Estética' },
+  'higiene': { category: 'Cuidados Pessoais & Estética', officialSubcategory: 'Higiene Pessoal' },
+
+  // Lazer & Entretenimento
+  'cinema': { category: 'Lazer & Entretenimento', officialSubcategory: 'Cinema, Teatro & Shows' },
+  'teatro': { category: 'Lazer & Entretenimento', officialSubcategory: 'Cinema, Teatro & Shows' },
+  'shows': { category: 'Lazer & Entretenimento', officialSubcategory: 'Cinema, Teatro & Shows' },
+  'show': { category: 'Lazer & Entretenimento', officialSubcategory: 'Cinema, Teatro & Shows' },
+  'viagens': { category: 'Lazer & Entretenimento', officialSubcategory: 'Viagens & Hospedagem' },
+  'viagem': { category: 'Lazer & Entretenimento', officialSubcategory: 'Viagens & Hospedagem' },
+  'hospedagem': { category: 'Lazer & Entretenimento', officialSubcategory: 'Viagens & Hospedagem' },
+  'hotel': { category: 'Lazer & Entretenimento', officialSubcategory: 'Viagens & Hospedagem' },
+  'passeios': { category: 'Lazer & Entretenimento', officialSubcategory: 'Passeios & Experiências' },
+  'passeio': { category: 'Lazer & Entretenimento', officialSubcategory: 'Passeios & Experiências' },
+  'festas': { category: 'Lazer & Entretenimento', officialSubcategory: 'Festas, Baladas & Eventos' },
+  'festa': { category: 'Lazer & Entretenimento', officialSubcategory: 'Festas, Baladas & Eventos' },
+  'balada': { category: 'Lazer & Entretenimento', officialSubcategory: 'Festas, Baladas & Eventos' },
+  'jogos': { category: 'Lazer & Entretenimento', officialSubcategory: 'Jogos & Games' },
+  'games': { category: 'Lazer & Entretenimento', officialSubcategory: 'Jogos & Games' },
+  'hobbies': { category: 'Lazer & Entretenimento', officialSubcategory: 'Hobbies & Atividades' },
+
+  // Assinaturas & Serviços
+  'netflix': { category: 'Assinaturas & Serviços', officialSubcategory: 'Streaming de Vídeo (Netflix/Max/Disney)' },
+  'spotify': { category: 'Assinaturas & Serviços', officialSubcategory: 'Streaming de Música (Spotify/Apple)' },
+  'chatgpt': { category: 'Assinaturas & Serviços', officialSubcategory: 'Softwares, IA & Nuvem (iCloud/ChatGPT)' },
+  'icloud': { category: 'Assinaturas & Serviços', officialSubcategory: 'Softwares, IA & Nuvem (iCloud/ChatGPT)' },
+  'telefonia': { category: 'Assinaturas & Serviços', officialSubcategory: 'Telefonia Celular & Planos' },
+  'celular': { category: 'Assinaturas & Serviços', officialSubcategory: 'Telefonia Celular & Planos' },
+
+  // Compras & Estilo de Vida
+  'roupas': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Roupas & Acessórios' },
+  'roupa': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Roupas & Acessórios' },
+  'calcados': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Calçados' },
+  'tenis': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Calçados' },
+  'sapato': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Calçados' },
+  'eletronicos': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Eletrônicos & Informática' },
+  'informatica': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Eletrônicos & Informática' },
+  'decoracao': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Casa & Decoração' },
+  'presentes': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Presentes' },
+  'presente': { category: 'Compras & Estilo de Vida', officialSubcategory: 'Presentes' },
+
+  // Educação & Desenvolvimento
+  'cursos': { category: 'Educação & Desenvolvimento', officialSubcategory: 'Cursos Online & Certificações' },
+  'curso': { category: 'Educação & Desenvolvimento', officialSubcategory: 'Cursos Online & Certificações' },
+  'faculdade': { category: 'Educação & Desenvolvimento', officialSubcategory: 'Faculdade & Pós-Graduação' },
+  'pos-graduacao': { category: 'Educação & Desenvolvimento', officialSubcategory: 'Faculdade & Pós-Graduação' },
+  'livros': { category: 'Educação & Desenvolvimento', officialSubcategory: 'Livros & E-books' },
+  'livro': { category: 'Educação & Desenvolvimento', officialSubcategory: 'Livros & E-books' },
+  'idiomas': { category: 'Educação & Desenvolvimento', officialSubcategory: 'Idiomas' },
+
+  // Família & Dependentes
+  'creche': { category: 'Família & Dependentes', officialSubcategory: 'Escola & Creche' },
+  'escola': { category: 'Família & Dependentes', officialSubcategory: 'Escola & Creche' },
+  'fraldas': { category: 'Família & Dependentes', officialSubcategory: 'Fraldas & Itens de Bebê' },
+  'fralda': { category: 'Família & Dependentes', officialSubcategory: 'Fraldas & Itens de Bebê' },
+  'pediatra': { category: 'Família & Dependentes', officialSubcategory: 'Pediatra & Saúde Infantil' },
+
+  // Pets
+  'racao': { category: 'Pets', officialSubcategory: 'Ração & Petiscos' },
+  'veterinario': { category: 'Pets', officialSubcategory: 'Veterinário & Medicamentos' },
+  'banho e tosa': { category: 'Pets', officialSubcategory: 'Banho, Tosa & Cuidados' },
+  'banho': { category: 'Pets', officialSubcategory: 'Banho, Tosa & Cuidados' },
+
+  // Investimentos
+  'cdb': { category: 'Investimentos', officialSubcategory: 'Renda Fixa (CDB / Tesouro / LCI / LCA)' },
+  'tesouro': { category: 'Investimentos', officialSubcategory: 'Renda Fixa (CDB / Tesouro / LCI / LCA)' },
+  'acoes': { category: 'Investimentos', officialSubcategory: 'Ações & Fundos Imobiliários (FIIs)' },
+  'fiis': { category: 'Investimentos', officialSubcategory: 'Ações & Fundos Imobiliários (FIIs)' },
+  'cripto': { category: 'Investimentos', officialSubcategory: 'Criptomoedas & Ativos Digitais' },
+  'criptomoedas': { category: 'Investimentos', officialSubcategory: 'Criptomoedas & Ativos Digitais' },
+  'reserva de emergencia': { category: 'Investimentos', officialSubcategory: 'Reserva de Emergência' },
+
+  // Financiamentos & Dívidas
+  'financiamento imobiliario': { category: 'Financiamentos & Dívidas', officialSubcategory: 'Financiamento Imobiliário' },
+  'financiamento veicular': { category: 'Financiamentos & Dívidas', officialSubcategory: 'Financiamento Veicular' },
+  'emprestimo pessoal': { category: 'Financiamentos & Dívidas', officialSubcategory: 'Empréstimo Pessoal' },
+  'emprestimo': { category: 'Financiamentos & Dívidas', officialSubcategory: 'Empréstimo Pessoal' },
+  'consignado': { category: 'Financiamentos & Dívidas', officialSubcategory: 'Empréstimo Consignado' },
+
+  // Impostos & Tributos
+  'ipva': { category: 'Impostos & Tributos', officialSubcategory: 'IPVA & Licenciamento' },
+  'iptu': { category: 'Impostos & Tributos', officialSubcategory: 'IPTU' },
+  'irpf': { category: 'Impostos & Tributos', officialSubcategory: 'Imposto de Renda (IRPF)' },
+  'darf': { category: 'Impostos & Tributos', officialSubcategory: 'DARFs & Tributos de Renda' },
+
+  // Trabalho / PJ / Carreira
+  'coworking': { category: 'Trabalho / PJ / Carreira', officialSubcategory: 'Coworking & Escritório' },
+  'das mei': { category: 'Trabalho / PJ / Carreira', officialSubcategory: 'DAS MEI & Contabilidade' },
+  'mei': { category: 'Trabalho / PJ / Carreira', officialSubcategory: 'DAS MEI & Contabilidade' },
+
+  // Outros
+  'doacao': { category: 'Outros', officialSubcategory: 'Doações & Caridade' },
+  'doacoes': { category: 'Outros', officialSubcategory: 'Doações & Caridade' },
+  'tarifas bancarias': { category: 'Outros', officialSubcategory: 'Tarifas Bancárias & Juros' },
+  'imprevistos': { category: 'Outros', officialSubcategory: 'Imprevistos' },
+  'diversos': { category: 'Outros', officialSubcategory: 'Diversos' },
+
+  // Receitas
+  'salario': { category: 'Salário & Remuneração', officialSubcategory: 'Salário Principal' },
+  'adiantamento': { category: 'Salário & Remuneração', officialSubcategory: 'Adiantamento / Quinzenal' },
+  'ferias': { category: 'Salário & Remuneração', officialSubcategory: 'Férias' },
+  'va': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'vr': { category: 'Benefícios', officialSubcategory: 'Vale Refeição (VR)' },
+  'freelance': { category: 'Freelance & Serviços', officialSubcategory: 'Projetos Freelance' },
+  'dividendos': { category: 'Rendimentos & Investimentos', officialSubcategory: 'Dividendos & JCP' },
+  'reembolso': { category: 'Reembolsos & Acertos', officialSubcategory: 'Reembolso de Empresa' },
+  'desapegos': { category: 'Vendas & Desapegos', officialSubcategory: 'Desapegos & Brechó' },
+  'pix recebido': { category: 'Outras Receitas', officialSubcategory: 'Pix Recebido' },
+}
+
+for (const [k, v] of Object.entries(SUBCATEGORY_ALIASES)) {
+  const folded = foldCategoryAccents(k)
+  if (!SUBCATEGORY_TO_CATEGORY_MAP[folded]) {
+    SUBCATEGORY_TO_CATEGORY_MAP[folded] = v
+  }
+}
+
+/**
+ * Resolução estrita de categorias para o Copiloto e cadastro de lançamentos.
+ * - Tolerância zero a categorias arbitrárias fora de ACTIVE_CATEGORIES.
+ * - Resolução reversa de subcategorias passadas no campo categoria (ex: "Supermercado" -> Alimentação › Supermercado).
+ * - Conversão de categorias legadas para versões modernas ativas (ex: "Lazer" -> "Lazer & Entretenimento").
+ * - Normalização canônica sem acentos e case-insensitive.
+ * - Fallback seguro inviolável para "Outros" (despesas) ou "Outras Receitas" (receitas).
+ */
+export function resolveStrictCategory(
+  rawCategory: string | undefined | null,
+  rawSubcategory?: string | null,
+  type: TransactionType = 'expense',
+  description?: string | null,
+  guessFallback?: (description: string, type: TransactionType) => { category: string; subcategory?: string | null }
+): StrictCategoryResult {
+  const trimmedCat = (rawCategory || '').trim()
+  const trimmedSub = (rawSubcategory || '').trim() || null
+  const foldedCat = foldCategoryAccents(trimmedCat)
+  const foldedSub = trimmedSub ? foldCategoryAccents(trimmedSub) : null
+
+  let resolvedCat: Category | null = null
+  let resolvedSub: string | null = trimmedSub
+
+  // 1. Tentar mapeamento canônico de categoria direta (inclusive legadas para ativas)
+  if (foldedCat && CATEGORY_CANONICAL_MAP[foldedCat]) {
+    resolvedCat = CATEGORY_CANONICAL_MAP[foldedCat]
+  }
+
+  // 2. Tentar match exato/insensível contra ACTIVE_CATEGORIES
+  if (!resolvedCat && foldedCat) {
+    const activeMatch = (ACTIVE_CATEGORIES as readonly string[]).find((c) => foldCategoryAccents(c) === foldedCat)
+    if (activeMatch) {
+      resolvedCat = activeMatch as Category
+    }
+  }
+
+  // 3. Tentar resolução reversa de subcategoria passada no campo categoria
+  if (!resolvedCat && foldedCat) {
+    const subMatch = SUBCATEGORY_TO_CATEGORY_MAP[foldedCat]
+    if (subMatch) {
+      resolvedCat = subMatch.category
+      if (!resolvedSub) {
+        resolvedSub = subMatch.officialSubcategory
+      }
+    }
+  }
+
+  // 4. Se a categoria era vazia ou não resolveu, mas temos uma subcategoria válida informada
+  if (!resolvedCat && foldedSub) {
+    const subMatch = SUBCATEGORY_TO_CATEGORY_MAP[foldedSub]
+    if (subMatch) {
+      resolvedCat = subMatch.category
+      resolvedSub = subMatch.officialSubcategory
+    }
+  }
+
+  // 5. Se já temos categoria oficial resolvida e uma subcategoria foi passada, tentar normalizar a subcategoria para o nome oficial
+  if (resolvedCat && resolvedSub) {
+    const detail = CATEGORY_GROUPS[resolvedCat]
+    if (detail && detail.subcategories) {
+      const foldedTargetSub = foldCategoryAccents(resolvedSub)
+      const officialSub = detail.subcategories.find((s) => foldCategoryAccents(s) === foldedTargetSub)
+      if (officialSub) {
+        resolvedSub = officialSub
+      } else {
+        const aliasMatch = SUBCATEGORY_ALIASES[foldedTargetSub]
+        if (aliasMatch && aliasMatch.category === resolvedCat) {
+          resolvedSub = aliasMatch.officialSubcategory
+        }
+      }
+    }
+  }
+
+  // 6. Se ainda não resolveu uma categoria válida e nenhuma foi informada explicitamente, tentar heurística/neural via descrição
+  if (!resolvedCat && !trimmedCat && description && guessFallback) {
+    try {
+      const guess = guessFallback(description, type)
+      if (guess && guess.category) {
+        const foldedGuess = foldCategoryAccents(guess.category)
+        const matched = (ACTIVE_CATEGORIES as readonly string[]).find((c) => foldCategoryAccents(c) === foldedGuess)
+        if (matched && matched !== 'Outros' && matched !== 'Outras Receitas') {
+          resolvedCat = matched as Category
+          if (!resolvedSub && guess.subcategory) {
+            resolvedSub = guess.subcategory
+          }
+        }
+      }
+    } catch {
+      // Ignora erro do classificador e prossegue para fallback seguro
+    }
+  }
+
+  // 7. Validação estrita por tipo e fallback inviolável
+  if (type === 'income') {
+    if (!resolvedCat || !(INCOME_CATEGORIES as readonly string[]).includes(resolvedCat)) {
+      resolvedCat = 'Outras Receitas'
+    }
+  } else {
+    if (!resolvedCat || !(EXPENSE_CATEGORIES as readonly string[]).includes(resolvedCat)) {
+      resolvedCat = 'Outros'
+    }
+  }
+
+  return {
+    category: resolvedCat,
+    subcategory: resolvedSub,
+  }
 }
 
 /** Coleção `public_profiles`: perfil público desprovido de dados sensíveis para busca de amigos e exibição em rateios */
