@@ -10,6 +10,7 @@ import { MobileBottomNav, type MobileTab } from '@/components/mobile/MobileBotto
 import { MobileMenuSheet } from '@/components/mobile/MobileMenuSheet'
 import { MobileTransactionCard } from '@/components/mobile/MobileTransactionCard'
 import { AutoLaunchNoticeBanner } from '@/components/AutoLaunchNoticeBanner'
+import { NetworkStatusIndicator } from '@/components/NetworkStatusIndicator'
 import { Button } from '@/components/ui/button'
 import { Clock, ArrowRight, ReceiptText, Sparkles, Plus } from 'lucide-react'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -173,7 +174,10 @@ function MainDashboard() {
 
       {/* 2. Main Content Area */}
       <main className={`flex-1 min-h-0 max-w-[1720px] w-full mx-auto px-3 sm:px-6 py-3.5 sm:py-4 ${isExpandedView ? 'lg:flex lg:flex-col' : 'space-y-4'}`}>
-        {/* Top Notification Banner if there are pending actions */}
+        {/* Offline / Reconnected Status Banner */}
+        <NetworkStatusIndicator />
+
+        
         {totalPendingNotifications > 0 && !isExpandedView && (
           <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-violet-500/15 to-transparent border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in slide-in-from-top-1">
             <div className="flex items-center gap-2.5 text-amber-200">

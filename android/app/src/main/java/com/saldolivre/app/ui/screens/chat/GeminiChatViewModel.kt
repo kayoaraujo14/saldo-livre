@@ -26,6 +26,7 @@ import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.parser.ParsedStatementItem
 import com.saldolivre.app.data.parser.StatementParser
 import com.saldolivre.app.data.repository.FinanceRepository
+import com.saldolivre.app.ui.util.NetworkMonitor
 import com.saldolivre.app.ui.theme.Emerald500
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -67,7 +68,8 @@ data class ChatUiState(
     val pasteStatementText: String = "",
     // Sugestões Dinâmicas
     val displayedSuggestions: List<String> = emptyList(),
-    val suggestionOffset: Int = 0
+    val suggestionOffset: Int = 0,
+    val isOnline: Boolean = true
 )
 
 class GeminiChatViewModel(
@@ -80,6 +82,7 @@ class GeminiChatViewModel(
     private val neuralClassifier = NeuralFinanceClassifier(appContext)
     private val sessionManager = ChatSessionManager(appContext)
     private val rulesManager = LearnedRulesManager(appContext)
+    private val networkMonitor by lazy { NetworkMonitor(appContext ?: SaldoLivreApplication.instance) }
     private val toolsEngine = AndroidAgentToolsEngine(
         repository = repository,
         neuralClassifier = neuralClassifier,
@@ -112,6 +115,12 @@ class GeminiChatViewModel(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            networkMonitor.isOnline.collect { online ->
+                _uiState.update { it.copy(isOnline = online) }
+            }
+        }
+
         // Inicializa sessões e regras do usuário
         val userUid = repository.currentUser.value.uid
         val initialSessions = sessionManager.getLocalSessions(userUid)
@@ -417,6 +426,14 @@ class GeminiChatViewModel(
     // -------------------------------------------------------------
 
     fun startVoiceRecording(context: Context) {
+        if (!_uiState.value.isOnline || !networkMonitor.isCurrentlyOnline()) {
+            android.widget.Toast.makeText(
+                context,
+                "Você está offline. A gravação e transcrição inteligente requerem conexão com a internet.",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
         if (_uiState.value.isRecordingAudio) {
             stopVoiceRecording(sendImmediately = true)
             return
@@ -1019,6 +1036,28 @@ class GeminiChatViewModel(
 
         if (rawInput.isBlank() && attachment == null) return
         if (_uiState.value.isTyping) return
+
+        // 0. Intercepta requisição se offline, sem disparar erros 500 no console
+        if (!_uiState.value.isOnline || !networkMonitor.isCurrentlyOnline()) {
+            val offlineMsg = ChatMessage(
+                sender = MessageSender.ASSISTANT,
+                text = "⚠️ **Você está offline no momento.**\n\nO Copiloto IA necessita de uma conexão ativa com a internet para consultar o Google Gemini e processar comandos inteligentes. Suas alterações locais estão protegidas e salvas com segurança no seu dispositivo."
+            )
+            val userMsg = ChatMessage(
+                sender = MessageSender.USER,
+                text = rawInput.ifBlank { "🎙️ [Áudio]" },
+                attachment = attachment
+            )
+            updateActiveSessionMessages(_uiState.value.messages + userMsg + offlineMsg, userPromptForTitle = rawInput.ifBlank { "Offline" })
+            _uiState.update {
+                it.copy(
+                    inputText = "",
+                    pendingAttachment = null,
+                    isTyping = false
+                )
+            }
+            return
+        }
 
         // 1. Detecção mágica de chave do Google AI Studio
         if (rawInput.startsWith("AIzaSy") && rawInput.length in 35..45 && !rawInput.contains(" ")) {
