@@ -1,7 +1,7 @@
 package com.saldolivre.app.ui.screens.menu
 
+import android.app.Activity
 import androidx.compose.runtime.Immutable
-
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.SaldoLivreApplication
@@ -12,6 +12,7 @@ import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.UserProfile
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.data.repository.MockFinanceRepository
+import com.saldolivre.app.data.security.AppSecurityManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -30,7 +31,11 @@ data class MenuUiState(
     val hasGeminiKey: Boolean = false,
     val apiKey: String = "",
     val activeGeminiModel: String = "gemini-3-flash",
-    val isTestingConnection: Boolean = false
+    val isTestingConnection: Boolean = false,
+    val biometricEnabled: Boolean = false,
+    val lockTimeoutMinutes: Int = 2,
+    val flagSecureEnabled: Boolean = false,
+    val biometricAvailable: Boolean = false
 )
 
 class MenuViewModel(
@@ -39,12 +44,20 @@ class MenuViewModel(
 
     private val appContext = runCatching { SaldoLivreApplication.instance }.getOrNull()
     private val loadBalancer = GeminiLoadBalancer(appContext)
+    private val securityManager = appContext?.let { AppSecurityManager.getInstance(it) }
 
     companion object {
         val AVAILABLE_MODELS = GeminiLoadBalancer.DEFAULT_MODELS_POOL
     }
 
-    private val _uiState = MutableStateFlow(MenuUiState())
+    private val _uiState = MutableStateFlow(
+        MenuUiState(
+            biometricEnabled = securityManager?.isBiometricEnabled ?: false,
+            lockTimeoutMinutes = securityManager?.lockTimeoutMinutes ?: 2,
+            flagSecureEnabled = securityManager?.isFlagSecureEnabled ?: false,
+            biometricAvailable = securityManager?.isBiometricAvailable() ?: false
+        )
+    )
     val uiState: StateFlow<MenuUiState> = _uiState.asStateFlow()
 
     init {
@@ -107,13 +120,41 @@ class MenuViewModel(
                     pendingAlertsCount = pendingFriendReqs + pendingCharges,
                     hasGeminiKey = keys.isNotEmpty(),
                     apiKey = keys.joinToString(", "),
-                    activeGeminiModel = loadBalancer.getSelectedModel()
+                    activeGeminiModel = loadBalancer.getSelectedModel(),
+                    biometricEnabled = securityManager?.isBiometricEnabled ?: false,
+                    lockTimeoutMinutes = securityManager?.lockTimeoutMinutes ?: 2,
+                    flagSecureEnabled = securityManager?.isFlagSecureEnabled ?: false,
+                    biometricAvailable = securityManager?.isBiometricAvailable() ?: false
                 )
             }.collect { state ->
                 _uiState.value = state
             }
         }
     }
+
+    // --------------------------------------------------------------------------
+    // SEGURANÇA & PRIVACIDADE
+    // --------------------------------------------------------------------------
+
+    fun setBiometricEnabled(enabled: Boolean) {
+        securityManager?.isBiometricEnabled = enabled
+        _uiState.update { it.copy(biometricEnabled = enabled) }
+    }
+
+    fun setLockTimeoutMinutes(minutes: Int) {
+        securityManager?.lockTimeoutMinutes = minutes
+        _uiState.update { it.copy(lockTimeoutMinutes = minutes) }
+    }
+
+    fun setFlagSecureEnabled(enabled: Boolean, activity: Activity? = null) {
+        securityManager?.isFlagSecureEnabled = enabled
+        activity?.let { securityManager?.applyFlagSecure(it) }
+        _uiState.update { it.copy(flagSecureEnabled = enabled) }
+    }
+
+    // --------------------------------------------------------------------------
+    // INTELIGÊNCIA ARTIFICIAL (GEMINI)
+    // --------------------------------------------------------------------------
 
     fun saveAiConfig(keyInput: String, model: String) {
         val trimmed = keyInput.trim()

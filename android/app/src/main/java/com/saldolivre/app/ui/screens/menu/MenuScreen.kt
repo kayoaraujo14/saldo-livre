@@ -1,5 +1,8 @@
 package com.saldolivre.app.ui.screens.menu
 
+import android.app.Activity
+import androidx.compose.ui.platform.LocalContext
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -270,7 +273,19 @@ fun MenuScreen(
                 )
             )
 
-            // 5. Botão de Encerrar Sessão
+                        // 5. Grupo: Segurança & Privacidade (Biometria e Blindagem)
+            val context = LocalContext.current
+            val activity = context as? Activity
+            MenuSecuritySection(
+                uiState = uiState,
+                onToggleBiometrics = { viewModel.setBiometricEnabled(it) },
+                onSelectTimeout = { viewModel.setLockTimeoutMinutes(it) },
+                onToggleFlagSecure = { enabled ->
+                    viewModel.setFlagSecureEnabled(enabled, activity)
+                }
+            )
+
+            // 6. Botão de Encerrar Sessão
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = Rose500.copy(alpha = 0.08f),
@@ -563,6 +578,224 @@ private data class MenuToolItemData(
     val highlightBadge: Boolean = false,
     val onClick: () -> Unit
 )
+
+@Composable
+private fun MenuSecuritySection(
+    uiState: MenuUiState,
+    onToggleBiometrics: (Boolean) -> Unit,
+    onSelectTimeout: (Int) -> Unit,
+    onToggleFlagSecure: (Boolean) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "SEGURANÇA & PRIVACIDADE",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextMuted,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(start = 4.dp)
+        )
+
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = DarkSurface,
+            border = BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                // Item 1: Bloqueio Biométrico
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .background(Emerald500.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+                            .border(1.dp, Emerald500.copy(alpha = 0.32f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Fingerprint,
+                            contentDescription = "Biometria",
+                            tint = Emerald400,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Bloqueio com Biometria / PIN",
+                            style = Typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (!uiState.biometricAvailable) {
+                                "Não suportado ou não configurado no aparelho"
+                            } else {
+                                "Solicitar ao abrir ou retornar ao app"
+                            },
+                            style = Typography.bodySmall,
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Switch(
+                        checked = uiState.biometricEnabled,
+                        onCheckedChange = onToggleBiometrics,
+                        enabled = uiState.biometricAvailable,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Emerald500,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = DarkBackground,
+                            uncheckedBorderColor = DarkBorder
+                        )
+                    )
+                }
+
+                // Sub-item: Seleção de Timeout (apenas se biometria estiver ativa)
+                if (uiState.biometricEnabled) {
+                    HorizontalDivider(
+                        color = DarkBorder.copy(alpha = 0.6f),
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Tempo de inatividade para bloquear",
+                            style = Typography.bodySmall,
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val timeoutOptions = listOf(
+                                0 to "Imediato",
+                                1 to "1 min",
+                                2 to "2 min",
+                                5 to "5 min"
+                            )
+
+                            timeoutOptions.forEach { (minutes, label) ->
+                                val isSelected = uiState.lockTimeoutMinutes == minutes
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) Emerald500.copy(alpha = 0.22f) else DarkBackground,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) Emerald500 else DarkBorder
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onSelectTimeout(minutes) }
+                                ) {
+                                    Box(
+                                        modifier = Modifier.padding(vertical = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) Emerald400 else TextMuted
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    color = DarkBorder.copy(alpha = 0.6f),
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+
+                // Item 2: Blindagem de Tela (FLAG_SECURE)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .background(Cyan400.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+                            .border(1.dp, Cyan400.copy(alpha = 0.32f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Blindagem",
+                            tint = Cyan400,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Blindagem de Tela",
+                            style = Typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Oculta valores nos apps recentes e impede prints",
+                            style = Typography.bodySmall,
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Switch(
+                        checked = uiState.flagSecureEnabled,
+                        onCheckedChange = onToggleFlagSecure,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Cyan400,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = DarkBackground,
+                            uncheckedBorderColor = DarkBorder
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun MenuSectionGroup(
