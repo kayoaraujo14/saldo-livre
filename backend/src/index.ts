@@ -2,6 +2,13 @@ import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { onRequest } from 'firebase-functions/v2/https'
 import * as logger from 'firebase-functions/logger'
 import * as admin from 'firebase-admin'
+import {
+  getMonthKey,
+  shiftMonth,
+  isBillEligibleForMonth,
+  buildAutoLaunchTransaction,
+  type RecurringBillData,
+} from './recurringBills.js'
 
 if (!admin.apps.length) {
   admin.initializeApp()
@@ -10,17 +17,9 @@ if (!admin.apps.length) {
 const db = admin.firestore()
 
 /**
- * Retorna a chave do mês no formato YYYY-MM
- */
-function getMonthKey(date: Date = new Date()): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  return `${y}-${m}`
-}
-
-/**
  * 1. Cron de Autolançamento de Contas Recorrentes
  * Executado todo dia 1º às 03:05 UTC (00:05 Horário de Brasília)
+ * Garante paridade contratual estrita com o motor financeiro e idempotência absoluta.
  */
 export const autoLaunchRecurringBillsScheduled = onSchedule(
   {
@@ -48,50 +47,70 @@ export const autoLaunchRecurringBillsScheduled = onSchedule(
       let skippedCount = 0
 
       for (const billDoc of billsSnapshot.docs) {
-        const bill = billDoc.data()
+        const bill = billDoc.data() as RecurringBillData
         const billId = billDoc.id
         const ownerUid = bill.ownerUid
 
         if (!ownerUid) continue
 
-        // Verifica se já existe lançamento dessa conta recorrente neste mês
-        const existingTx = await db
-          .collection('transactions')
-          .where('recurringBillId', '==', billId)
-          .where('month', '==', currentMonth)
-          .limit(1)
-          .get()
-
-        if (!existingTx.empty) {
+        // 1. Verifica elegibilidade temporal da recorrência (startMonth e endMonth)
+        if (!isBillEligibleForMonth(bill, currentMonth)) {
           skippedCount++
           continue
         }
 
-        const dueDay = Math.min(Math.max(1, Number(bill.dueDay) || 1), 31)
-        const dueDayPadded = String(dueDay).padStart(2, '0')
-        const txDate = `${currentMonth}-${dueDayPadded}`
+        // 2. Verifica idempotência: já existe lançamento dessa conta recorrente neste mês?
+        // Consulta simultânea por competenceMonth (canônico) e month (legado) para blindagem total contra duplicações
+        const [existingByCompetence, existingByMonth] = await Promise.all([
+          db
+            .collection('transactions')
+            .where('recurringBillId', '==', billId)
+            .where('competenceMonth', '==', currentMonth)
+            .limit(1)
+            .get(),
+          db
+            .collection('transactions')
+            .where('recurringBillId', '==', billId)
+            .where('month', '==', currentMonth)
+            .limit(1)
+            .get(),
+        ])
+
+        if (!existingByCompetence.empty || !existingByMonth.empty) {
+          skippedCount++
+          continue
+        }
+
+        // 3. Resolução de valor pela regra last_month se aplicável
+        let prevTxAmount: number | null = null
+        if (bill.estimationRule === 'last_month') {
+          const prevMonth = shiftMonth(currentMonth, -1)
+          const prevTxSnap = await db
+            .collection('transactions')
+            .where('recurringBillId', '==', billId)
+            .where('competenceMonth', '==', prevMonth)
+            .limit(1)
+            .get()
+
+          if (!prevTxSnap.empty) {
+            const prevData = prevTxSnap.docs[0].data()
+            prevTxAmount =
+              Number(prevData.actualAmount ?? prevData.estimatedAmount ?? prevData.totalAmount ?? prevData.amount) ||
+              null
+          }
+        }
+
+        // 4. Constrói o payload completo em total conformidade com o contrato canônico
+        const txPayload = buildAutoLaunchTransaction({
+          bill,
+          billId,
+          currentMonth,
+          prevTxAmount,
+        })
 
         const newTx = {
-          description: bill.title || bill.description || 'Conta Recorrente',
-          amount: Number(bill.amount) || 0,
-          type: bill.type || 'expense',
-          category: bill.category || 'Outros',
-          subcategory: bill.subcategory || null,
-          paymentMethod: bill.paymentMethod || 'bill',
-          status: 'pending',
-          date: txDate,
-          dueDate: txDate,
-          month: currentMonth,
-          createdByUid: ownerUid,
-          paidByUid: ownerUid,
-          visibleToUids: Array.isArray(bill.visibleToUids) && bill.visibleToUids.length > 0
-            ? bill.visibleToUids
-            : [ownerUid],
-          splitType: bill.splitType || 'mine',
-          recurringBillId: billId,
-          cardId: bill.cardId || null,
+          ...txPayload,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          isAutoLaunched: true,
         }
 
         await db.collection('transactions').add(newTx)
@@ -99,7 +118,7 @@ export const autoLaunchRecurringBillsScheduled = onSchedule(
       }
 
       logger.info(
-        `Autolançamento concluído com sucesso: ${launchedCount} lançadas, ${skippedCount} já existentes.`
+        `Autolançamento concluído com sucesso: ${launchedCount} lançadas, ${skippedCount} ignoradas/já existentes.`
       )
     } catch (error) {
       logger.error('Erro crítico no processamento de contas recorrentes:', error)
@@ -199,4 +218,3 @@ export const healthCheck = onRequest((req, res) => {
     uptime: process.uptime(),
   })
 })
-
