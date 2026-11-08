@@ -751,6 +751,15 @@ export function getBudgetNature(category: string, subcategory?: string | null): 
   return 'want'
 }
 
+/** Coleção `public_profiles`: perfil público desprovido de dados sensíveis para busca de amigos e exibição em rateios */
+export interface PublicUserProfile {
+  uid: string
+  email: string
+  displayName: string
+  photoURL: string | null
+  updatedAt?: any
+}
+
 /** Coleção `users` */
 export interface UserProfile {
   uid: string

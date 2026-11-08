@@ -62,7 +62,17 @@ class FirestoreFinanceRepository(
                             "displayName" to (user.displayName ?: "Meu Perfil"),
                             "monthlyIncome" to 5000.0
                         )
-                        firestore.collection("users").document(user.uid).set(defaultDoc)
+                        val publicDoc = mapOf(
+                            "uid" to user.uid,
+                            "email" to (user.email ?: "").lowercase().trim(),
+                            "displayName" to (user.displayName ?: "Meu Perfil"),
+                            "photoURL" to user.photoUrl?.toString(),
+                            "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                        )
+                        val batch = firestore.batch()
+                        batch.set(firestore.collection("users").document(user.uid), defaultDoc, com.google.firebase.firestore.SetOptions.merge())
+                        batch.set(firestore.collection("public_profiles").document(user.uid), publicDoc, com.google.firebase.firestore.SetOptions.merge())
+                        batch.commit()
                     }
                 }
         }
@@ -677,21 +687,30 @@ class FirestoreFinanceRepository(
         val uid = auth.currentUser?.uid ?: _currentUser.value.uid
         _currentUser.value = profile
         if (uid.isNotBlank() && uid != "default_uid") {
-            firestore.collection("users").document(uid).set(
-                mapOf(
-                    "uid" to profile.uid,
-                    "email" to profile.email,
-                    "displayName" to profile.displayName,
-                    "photoURL" to profile.photoURL,
-                    "monthlyIncome" to profile.monthlyIncome,
-                    "investmentMonthlyTarget" to profile.investmentMonthlyTarget,
-                    "investmentAssetBalances" to profile.investmentAssetBalances,
-                    "categoryBudgets" to profile.categoryBudgets,
-                    "monthlyCategoryBudgets" to profile.monthlyCategoryBudgets,
-                    "resolvedRecurring" to profile.resolvedRecurring
-                ),
-                com.google.firebase.firestore.SetOptions.merge()
-            ).await()
+            val userDoc = mapOf(
+                "uid" to profile.uid,
+                "email" to profile.email,
+                "displayName" to profile.displayName,
+                "photoURL" to profile.photoURL,
+                "monthlyIncome" to profile.monthlyIncome,
+                "emergencyReserveBalance" to profile.emergencyReserveBalance,
+                "investmentMonthlyTarget" to profile.investmentMonthlyTarget,
+                "investmentAssetBalances" to profile.investmentAssetBalances,
+                "categoryBudgets" to profile.categoryBudgets,
+                "monthlyCategoryBudgets" to profile.monthlyCategoryBudgets,
+                "resolvedRecurring" to profile.resolvedRecurring
+            )
+            val publicDoc = mapOf(
+                "uid" to profile.uid,
+                "email" to profile.email.lowercase().trim(),
+                "displayName" to profile.displayName,
+                "photoURL" to profile.photoURL,
+                "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+            )
+            val batch = firestore.batch()
+            batch.set(firestore.collection("users").document(uid), userDoc, com.google.firebase.firestore.SetOptions.merge())
+            batch.set(firestore.collection("public_profiles").document(uid), publicDoc, com.google.firebase.firestore.SetOptions.merge())
+            batch.commit().await()
         }
     }
 
@@ -850,7 +869,7 @@ class FirestoreFinanceRepository(
             return Pair(false, "Você não pode adicionar o seu próprio e-mail.")
         }
 
-        val userSnap = firestore.collection("users")
+        val userSnap = firestore.collection("public_profiles")
             .whereEqualTo("email", trimmed)
             .limit(1)
             .get()

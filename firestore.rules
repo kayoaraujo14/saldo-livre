@@ -6,14 +6,26 @@ service cloud.firestore {
     // Assumed Data Model
     // ===============================================================
     //
-    // Collection: /users/{userId}
+    // Collection: /users/{userId} (Privado - Dados Patrimoniais Sensíveis)
     // Document ID: userId (Auth UID)
     // Fields:
     //   - uid: string (required) - UID do usuário
-    //   - email: string (required) - Email para busca de contatos
+    //   - email: string (required) - Email
     //   - displayName: string (optional) - Nome de exibição
     //   - photoURL: string (optional) - URL do avatar
     //   - monthlyIncome: number (optional) - Renda mensal base
+    //   - emergencyReserveBalance: number (optional) - Reserva de emergência
+    //   - investmentAssetBalances: map (optional) - Saldos de investimentos
+    //   - categoryBudgets: map (optional) - Tetos de categorias
+    //
+    // Collection: /public_profiles/{userId} (Público autenticado - Descoberta de Amigos)
+    // Document ID: userId (Auth UID)
+    // Fields Permitidos:
+    //   - uid: string (required) - UID do usuário
+    //   - email: string (optional) - Email público para busca de contatos
+    //   - displayName: string (optional) - Nome de exibição público
+    //   - photoURL: string (optional) - URL do avatar público
+    //   - updatedAt: any (optional) - Timestamp da última atualização
     //
     // Subcollections:
     //   - /users/{userId}/activity_logs/{logId} (Logs de auditoria e atividades privadas)
@@ -113,11 +125,22 @@ service cloud.firestore {
     // Regras de Segurança por Coleção
     // ===============================================================
 
-    // 1. Perfil do Usuário
+    // 1. Perfil do Usuário (Dados Privados e Patrimoniais)
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isOwner(userId);
+      allow read, create: if isOwner(userId);
       allow update: if isOwner(userId) && (!('uid' in request.resource.data) || request.resource.data.uid == userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // 1.1 Perfil Público (Segregação de Dados para Busca e Exibição de Amigos)
+    match /public_profiles/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) &&
+        request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'updatedAt']) &&
+        request.resource.data.uid == userId;
+      allow update: if isOwner(userId) &&
+        request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'updatedAt']) &&
+        request.resource.data.uid == userId;
       allow delete: if isOwner(userId);
     }
 
