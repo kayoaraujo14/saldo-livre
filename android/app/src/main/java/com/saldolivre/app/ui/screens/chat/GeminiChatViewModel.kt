@@ -547,10 +547,12 @@ class GeminiChatViewModel(
                     }.getOrDefault(emptyList())
                 }
                 val enriched = enrichStatementItemsWithRules(rawItems)
-                if (enriched.isNotEmpty()) {
+                val existingTxs = runCatching { repository.getTransactions().firstOrNull() }.getOrNull() ?: emptyList()
+                val deduplicated = StatementParser.deduplicateStatementItems(enriched, existingTxs)
+                if (deduplicated.isNotEmpty()) {
                     _uiState.update {
                         it.copy(
-                            parsedStatementItems = enriched,
+                            parsedStatementItems = deduplicated,
                             statementFileName = name,
                             isStatementReviewOpen = true
                         )

@@ -28,6 +28,7 @@ import {
 import { runDemoAgent } from '@/lib/demoAgent'
 import { formatBRL, formatShortDate, monthLabel, todayKey } from '@/lib/utils'
 import { extractTextFromPdf } from '@/lib/pdfParser'
+import { parseUniversalStatement } from '@/lib/bankStatementParser'
 import { ChatChart } from '@/components/ui/ChatChart'
 import {
   fsSaveChatSession,
@@ -520,15 +521,60 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
     audioChunksRef.current = []
   }
 
-  const handleFileSelect = (file: File) => {
+  const handleFileSelect = async (file: File) => {
     if (!file) return
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Por favor, selecione um arquivo no formato PDF (extrato bancário ou fatura de cartão).')
+    const nameLower = file.name.toLowerCase()
+    const isPdf = file.type === 'application/pdf' || nameLower.endsWith('.pdf')
+    const isOfx = nameLower.endsWith('.ofx') || nameLower.endsWith('.qfx')
+    const isCsv = file.type === 'text/csv' || nameLower.endsWith('.csv') || file.type === 'text/plain' || nameLower.endsWith('.txt')
+
+    if (!isPdf && !isOfx && !isCsv) {
+      alert('Por favor, selecione um arquivo no formato PDF, OFX ou CSV (extrato bancário ou fatura de cartão).')
       return
     }
     if (file.size > 25 * 1024 * 1024) {
-      alert('O arquivo PDF selecionado ultrapassa o limite de 25MB.')
+      alert('O arquivo selecionado ultrapassa o limite de 25MB.')
       return
+    }
+
+    if (isOfx || isCsv) {
+      try {
+        const content = await file.text()
+        const parsedTransactions = parseUniversalStatement(content, file.name, transactions, month)
+        const totalCount = parsedTransactions.length
+        const duplicatesCount = parsedTransactions.filter((t) => t.isDuplicate).length
+        const ignoredCount = parsedTransactions.filter((t) => t.isIgnored).length
+        const newCount = totalCount - duplicatesCount - ignoredCount
+        const formatLabel = isOfx ? 'OFX' : 'CSV'
+
+        const lines = [
+          `=== EXTRATO BANCÁRIO / FATURA (${formatLabel} - ${file.name}) ===`,
+          `Total de lançamentos detectados: ${totalCount}`,
+          `Lançamentos novos: ${newCount}`,
+          `Lançamentos já cadastrados (duplicatas): ${duplicatesCount}`,
+          `Ignorados (RDB/Pagamentos de Fatura): ${ignoredCount}`,
+          '',
+          'Transações encontradas:',
+        ]
+
+        parsedTransactions.forEach((tx, idx) => {
+          const dupMarker = tx.isDuplicate ? ` [JÁ CADASTRADA - ${tx.duplicateReason}]` : ''
+          const ignMarker = tx.isIgnored ? ` [IGNORADA - ${tx.ignoredReason}]` : ''
+          lines.push(
+            `${idx + 1}. ${tx.date} | ${tx.type === 'income' ? 'RECEITA' : 'DESPESA'} | R$ ${tx.amount.toFixed(2)} | ${tx.counterparty || tx.description} | Categoria: ${tx.category}${tx.subcategory ? ` > ${tx.subcategory}` : ''}${dupMarker}${ignMarker}`
+          )
+        })
+
+        setPendingAttachment({
+          name: file.name,
+          size: file.size,
+          type: isOfx ? 'application/x-ofx' : 'text/csv',
+          extractedText: lines.join('\n'),
+        })
+        return
+      } catch (err) {
+        console.warn('Erro ao processar extrato bancário OFX/CSV localmente:', err)
+      }
     }
 
     const reader = new FileReader()
@@ -1145,9 +1191,9 @@ Atenção crítica:
             <UploadCloud className="size-8 stroke-[2.5]" />
           </div>
           <div className="text-center">
-            <h4 className="text-sm font-bold text-white">Solte seu extrato ou fatura em PDF aqui</h4>
+            <h4 className="text-sm font-bold text-white">Solte seu extrato ou fatura (PDF, OFX, CSV) aqui</h4>
             <p className="text-xs text-slate-300 mt-1 max-w-xs">
-              O Copiloto lerá as páginas e lançará todas as despesas e receitas automaticamente no sistema.
+              O Copiloto analisará os lançamentos e fará a deduplicação inteligente com suas despesas já cadastradas.
             </p>
           </div>
         </div>
@@ -2054,7 +2100,7 @@ Atenção crítica:
           <input
             ref={fileInputRef}
             type="file"
-            accept="application/pdf,.pdf"
+            accept=".pdf,.ofx,.qfx,.csv,.txt,application/pdf,text/csv,text/plain"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0]
@@ -2069,7 +2115,7 @@ Atenção crítica:
             disabled={isRecording || loading}
             onClick={() => fileInputRef.current?.click()}
             className="size-9 rounded-full bg-white/5 hover:bg-white/10 text-slate-400 hover:text-emerald-400 flex items-center justify-center shrink-0 transition-colors cursor-pointer disabled:opacity-30"
-            title="Anexar fatura ou extrato bancário em PDF"
+            title="Anexar fatura ou extrato bancário em PDF, OFX ou CSV"
           >
             <Paperclip className="size-4" />
           </button>

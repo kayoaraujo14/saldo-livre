@@ -14,6 +14,7 @@ import java.util.zip.InflaterInputStream
 @Immutable
 data class ParsedStatementItem(
     val id: String = UUID.randomUUID().toString(),
+    val fitId: String? = null,
     val rawLine: String = "",
     val date: String = "", // YYYY-MM-DD
     val description: String = "",
@@ -25,6 +26,8 @@ data class ParsedStatementItem(
     val subcategory: String? = null,
     val isIgnored: Boolean = false,
     val ignoredReason: String? = null,
+    val isDuplicate: Boolean = false,
+    val duplicateReason: String? = null,
     val installmentNumber: Int? = null,
     val installmentsTotal: Int? = null,
     val isSelected: Boolean = true,
@@ -73,10 +76,10 @@ object StatementParser {
 
         // Moradia
         Triple("Moradia", "Aluguel & Condomínio", Regex("""aluguel|condominio|condomínio|locacao|locação|imobiliaria""", RegexOption.IGNORE_CASE)),
-        Triple("Moradia", "Energia Elétrica", Regex("""luz|energia|enel|cpfl|cemig|coelba|light|eletropaulo|energisa""", RegexOption.IGNORE_CASE)),
+        Triple("Moradia", "Energia Elétrica", Regex("""\\bluz\\b|energia|enel|cpfl|cemig|coelba|light|eletropaulo|energisa""", RegexOption.IGNORE_CASE)),
         Triple("Moradia", "Água & Saneamento", Regex("""agua|água|sabesp|sanepar|copasa|cedae|caesb""", RegexOption.IGNORE_CASE)),
-        Triple("Moradia", "Internet & TV a Cabo", Regex("""internet|fibra|claro|vivo|oi |tim fibra|brisanet|net virtua""", RegexOption.IGNORE_CASE)),
-        Triple("Moradia", "Gás", Regex("""gas|gás|ultragaz|liquigas|comgas""", RegexOption.IGNORE_CASE)),
+        Triple("Moradia", "Internet & TV a Cabo", Regex("""internet|fibra|claro|vivo|\\boi\\b|tim fibra|brisanet|net virtua""", RegexOption.IGNORE_CASE)),
+        Triple("Moradia", "Gás", Regex("""\\b(gas|gás)\\b|ultragaz|liquigas|comgas""", RegexOption.IGNORE_CASE)),
 
         // Saúde
         Triple("Saúde", "Farmácia & Remédios", Regex("""farmacia|farmácia|drogaria|drogasil|droga raia|pacheco|sao paulo|são paulo|panvel|remedio|remédio|medicamento""", RegexOption.IGNORE_CASE)),
@@ -125,7 +128,7 @@ object StatementParser {
         Pair("Estorno", Regex("""estorno|reembolso|devolucao|devolução|credito fatura|crédito fatura|credit voucher|cashback""", RegexOption.IGNORE_CASE)),
         Pair("Financiamentos & Empréstimos", Regex("""financiamento|emprestimo|empréstimo|consignado|amortizacao|amortização|fies|pravaler|parcela auto|parcela carro|parcela moto""", RegexOption.IGNORE_CASE)),
         Pair("Investimentos", Regex("""investimento|aporte|cdb|tesouro|selic|lci|lca|fii|fiis|acoes|ações|cripto|bitcoin|btc|eth|corretora""", RegexOption.IGNORE_CASE)),
-        Pair("Moradia", Regex("""aluguel|condom|luz|energia|agua|gas|internet|iptu|casa|apartamento""", RegexOption.IGNORE_CASE)),
+        Pair("Moradia", Regex("""aluguel|condom|\\bluz\\b|energia|agua|\\b(gas|gás)\\b|internet|iptu|casa|apartamento""", RegexOption.IGNORE_CASE)),
         Pair("Alimentação", Regex("""jantar|almoco|cafe|mercado|supermercado|ifood|restaurante|lanche|pizza|padaria|comida|feira""", RegexOption.IGNORE_CASE)),
         Pair("Transporte", Regex("""uber|99|gasolina|combustivel|onibus|metro|estacionamento|carro|pedagio""", RegexOption.IGNORE_CASE)),
         Pair("Saúde", Regex("""farmacia|remedio|medic|consulta|exame|dentista|academia|plano de saude|drogaria""", RegexOption.IGNORE_CASE)),
@@ -290,8 +293,13 @@ object StatementParser {
                 PaymentMethod.CREDIT_CARD
             }
 
+            val fitIdMatch = Regex("""<FITID>([^<\r\n]+)""", RegexOption.IGNORE_CASE).find(block)
+            val fitId = fitIdMatch?.groupValues?.get(1)?.trim()
+
             items.add(
                 ParsedStatementItem(
+                    id = "ofx_${fitId ?: UUID.randomUUID().toString().take(8)}",
+                    fitId = fitId,
                     rawLine = block.take(120),
                     date = txDate,
                     description = rawDesc,
@@ -355,7 +363,13 @@ object StatementParser {
             val rawDesc = cols[descIdx]
 
             // Limpeza de valor brasileiro: 1.234,56 ou -12,34 ou R$ 15,00
-            val cleanValStr = rawVal.replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+            val cleanValStr = if (rawVal.contains(",") && rawVal.contains(".")) {
+                rawVal.replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+            } else if (rawVal.contains(",")) {
+                rawVal.replace("R$", "").replace(" ", "").replace(",", ".")
+            } else {
+                rawVal.replace("R$", "").replace(" ", "")
+            }
             val parsedVal = cleanValStr.toDoubleOrNull() ?: continue
             if (parsedVal == 0.0) continue
 
@@ -583,5 +597,71 @@ object StatementParser {
         }
 
         return lines
+    }
+    fun normalizeForDeduplication(text: String): String {
+        val normalized = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD)
+        return normalized.replace(Regex("""\p{InCombiningDiacriticalMarks}+"""), "")
+            .replace(Regex("""[^a-zA-Z0-9]"""), "")
+            .lowercase()
+    }
+
+    /**
+     * Deduplica transações extraídas contra as transações já cadastradas no repositório.
+     * Transações duplicadas recebem isDuplicate = true, isSelected = false e justificativa amigável.
+     */
+    fun deduplicateStatementItems(
+        parsedItems: List<ParsedStatementItem>,
+        existingTransactions: List<com.saldolivre.app.data.model.Transaction>
+    ): List<ParsedStatementItem> {
+        if (existingTransactions.isEmpty()) return parsedItems
+
+        val existingSignatures = mutableMapOf<String, com.saldolivre.app.data.model.Transaction>()
+        val existingFitIds = mutableSetOf<String>()
+
+        for (tx in existingTransactions) {
+            val notes = tx.notes ?: ""
+            val fitIdMatch = Regex("""FITID:\s*([^\s,;]+)""", RegexOption.IGNORE_CASE).find(notes)
+            if (fitIdMatch != null) {
+                existingFitIds.add(fitIdMatch.groupValues[1])
+            }
+
+            val amountStr = String.format(Locale.US, "%.2f", Math.abs(tx.effectiveAmount))
+            val normDesc = normalizeForDeduplication(tx.description)
+            val date = if (tx.dueDate.isNotBlank()) tx.dueDate else "${tx.competenceMonth}-01"
+            existingSignatures["${date}_${amountStr}_$normDesc"] = tx
+
+            val cleanCounterparty = extractCounterparty(tx.description)
+            if (cleanCounterparty.isNotBlank()) {
+                val normCounter = normalizeForDeduplication(cleanCounterparty)
+                existingSignatures["${date}_${amountStr}_$normCounter"] = tx
+            }
+        }
+
+        return parsedItems.map { item ->
+            if (!item.fitId.isNullOrBlank() && existingFitIds.contains(item.fitId)) {
+                item.copy(
+                    isDuplicate = true,
+                    isSelected = false,
+                    duplicateReason = "Transação já importada anteriormente (FITID: ${item.fitId})"
+                )
+            } else {
+                val amountStr = String.format(Locale.US, "%.2f", item.amount)
+                val sigDesc = "${item.date}_${amountStr}_${normalizeForDeduplication(item.description)}"
+                val sigCounter = "${item.date}_${amountStr}_${normalizeForDeduplication(item.counterparty)}"
+
+                val match = existingSignatures[sigDesc] ?: existingSignatures[sigCounter]
+                if (match != null) {
+                    val matchDate = if (match.dueDate.isNotBlank()) match.dueDate else match.competenceMonth
+                    val formattedDate = matchDate.split("-").reversed().take(2).joinToString("/")
+                    item.copy(
+                        isDuplicate = true,
+                        isSelected = false,
+                        duplicateReason = "Lançamento idêntico já cadastrado em $formattedDate"
+                    )
+                } else {
+                    item
+                }
+            }
+        }
     }
 }

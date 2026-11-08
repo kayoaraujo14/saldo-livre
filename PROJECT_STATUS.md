@@ -39,7 +39,7 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 | **Motor de Faturas** | `invoices.ts` | `engine/InvoiceEngine.kt` | Agrupamento de faturas por ciclo de corte do cartão, separação titular vs. terceiros e status de pagamento. |
 | **Copiloto Gemini & Tools** | `gemini.ts` + `agentTools.ts` | `ai/GeminiLoadBalancer.kt` + `ai/AndroidAgentToolsEngine.kt` | Balanceamento de chaves/modelos Gemini, Function Calling (CRUD via voz/texto, gráficos dinâmicos, consultas). |
 | **Classificador & Regras** | `demoAgent.ts` / `gemini.ts` | `ai/NeuralFinanceClassifier.kt` + `ai/LearnedRulesManager.kt` | Inferência rápida de categorias/intenções e aprendizado contínuo de regras do usuário. |
-| **Parser de Extratos/Faturas** | `pdfParser.ts` | `parser/StatementParser.kt` | Importação e interpretação de faturas/extratos (PDF/CSV/Texto) com deduplicação. |
+| **Parser de Extratos/Faturas** | `lib/bankStatementParser.ts` + `lib/pdfParser.ts` | `parser/StatementParser.kt` | Parser Universal OFX (1.02/2.x) e CSV bancário brasileiro com deduplicação inteligente (FITID/assinatura) e categorização heurística. |
 | **Estado & Repositório** | `store/FinanceContext.tsx` + `lib/firebase.ts` | `repository/FirestoreFinanceRepository.kt` + `MockFinanceRepository.kt` | Gerenciamento reativo de estado, listeners em tempo real e fallback transparente para Mock Data. |
 
 ---
@@ -64,6 +64,7 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 | **Saúde Financeira (4 Pilares & Coach IA)** | `lib/finance.ts`, `components/KpiGrid.tsx`, `modals/FinancialHealthModal.tsx` | `engine/FinanceEngine.kt`, `FinancialHealthScore.kt`, `ui/screens/dashboard/DashboardScreen.kt`, `FinancialHealthAndBudgetsComponents.kt` | 🟢 100% |
 | **Envelopes Orçamentários Inteligentes** | `lib/finance.ts`, `components/CategoryBudgetsCard.tsx`, `modals/ManageBudgetsModal.tsx` | `engine/FinanceEngine.kt`, `FinancialHealthScore.kt`, `ui/screens/dashboard/FinancialHealthAndBudgetsComponents.kt` | 🟢 100% |
 | **Feedback Tátil & Haptics** | N/A (Específico nativo) | `ui/util/HapticFeedbackHelper.kt` (integrado nos formulários, faturas e fechamento) | 🟢 100% |
+| **Parser Universal de Extratos (OFX/CSV/PDF)** | `lib/bankStatementParser.ts`, `lib/pdfParser.ts`, `components/GeminiChat.tsx` | `data/parser/StatementParser.kt`, `ui/screens/chat/GeminiChatViewModel.kt`, `GeminiChatScreen.kt` | 🟢 100% |
 | **PWA & Instalação Nativa** | `manifest.webmanifest`, `public/sw.js`, `index.html` (iOS/Desktop) | App nativo Android / APK / AAB | 🟢 100% |
 | **Navegação Mobile & Menu** | `components/mobile/MobileBottomNav.tsx`, `MobileMenuSheet.tsx` | `ui/navigation/AppNavHost.kt`, `AppBottomBar.kt`, `ui/screens/menu/MenuScreen.kt` | 🟢 100% |
 
@@ -100,6 +101,30 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+- **[2026-11-08] Multiplataforma (Web & Android) — Parser Universal de Extratos Bancários OFX e CSV com Deduplicação Inteligente — Issue #70 (Conclusão Integral):**
+  - **1. Parser Universal OFX (`OFXParser.ts` / `StatementParser.kt`):**
+    - Suporte bidirecional a OFX 1.02 (SGML legado com tags abertas `<STMTTRN>`, `<FITID>`, `<TRNAMT>`, `<DTPOSTED>`, `<MEMO>`) e OFX 2.x (XML).
+    - Extração padronizada de metadados: tipo de lançamento (`CREDIT`/`DEBIT`), valor absoluto com sinal canônico, data ISO (`YYYY-MM-DD`), identificador único (`FITID`), descrição e contraparte limpa de prefixos bancários (`PIX TRANSF`, `PAGTO ELETRON`, `COMPRA CARTAO`).
+    - Detecção e marcação automática de transferências internas para RDB/CDB e pagamentos de fatura como ignorados por padrão (`isIgnored: true`).
+  - **2. Parser CSV Bancário Brasileiro (`CSVParser.ts` / `StatementParser.kt`):**
+    - Detecção automática inteligente de delimitadores (ponto e vírgula `;`, vírgula `,` ou tabulação `\t`).
+    - Normalização de padrões monetários brasileiros (`1.234,56`, `-12,34`, `1234.56`, indicadores `D`/`C` no sufixo ou prefixo).
+    - Reconhecimento automático de colunas por cabeçalhos (`Data`/`Date`, `Valor`/`Amount`, `Descrição`/`Historico`, `Identificador`/`Documento`/`FITID`).
+  - **3. Deduplicação Inteligente Cruzada (Anti-Duplicidade):**
+    - Deduplicação determinística em duas fases:
+      1. Por `fitId` persistido nas notas ou metadados de transações já cadastradas.
+      2. Por assinatura composta normalizada (`data + valor + contraparte/descrição`).
+    - Itens duplicados são marcados com `isDuplicate: true`, `isSelected: false` e badge explicativo `"Já Cadastrada - Lançamento idêntico já cadastrado em DD/MM"`.
+  - **4. Integração no Copiloto IA Web (`GeminiChat.tsx`):**
+    - Input de arquivos e área de drag & drop atualizados para aceitar `.ofx`, `.qfx`, `.csv`, `.txt` e `.pdf`.
+    - Pré-processamento local instantâneo via `parseUniversalStatement`, gerando resumo estruturado de lançamentos novos vs duplicados para enriquecer o contexto do Gemini sem alucinações.
+  - **5. Interface Android Integrada (`GeminiChatScreen.kt` & `GeminiChatViewModel.kt`):**
+    - Cruzamento com transações do `FirestoreFinanceRepository` / `MockFinanceRepository`.
+    - Badge visual `Amber` ("Já Cadastrada") exibido nas linhas de extrato identificadas como duplicatas, desmarcadas por padrão para evitar duplicidade de saldo.
+  - **6. Qualidade & Testes (100% Verdes):**
+    - Web: 215 testes unitários passando no Vitest (`bankStatementParser.test.ts` cobrindo OFX, CSV com `;`, CSV com `,`, deduplicação e fluxo universal). Build e Lint (`oxlint`) com 0 erros e 0 warnings.
+    - Android: `StatementParserTest.kt` cobrindo parsing de OFX com FITID, CSV brasileiro, CSV americano e deduplicação inteligente por assinatura.
+
 - **[2026-11-08] Web Mobile — Bottom Sheets Responsivas com Proteção de Teclado — Issue #67 (Conclusão Integral):**
   - **1. Componente Adaptativo Universal (`Drawer` / `ResponsiveModal` em `web/src/components/ui/drawer.tsx`):**
     - Em Telas Móveis (`< 640px`): renderiza Bottom Sheet nativa baseada em `Vaul` com física de arrastar para fechar (`drag-to-dismiss`), barra de puxar (`handle`) no topo, scroll com momentum, cantos arredondados superiores (`rounded-t-[28px] rounded-b-none`) e ancoragem inferior `bottom-0`.
