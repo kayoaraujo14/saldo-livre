@@ -1,6 +1,7 @@
 # PROJECT_STATUS.md — Fonte da Verdade & Índice Arquitetural (`Saldo Livre`)
 
-> **Última Atualização:** 2026-11-07
+> **Última Atualização:** 2026-11-08
+> **Versão Oficial:** 🏷️ **v1.5.0** (Milestone 4 — Robustez Serverless & Resiliência Multiplataforma)
 > **Status da Fundação:** 🟢 **100% CONCLUÍDA E ESTABILIZADA**
 > **Propósito:** Índice central de arquitetura, mapeamento de paridade Web/Mobile, segurança e histórico de micro-commits para otimização máxima de contexto e tokens.
 
@@ -99,6 +100,12 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+
+- **[2026-11-08] 🚀 Release Oficial v1.5.0 — Milestone 4 (Robustez Serverless & Resiliência Multiplataforma):**
+  - Tag Git e Release oficial publicadas no GitHub: [`v1.5.0`](https://github.com/kayoaraujo14/saldo-livre/releases/tag/v1.5.0).
+  - Consolida todas as 4 frentes do Milestone: Autolançamento de recorrentes no backend (#64 / PR #80), Segregação de `/public_profiles` no Firestore (#73 / PR #81), Indicador reativo de rede/offline (#66 / PR #83) e Telemetria Crashlytics/Error Boundary (#65 / PR #84).
+  - Paridade total de validação estrita de categorias canônicas entre Web e Android no Copiloto IA.
+  - Quality gates 100% verdes: 172 testes Web, 10 testes Backend, 63 testes Android JVM e 0 erros de linters/compilação.
 
 - **[2026-11-08] Sprint 4 (v1.5.0: Robustez Serverless & Resiliência Multiplataforma) — Issue #65 (Conclusão Integral & Encerramento da Sprint 4):**
   - **1. Telemetria, Crash Reporting e Error Boundary Nativo (Firebase Crashlytics):**
