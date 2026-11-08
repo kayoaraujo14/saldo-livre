@@ -1,6 +1,7 @@
 package com.saldolivre.app.ui.screens.investments
 
 import android.content.Context
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -28,6 +29,7 @@ enum class InvestmentBucketType(val title: String, val subtitle: String) {
     RISK_VARIABLE("Investimentos de Risco & Variável", "Ações B3, FIIs, Criptomoedas e Ativos Digitais")
 }
 
+@Immutable
 data class InvestmentAsset(
     val subcategory: String,
     val bucketType: InvestmentBucketType,
@@ -43,6 +45,7 @@ data class InvestmentAsset(
         get() = if (totalInvestedAllTime > 0.0) FinanceEngine.round2((profitOrLoss / totalInvestedAllTime) * 100.0) else 0.0
 }
 
+@Immutable
 data class Rule503020Data(
     val income: Double = 0.0,
     val targetNeeds: Double = 0.0,
@@ -56,6 +59,7 @@ data class Rule503020Data(
     val investPct: Double = 0.0
 )
 
+@Immutable
 data class YearlySimulationData(
     val year: Int,
     val invested: Double,
@@ -63,6 +67,7 @@ data class YearlySimulationData(
     val interest: Double
 )
 
+@Immutable
 data class CompoundSimulationResult(
     val futureValue: Double = 0.0,
     val totalInvested: Double = 0.0,
@@ -70,6 +75,7 @@ data class CompoundSimulationResult(
     val yearlyData: List<YearlySimulationData> = emptyList()
 )
 
+@Immutable
 data class InvestmentsUiState(
     val currentUser: UserProfile = UserProfile(),
     val selectedMonth: String = "",

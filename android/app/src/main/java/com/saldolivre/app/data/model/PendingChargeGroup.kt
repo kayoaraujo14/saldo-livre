@@ -1,9 +1,12 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Agrupa despesas pendentes atribuídas a um amigo para aceite ou rejeição
  * (tanto para compras unitárias quanto para compras parceladas vinculadas por `installmentGroupId`).
  */
+@Immutable
 data class PendingChargeGroup(
     val id: String = "",
     val isInstallment: Boolean = false,

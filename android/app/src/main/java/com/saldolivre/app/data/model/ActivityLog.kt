@@ -1,5 +1,6 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 import java.util.UUID
 
@@ -32,6 +33,7 @@ enum class ActivityActionType(val label: String) {
     FRIEND_ACTION("Rede de Amizades")
 }
 
+@Immutable
 data class ActivityLog(
     val id: String = UUID.randomUUID().toString(),
     val actionType: ActivityActionType = ActivityActionType.TRANSACTION_CREATED,

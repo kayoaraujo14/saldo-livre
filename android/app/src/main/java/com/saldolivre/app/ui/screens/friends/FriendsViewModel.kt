@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.friends
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -14,6 +16,7 @@ enum class FriendsTab {
     STATEMENT
 }
 
+@Immutable
 data class FriendItem(
     val friendshipId: String,
     val friendUid: String,
@@ -21,6 +24,7 @@ data class FriendItem(
     val friendEmail: String
 )
 
+@Immutable
 data class FriendRequestItem(
     val friendshipId: String,
     val requesterUid: String,
@@ -29,6 +33,7 @@ data class FriendRequestItem(
     val createdAt: Long
 )
 
+@Immutable
 data class FriendsUiState(
     val currentUser: UserProfile = UserProfile(),
     val selectedMonth: String = FinanceEngine.currentMonthKey(),

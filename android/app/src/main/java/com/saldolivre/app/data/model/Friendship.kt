@@ -1,5 +1,6 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 
 enum class FriendshipStatus(val value: String) {
@@ -21,6 +22,7 @@ enum class FriendshipStatus(val value: String) {
 /**
  * Representa um vínculo de amizade na coleção `friendships` do Cloud Firestore.
  */
+@Immutable
 data class Friendship(
     val id: String = "",
     val requesterUid: String = "",

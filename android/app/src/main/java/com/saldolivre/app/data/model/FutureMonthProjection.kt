@@ -1,5 +1,8 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class ProjectedCategoryItem(
     val category: String = "",
     val amount: Double = 0.0,
@@ -9,6 +12,7 @@ data class ProjectedCategoryItem(
     val count: Int = 0
 )
 
+@Immutable
 data class ProjectedMonthItem(
     val id: String = "",
     val description: String = "",
@@ -30,6 +34,7 @@ data class ProjectedMonthItem(
 /**
  * Projeção orçamentária para meses futuros, espelhando FutureMonthProjection de web/src/types/index.ts.
  */
+@Immutable
 data class FutureMonthProjection(
     val monthKey: String = "",
     val label: String = "",

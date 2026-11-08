@@ -1,5 +1,7 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import com.saldolivre.app.ui.screens.chat.ChartPayload
 import java.util.UUID
 
@@ -14,6 +16,7 @@ enum class PendingActionStatus {
     CANCELLED
 }
 
+@Stable
 data class PendingAction(
     val id: String = UUID.randomUUID().toString(),
     val toolName: String,
@@ -24,6 +27,7 @@ data class PendingAction(
     var status: PendingActionStatus = PendingActionStatus.PENDING
 )
 
+@Immutable
 data class ActionCardLine(
     val label: String = "",
     val value: String = "",
@@ -38,6 +42,7 @@ data class ActionCardLine(
  * Todos os parâmetros têm valor padrão para que o Gson consiga usar o construtor vazio
  * e preserve os defaults ao desserializar sessões antigas salvas localmente.
  */
+@Immutable
 data class ActionCardData(
     val title: String = "",
     val description: String = "",
@@ -74,6 +79,7 @@ data class ActionCardData(
     }
 }
 
+@Immutable
 data class ChatAttachment(
     val name: String,
     val size: Long = 0L,
@@ -82,6 +88,7 @@ data class ChatAttachment(
     val extractedText: String? = null
 )
 
+@Immutable
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val sender: MessageSender,
@@ -102,6 +109,7 @@ data class ChatMessage(
     }
 }
 
+@Immutable
 data class ChatSession(
     val id: String = "sess_${System.currentTimeMillis()}",
     val title: String = "Nova Conversa",
@@ -111,6 +119,7 @@ data class ChatSession(
     val pendingTransactions: List<Map<String, Any?>> = emptyList()
 )
 
+@Immutable
 data class UserLearnedRule(
     val id: String = "rule_${UUID.randomUUID().toString().take(8)}",
     val rule: String,

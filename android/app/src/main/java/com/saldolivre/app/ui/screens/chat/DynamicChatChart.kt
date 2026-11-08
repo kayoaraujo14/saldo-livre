@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.ui.theme.*
 
+@Immutable
 data class ChartDataItem(
     val label: String,
     val value: Double,
@@ -43,6 +44,7 @@ enum class ChartType {
     BAR
 }
 
+@Immutable
 data class ChartPayload(
     val type: ChartType = ChartType.DONUT,
     val title: String = "Análise Financeira",

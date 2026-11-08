@@ -26,6 +26,7 @@ data class PayableItem(
     val myUid: String
 )
 
+@Immutable
 data class ReceivablesUiState(
     val selectedMonth: String = FinanceEngine.currentMonthKey(),
     val activeTab: SettlementsTab = SettlementsTab.RECEIVABLES,

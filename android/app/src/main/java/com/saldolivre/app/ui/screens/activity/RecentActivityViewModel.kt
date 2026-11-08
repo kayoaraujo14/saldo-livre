@@ -1,5 +1,6 @@
 package com.saldolivre.app.ui.screens.activity
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -19,6 +20,7 @@ enum class ActivityFilter(val label: String) {
     EXPENSE("Despesas")
 }
 
+@Immutable
 data class ActivityItemUi(
     val id: String,
     val title: String,
@@ -42,6 +44,7 @@ data class ActivityItemUi(
     val timestamp: Long
 )
 
+@Immutable
 data class RecentActivityUiState(
     val items: List<ActivityItemUi> = emptyList(),
     val filteredItems: List<ActivityItemUi> = emptyList(),

@@ -1,5 +1,8 @@
 package com.saldolivre.app.data.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class UserProfile(
     val uid: String = "",
     val email: String = "",

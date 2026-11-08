@@ -1,5 +1,7 @@
 package com.saldolivre.app.ui.screens.dashboard
 
+import androidx.compose.runtime.Immutable
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.SaldoLivreApplication
@@ -34,11 +36,13 @@ import com.saldolivre.app.data.model.Allocation
 import com.saldolivre.app.data.model.PaymentMethod
 import com.saldolivre.app.data.model.SplitType
 
+@Immutable
 data class AutoLaunchNotice(
     val count: Int,
     val bills: List<Transaction>
 )
 
+@Immutable
 data class IncomeConsumptionState(
     val percentage: Int = 0,
     val paid: Double = 0.0,
@@ -46,6 +50,7 @@ data class IncomeConsumptionState(
     val statusBadge: String = "No Limite"
 )
 
+@Immutable
 data class Radar7DaysState(
     val totalAmount: Double = 0.0,
     val count: Int = 0,
@@ -54,6 +59,7 @@ data class Radar7DaysState(
     val isUrgent: Boolean = false
 )
 
+@Immutable
 data class TopCategoryState(
     val categoryName: String = "Sem despesas",
     val amount: Double = 0.0,
@@ -62,6 +68,7 @@ data class TopCategoryState(
     val subtitle: String = "Nenhum gasto registrado"
 )
 
+@Immutable
 data class InvestmentHealthState(
     val totalInvested: Double = 0.0,
     val incomePercentage: Int = 0,
@@ -71,6 +78,7 @@ data class InvestmentHealthState(
     val badgeText: String = "Pendente"
 )
 
+@Immutable
 data class DashboardUiState(
     val currentUser: UserProfile = UserProfile(),
     val allUsers: List<UserProfile> = emptyList(),

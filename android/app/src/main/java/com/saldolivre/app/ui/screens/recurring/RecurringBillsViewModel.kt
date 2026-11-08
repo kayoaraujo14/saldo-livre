@@ -41,6 +41,7 @@ data class RecurringExecutiveStats(
     val freeBaseBalance: Double = 0.0
 )
 
+@Immutable
 data class RecurringBillsUiState(
     val currentUser: UserProfile = UserProfile(),
     val partner: UserProfile? = null,
