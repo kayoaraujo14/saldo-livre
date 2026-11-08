@@ -154,7 +154,9 @@ class AndroidAgentToolsEngine(
         totalInstallments: Int = 1,
         customCompetenceMonth: String? = null,
         customDueDate: String? = null,
-        confirmed: Boolean = false
+        confirmed: Boolean = false,
+        totalPurchaseAmount: Double? = null,
+        isPerInstallment: Boolean = false
     ): ToolExecutionResult {
         val isEstorno = type == TransactionType.EXPENSE && (
             category?.equals("Estorno", ignoreCase = true) == true ||
@@ -365,15 +367,37 @@ class AndroidAgentToolsEngine(
 
         if (totalInstallments > 1) {
             val groupId = "inst_" + UUID.randomUUID().toString().take(8)
+            val totalPurchase = if (isPerInstallment) {
+                FinanceEngine.round2(amount * totalInstallments)
+            } else {
+                totalPurchaseAmount ?: FinanceEngine.round2(amount * totalInstallments)
+            }
             val installmentList = mutableListOf<Transaction>()
 
             for (i in 1..totalInstallments) {
+                val curAmount = if (isPerInstallment) {
+                    amount
+                } else {
+                    FinanceEngine.calculateInstallmentAmount(
+                        total = totalPurchase,
+                        installmentNumber = i,
+                        installmentsTotal = totalInstallments,
+                        isPerInstallment = false
+                    )
+                }
                 val delta = i - currentInstallment
                 val targetMonth = FinanceEngine.shiftMonth(finalCompetenceMonth, delta)
                 val targetDueDate = shiftDateMonth(finalDueDate, delta)
 
                 val isPast = i < currentInstallment
                 val status = if (isPast) TransactionStatus.PAID else TransactionStatus.PENDING
+
+                val curAllocs = FinanceEngine.fractionCustomAllocations(
+                    allocations = splitResult.allocations,
+                    installmentNumber = i,
+                    installmentsTotal = totalInstallments,
+                    isPerInstallment = isPerInstallment
+                ) ?: (if (isPast) splitResult.allocations.map { it.copy(reimbursed = true) } else splitResult.allocations)
 
                 installmentList.add(
                     Transaction(
@@ -387,13 +411,13 @@ class AndroidAgentToolsEngine(
                         type = type,
                         paymentMethod = effectiveMethod,
                         status = status,
-                        actualAmount = amount,
-                        totalAmount = amount,
+                        actualAmount = curAmount,
+                        totalAmount = curAmount,
                         dueDate = targetDueDate,
                         competenceMonth = targetMonth,
                         visibleToUids = splitResult.visibleToUids,
                         userImpact = splitResult.userImpact,
-                        allocations = if (isPast) splitResult.allocations.map { it.copy(reimbursed = true) } else splitResult.allocations,
+                        allocations = if (isPast) curAllocs.map { it.copy(reimbursed = true) } else curAllocs,
                         splitType = effectiveSplitType,
                         installmentGroupId = groupId,
                         installmentNumber = i,
@@ -517,7 +541,12 @@ class AndroidAgentToolsEngine(
         rawDesc = neuralClassifier.extractDescription(rawDesc).ifBlank { rawDesc }
         val desc = AgentSecuritySanitizer.sanitizeText(rawDesc, 300)
 
-        val rawAmount = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor")
+        val rawAmount = jsonObj.getDoubleOrNull("amount")
+            ?: jsonObj.getDoubleOrNull("valor")
+            ?: jsonObj.getDoubleOrNull("valorTotal")
+            ?: jsonObj.getDoubleOrNull("totalAmount")
+            ?: jsonObj.getDoubleOrNull("valorParcela")
+            ?: jsonObj.getDoubleOrNull("installmentAmount")
         val amount = AgentSecuritySanitizer.sanitizeAmount(rawAmount)
         if (amount == null || amount <= 0.0) {
             return ToolExecutionResult(text = "⚠️ Valor de transação inválido ou ausente. Por favor, informe um valor numérico válido maior que zero.")
@@ -573,12 +602,22 @@ class AndroidAgentToolsEngine(
         val explicitTotalAmt = jsonObj.getDoubleOrNull("valorTotal")
             ?: jsonObj.getDoubleOrNull("totalAmount")
 
-        val finalAmount = when {
-            explicitInstallmentAmt != null && explicitInstallmentAmt > 0 -> explicitInstallmentAmt
-            explicitTotalAmt != null && explicitTotalAmt > 0 && totalInstallments > 1 -> FinanceEngine.round2(explicitTotalAmt / totalInstallments)
-            totalInstallments > 1 && (jsonObj.getBooleanOrNull("isTotalAmount") == true || jsonObj.getBooleanOrNull("ehValorTotal") == true) ->
-                FinanceEngine.round2(amount / totalInstallments)
+        val isPerInstallment = explicitInstallmentAmt != null && explicitInstallmentAmt > 0 && (explicitTotalAmt == null || explicitTotalAmt <= 0)
+        val purchaseTotal = when {
+            isPerInstallment -> FinanceEngine.round2(explicitInstallmentAmt!! * totalInstallments)
+            explicitTotalAmt != null && explicitTotalAmt > 0 -> explicitTotalAmt
+            totalInstallments > 1 && (jsonObj.getBooleanOrNull("isTotalAmount") == true || jsonObj.getBooleanOrNull("ehValorTotal") == true) -> amount
             else -> amount
+        }
+
+        val finalAmount = if (totalInstallments > 1) {
+            if (isPerInstallment) {
+                explicitInstallmentAmt!!
+            } else {
+                FinanceEngine.calculateInstallmentAmount(purchaseTotal, currentInstallment, totalInstallments, false)
+            }
+        } else {
+            amount
         }
 
         val txType = when {
@@ -633,7 +672,9 @@ class AndroidAgentToolsEngine(
             totalInstallments = totalInstallments,
             customCompetenceMonth = competenceMonth,
             customDueDate = dueDate,
-            confirmed = confirmed
+            confirmed = confirmed,
+            totalPurchaseAmount = purchaseTotal,
+            isPerInstallment = isPerInstallment
         )
     }
 
@@ -1117,8 +1158,10 @@ class AndroidAgentToolsEngine(
         }
 
         // Se pertencer a parcelamento e for edição de categoria ou descrição, inclui irmãos do mesmo grupo
+        // APENAS se NÃO estiver alterando vencimento ou mês de fatura (alterar data afeta apenas a parcela alvo)
+        val isDateChange = !newDueDate.isNullOrBlank() || !newCompetenceMonth.isNullOrBlank()
         val groupIds = targets.mapNotNull { it.installmentGroupId }.toSet()
-        if (groupIds.isNotEmpty() && (newCategory != null || newSubcategory != null || newDescription != null)) {
+        if (groupIds.isNotEmpty() && !isDateChange && (newCategory != null || newSubcategory != null || newDescription != null)) {
             val siblings = all.filter { it.installmentGroupId in groupIds && !targets.contains(it) }
             targets = targets + siblings
         }
@@ -1678,7 +1721,10 @@ class AndroidAgentToolsEngine(
         val targetIds = targetIdsArray?.mapNotNull { it.asString }
         val amount = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor")
         val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
-        val deleteAll = jsonObj.getBooleanOrNull("deleteAllInstallments") ?: false
+        val deleteAll = jsonObj.getBooleanOrNull("deleteAllInstallments")
+            ?: jsonObj.getBooleanOrNull("excluirTodasAsParcelas")
+            ?: jsonObj.getBooleanOrNull("excluirParcelamento")
+            ?: false
         val confirmed = jsonObj.getBooleanOrNull("confirmed")
             ?: jsonObj.getBooleanOrNull("__confirmed")
             ?: false

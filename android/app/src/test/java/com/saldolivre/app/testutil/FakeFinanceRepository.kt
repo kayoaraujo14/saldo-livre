@@ -69,7 +69,11 @@ class FakeFinanceRepository(
         closuresFlow.value = closuresFlow.value.filterNot { it.closedMonth == closedMonth }
     }
 
-    override suspend fun deleteInstallmentGroup(groupId: String): Int = 0
+    override suspend fun deleteInstallmentGroup(groupId: String): Int {
+        val initialSize = transactionsFlow.value.size
+        transactionsFlow.value = transactionsFlow.value.filterNot { it.installmentGroupId == groupId }
+        return initialSize - transactionsFlow.value.size
+    }
     override suspend fun updateInstallmentGroup(groupId: String, input: InstallmentGroupUpdateInput): Int = 0
 
     override suspend fun markTransactionPaid(id: String) {
