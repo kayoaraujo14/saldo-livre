@@ -1,5 +1,5 @@
-import { extractCounterparty } from '@/lib/pdfParser'
-import type { Transaction } from '@/types'
+import { extractCounterparty } from './pdfParser'
+import type { Transaction } from '../types'
 
 export interface ParsedStatementTransaction {
   id: string
@@ -448,9 +448,16 @@ export function deduplicateTransactions(
       existingFitIds.add(fitIdMatch[1])
     }
 
-    const txAmount = tx.actualAmount ?? tx.estimatedAmount ?? tx.totalAmount ?? 0
+    const metadata = customTx.metadata as Record<string, unknown> | undefined
+    if (metadata?.fitId) {
+      existingFitIds.add(String(metadata.fitId))
+    }
+
+    const txAmount = typeof customTx.amount === 'number'
+      ? customTx.amount
+      : (tx.actualAmount ?? tx.estimatedAmount ?? tx.totalAmount ?? 0)
     const absAmount = Math.abs(txAmount).toFixed(2)
-    const txDate = tx.dueDate || ''
+    const txDate = (customTx.date as string) || tx.dueDate || ''
     const normDesc = normalizeDescriptionForDeduplication(tx.description || '')
     const sig = `${txDate}_${absAmount}_${normDesc}`
     existingSignatures.set(sig, tx)
@@ -484,9 +491,12 @@ export function deduplicateTransactions(
     const existingMatch = existingSignatures.get(sigDesc) || existingSignatures.get(sigCounter)
 
     if (existingMatch) {
-      const txAmount = existingMatch.actualAmount ?? existingMatch.estimatedAmount ?? existingMatch.totalAmount ?? 0
-      const txDate = existingMatch.dueDate || ''
-      const formattedDate = txDate.split('-').reverse().slice(0, 2).join('/')
+      const matchAny = existingMatch as unknown as Record<string, unknown>
+      const txAmount = typeof matchAny.amount === 'number'
+        ? matchAny.amount
+        : (existingMatch.actualAmount ?? existingMatch.estimatedAmount ?? existingMatch.totalAmount ?? 0)
+      const txDate = (matchAny.date as string) || existingMatch.dueDate || ''
+      const formattedDate = txDate ? txDate.split('-').reverse().slice(0, 2).join('/') : ''
       return {
         ...item,
         isDuplicate: true,

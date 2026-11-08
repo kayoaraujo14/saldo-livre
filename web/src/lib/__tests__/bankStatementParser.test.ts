@@ -5,7 +5,7 @@ import {
   deduplicateTransactions,
   parseUniversalStatement,
 } from '../bankStatementParser'
-import type { Transaction } from '@/types'
+import type { Transaction } from '../../types'
 
 describe('Universal Bank Statement Parser (Web)', () => {
   const SAMPLE_OFX_SGML = `
