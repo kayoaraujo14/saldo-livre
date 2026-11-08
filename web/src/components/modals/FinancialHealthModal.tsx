@@ -151,7 +151,7 @@ export function FinancialHealthModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col p-0 overflow-hidden bg-slate-950 border-white/10 text-slate-100">
+      <DialogContent className="sm:max-w-2xl w-full max-h-[92dvh] sm:max-h-[90vh] flex flex-col p-0 overflow-hidden bg-slate-950 border-x-0 border-b-0 sm:border border-white/10 text-slate-100 rounded-t-[28px] rounded-b-none sm:rounded-2xl shadow-2xl">
         {/* Header */}
         <DialogHeader className="p-5 pb-4 border-b border-white/[0.08] bg-slate-900/60 shrink-0">
           <div className="flex items-center justify-between gap-3">

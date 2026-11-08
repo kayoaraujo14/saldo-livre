@@ -100,6 +100,26 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+- **[2026-11-08] Web Mobile — Bottom Sheets Responsivas com Proteção de Teclado — Issue #67 (Conclusão Integral):**
+  - **1. Componente Adaptativo Universal (`Drawer` / `ResponsiveModal` em `web/src/components/ui/drawer.tsx`):**
+    - Em Telas Móveis (`< 640px`): renderiza Bottom Sheet nativa baseada em `Vaul` com física de arrastar para fechar (`drag-to-dismiss`), barra de puxar (`handle`) no topo, scroll com momentum, cantos arredondados superiores (`rounded-t-[28px] rounded-b-none`) e ancoragem inferior `bottom-0`.
+    - Em Telas Desktop (`>= 640px`): renderiza Dialog centralizado do Radix UI com cantos `rounded-2xl` e zero quebras na experiência desktop.
+    - Proteção automática contra teclado virtual móvel (`repositionInputs={true}` e `max-h-[92dvh]`), garantindo que campos de input em foco e botões de ação do rodapé nunca sejam ocultados pelo teclado virtual em smartphones (360px a 430px).
+    - Suporte a safe areas iOS/Android (`env(safe-area-inset-bottom)`).
+  - **2. Hook Reativo de Viewport (`web/src/hooks/useIsMobile.ts`):**
+    - Sincronizado ao breakpoint `sm` (640px) do Tailwind CSS, com listener reativo para redimensionamento e rotação de tela.
+  - **3. Aplicação nos Fluxos Centrais:**
+    - `TransactionModal.tsx`: inclusão/edição de despesas, receitas e parcelamentos com botões e rodapé perfeitamente visíveis.
+    - `CardInvoicesModal.tsx`: navegação entre faturas, meses, despesas e cartões compartilhados com visualização em Bottom Sheet expansível.
+    - `ManageBudgetsModal.tsx`: configuração de tetos por envelopes e rebalanceamento IA em formato de gaveta touch.
+    - `FinancialHealthModal.tsx`: diagnóstico dos 4 pilares e score com botões de ação e visualização otimizada.
+  - **4. Auditoria Visual UI/UX com Captura de Tela:**
+    - Testado e auditado com Puppeteer em viewport móvel (`390x844`) e desktop (`1440x900`), confirmando design "Premium & Smart", abertura suave e integridade dos botões de ação.
+    - Screenshots gerados e arquivados em `.agents/screenshots/web/`.
+  - **5. Suíte de Testes Automatizados (100% Verdes):**
+    - `useIsMobile.test.ts` (3 testes) e `drawer.test.tsx` (2 testes) cobrindo alternância desktop/mobile e presença do handle — totalizando 210 testes verdes na Web.
+    - `oxlint`: 0 erros e 0 warnings.
+
 
 - **[2026-11-08] Android — Autenticação Biométrica, Bloqueio por Inatividade e Blindagem de Tela — Issue #74 (Conclusão Integral):**
   - **1. Integração Nativa AndroidX Biometric:**

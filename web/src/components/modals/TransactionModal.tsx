@@ -1,5 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Drawer as Dialog,
+  DrawerContent as DialogContent,
+  DrawerDescription as DialogDescription,
+  DrawerFooter as DialogFooter,
+  DrawerHeader as DialogHeader,
+  DrawerTitle as DialogTitle,
+} from '@/components/ui/drawer'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -630,7 +637,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl w-full max-h-[90vh] flex flex-col p-0 overflow-hidden bg-[#0a0f1d]/95 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl">
+      <DialogContent className="sm:max-w-2xl w-full max-h-[92dvh] sm:max-h-[90vh] flex flex-col p-0 overflow-hidden bg-[#0a0f1d]/95 backdrop-blur-2xl border-x-0 border-b-0 sm:border border-white/[0.1] rounded-t-[28px] rounded-b-none sm:rounded-2xl shadow-2xl">
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <DialogHeader className="p-4 sm:p-5 pb-3 border-b border-white/[0.08] shrink-0 bg-[#0a0f1d]/90 backdrop-blur-md">
             <DialogTitle className="text-base sm:text-lg font-bold text-white flex items-center gap-2">

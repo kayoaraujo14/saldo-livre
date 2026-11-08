@@ -1,11 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+  Drawer as Dialog,
+  DrawerContent as DialogContent,
+  DrawerDescription as DialogDescription,
+  DrawerHeader as DialogHeader,
+  DrawerTitle as DialogTitle,
+} from '@/components/ui/drawer'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -370,7 +370,7 @@ export function ManageBudgetsModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-xl max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden bg-slate-950 border-white/[0.12]">
+      <DialogContent className="sm:max-w-xl w-full max-h-[92dvh] sm:max-h-[88vh] flex flex-col p-0 gap-0 overflow-hidden bg-slate-950 border-x-0 border-b-0 sm:border border-white/[0.12] rounded-t-[28px] rounded-b-none sm:rounded-2xl shadow-2xl">
         {/* Header com Abas */}
         <DialogHeader className="p-5 pb-3 border-b border-white/[0.08] bg-slate-900/40">
           <div className="flex items-center justify-between">
