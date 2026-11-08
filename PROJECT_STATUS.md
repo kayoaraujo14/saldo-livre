@@ -101,6 +101,26 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
 
+- **[2026-11-08] Android — Autenticação Biométrica, Bloqueio por Inatividade e Blindagem de Tela — Issue #74 (Conclusão Integral):**
+  - **1. Integração Nativa AndroidX Biometric:**
+    - Adicionadas dependências `androidx.biometric:biometric-ktx:1.2.0-alpha05` e `androidx.fragment:fragment-ktx:1.6.2` ao `android/app/build.gradle.kts`.
+    - `MainActivity.kt` migrada de `ComponentActivity` para `FragmentActivity`, mantendo suporte integral e transparente ao Jetpack Compose e integrando o ciclo de vida ao `AppSecurityManager`.
+  - **2. Gerenciador de Segurança (`AppSecurityManager.kt`):**
+    - Singleton com preferências dedicadas (`saldo_livre_security_prefs`): `isBiometricEnabled`, `lockTimeoutMinutes` (0 = imediato, 1 min, 2 min, 5 min; default 2) e `isFlagSecureEnabled`.
+    - Lógica pura testável de bloqueio por inatividade: `shouldLockOnForeground(elapsedMillis, timeoutMinutes, isBiometricEnabled)`.
+    - Suporte a `BiometricPrompt` com autenticadores fortes (`BIOMETRIC_STRONG or DEVICE_CREDENTIAL`) e fallback para PIN/Padrão do dispositivo.
+    - Observação reativa com `StateFlow<Boolean>` para `isAppLocked`, `lockAppImmediately()` e `unlockApp()`.
+  - **3. Tela de Bloqueio em Compose (`BiometricLockScreen.kt`):**
+    - Design System Dark Mode oficial (`DarkBackground`, `DarkSurface`, `Emerald500`, `Rose500`).
+    - Animação de pulso contínuo (`rememberInfiniteTransition`) no ícone de impressão digital.
+    - Acionamento automático do prompt biométrico ao inicializar e botões "Desbloquear com Biometria / PIN" e "Sair ou Trocar de Conta" (`onLogout`).
+  - **4. Blindagem de Tela & Multitarefa (`FLAG_SECURE`):**
+    - Aplicação nativa de `WindowManager.LayoutParams.FLAG_SECURE`: impede captura de tela (prints/gravação) e oculta os valores e interface na tela de aplicativos recentes (Overview / Recents) do Android.
+  - **5. Seção de Segurança no Menu (`MenuScreen.kt` & `MenuViewModel.kt`):**
+    - Grupo visual "SEGURANÇA & PRIVACIDADE" com switch de ativação biométrica (com detecção de hardware/matrícula), seletor em chips/pills para o tempo de inatividade (Imediato, 1 min, 2 min, 5 min) e switch de Blindagem de Tela com aplicação em tempo real na Activity.
+  - **6. Suíte de Testes Automatizados (100% Verdes):**
+    - Criada a suíte `android/app/src/test/java/com/saldolivre/app/data/security/AppSecurityManagerTest.kt` com 6 testes cobrindo todos os limites temporais de inatividade, desativação e persistência das chaves de segurança.
+
 - **[2026-11-08] Sprint — Correções Críticas: Motor de Parcelamentos & Faturas — Issue #79 (Conclusão Integral):**
   - **1. Cancelamento / Exclusão de Parcelas Futuras (`deleteFutureInstallments`):**
     - **Web (`store/FinanceContext.tsx`, `components/modals/DeleteInstallmentDialog.tsx`) & Android (`DeleteInstallmentDialog.kt`, `FirestoreFinanceRepository.kt`, `MockFinanceRepository.kt`, `TransactionsViewModel.kt`, `DashboardViewModel.kt`):**

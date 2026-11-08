@@ -3,29 +3,36 @@ package com.saldolivre.app
 import android.content.Context
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.rememberNavController
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.crashlytics.FirebaseCrashlytics
-import com.saldolivre.app.ui.screens.crash.CrashFallbackScreen
 import com.saldolivre.app.data.repository.FirestoreFinanceRepository
 import com.saldolivre.app.data.repository.MockFinanceRepository
+import com.saldolivre.app.data.security.AppSecurityManager
 import com.saldolivre.app.ui.navigation.AppNavHost
 import com.saldolivre.app.ui.screens.auth.AuthViewModel
 import com.saldolivre.app.ui.screens.auth.LoginScreen
+import com.saldolivre.app.ui.screens.crash.CrashFallbackScreen
+import com.saldolivre.app.ui.screens.security.BiometricLockScreen
 import com.saldolivre.app.ui.theme.DarkBackground
 import com.saldolivre.app.ui.theme.SaldoLivreTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
+
+    private val securityManager by lazy { AppSecurityManager.getInstance(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Aplica proteção de tela e multitarefa conforme preferências do usuário
+        securityManager.applyFlagSecure(this)
 
         // Captura global de exceções não tratadas (Crashlytics)
         val defaultUncaughtHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -70,6 +77,8 @@ class MainActivity : ComponentActivity() {
                         val auth = remember { FirebaseAuth.getInstance() }
                         var currentUser by remember { mutableStateOf(auth.currentUser) }
 
+                        val isAppLocked by securityManager.isAppLocked.collectAsState()
+
                         DisposableEffect(auth) {
                             val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
                                 currentUser = firebaseAuth.currentUser
@@ -96,6 +105,23 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             )
+                        } else if (isAppLocked) {
+                            // Tela de bloqueio biométrico quando o app for reaberto após inatividade
+                            BiometricLockScreen(
+                                userName = currentUser?.displayName?.ifBlank { null }
+                                    ?: if (isDemoMode) "Modo Demonstração" else "Usuário Saldo Livre",
+                                onUnlocked = {
+                                    securityManager.unlockApp()
+                                },
+                                onLogout = {
+                                    securityManager.unlockApp()
+                                    authViewModel.signOut {
+                                        prefs.edit().putBoolean(AuthViewModel.PREF_IS_DEMO_MODE, false).apply()
+                                        isDemoMode = false
+                                        currentUser = null
+                                    }
+                                }
+                            )
                         } else {
                             val repository = remember(isDemoMode, currentUser?.uid) {
                                 if (isDemoMode) {
@@ -111,6 +137,7 @@ class MainActivity : ComponentActivity() {
                                 navController = navController,
                                 repository = repository,
                                 onLogout = {
+                                    securityManager.unlockApp()
                                     authViewModel.signOut {
                                         prefs.edit().putBoolean(AuthViewModel.PREF_IS_DEMO_MODE, false).apply()
                                         isDemoMode = false
@@ -123,5 +150,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        securityManager.onAppForegrounded()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        securityManager.applyFlagSecure(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        securityManager.onAppBackgrounded()
     }
 }
