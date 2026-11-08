@@ -3,6 +3,7 @@ import { buildCardInvoice } from '../invoices'
 import { effectiveAmount, guessCategoryAndSubcategory, impactFor } from '../finance'
 import { monthLabel, normalize, round2, shiftMonth, uid } from '../utils'
 import { money, parseMonthKey } from './common'
+import { sanitizeAmount, sanitizeText } from './security'
 import type { AgentEnv, ToolResult } from './types'
 
 export async function gerenciarCartoes(env: AgentEnv, args: Record<string, unknown>): Promise<ToolResult> {
@@ -65,9 +66,9 @@ export async function gerenciarCartoes(env: AgentEnv, args: Record<string, unkno
   }
 
   if (acao === 'adicionar') {
-    const nome = String(args.nome || '')
-    const f = Number(args.fechamento || 1)
-    const v = Number(args.vencimento || 10)
+    const nome = sanitizeText(args.nome || '', 100)
+    const f = Math.min(31, Math.max(1, Math.floor(Number(args.fechamento) || 1)))
+    const v = Math.min(31, Math.max(1, Math.floor(Number(args.vencimento) || 10)))
     if (!nome) return { response: { ok: false, erro: 'Nome é obrigatório para adicionar' } }
 
     const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
@@ -171,9 +172,12 @@ export async function gerenciarContasRecorrentes(env: AgentEnv, args: Record<str
   }
 
   if (acao === 'adicionar') {
-    const desc = String(args.descricao || '')
-    const valor = Number(args.valor || 0)
-    if (!desc || valor <= 0) return { response: { ok: false, erro: 'Descrição e valor são obrigatórios.' } }
+    const desc = sanitizeText(args.descricao || '', 200)
+    const sanitizedValor = sanitizeAmount(args.valor, { min: 0.01 })
+    if (!desc || sanitizedValor === null || sanitizedValor <= 0) {
+      return { response: { ok: false, erro: 'Descrição e valor positivo são obrigatórios.' } }
+    }
+    const valor = sanitizedValor
     const bType: 'expense' | 'income' = args.tipo === 'income' ? 'income' : 'expense'
     const guessed = guessCategoryAndSubcategory(desc, valor)
     const cat = (args.categoria as Category) || (bType === 'income' ? 'Salário & Remuneração' : guessed.category || 'Outros')

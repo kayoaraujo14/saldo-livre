@@ -9,6 +9,7 @@ import {
 } from '../finance'
 import { todayKey, formatBRL, round2 } from '../utils'
 import { normalizeCategory } from '@/types'
+import { sanitizeAmount, sanitizeText } from './security'
 
 export async function gerenciarEnvelopesOrcamentarios(
   env: AgentEnv,
@@ -118,11 +119,11 @@ export async function gerenciarEnvelopesOrcamentarios(
   }
 
   if (acao === 'definir_teto') {
-    const catRaw = String(args.categoria || '').trim()
+    const catRaw = sanitizeText(args.categoria || '', 100)
     const categoria = normalizeCategory(catRaw)
-    const limite = round2(Number(args.limite) || 0)
+    const sanitizedLimite = sanitizeAmount(args.limite, { min: 0, allowNegative: false })
 
-    if (!catRaw || limite < 0) {
+    if (!catRaw || sanitizedLimite === null || sanitizedLimite < 0) {
       return {
         response: {
           ok: false,
@@ -130,6 +131,7 @@ export async function gerenciarEnvelopesOrcamentarios(
         },
       }
     }
+    const limite = sanitizedLimite
 
     if (limite === 0) {
       delete currentBudgets[categoria]
@@ -189,13 +191,13 @@ export async function gerenciarEnvelopesOrcamentarios(
   }
 
   if (acao === 'rebalancear') {
-    const fromRaw = String(args.categoriaOrigem || '').trim()
-    const toRaw = String(args.categoriaDestino || '').trim()
+    const fromRaw = sanitizeText(args.categoriaOrigem || '', 100)
+    const toRaw = sanitizeText(args.categoriaDestino || '', 100)
     const categoriaOrigem = normalizeCategory(fromRaw)
     const categoriaDestino = normalizeCategory(toRaw)
-    const valor = round2(Number(args.valorTransferencia) || 0)
+    const sanitizedValor = sanitizeAmount(args.valorTransferencia, { min: 0.01, allowNegative: false })
 
-    if (!fromRaw || !toRaw || valor <= 0) {
+    if (!fromRaw || !toRaw || sanitizedValor === null || sanitizedValor <= 0) {
       return {
         response: {
           ok: false,
@@ -203,6 +205,7 @@ export async function gerenciarEnvelopesOrcamentarios(
         },
       }
     }
+    const valor = sanitizedValor
 
     const fromCurrent = currentBudgets[categoriaOrigem] || 0
     const toCurrent = currentBudgets[categoriaDestino] || 0

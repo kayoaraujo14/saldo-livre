@@ -97,9 +97,9 @@ class AndroidAgentToolsEngine(
     // EXECUÇÃO A PARTIR DE JSON (GEMINI OU RESPOSTA ESTRUTURADA)
     // -------------------------------------------------------------
 
-    suspend fun executeFromJson(jsonObj: JsonObject): ToolExecutionResult {
+    suspend fun executeFromJson(jsonObj: JsonObject): ToolExecutionResult = try {
         val action = jsonObj.getStringOrNull("action") ?: jsonObj.getStringOrNull("toolName") ?: ""
-        return when (action) {
+        when (action) {
             "CREATE_TRANSACTION", "registrarTransacao" -> executeCreateFromJson(jsonObj)
             "BATCH_TRANSACTIONS", "registrarTransacoesLote" -> executeBatchFromJson(jsonObj)
             "EDIT_TRANSACTION", "editarTransacoes", "EDIT_TRANSACTIONS", "BATCH_EDIT", "batchEdit", "editarTransacao" -> executeEditFromJson(jsonObj)
@@ -116,18 +116,21 @@ class AndroidAgentToolsEngine(
             "LEARN_RULE", "gerenciarRegrasEMemoria" -> {
                 val op = jsonObj.getStringOrNull("acao") ?: jsonObj.getStringOrNull("operation") ?: "aprender"
                 val rule = jsonObj.getStringOrNull("rule") ?: jsonObj.getStringOrNull("regra") ?: ""
+                val cleanRule = AgentSecuritySanitizer.sanitizeText(rule, 500)
                 if (op.equals("esquecer", ignoreCase = true) || op.equals("delete", ignoreCase = true)) {
-                    executeDeleteRule(rule)
+                    executeDeleteRule(cleanRule)
                 } else {
-                    executeLearnRule(rule)
+                    executeLearnRule(cleanRule)
                 }
             }
             "DELETE_RULE" -> {
                 val rule = jsonObj.getStringOrNull("rule") ?: jsonObj.getStringOrNull("regra") ?: ""
-                executeDeleteRule(rule)
+                executeDeleteRule(AgentSecuritySanitizer.sanitizeText(rule, 500))
             }
             else -> ToolExecutionResult(text = "Ação desconhecida solicitada: $action")
         }
+    } catch (e: Exception) {
+        ToolExecutionResult(text = "⚠️ Não foi possível executar a ação com segurança: ${e.message ?: "parâmetros corrompidos ou inválidos"}")
     }
 
     // -------------------------------------------------------------
@@ -160,10 +163,12 @@ class AndroidAgentToolsEngine(
             description.contains("credito na fatura", ignoreCase = true)
         )
 
-        val absAmount = Math.abs(amount)
-        if (absAmount <= 0.0) {
-            return ToolExecutionResult(text = "⚠️ O valor da transação deve ser maior que zero.")
+        val cleanDescription = AgentSecuritySanitizer.sanitizeText(description, 300)
+        val validAmount = AgentSecuritySanitizer.sanitizeAmount(amount, allowNegative = true)
+        if (validAmount == null || Math.abs(validAmount) <= 0.0) {
+            return ToolExecutionResult(text = "⚠️ O valor da transação deve ser um número finito maior que zero.")
         }
+        val absAmount = Math.abs(validAmount)
         val totalSigned = if (isEstorno) -absAmount else absAmount
 
         val user = repository.currentUser.value
@@ -508,9 +513,15 @@ class AndroidAgentToolsEngine(
     }
 
     private suspend fun executeCreateFromJson(jsonObj: JsonObject): ToolExecutionResult {
-        var desc = jsonObj.getStringOrNull("description") ?: jsonObj.getStringOrNull("descricao") ?: ""
-        desc = neuralClassifier.extractDescription(desc).ifBlank { desc }
-        val amount = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor") ?: 0.0
+        var rawDesc = jsonObj.getStringOrNull("description") ?: jsonObj.getStringOrNull("descricao") ?: ""
+        rawDesc = neuralClassifier.extractDescription(rawDesc).ifBlank { rawDesc }
+        val desc = AgentSecuritySanitizer.sanitizeText(rawDesc, 300)
+
+        val rawAmount = jsonObj.getDoubleOrNull("amount") ?: jsonObj.getDoubleOrNull("valor")
+        val amount = AgentSecuritySanitizer.sanitizeAmount(rawAmount)
+        if (amount == null || amount <= 0.0) {
+            return ToolExecutionResult(text = "⚠️ Valor de transação inválido ou ausente. Por favor, informe um valor numérico válido maior que zero.")
+        }
         val typeStr = jsonObj.getStringOrNull("type") ?: jsonObj.getStringOrNull("tipo") ?: "expense"
         val category = jsonObj.getStringOrNull("category") ?: jsonObj.getStringOrNull("categoria")
         val subcategory = jsonObj.getStringOrNull("subcategory") ?: jsonObj.getStringOrNull("subcategoria")
