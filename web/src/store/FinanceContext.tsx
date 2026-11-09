@@ -1909,7 +1909,14 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           competenceMonth: curCompetenceMonth,
           visibleToUids: isReserve
             ? [me.uid]
-            : Array.from(new Set([...split.visibleToUids, ...((input.paymentMethod === 'credit_card' && card?.sharedWithUids) || [])])),
+            : Array.from(
+                new Set([
+                  ...split.visibleToUids,
+                  ...(input.paymentMethod === 'credit_card' && card
+                    ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean)
+                    : []),
+                ]),
+              ),
           userImpact: split.userImpact,
           allocations: isReserve ? split.allocations.map((a) => ({ ...a, reimbursed: true })) : split.allocations,
           recurringBillId: null,

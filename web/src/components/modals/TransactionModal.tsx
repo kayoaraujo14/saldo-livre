@@ -578,6 +578,10 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             friendSharePct: assignedFriend ? resolvedFriendPct : null,
           })
 
+          const cardUids = paymentMethod === 'credit_card' && card
+            ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean)
+            : []
+
           await updateTransaction(editingTx.id, {
             description: description.trim(),
             category,
@@ -595,7 +599,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             visibleToUids: Array.from(
               new Set([
                 ...split.visibleToUids,
-                ...((paymentMethod === 'credit_card' && card?.sharedWithUids) || []),
+                ...cardUids,
               ])
             ),
             assignedFriendUid: assignedFriend?.uid ?? null,

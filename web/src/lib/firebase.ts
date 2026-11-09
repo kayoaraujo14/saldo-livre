@@ -379,8 +379,9 @@ export function normalizeTransaction(id: string, raw: any): Transaction {
     refundedTransactionId: data.refundedTransactionId || null,
     isAnticipated: Boolean(data.isAnticipated),
     anticipatedFromMonth: data.anticipatedFromMonth || null,
-    discountAmount: data.discountAmount ?? null,
-    externalName: data.externalName || null,
+    discountAmount: data.discountAmount != null ? Number(data.discountAmount) : null,
+    externalName: data.externalName || data.thirdPartyName || null,
+    notes: data.notes || null,
   }
 }
 
@@ -439,48 +440,66 @@ export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => v
       (err) => console.warn('Erro ao sincronizar transações do Firestore:', err)
     )
 
-    // 2. Escuta cartões compartilhados onde o usuário é convidado e sincroniza todas as transações daquele cartão
-    const uCards = onSnapshot(
+    // 2. Escuta cartões próprios e compartilhados para sincronizar todas as transações desses cartões
+    let ownedCardIds = new Set<string>()
+    let sharedCardIds = new Set<string>()
+
+    const syncCardListeners = () => {
+      const allCardIds = new Set([...ownedCardIds, ...sharedCardIds])
+
+      // Remove listeners de cartões que deixaram de pertencer ao usuário ou serem compartilhados
+      for (const [id, unsub] of sharedCardUnsubs) {
+        if (!allCardIds.has(id)) {
+          unsub()
+          sharedCardUnsubs.delete(id)
+          sharedCardTxsMap.delete(id)
+        }
+      }
+
+      // Adiciona listeners para novos cartões
+      for (const cardId of allCardIds) {
+        if (!sharedCardUnsubs.has(cardId)) {
+          const cardQuery = query(collection(db, COLLECTIONS.transactions), where('cardId', '==', cardId))
+          const uCard = onSnapshot(
+            cardQuery,
+            (txSnap) => {
+              const cardMap = new Map<string, Transaction>()
+              for (const d of txSnap.docs) {
+                cardMap.set(d.id, normalizeTransaction(d.id, d.data()))
+              }
+              sharedCardTxsMap.set(cardId, cardMap)
+              emit()
+            },
+            (err) => console.warn(`Erro ao sincronizar transações do cartão ${cardId}:`, err)
+          )
+          sharedCardUnsubs.set(cardId, uCard)
+        }
+      }
+      emit()
+    }
+
+    const uOwnedCards = onSnapshot(
+      query(collection(db, COLLECTIONS.cards), where('ownerUid', '==', uid)),
+      (snap) => {
+        ownedCardIds = new Set(snap.docs.map((d) => d.id))
+        syncCardListeners()
+      },
+      (err) => console.warn('Erro ao sincronizar cartões próprios para transações:', err)
+    )
+
+    const uSharedCards = onSnapshot(
       query(collection(db, COLLECTIONS.cards), where('sharedWithUids', 'array-contains', uid)),
       (snap) => {
-        const currentCardIds = new Set(snap.docs.map((d) => d.id))
-
-        // Remove listeners de cartões que deixaram de ser compartilhados
-        for (const [id, unsub] of sharedCardUnsubs) {
-          if (!currentCardIds.has(id)) {
-            unsub()
-            sharedCardUnsubs.delete(id)
-            sharedCardTxsMap.delete(id)
-          }
-        }
-
-        // Adiciona listeners para novos cartões compartilhados
-        for (const cardId of currentCardIds) {
-          if (!sharedCardUnsubs.has(cardId)) {
-            const cardQuery = query(collection(db, COLLECTIONS.transactions), where('cardId', '==', cardId))
-            const uCard = onSnapshot(
-              cardQuery,
-              (txSnap) => {
-                const cardMap = new Map<string, Transaction>()
-                for (const d of txSnap.docs) {
-                  cardMap.set(d.id, normalizeTransaction(d.id, d.data()))
-                }
-                sharedCardTxsMap.set(cardId, cardMap)
-                emit()
-              },
-              (err) => console.warn(`Erro ao sincronizar transações do cartão compartilhado ${cardId}:`, err)
-            )
-            sharedCardUnsubs.set(cardId, uCard)
-          }
-        }
-        emit()
+        sharedCardIds = new Set(snap.docs.map((d) => d.id))
+        syncCardListeners()
       },
       (err) => console.warn('Erro ao sincronizar cartões compartilhados para transações:', err)
     )
 
     return () => {
       u1()
-      uCards()
+      uOwnedCards()
+      uSharedCards()
       for (const unsub of sharedCardUnsubs.values()) unsub()
       sharedCardUnsubs.clear()
     }

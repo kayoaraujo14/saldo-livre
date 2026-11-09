@@ -574,7 +574,12 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
         totalAmount: curInstAmt,
         dueDate: instDueDate,
         competenceMonth: instMonth,
-        visibleToUids: instSplit.visibleToUids,
+        visibleToUids: Array.from(
+          new Set([
+            ...instSplit.visibleToUids,
+            ...(method === 'credit_card' && card ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean) : []),
+          ]),
+        ),
         userImpact: instSplit.userImpact,
         allocations: isPast
           ? instSplit.allocations.map((a) => ({ ...a, reimbursed: true }))
@@ -630,7 +635,12 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
       totalAmount: currentInstallmentAmt,
       dueDate: finalDueDate,
       competenceMonth,
-      visibleToUids: split.visibleToUids,
+      visibleToUids: Array.from(
+        new Set([
+          ...split.visibleToUids,
+          ...(method === 'credit_card' && card ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean) : []),
+        ]),
+      ),
       userImpact: split.userImpact,
       allocations: split.allocations,
       recurringBillId: null,
@@ -1836,7 +1846,11 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
 
       patch.allocations = split.allocations
       patch.userImpact = split.userImpact
-      patch.visibleToUids = split.visibleToUids
+      const effCardId = patch.cardId !== undefined ? patch.cardId : tx.cardId
+      const cardsList = env.getCards ? env.getCards() : []
+      const targetCard = effCardId ? cardsList.find((c) => c.id === effCardId) : null
+      const cardUids = targetCard ? [targetCard.ownerUid, ...(targetCard.sharedWithUids || [])].filter(Boolean) : []
+      patch.visibleToUids = Array.from(new Set([...split.visibleToUids, ...cardUids]))
       if (assignedFriend) {
         patch.assignedFriendUid = assignedFriend.uid
         patch.assignedFriendName = assignedFriend.name

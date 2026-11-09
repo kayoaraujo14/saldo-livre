@@ -33,7 +33,11 @@ fun safeExtractBoolean(raw: Any?): Boolean? {
     return when (raw) {
         is Boolean -> raw
         is Number -> raw.toInt() != 0
-        is String -> raw.trim().lowercase().let { it == "true" || it == "1" }
+        is String -> when (raw.trim().lowercase()) {
+            "true", "1" -> true
+            "false", "0" -> false
+            else -> null
+        }
         else -> null
     }
 }

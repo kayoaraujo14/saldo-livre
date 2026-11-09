@@ -6,7 +6,7 @@ import android.util.Log
 import com.google.firebase.FirebaseApp
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
+import com.google.firebase.appcheck.AppCheckProviderFactory
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.data.repository.FirestoreFinanceRepository
@@ -46,10 +46,15 @@ class SaldoLivreApplication : Application() {
             FirebaseApp.initializeApp(this)
             val firebaseAppCheck = FirebaseAppCheck.getInstance()
             if (BuildConfig.DEBUG) {
-                firebaseAppCheck.installAppCheckProviderFactory(
-                    DebugAppCheckProviderFactory.getInstance()
-                )
-                Log.d(TAG, "Firebase App Check inicializado com DebugAppCheckProviderFactory")
+                try {
+                    val debugFactoryClass = Class.forName("com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory")
+                    val getInstanceMethod = debugFactoryClass.getMethod("getInstance")
+                    val factory = getInstanceMethod.invoke(null) as AppCheckProviderFactory
+                    firebaseAppCheck.installAppCheckProviderFactory(factory)
+                    Log.d(TAG, "Firebase App Check inicializado com DebugAppCheckProviderFactory")
+                } catch (e: Exception) {
+                    Log.w(TAG, "DebugAppCheckProviderFactory indisponível em runtime: ${e.message}")
+                }
             } else {
                 firebaseAppCheck.installAppCheckProviderFactory(
                     PlayIntegrityAppCheckProviderFactory.getInstance()

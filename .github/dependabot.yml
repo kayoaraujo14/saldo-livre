@@ -32,14 +32,19 @@ updates:
       timezone: "America/Sao_Paulo"
     open-pull-requests-limit: 5
     ignore:
-      # Não permitir updates 'major' automáticos de ferramentas base do Android,
-      # que exigem migração coordenada de compilador e plugins
+      # Não permitir updates automáticos não-coordenados que quebram paridade de compilador
+      # ou exigem bump de compileSdk 34 para 35 e Kotlin 1.9.23 para 2.0+
       - dependency-name: "gradle"
         update-types: ["version-update:semver-major"]
       - dependency-name: "com.android.application"
         update-types: ["version-update:semver-major"]
       - dependency-name: "org.jetbrains.kotlin.*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: "androidx.compose:compose-bom"
+      - dependency-name: "androidx.compose.compiler:*"
+      - dependency-name: "androidx.navigation:navigation-compose"
+      - dependency-name: "androidx.fragment:fragment-ktx"
+      - dependency-name: "androidx.biometric:biometric-ktx"
+      - dependency-name: "androidx.activity:activity-compose"
       - dependency-name: "androidx.core:core-ktx"
         update-types: ["version-update:semver-major"]
     groups:
