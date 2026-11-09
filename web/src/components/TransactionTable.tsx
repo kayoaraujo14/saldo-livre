@@ -2514,15 +2514,10 @@ export function TransactionTable({
                                 subcategory: newSub,
                               })
                             } else {
-                              const patch: Partial<Transaction> = {
+                              updateTransaction(tx.id, {
                                 category: newCat,
                                 subcategory: newSub,
-                              }
-                              if (tx.assignedFriendUid) {
-                                patch.acceptanceStatus = 'pending_approval'
-                                patch.respondedAt = null
-                              }
-                              updateTransaction(tx.id, patch)
+                              })
                             }
                           }}
                         >
@@ -2554,14 +2549,9 @@ export function TransactionTable({
                                   subcategory: newSub,
                                 })
                               } else {
-                                const patch: Partial<Transaction> = {
+                                updateTransaction(tx.id, {
                                   subcategory: newSub,
-                                }
-                                if (tx.assignedFriendUid) {
-                                  patch.acceptanceStatus = 'pending_approval'
-                                  patch.respondedAt = null
-                                }
-                                updateTransaction(tx.id, patch)
+                                })
                               }
                             }}
                           >

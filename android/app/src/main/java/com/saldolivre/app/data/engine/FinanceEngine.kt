@@ -836,7 +836,12 @@ object FinanceEngine {
             splitType = origTx.splitType ?: if (!origTx.assignedFriendUid.isNullOrBlank()) SplitType.FRIEND else SplitType.MINE,
             assignedFriendUid = origTx.assignedFriendUid,
             assignedFriendName = origTx.assignedFriendName,
-            acceptanceStatus = if (!origTx.assignedFriendUid.isNullOrBlank()) "pending_approval" else null,
+            acceptanceStatus = if (!origTx.assignedFriendUid.isNullOrBlank()) {
+                if (origTx.acceptanceStatus == "accepted") "accepted" else "pending_approval"
+            } else null,
+            respondedAt = if (!origTx.assignedFriendUid.isNullOrBlank() && origTx.acceptanceStatus == "accepted") {
+                origTx.respondedAt ?: System.currentTimeMillis()
+            } else null,
             friendSharePct = friendSharePct,
             externalName = origTx.externalName,
             refundedTransactionId = origTx.id,
@@ -911,15 +916,16 @@ object FinanceEngine {
         )
     }
 
-    fun friendShareOf(tx: Transaction): Double {
-        if (tx.assignedFriendUid.isNullOrBlank()) return 0.0
-        val friendAlloc = tx.allocations.filter { it.uid == tx.assignedFriendUid }
+    fun friendShareOf(tx: Transaction, fallbackFriendUid: String? = null): Double {
+        val targetUid = tx.assignedFriendUid?.takeIf { it.isNotBlank() } ?: fallbackFriendUid?.takeIf { it.isNotBlank() }
+        if (targetUid.isNullOrBlank()) return 0.0
+        val friendAlloc = tx.allocations.filter { it.uid == targetUid }
         if (friendAlloc.isNotEmpty()) {
             return round2(friendAlloc.sumOf { it.amount })
         }
 
-        // Fallback 1: se userImpact tem o assignedFriendUid com valor diferente de zero
-        val impactVal = tx.userImpact[tx.assignedFriendUid]
+        // Fallback 1: se userImpact tem o targetUid com valor diferente de zero
+        val impactVal = tx.userImpact[targetUid]
         if (impactVal != null && Math.abs(impactVal) > 0.0001) {
             return round2(impactVal)
         }
@@ -928,6 +934,57 @@ object FinanceEngine {
         val pct = (tx.friendSharePct ?: 50.0).coerceIn(1.0, 100.0)
         val total = effectiveAmount(tx)
         return round2((total * (pct / 100.0)))
+    }
+
+    fun resolveNextAcceptanceStatus(
+        prevTx: Transaction,
+        nextAssignedFriendUid: String?,
+        nextFriendSharePct: Double?,
+        nextTotalAmount: Double,
+        nextAllocations: List<Allocation>
+    ): Pair<String?, Long?> {
+        val nextCandidate = prevTx.copy(
+            assignedFriendUid = nextAssignedFriendUid,
+            friendSharePct = nextFriendSharePct,
+            totalAmount = nextTotalAmount,
+            allocations = nextAllocations
+        )
+        return resolveNextAcceptanceStatus(prevTx, nextCandidate)
+    }
+
+    fun resolveNextAcceptanceStatus(
+        currentTx: Transaction?,
+        nextTx: Transaction
+    ): Pair<String?, Long?> {
+        val nextFriendUid = nextTx.assignedFriendUid?.takeIf { it.isNotBlank() }
+        if (nextFriendUid == null) {
+            return Pair(null, null)
+        }
+
+        if (currentTx != null && currentTx.createdByUid.isNotBlank() && nextFriendUid == currentTx.createdByUid) {
+            val status = if (currentTx.acceptanceStatus == "pending_approval") "accepted" else currentTx.acceptanceStatus
+            return Pair(status, currentTx.respondedAt ?: System.currentTimeMillis())
+        }
+
+        if (currentTx == null) {
+            return Pair("pending_approval", null)
+        }
+
+        val prevFriendUid = currentTx.assignedFriendUid?.takeIf { it.isNotBlank() }
+        if (prevFriendUid != nextFriendUid) {
+            return Pair("pending_approval", null)
+        }
+
+        if (currentTx.acceptanceStatus == "accepted" || currentTx.acceptanceStatus == "rejected") {
+            val prevShare = friendShareOf(currentTx)
+            val nextShare = friendShareOf(nextTx)
+            if (Math.abs(nextShare - prevShare) <= 0.01) {
+                return Pair(currentTx.acceptanceStatus, currentTx.respondedAt)
+            }
+            return Pair("pending_approval", null)
+        }
+
+        return Pair(currentTx.acceptanceStatus ?: "pending_approval", currentTx.respondedAt)
     }
 
     fun detectSplit(tx: Transaction, viewerUid: String): SplitType {
@@ -2363,10 +2420,11 @@ object FinanceEngine {
         if (currentUid.isBlank()) return emptyList()
 
         val rawPending = transactions.filter {
-            it.acceptanceStatus == "pending_approval" && (
-                it.assignedFriendUid == currentUid ||
-                (it.createdByUid != currentUid && it.allocations.any { a -> a.uid == currentUid && a.type == "PLATFORM_USER" })
-            )
+            it.acceptanceStatus == "pending_approval" &&
+                !(it.createdByUid == currentUid && it.paidByUid == currentUid) && (
+                    it.assignedFriendUid == currentUid ||
+                    (it.createdByUid != currentUid && it.allocations.any { a -> a.uid == currentUid && a.type == "PLATFORM_USER" })
+                )
         }
 
         val groups = mutableListOf<PendingChargeGroup>()
@@ -2388,7 +2446,7 @@ object FinanceEngine {
                 val friendPct = primaryTx.friendSharePct ?: 100.0
 
                 val totalAmount = round2(items.sumOf { it.totalAmount })
-                val friendShareAmount = round2(items.sumOf { friendShareOf(it) })
+                val friendShareAmount = round2(items.sumOf { friendShareOf(it, currentUid) })
 
                 val dates = items.map { it.dueDate }.sorted()
                 val firstDueDate = dates.firstOrNull() ?: primaryTx.dueDate
@@ -2410,7 +2468,7 @@ object FinanceEngine {
                         firstDueDate = firstDueDate,
                         lastDueDate = lastDueDate,
                         perInstallmentAmount = primaryTx.totalAmount,
-                        perInstallmentFriendShare = friendShareOf(primaryTx),
+                        perInstallmentFriendShare = friendShareOf(primaryTx, currentUid),
                         items = items,
                         primaryTx = primaryTx
                     )
@@ -2418,7 +2476,7 @@ object FinanceEngine {
             } else {
                 val sender = allUsers.find { it.uid == tx.createdByUid }
                 val friendPct = tx.friendSharePct ?: 100.0
-                val friendShare = friendShareOf(tx)
+                val friendShare = friendShareOf(tx, currentUid)
 
                 groups.add(
                     PendingChargeGroup(

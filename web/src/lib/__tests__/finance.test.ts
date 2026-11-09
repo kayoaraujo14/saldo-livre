@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { computeSummary, friendPctOf, projectFutureMonths } from '../finance'
+import {
+  computeSummary,
+  createRefundForTransaction,
+  friendPctOf,
+  friendShareOf,
+  projectFutureMonths,
+  resolveNextAcceptanceStatus,
+} from '../finance'
 import type { Card, MonthClosure, RecurringBill, Transaction, UserProfile } from '@/types'
 
 describe('friendPctOf', () => {
@@ -348,3 +355,76 @@ describe('projectFutureMonths (12-month projection, channels, categories & items
     expect(summaryFuture.freeBalance).toBe(-700)
   })
 })
+
+describe('resolveNextAcceptanceStatus & friendShareOf', () => {
+  const baseAcceptedTx: Transaction = {
+    id: 'tx_shared_1',
+    description: 'iFood sorvete',
+    category: 'Alimentação',
+    type: 'expense',
+    status: 'pending',
+    paymentMethod: 'credit_card',
+    cardId: 'card_nubank_leticia',
+    totalAmount: 35.16,
+    actualAmount: 35.16,
+    dueDate: '2026-10-20',
+    competenceMonth: '2026-10',
+    createdByUid: 'uid_leticia',
+    paidByUid: 'uid_leticia',
+    visibleToUids: ['uid_leticia', 'uid_kayo'],
+    userImpact: { uid_leticia: 17.58, uid_kayo: 17.58 },
+    splitType: 'friend',
+    assignedFriendUid: 'uid_kayo',
+    assignedFriendName: 'Kayo',
+    friendSharePct: 50,
+    acceptanceStatus: 'accepted',
+    respondedAt: 1760000000000,
+    allocations: [
+      { type: 'PLATFORM_USER', uid: 'uid_leticia', name: 'Leticia', amount: 17.58, reimbursed: true },
+      { type: 'PLATFORM_USER', uid: 'uid_kayo', name: 'Kayo', amount: 17.58, reimbursed: false },
+    ],
+    createdAt: 1759000000000,
+  }
+
+  it('preserves accepted status and respondedAt when status changes to paid without altering friend share', () => {
+    const res = resolveNextAcceptanceStatus(baseAcceptedTx, {
+      ...baseAcceptedTx,
+      status: 'paid',
+    })
+    expect(res.acceptanceStatus).toBe('accepted')
+    expect(res.respondedAt).toBe(1760000000000)
+  })
+
+  it('resets acceptanceStatus to pending_approval when friend monetary share changes', () => {
+    const res = resolveNextAcceptanceStatus(baseAcceptedTx, {
+      ...baseAcceptedTx,
+      totalAmount: 50,
+      allocations: [
+        { type: 'PLATFORM_USER', uid: 'uid_leticia', name: 'Leticia', amount: 25, reimbursed: true },
+        { type: 'PLATFORM_USER', uid: 'uid_kayo', name: 'Kayo', amount: 25, reimbursed: false },
+      ],
+    })
+    expect(res.acceptanceStatus).toBe('pending_approval')
+    expect(res.respondedAt).toBeNull()
+  })
+
+  it('uses fallbackFriendUid when assignedFriendUid is missing on shared-card split', () => {
+    const txWithoutAssignedUid: Transaction = {
+      ...baseAcceptedTx,
+      assignedFriendUid: null,
+      splitType: 'split_50',
+    }
+    expect(friendShareOf(txWithoutAssignedUid, 'uid_kayo')).toBe(17.58)
+    expect(friendPctOf(txWithoutAssignedUid, 'uid_kayo')).toBe(50)
+  })
+
+  it('inherits accepted status when creating a refund for an already accepted transaction', () => {
+    const refund = createRefundForTransaction(baseAcceptedTx, 16.8, {
+      uid: 'uid_leticia',
+      displayName: 'Leticia',
+    })
+    expect(refund.acceptanceStatus).toBe('accepted')
+    expect(refund.respondedAt).toBe(1760000000000)
+  })
+})
+

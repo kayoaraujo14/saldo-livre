@@ -852,6 +852,14 @@ class TransactionFormViewModel(
                     val customUids = customAllocations?.mapNotNull { it.uid } ?: emptyList()
                     val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
 
+                    val (nextAcceptanceStatus, nextRespondedAt) = FinanceEngine.resolveNextAcceptanceStatus(
+                        prevTx = origTx,
+                        nextAssignedFriendUid = assignedFriendUid,
+                        nextFriendSharePct = friendSharePct,
+                        nextTotalAmount = total,
+                        nextAllocations = split.allocations
+                    )
+
                     val updatedTx = origTx.copy(
                         createdByUid = origTx.createdByUid.ifBlank { user.uid },
                         paidByUid = payerUid,
@@ -874,8 +882,8 @@ class TransactionFormViewModel(
                         externalName = externalName,
                         assignedFriendUid = assignedFriendUid,
                         assignedFriendName = assignedFriendName,
-                        acceptanceStatus = acceptanceStatus,
-                        respondedAt = null,
+                        acceptanceStatus = nextAcceptanceStatus,
+                        respondedAt = nextRespondedAt,
                         friendSharePct = friendSharePct
                     )
 

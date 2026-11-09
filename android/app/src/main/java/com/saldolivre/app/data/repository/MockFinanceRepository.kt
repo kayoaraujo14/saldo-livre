@@ -545,6 +545,13 @@ class MockFinanceRepository(
 
             // 1. Isolamento de Status: cada parcela preserva seu próprio status
             val effectiveStatus = tx.status
+            val (nextAcceptanceStatus, nextRespondedAt) = FinanceEngine.resolveNextAcceptanceStatus(
+                prevTx = tx,
+                nextAssignedFriendUid = targetFriendUid,
+                nextFriendSharePct = targetFriendPct,
+                nextTotalAmount = curAmount,
+                nextAllocations = split.allocations
+            )
 
             val updatedTx = tx.copy(
                 description = newDesc,
@@ -564,8 +571,8 @@ class MockFinanceRepository(
                 assignedFriendUid = targetFriendUid,
                 assignedFriendName = targetFriendName,
                 friendSharePct = targetFriendPct,
-                acceptanceStatus = if (hasFriend) AcceptanceStatus.PENDING_APPROVAL.value else null,
-                respondedAt = if (hasFriend) null else tx.respondedAt,
+                acceptanceStatus = nextAcceptanceStatus,
+                respondedAt = nextRespondedAt,
                 splitType = input.splitType ?: tx.splitType
             )
             tx.id to updatedTx
@@ -832,18 +839,26 @@ class MockFinanceRepository(
         val newStatus = if (accept) AcceptanceStatus.ACCEPTED.value else AcceptanceStatus.REJECTED.value
         val now = System.currentTimeMillis()
         val gId = tx.installmentGroupId
+        val currentUid = _currentUser.value.uid.ifBlank { tx.assignedFriendUid ?: "" }
 
         _transactions.update { current ->
             val updated = current.map { t ->
                 val isTarget = if (!gId.isNullOrBlank()) {
-                    t.installmentGroupId == gId && t.assignedFriendUid == tx.assignedFriendUid
+                    t.installmentGroupId == gId &&
+                        t.acceptanceStatus == AcceptanceStatus.PENDING_APPROVAL.value &&
+                        (
+                            (currentUid.isNotBlank() && t.assignedFriendUid == currentUid) ||
+                                (!tx.assignedFriendUid.isNullOrBlank() && t.assignedFriendUid == tx.assignedFriendUid) ||
+                                (currentUid.isNotBlank() && t.allocations.any { a -> a.uid == currentUid && a.type == "PLATFORM_USER" })
+                            )
                 } else {
                     t.id == tx.id
                 }
-                if (isTarget) {
+                if (isTarget || t.id == tx.id) {
                     t.copy(
                         acceptanceStatus = newStatus,
-                        respondedAt = now
+                        respondedAt = now,
+                        assignedFriendUid = if (currentUid.isNotBlank()) currentUid else t.assignedFriendUid
                     )
                 } else t
             }

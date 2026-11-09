@@ -761,9 +761,26 @@ export async function fsRespondChargeRequest(txIds: string[], accept: boolean) {
   const patch = { acceptanceStatus: accept ? 'accepted' : 'rejected', respondedAt: Date.now() }
   // writeBatch suporta até 500 operações
   for (let i = 0; i < ids.length; i += 450) {
-    const batch = writeBatch(db)
-    for (const id of ids.slice(i, i + 450)) batch.update(doc(db, COLLECTIONS.transactions, id), patch)
-    await batch.commit()
+    const chunk = ids.slice(i, i + 450)
+    try {
+      const batch = writeBatch(db)
+      for (const id of chunk) batch.update(doc(db, COLLECTIONS.transactions, id), patch)
+      await batch.commit()
+    } catch (batchErr) {
+      if (chunk.length <= 1) throw batchErr
+      // Se uma parcela irmã falhar no lote, tenta atualizar individualmente para não bloquear as demais
+      let succeeded = 0
+      let lastErr: unknown = batchErr
+      for (const id of chunk) {
+        try {
+          await updateDoc(doc(db, COLLECTIONS.transactions, id), patch)
+          succeeded++
+        } catch (err) {
+          lastErr = err
+        }
+      }
+      if (succeeded === 0) throw lastErr
+    }
   }
 }
 

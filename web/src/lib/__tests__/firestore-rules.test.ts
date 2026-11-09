@@ -364,6 +364,59 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       )
     })
 
+    it('participante em visibleToUids pode aceitar cobrança mesmo quando assignedFriendUid está nulo (cartão compartilhado)', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'transactions', 'tx_shared_card_split'), {
+          createdByUid: 'alice',
+          paidByUid: 'alice',
+          assignedFriendUid: null,
+          visibleToUids: ['alice', 'bob'],
+          totalAmount: 100,
+          description: 'iFood Sorvete',
+          acceptanceStatus: 'pending_approval',
+        })
+      })
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const txRef = doc(bobDb, 'transactions', 'tx_shared_card_split')
+
+      await assertSucceeds(
+        updateDoc(txRef, {
+          acceptanceStatus: 'accepted',
+          respondedAt: Date.now(),
+          assignedFriendUid: 'bob',
+        })
+      )
+    })
+
+    it('titular pagador (paidByUid) pode atualizar o status de pagamento da fatura mantendo createdByUid imutável', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'transactions', 'tx_card_payer'), {
+          createdByUid: 'bob',
+          paidByUid: 'alice',
+          visibleToUids: ['alice', 'bob'],
+          totalAmount: 95.13,
+          status: 'pending',
+          description: 'Empréstimo no cartão de Alice',
+          acceptanceStatus: 'accepted',
+        })
+      })
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const txRef = doc(aliceDb, 'transactions', 'tx_card_payer')
+
+      await assertSucceeds(
+        updateDoc(txRef, {
+          status: 'paid',
+          actualAmount: 95.13,
+        })
+      )
+    })
+
     it('apenas o criador original pode excluir uma transação', async () => {
       if (!isEmulatorRunning || !testEnv) return
 

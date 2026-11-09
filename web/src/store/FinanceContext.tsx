@@ -38,6 +38,7 @@ import {
   getPendingRecurringLaunches,
   generateMonthBills,
   nextStatus,
+  resolveNextAcceptanceStatus,
   resolvePartner,
   statusPatch,
   calculateFullInstallmentRefund,
@@ -345,6 +346,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     if (!currentUid) return []
     return transactions.filter((t) => {
       if (t.acceptanceStatus !== 'pending_approval') return false
+      if (t.createdByUid === currentUid && t.paidByUid === currentUid) return false
       if (t.assignedFriendUid === currentUid) return true
       if (
         t.createdByUid !== currentUid &&
@@ -360,6 +362,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     if (!currentUid) return []
     const rawPending = transactions.filter((t) => {
       if (t.acceptanceStatus !== 'pending_approval') return false
+      if (t.createdByUid === currentUid && t.paidByUid === currentUid) return false
       if (t.assignedFriendUid === currentUid) return true
       if (
         t.createdByUid !== currentUid &&
@@ -393,10 +396,10 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           sender?.displayName ||
           friends.find((f) => f.uid === primaryTx.createdByUid || f.uid === primaryTx.paidByUid)?.name ||
           'Amigo'
-        const friendPct = friendPctOf(primaryTx)
+        const friendPct = friendPctOf(primaryTx, currentUid)
 
         const totalAmount = round2(items.reduce((s, t) => s + (Number(t.totalAmount) || 0), 0))
-        const friendShareAmount = round2(items.reduce((s, t) => s + friendShareOf(t), 0))
+        const friendShareAmount = round2(items.reduce((s, t) => s + friendShareOf(t, currentUid), 0))
 
         const dates = items.map((t) => t.dueDate).filter(Boolean).sort()
         const firstDueDate = dates[0] || primaryTx.dueDate
@@ -417,7 +420,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           firstDueDate,
           lastDueDate,
           perInstallmentAmount: primaryTx.totalAmount,
-          perInstallmentFriendShare: friendShareOf(primaryTx),
+          perInstallmentFriendShare: friendShareOf(primaryTx, currentUid),
           items,
           primaryTx,
         })
@@ -427,8 +430,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           sender?.displayName ||
           friends.find((f) => f.uid === tx.createdByUid || f.uid === tx.paidByUid)?.name ||
           'Amigo'
-        const friendPct = friendPctOf(tx)
-        const friendShare = friendShareOf(tx)
+        const friendPct = friendPctOf(tx, currentUid)
+        const friendShare = friendShareOf(tx, currentUid)
 
         groups.push({
           id: tx.id,
@@ -541,15 +544,17 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     async (tx: Transaction, accept: boolean) => {
       const status: 'accepted' | 'rejected' = accept ? 'accepted' : 'rejected'
       const source = mode === 'demo' ? demoRef.current.transactions : fbTxRef.current
-      // Parcelas irmãs que este usuário pode ver (já carregadas via snapshot)
+      // Parcelas irmãs pendentes destinadas a este usuário (já carregadas via snapshot)
       const ids = tx.installmentGroupId
         ? source
-            .filter(
-              (t) =>
-                t.installmentGroupId === tx.installmentGroupId &&
-                t.assignedFriendUid === tx.assignedFriendUid &&
-                (!currentUid || (t.visibleToUids || []).includes(currentUid)),
-            )
+            .filter((t) => {
+              if (t.installmentGroupId !== tx.installmentGroupId) return false
+              if (t.acceptanceStatus !== 'pending_approval') return false
+              if (!currentUid) return true
+              if (t.assignedFriendUid === currentUid) return true
+              if (tx.assignedFriendUid && t.assignedFriendUid === tx.assignedFriendUid) return true
+              return Boolean(t.allocations?.some((a) => a.uid === currentUid && a.type === 'PLATFORM_USER'))
+            })
             .map((t) => t.id)
         : []
       if (!ids.includes(tx.id)) ids.push(tx.id)
@@ -899,27 +904,31 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Regra 2: A pessoa que lançou ao editar submete de novo ao aceite de quem recebe o rateio
-      const targetFriendUid =
-        patch.assignedFriendUid !== undefined
-          ? patch.assignedFriendUid
-          : (currentTx?.assignedFriendUid ||
-             currentTx?.allocations?.find(
-               (a) => a.type === 'PLATFORM_USER' && a.uid && a.uid !== currentUid && (!partnerParty || a.uid !== partnerParty.uid)
-             )?.uid)
+      // Regra 2: Só volta o status de aceite para 'pending_approval' se houver amigo atribuído
+      // e o amigo ou o valor da cota dele tiverem sido efetivamente alterados.
+      // Mudanças apenas de status (ex: marcar fatura como paga), categoria, subcategoria,
+      // descrição, data ou baixa de reembolso preservam o aceite ('accepted').
+      const keys = Object.keys(patch)
+      const isOnlyResponse = keys.length > 0 && keys.every((k) => k === 'acceptanceStatus' || k === 'respondedAt')
+      if (!isOnlyResponse) {
+        const targetFriendUid =
+          patch.assignedFriendUid !== undefined ? patch.assignedFriendUid : currentTx?.assignedFriendUid
 
-      if (targetFriendUid && (!currentTx || currentTx.createdByUid === currentUid || currentTx.paidByUid === currentUid)) {
-        const keys = Object.keys(patch)
-        const isOnlyResponse = keys.length > 0 && keys.every((k) => k === 'acceptanceStatus' || k === 'respondedAt')
-        if (!isOnlyResponse) {
-          patch.acceptanceStatus = 'pending_approval'
-          patch.respondedAt = null
-          if (patch.assignedFriendUid === undefined && targetFriendUid) {
-            patch.assignedFriendUid = targetFriendUid
-            patch.assignedFriendName =
-              currentTx?.assignedFriendName ||
-              friends.find((f) => f.uid === targetFriendUid)?.name ||
-              'Amigo'
+        if (targetFriendUid || patch.assignedFriendUid === null) {
+          const nextAcceptance = resolveNextAcceptanceStatus(currentTx, {
+            assignedFriendUid: targetFriendUid,
+            allocations: patch.allocations,
+            totalAmount: patch.totalAmount,
+            actualAmount: patch.actualAmount,
+            estimatedAmount: patch.estimatedAmount,
+            friendSharePct: patch.friendSharePct,
+          })
+          if (
+            nextAcceptance.acceptanceStatus !== currentTx?.acceptanceStatus ||
+            patch.acceptanceStatus !== undefined
+          ) {
+            patch.acceptanceStatus = nextAcceptance.acceptanceStatus
+            patch.respondedAt = nextAcceptance.respondedAt
           }
         }
       }
@@ -933,7 +942,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
       await fb.fsUpdateTransaction(id, patch)
     },
-    [mode, commitDemo, currentUid, partnerParty, friends],
+    [mode, commitDemo, currentUid],
   )
 
   const deleteTransaction = useCallback(
@@ -1255,6 +1264,13 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           previous: t.allocations,
         })
 
+        const nextAcceptance = resolveNextAcceptanceStatus(t, {
+          assignedFriendUid: assignedFriend?.uid ?? null,
+          allocations: split.allocations,
+          totalAmount: curAmount,
+          friendSharePct,
+        })
+
         const cardForGroup =
           effectivePaymentMethod === 'credit_card'
             ? cards.find((c) => c.id === targetCardId)
@@ -1290,8 +1306,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           assignedFriendUid: assignedFriend?.uid ?? null,
           assignedFriendName: assignedFriend?.name ?? null,
           friendSharePct,
-          acceptanceStatus: isFriend ? 'pending_approval' : null,
-          respondedAt: null,
+          acceptanceStatus: nextAcceptance.acceptanceStatus,
+          respondedAt: nextAcceptance.respondedAt,
         }
 
         updates.push({ id: t.id, patch })
@@ -1347,7 +1363,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     if (!transactions.length) return
     const groups = new Map<string, Transaction[]>()
     for (const tx of transactions) {
-      if (tx.installmentGroupId && (tx.installmentsTotal ?? 0) > 1) {
+      if (tx.installmentGroupId && (tx.installmentsTotal ?? 0) > 1 && !tx.isAnticipated) {
+        if (currentUid && !canUserEditTransaction(tx, currentUid)) continue
         const list = groups.get(tx.installmentGroupId) || []
         list.push(tx)
         groups.set(tx.installmentGroupId, list)
@@ -1380,7 +1397,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-  }, [transactions, updateTransaction])
+  }, [transactions, updateTransaction, currentUid])
 
   // Candidatos a lançamento recorrente prontos e ainda não lançados
   const pendingRecurringLaunches: PendingRecurringCandidate[] = useMemo(() => {

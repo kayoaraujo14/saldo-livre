@@ -24,7 +24,7 @@ import {
   type Transaction,
   type TransactionStatus,
 } from '@/types'
-import { buildSplit, calculateCardInvoiceDates, canUserEditTransaction, clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory } from '@/lib/finance'
+import { buildSplit, calculateCardInvoiceDates, canUserEditTransaction, clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory, resolveNextAcceptanceStatus } from '@/lib/finance'
 import { todayKey, formatBRL, stripInstallmentSuffix, round2 } from '@/lib/utils'
 import {
   CreditCard,
@@ -157,8 +157,9 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
         const total = Math.abs(effectiveAmount(editingTx)) || 1
         const rows: CustomParticipantRow[] = allocs.map((a, i) => {
           const isMe = a.uid === me?.uid
-          const isPart = partner && a.uid === partner.uid
-          const isFr = friends.some((f) => f.uid === a.uid)
+          const isAssignedFriend = Boolean(editingTx.assignedFriendUid && a.uid === editingTx.assignedFriendUid)
+          const isPart = !isAssignedFriend && partner && a.uid === partner.uid
+          const isFr = isAssignedFriend || friends.some((f) => f.uid === a.uid)
           const absAmount = Math.abs(a.amount)
           const pct = round2((absAmount / total) * 100)
           return {
@@ -570,6 +571,13 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             previous: editingTx.allocations,
           })
 
+          const nextAcceptance = resolveNextAcceptanceStatus(editingTx, {
+            assignedFriendUid: assignedFriend?.uid ?? null,
+            allocations: split.allocations,
+            totalAmount: numericAmount,
+            friendSharePct: assignedFriend ? resolvedFriendPct : null,
+          })
+
           await updateTransaction(editingTx.id, {
             description: description.trim(),
             category,
@@ -593,8 +601,8 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
             assignedFriendUid: assignedFriend?.uid ?? null,
             assignedFriendName: assignedFriend?.name ?? null,
             friendSharePct: assignedFriend ? resolvedFriendPct : null,
-            acceptanceStatus: assignedFriend ? 'pending_approval' : null,
-            respondedAt: null,
+            acceptanceStatus: nextAcceptance.acceptanceStatus,
+            respondedAt: nextAcceptance.respondedAt,
             status,
           })
         }

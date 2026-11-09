@@ -88,6 +88,44 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
         success: accept,
       })
       setTimeout(() => setActionFeedback(null), 4500)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Não foi possível processar a aprovação no momento.'
+      setActionFeedback({
+        text: `Erro ao ${accept ? 'aceitar' : 'recusar'} "${group.baseDescription}": ${msg}`,
+        success: false,
+      })
+    } finally {
+      setProcessingGroupId(null)
+    }
+  }
+
+  const handleAcceptAllCharges = async () => {
+    if (pendingChargeGroups.length === 0) return
+    setProcessingGroupId('__all__')
+    setActionFeedback(null)
+    let acceptedCount = 0
+    let lastError: string | null = null
+    try {
+      for (const group of pendingChargeGroups) {
+        try {
+          await respondChargeRequest(group.primaryTx, true)
+          acceptedCount++
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : 'Permissão negada ou falha de conexão.'
+        }
+      }
+      if (acceptedCount > 0) {
+        setActionFeedback({
+          text: `${acceptedCount} cobrança(s) aceita(s) com sucesso!`,
+          success: true,
+        })
+        setTimeout(() => setActionFeedback(null), 4500)
+      } else if (lastError) {
+        setActionFeedback({
+          text: `Erro ao aceitar cobranças: ${lastError}`,
+          success: false,
+        })
+      }
     } finally {
       setProcessingGroupId(null)
     }
@@ -195,11 +233,28 @@ export function FriendsModal({ open, onOpenChange }: FriendsModalProps) {
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-xs text-amber-300">
-                  <AlertTriangle className="size-4 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">
-                    Ao aceitar, a sua <strong>cota atribuída</strong> entrará no cálculo das suas saídas comprometidas mês a mês, atualizando com precisão o seu Saldo Livre.
-                  </span>
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-3 text-xs text-amber-300 flex-wrap">
+                  <div className="flex items-start gap-2.5 flex-1 min-w-[220px]">
+                    <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">
+                      Ao aceitar, a sua <strong>cota atribuída</strong> entrará no cálculo das suas saídas comprometidas mês a mês, atualizando com precisão o seu Saldo Livre.
+                    </span>
+                  </div>
+                  {pendingChargeGroups.length > 1 && (
+                    <Button
+                      size="sm"
+                      disabled={processingGroupId !== null}
+                      onClick={handleAcceptAllCharges}
+                      className="h-8 text-xs px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold gap-1.5 cursor-pointer shadow-md shrink-0"
+                    >
+                      <CheckCircle2 className="size-3.5" />
+                      <span>
+                        {processingGroupId === '__all__'
+                          ? 'Aceitando todas...'
+                          : `Aceitar Todas (${pendingChargeGroups.length})`}
+                      </span>
+                    </Button>
+                  )}
                 </div>
 
                 {pendingChargeGroups.map((group) => {

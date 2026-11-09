@@ -251,14 +251,19 @@ export function clampPct(pct: number | null | undefined) {
 }
 
 /** Valor que cabe ao amigo numa cobrança de amigo (fallback: cálculo por porcentagem ou total). */
-export function friendShareOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>) {
-  if (!tx || !tx.assignedFriendUid) return 0
+export function friendShareOf(
+  tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>,
+  fallbackFriendUid?: string | null,
+) {
+  if (!tx) return 0
+  const targetUid = tx.assignedFriendUid || fallbackFriendUid
+  if (!targetUid) return 0
   const rawAllocs = Array.isArray(tx.allocations)
     ? tx.allocations
     : (tx.allocations && typeof tx.allocations === 'object'
         ? Object.values(tx.allocations)
         : [])
-  const allocs = rawAllocs.filter((a: any) => a && typeof a === 'object' && a.uid === tx.assignedFriendUid)
+  const allocs = rawAllocs.filter((a: any) => a && typeof a === 'object' && a.uid === targetUid)
   if (allocs.length > 0) {
     return round2(allocs.reduce((s: number, a: any) => s + (Number(a.amount) || 0), 0))
   }
@@ -268,12 +273,94 @@ export function friendShareOf(tx: Pick<Transaction, 'assignedFriendUid' | 'alloc
   return round2((total * pct) / 100)
 }
 
-export function friendPctOf(tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>) {
+export function friendPctOf(
+  tx: Pick<Transaction, 'assignedFriendUid' | 'allocations' | 'totalAmount' | 'friendSharePct'>,
+  fallbackFriendUid?: string | null,
+) {
   if (!tx) return 100
   if (tx.friendSharePct != null) return clampPct(tx.friendSharePct)
   const total = Math.abs(Number(tx.totalAmount) || 0)
   if (!total) return 100
-  return clampPct((Math.abs(friendShareOf(tx)) / total) * 100)
+  return clampPct((Math.abs(friendShareOf(tx, fallbackFriendUid)) / total) * 100)
+}
+
+/**
+ * Determina o próximo `acceptanceStatus` e `respondedAt` ao atualizar uma transação existente.
+ * Preserva `'accepted'` (ou `'rejected'`) quando o amigo atribuído e o valor da sua cota
+ * permanecem inalterados (ex: ao quitar fatura / mudar status para `paid`, alterar categoria,
+ * subcategoria, descrição, data ou marcar reembolso).
+ * Só retorna `'pending_approval'` se um amigo for recém-atribuído, trocado, ou se o valor
+ * da cota dele (`friendShareOf`) mudar em mais de R$ 0,01.
+ */
+export function resolveNextAcceptanceStatus(
+  currentTx: Transaction | null | undefined,
+  nextState: {
+    assignedFriendUid?: string | null
+    allocations?: Allocation[]
+    totalAmount?: number
+    actualAmount?: number | null
+    estimatedAmount?: number | null
+    friendSharePct?: number | null
+  },
+): {
+  acceptanceStatus: 'pending_approval' | 'accepted' | 'rejected' | null
+  respondedAt: number | null
+} {
+  const nextFriendUid =
+    nextState.assignedFriendUid !== undefined
+      ? nextState.assignedFriendUid
+      : (currentTx?.assignedFriendUid ?? null)
+
+  if (!nextFriendUid) {
+    return { acceptanceStatus: null, respondedAt: null }
+  }
+
+  // Se o "amigo" atribuído for o próprio criador do lançamento, não há cobrança pendente
+  if (currentTx?.createdByUid && nextFriendUid === currentTx.createdByUid) {
+    return {
+      acceptanceStatus:
+        currentTx.acceptanceStatus === 'pending_approval'
+          ? 'accepted'
+          : (currentTx.acceptanceStatus ?? null),
+      respondedAt: currentTx.respondedAt ?? Date.now(),
+    }
+  }
+
+  if (!currentTx) {
+    return { acceptanceStatus: 'pending_approval', respondedAt: null }
+  }
+
+  const prevFriendUid = currentTx.assignedFriendUid ?? null
+  if (prevFriendUid !== nextFriendUid) {
+    return { acceptanceStatus: 'pending_approval', respondedAt: null }
+  }
+
+  if (currentTx.acceptanceStatus === 'accepted' || currentTx.acceptanceStatus === 'rejected') {
+    const prevShare = friendShareOf(currentTx)
+    const nextTotal =
+      nextState.totalAmount !== undefined
+        ? nextState.totalAmount
+        : (nextState.actualAmount ?? nextState.estimatedAmount ?? currentTx.totalAmount)
+    const nextShare = friendShareOf({
+      assignedFriendUid: nextFriendUid,
+      allocations: nextState.allocations !== undefined ? nextState.allocations : currentTx.allocations,
+      totalAmount: nextTotal,
+      friendSharePct: nextState.friendSharePct !== undefined ? nextState.friendSharePct : currentTx.friendSharePct,
+    })
+
+    if (Math.abs(nextShare - prevShare) <= 0.01) {
+      return {
+        acceptanceStatus: currentTx.acceptanceStatus,
+        respondedAt: currentTx.respondedAt ?? null,
+      }
+    }
+    return { acceptanceStatus: 'pending_approval', respondedAt: null }
+  }
+
+  return {
+    acceptanceStatus: currentTx.acceptanceStatus ?? 'pending_approval',
+    respondedAt: currentTx.respondedAt ?? null,
+  }
 }
 
 export function buildSplit(input: SplitInput) {
@@ -528,7 +615,12 @@ export function createRefundForTransaction(
     splitType: origTx.splitType || (origTx.assignedFriendUid ? 'friend' : 'mine'),
     assignedFriendUid: origTx.assignedFriendUid,
     assignedFriendName: origTx.assignedFriendName,
-    acceptanceStatus: origTx.assignedFriendUid ? 'pending_approval' : null,
+    acceptanceStatus: origTx.assignedFriendUid
+      ? (origTx.acceptanceStatus === 'accepted' ? 'accepted' : 'pending_approval')
+      : null,
+    respondedAt: origTx.assignedFriendUid && origTx.acceptanceStatus === 'accepted'
+      ? (origTx.respondedAt ?? Date.now())
+      : null,
     friendSharePct,
     externalName: origTx.externalName,
     refundedTransactionId: origTx.id,

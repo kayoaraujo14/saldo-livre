@@ -621,6 +621,13 @@ class FirestoreFinanceRepository(
 
             // 1. Isolamento de Status: cada parcela preserva seu próprio status
             val effectiveStatus = tx.status
+            val (nextAcceptanceStatus, nextRespondedAt) = FinanceEngine.resolveNextAcceptanceStatus(
+                prevTx = tx,
+                nextAssignedFriendUid = targetFriendUid,
+                nextFriendSharePct = targetFriendPct,
+                nextTotalAmount = curAmount,
+                nextAllocations = split.allocations
+            )
 
             tx.copy(
                 description = newDesc,
@@ -640,8 +647,8 @@ class FirestoreFinanceRepository(
                 assignedFriendUid = targetFriendUid,
                 assignedFriendName = targetFriendName,
                 friendSharePct = targetFriendPct,
-                acceptanceStatus = if (hasFriend) AcceptanceStatus.PENDING_APPROVAL.value else null,
-                respondedAt = if (hasFriend) null else tx.respondedAt,
+                acceptanceStatus = nextAcceptanceStatus,
+                respondedAt = nextRespondedAt,
                 splitType = input.splitType ?: tx.splitType
             )
         }
@@ -1033,23 +1040,55 @@ class FirestoreFinanceRepository(
         val status = if (accept) AcceptanceStatus.ACCEPTED.value else AcceptanceStatus.REJECTED.value
         val now = System.currentTimeMillis()
         val gId = tx.installmentGroupId
+        val currentUid = auth.currentUser?.uid ?: tx.assignedFriendUid
 
         val allTxs = getTransactions().first()
-        val targetIds = if (!gId.isNullOrBlank()) {
-            allTxs.filter { it.installmentGroupId == gId && it.assignedFriendUid == tx.assignedFriendUid }.map { it.id }
+        val targetTxs = if (!gId.isNullOrBlank()) {
+            val siblings = allTxs.filter { t ->
+                t.installmentGroupId == gId &&
+                    t.acceptanceStatus == AcceptanceStatus.PENDING_APPROVAL.value &&
+                    (
+                        (!currentUid.isNullOrBlank() && t.assignedFriendUid == currentUid) ||
+                            (!tx.assignedFriendUid.isNullOrBlank() && t.assignedFriendUid == tx.assignedFriendUid) ||
+                            (!currentUid.isNullOrBlank() && t.allocations.any { a -> a.uid == currentUid && a.type == "PLATFORM_USER" })
+                        )
+            }
+            if (siblings.isNotEmpty()) siblings else listOf(tx)
         } else {
-            listOf(tx.id)
+            listOf(tx)
         }
 
-        val batch = firestore.batch()
-        for (id in targetIds) {
-            val ref = firestore.collection("transactions").document(id)
-            batch.update(ref, mapOf(
-                "acceptanceStatus" to status,
-                "respondedAt" to now
-            ))
+        val targetIds = targetTxs.map { it.id }.distinct()
+        val payload = mutableMapOf<String, Any?>(
+            "acceptanceStatus" to status,
+            "respondedAt" to now
+        )
+        if (!currentUid.isNullOrBlank()) {
+            payload["assignedFriendUid"] = currentUid
         }
-        batch.commit().await()
+
+        try {
+            val batch = firestore.batch()
+            for (id in targetIds) {
+                val ref = firestore.collection("transactions").document(id)
+                batch.update(ref, payload)
+            }
+            batch.commit().await()
+        } catch (batchErr: Exception) {
+            var updatedCount = 0
+            var lastErr: Exception = batchErr
+            for (id in targetIds) {
+                try {
+                    firestore.collection("transactions").document(id).update(payload).await()
+                    updatedCount++
+                } catch (err: Exception) {
+                    lastErr = err
+                }
+            }
+            if (updatedCount == 0) {
+                throw lastErr
+            }
+        }
     }
 
     override fun getActivityLogs(): Flow<List<ActivityLog>> = callbackFlow {
