@@ -1,22 +1,7 @@
-const fs = require('fs');
-const path = require('path');
-
 function resolveToken() {
   if (process.env.GITHUB_PERSONAL_ACCESS_TOKEN) return process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
   if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-  
-  // Tenta ler de mcp_config.json do usuário
-  try {
-    const userProfile = process.env.USERPROFILE || 'C:\\Users\\Kayo Araújo';
-    const mcpConfigPath = path.join(userProfile, '.gemini', 'config', 'mcp_config.json');
-    if (fs.existsSync(mcpConfigPath)) {
-      const content = JSON.parse(fs.readFileSync(mcpConfigPath, 'utf8'));
-      const token = content?.mcpServers?.github?.env?.GITHUB_PERSONAL_ACCESS_TOKEN;
-      if (token) return token;
-    }
-  } catch {
-    // Falha silenciosa
-  }
+  if (process.env.GH_TOKEN) return process.env.GH_TOKEN;
   return null;
 }
 

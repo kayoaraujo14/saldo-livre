@@ -36,7 +36,10 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         },
       })
       isEmulatorRunning = true
-    } catch {
+    } catch (err) {
+      if (process.env.FIRESTORE_EMULATOR_HOST) {
+        throw err
+      }
       console.warn(
         `[AVISO] Emulador do Firestore não detectado em ${emulatorHost}. ` +
         `Para rodar suíte de regras ao vivo: npm run test:rules`
@@ -107,6 +110,18 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       await assertSucceeds(setDoc(doc(aliceDb, 'users', 'alice'), { displayName: 'Alice Silva' }))
       await assertFails(setDoc(doc(bobDb, 'users', 'alice'), { displayName: 'Bob Hacking Alice' }))
     })
+
+    it('impede criação de perfil /users/{userId} com campo uid divergente do userId', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      await assertFails(
+        setDoc(doc(aliceDb, 'users', 'alice'), {
+          uid: 'bob',
+          displayName: 'Spoofed UID',
+        })
+      )
+    })
   })
 
   describe('1.1 Coleção /public_profiles/{userId} (Perfis Públicos para Amizades)', () => {
@@ -147,7 +162,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       const aliceDb = testEnv.authenticatedContext('alice').firestore()
       const bobDb = testEnv.authenticatedContext('bob').firestore()
 
-      // Alice (proprietária) cria seu perfil público com sucesso
       await assertSucceeds(
         setDoc(doc(aliceDb, 'public_profiles', 'alice'), {
           uid: 'alice',
@@ -158,14 +172,12 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Alice atualiza seu perfil público com sucesso
       await assertSucceeds(
         updateDoc(doc(aliceDb, 'public_profiles', 'alice'), {
           displayName: 'Alice Santos',
         })
       )
 
-      // Bob tenta criar o perfil de Alice -> falha
       await assertFails(
         setDoc(doc(bobDb, 'public_profiles', 'alice'), {
           uid: 'alice',
@@ -173,7 +185,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Bob tenta atualizar o perfil de Alice -> falha
       await assertFails(
         updateDoc(doc(bobDb, 'public_profiles', 'alice'), {
           displayName: 'Bob Overwrite',
@@ -187,7 +198,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       const aliceDb = testEnv.authenticatedContext('alice').firestore()
       const aliceRef = doc(aliceDb, 'public_profiles', 'alice')
 
-      // Tentativa de criar com campo não autorizado (monthlyIncome)
       await assertFails(
         setDoc(aliceRef, {
           uid: 'alice',
@@ -196,7 +206,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Criação inicial válida
       await assertSucceeds(
         setDoc(aliceRef, {
           uid: 'alice',
@@ -204,7 +213,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Tentativa de injetar campo não autorizado em update
       await assertFails(
         updateDoc(aliceRef, {
           monthlyIncome: 10000,
@@ -344,13 +352,10 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       const bobDb = testEnv.authenticatedContext('bob').firestore()
       const txRef = doc(bobDb, 'transactions', 'tx_split')
 
-      // Bob tenta adulterar o valor -> BLOQUEADO!
       await assertFails(updateDoc(txRef, { totalAmount: 10 }))
-
-      // Bob tenta alterar a descrição -> BLOQUEADO!
       await assertFails(updateDoc(txRef, { description: 'Alterado' }))
+      await assertFails(updateDoc(txRef, { acceptanceStatus: 'invalid_status' }))
 
-      // Bob apenas aceita o rateio -> PERMITIDO!
       await assertSucceeds(
         updateDoc(txRef, {
           acceptanceStatus: 'accepted',
@@ -376,6 +381,21 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
 
       await assertFails(deleteDoc(doc(bobDb, 'transactions', 'tx_del')))
       await assertSucceeds(deleteDoc(doc(aliceDb, 'transactions', 'tx_del')))
+    })
+
+    it('impede criação de transação forjando createdByUid de outra pessoa mesmo incluindo seu próprio UID em visibleToUids', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const eveDb = testEnv.authenticatedContext('eve').firestore()
+      await assertFails(
+        setDoc(doc(eveDb, 'transactions', 'tx_spoof_creator'), {
+          createdByUid: 'alice',
+          paidByUid: 'alice',
+          visibleToUids: ['eve', 'alice'],
+          totalAmount: 500,
+          description: 'Transação Forjada',
+        })
+      )
     })
   })
 
@@ -478,7 +498,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
 
       const bobDb = testEnv.authenticatedContext('bob').firestore()
 
-      // Bob tenta se passar por Alice no requesterUid
       await assertFails(
         setDoc(doc(bobDb, 'friendships', 'fake_request'), {
           requesterUid: 'alice',
@@ -487,12 +506,51 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Bob tenta adicionar a si mesmo
       await assertFails(
         setDoc(doc(bobDb, 'friendships', 'self_request'), {
           requesterUid: 'bob',
           recipientUid: 'bob',
           status: 'pending',
+        })
+      )
+    })
+
+    it('impede criação de amizade já aceita (status: accepted) ou auto-aceite pelo próprio requesterUid', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+
+      // Alice tenta criar amizade diretamente com status accepted -> BLOQUEADO
+      await assertFails(
+        setDoc(doc(aliceDb, 'friendships', 'f_pre_accepted'), {
+          requesterUid: 'alice',
+          recipientUid: 'bob',
+          status: 'accepted',
+        })
+      )
+
+      // Alice cria pedido pendente legítimo
+      const fPendingRef = doc(aliceDb, 'friendships', 'f_self_accept_attempt')
+      await assertSucceeds(
+        setDoc(fPendingRef, {
+          requesterUid: 'alice',
+          recipientUid: 'bob',
+          status: 'pending',
+        })
+      )
+
+      // Alice (requester) tenta aprovar o próprio convite sem o consentimento de Bob -> BLOQUEADO
+      await assertFails(
+        updateDoc(fPendingRef, {
+          status: 'accepted',
+        })
+      )
+
+      // Bob (recipient) aprova o convite -> PERMITIDO
+      await assertSucceeds(
+        updateDoc(doc(bobDb, 'friendships', 'f_self_accept_attempt'), {
+          status: 'accepted',
         })
       )
     })
@@ -531,13 +589,8 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       const bobDb = testEnv.authenticatedContext('bob').firestore()
       const fRef = doc(bobDb, 'friendships', 'f_mutable_test')
 
-      // Bob aceita o pedido -> PERMITIDO
       await assertSucceeds(updateDoc(fRef, { status: 'accepted' }))
-
-      // Bob tenta adulterar o recipientUid para outra pessoa -> BLOQUEADO
       await assertFails(updateDoc(fRef, { recipientUid: 'eve' }))
-
-      // Bob tenta adulterar o requesterUid -> BLOQUEADO
       await assertFails(updateDoc(fRef, { requesterUid: 'eve' }))
     })
 
@@ -564,7 +617,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
     it('bloqueia ataque de sobrescrita cruzada em /agent_rules (Update Bypass)', async () => {
       if (!isEmulatorRunning || !testEnv) return
 
-      // Alice cria sua regra legítima
       await testEnv.withSecurityRulesDisabled(async (context) => {
         await setDoc(doc(context.firestore(), 'agent_rules', 'rule_alice_top'), {
           ownerUid: 'alice',
@@ -578,7 +630,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       const targetRefForBob = doc(bobDb, 'agent_rules', 'rule_alice_top')
       const targetRefForAlice = doc(aliceDb, 'agent_rules', 'rule_alice_top')
 
-      // Bob tenta sobrescrever a regra de Alice injetando seu próprio ownerUid no payload
       await assertFails(
         updateDoc(targetRefForBob, {
           ownerUid: 'bob',
@@ -586,25 +637,21 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Bob tenta alterar a regra mantendo ownerUid de Alice
       await assertFails(
         updateDoc(targetRefForBob, {
           rule: 'Invasão sutil',
         })
       )
 
-      // Bob tenta ler ou deletar a regra de Alice
       await assertFails(getDoc(targetRefForBob))
       await assertFails(deleteDoc(targetRefForBob))
 
-      // Alice pode atualizar legitimamente sua regra
       await assertSucceeds(
         updateDoc(targetRefForAlice, {
           rule: 'Regra atualizada pela Alice',
         })
       )
 
-      // Alice tenta trocar ownerUid para outra pessoa -> BLOQUEADO (imutabilidade)
       await assertFails(
         updateDoc(targetRefForAlice, {
           ownerUid: 'charlie',
@@ -627,7 +674,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       const bobTargetRef = doc(bobDb, 'chat_sessions', 'sess_alice')
       const aliceTargetRef = doc(aliceDb, 'chat_sessions', 'sess_alice')
 
-      // Bob tenta sobrescrever com seu próprio ownerUid
       await assertFails(
         updateDoc(bobTargetRef, {
           ownerUid: 'bob',
@@ -635,14 +681,9 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Bob não pode ler nem excluir
       await assertFails(getDoc(bobTargetRef))
       await assertFails(deleteDoc(bobTargetRef))
-
-      // Alice pode atualizar
       await assertSucceeds(updateDoc(aliceTargetRef, { title: 'Conversa Atualizada' }))
-
-      // Alice não pode transferir ownership
       await assertFails(updateDoc(aliceTargetRef, { ownerUid: 'bob' }))
     })
 
@@ -662,7 +703,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       const bobTargetRef = doc(bobDb, 'month_closures', 'cls_alice_2026_04')
       const aliceTargetRef = doc(aliceDb, 'month_closures', 'cls_alice_2026_04')
 
-      // Bob tenta sobrescrever passando seu próprio uid
       await assertFails(
         updateDoc(bobTargetRef, {
           uid: 'bob',
@@ -670,14 +710,9 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Bob não pode ler nem excluir
       await assertFails(getDoc(bobTargetRef))
       await assertFails(deleteDoc(bobTargetRef))
-
-      // Alice pode atualizar legitimamente
       await assertSucceeds(updateDoc(aliceTargetRef, { totalSurplus: 1800 }))
-
-      // Alice não pode alterar o campo uid (imutabilidade)
       await assertFails(updateDoc(aliceTargetRef, { uid: 'charlie' }))
     })
   })
@@ -695,7 +730,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       await assertSucceeds(setDoc(aliceChatRef, { title: 'Chat Alice', updatedAt: Date.now() }))
       await assertSucceeds(setDoc(aliceClosureRef, { closedMonth: '2026-04', surplus: 500 }))
 
-      // Bob não pode ler, escrever nem deletar as subcoleções de Alice
       const bobChatRef = doc(bobDb, 'users', 'alice', 'chat_sessions', 'sess_sub_1')
       const bobClosureRef = doc(bobDb, 'users', 'alice', 'month_closures', 'cls_sub_1')
 
@@ -767,7 +801,6 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
         })
       )
 
-      // Alice tenta transferir a autoria para Bob -> BLOQUEADO
       await assertFails(
         updateDoc(txRef, {
           createdByUid: 'bob',
@@ -776,5 +809,3 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
     })
   })
 })
-
-

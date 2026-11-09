@@ -127,7 +127,8 @@ service cloud.firestore {
 
     // 1. Perfil do Usuário (Dados Privados e Patrimoniais)
     match /users/{userId} {
-      allow read, create: if isOwner(userId);
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && (!('uid' in request.resource.data) || request.resource.data.uid == userId);
       allow update: if isOwner(userId) && (!('uid' in request.resource.data) || request.resource.data.uid == userId);
       allow delete: if isOwner(userId);
     }
@@ -175,7 +176,9 @@ service cloud.firestore {
         ('requesterUid' in request.resource.data) &&
         ('recipientUid' in request.resource.data) &&
         request.resource.data.requesterUid == request.auth.uid &&
-        request.resource.data.recipientUid != request.auth.uid;
+        request.resource.data.recipientUid != request.auth.uid &&
+        ('status' in request.resource.data) &&
+        request.resource.data.status == 'pending';
 
       allow update: if isAuthenticated() &&
         resource != null &&
@@ -187,7 +190,13 @@ service cloud.firestore {
         ('requesterUid' in request.resource.data) &&
         request.resource.data.requesterUid == resource.data.requesterUid &&
         ('recipientUid' in request.resource.data) &&
-        request.resource.data.recipientUid == resource.data.recipientUid;
+        request.resource.data.recipientUid == resource.data.recipientUid &&
+        ('status' in request.resource.data) && (
+          request.resource.data.status == resource.data.status || (
+            request.auth.uid == resource.data.recipientUid &&
+            request.resource.data.status in ['accepted', 'rejected']
+          )
+        );
 
       allow delete: if isAuthenticated() &&
         resource != null &&
@@ -254,24 +263,32 @@ service cloud.firestore {
         isTxSharedCardHolder(resource.data)
       );
 
-      allow create: if isAuthenticated() && (
-        (('visibleToUids' in request.resource.data) && request.resource.data.visibleToUids is list && request.auth.uid in request.resource.data.visibleToUids) ||
-        (('createdByUid' in request.resource.data) && request.resource.data.createdByUid == request.auth.uid)
-      );
+      allow create: if isAuthenticated() &&
+        isTxCreator(request.resource.data) &&
+        (!('visibleToUids' in request.resource.data) || (
+          request.resource.data.visibleToUids is list &&
+          request.auth.uid in request.resource.data.visibleToUids
+        ));
 
       allow delete: if isAuthenticated() && isTxCreator(resource.data);
 
       allow update: if isAuthenticated() && resource != null && (
-        // Criador ou pagador original tem permissão para alterar os dados da transação, com imutabilidade de createdByUid
+        // Criador ou pagador original tem permissão para alterar os dados da transação, com imutabilidade estrita de createdByUid
         (
           isTxCreator(resource.data) &&
-          (!('createdByUid' in resource.data) || request.resource.data.createdByUid == resource.data.createdByUid)
+          (
+            !('createdByUid' in request.resource.data) ||
+            (('createdByUid' in resource.data) && request.resource.data.createdByUid == resource.data.createdByUid) ||
+            (!('createdByUid' in resource.data) && request.resource.data.createdByUid == request.auth.uid)
+          )
         ) ||
         // Quem recebeu o rateio pode APENAS aceitar ou rejeitar (alterar acceptanceStatus e respondedAt)
         (
           ('assignedFriendUid' in resource.data) &&
           resource.data.assignedFriendUid == request.auth.uid &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptanceStatus', 'respondedAt'])
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptanceStatus', 'respondedAt']) &&
+          ('acceptanceStatus' in request.resource.data) &&
+          request.resource.data.acceptanceStatus in ['accepted', 'rejected']
         )
       );
     }

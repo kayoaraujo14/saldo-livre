@@ -5,7 +5,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "visibleToUids", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "date", "order": "DESCENDING" }
+        { "fieldPath": "dueDate", "order": "DESCENDING" }
       ]
     },
     {
@@ -13,7 +13,23 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "cardId", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "DESCENDING" }
+        { "fieldPath": "dueDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "transactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recurringBillId", "order": "ASCENDING" },
+        { "fieldPath": "competenceMonth", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "transactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recurringBillId", "order": "ASCENDING" },
+        { "fieldPath": "month", "order": "ASCENDING" }
       ]
     },
     {
@@ -21,7 +37,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "ownerUid", "order": "ASCENDING" },
-        { "fieldPath": "name", "order": "ASCENDING" }
+        { "fieldPath": "cardName", "order": "ASCENDING" }
       ]
     },
     {
@@ -29,7 +45,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "sharedWithUids", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "name", "order": "ASCENDING" }
+        { "fieldPath": "cardName", "order": "ASCENDING" }
       ]
     },
     {
@@ -47,7 +63,27 @@
         { "fieldPath": "recipientUid", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "friendships",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "requesterUid", "order": "ASCENDING" },
+        { "fieldPath": "recipientEmail", "order": "ASCENDING" }
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "activity_logs",
+      "fieldPath": "timestamp",
+      "ttl": false,
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
 }

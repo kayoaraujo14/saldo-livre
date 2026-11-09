@@ -121,7 +121,9 @@ export function initFirebaseAppCheck(firebaseApp: FirebaseApp): AppCheck | null 
   if (appCheck) return appCheck
 
   try {
-    const isDebug = import.meta.env.DEV || Boolean(import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG)
+    const rawDebugFlag = import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG
+    const isDebug =
+      import.meta.env.DEV || rawDebugFlag === 'true' || rawDebugFlag === true
     if (isDebug) {
       const debugToken = (import.meta.env.VITE_FIREBASE_APPCHECK_DEBUG_TOKEN as string) || true
       const globalScope = typeof self !== 'undefined' ? self : typeof window !== 'undefined' ? window : globalThis

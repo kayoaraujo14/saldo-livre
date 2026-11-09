@@ -5,6 +5,8 @@ import {
   dateInMonth,
   isBillEligibleForMonth,
   buildAutoLaunchTransaction,
+  getActivityLogCutoff,
+  isActivityLogExpired,
   type RecurringBillData,
 } from '../recurringBills.js'
 
@@ -193,6 +195,20 @@ describe('Motor de Contas Recorrentes do Backend (Cloud Functions)', () => {
 
       expect(txFallback.totalAmount).toBe(100.0)
       expect(txFallback.estimatedAmount).toBe(100.0)
+    })
+  })
+
+  describe('Retenção e TTL de activity_logs (timestamp numérico e Timestamp Firestore)', () => {
+    it('calcula cutoffMs e avalia expiração para timestamps numéricos e objetos Date/Timestamp', () => {
+      const now = new Date('2026-11-08T12:00:00.000Z')
+      const { cutoffDate, cutoffMs } = getActivityLogCutoff(now, 180)
+
+      expect(cutoffDate.getTime()).toBe(cutoffMs)
+      expect(isActivityLogExpired(cutoffMs - 1000, cutoffMs)).toBe(true)
+      expect(isActivityLogExpired(cutoffMs + 1000, cutoffMs)).toBe(false)
+      expect(isActivityLogExpired(new Date(cutoffMs - 5000), cutoffMs)).toBe(true)
+      expect(isActivityLogExpired({ toMillis: () => cutoffMs - 1 }, cutoffMs)).toBe(true)
+      expect(isActivityLogExpired({ toMillis: () => cutoffMs + 1 }, cutoffMs)).toBe(false)
     })
   })
 })

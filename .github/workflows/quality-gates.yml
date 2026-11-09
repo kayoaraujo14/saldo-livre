@@ -25,6 +25,9 @@ jobs:
           filters: |
             web:
               - 'web/**'
+              - 'firestore.rules'
+              - 'firestore.indexes.json'
+              - 'firebase.json'
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/quality-gates.yml'
@@ -33,17 +36,25 @@ jobs:
               - '.github/workflows/quality-gates.yml'
             backend:
               - 'backend/**'
+              - 'firestore.rules'
+              - 'firestore.indexes.json'
               - 'firebase.json'
               - '.github/workflows/quality-gates.yml'
 
   web-quality:
-    name: Web QA (Lint, Vitest & Build)
+    name: Web QA (Lint, Vitest, Firestore Rules & Build)
     needs: detect-changes
     if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.web == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Setup JDK 21 (for Firebase Firestore Emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
 
       - name: Setup Node.js & Cache
         uses: actions/setup-node@v4
@@ -53,13 +64,16 @@ jobs:
           cache-dependency-path: 'web/package-lock.json'
 
       - name: Install Web Dependencies
-        run: npm --prefix web install
+        run: npm --prefix web ci
 
       - name: Run Linter (Oxlint)
         run: npm --prefix web run lint
 
       - name: Run Unit Tests (Vitest)
         run: npm --prefix web test -- --run
+
+      - name: Run Firestore Security Rules Suite (Emulator)
+        run: npx --yes firebase-tools emulators:exec --only firestore --project saldo-livre-rules-test "npm --prefix web run test:rules"
 
       - name: Verify Web Production Build
         run: npm --prefix web run build
@@ -101,7 +115,7 @@ jobs:
         run: ./gradlew testDebugUnitTest --stacktrace
 
   backend-quality:
-    name: Backend Serverless QA (TypeScript Build)
+    name: Backend Serverless QA (TypeScript Build & Vitest)
     needs: detect-changes
     if: ${{ github.event_name == 'workflow_dispatch' || needs.detect-changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
@@ -117,10 +131,13 @@ jobs:
           cache-dependency-path: 'backend/package-lock.json'
 
       - name: Install Backend Dependencies
-        run: npm --prefix backend install
+        run: npm --prefix backend ci
 
       - name: Verify Backend TypeScript Build
         run: npm --prefix backend run build
+
+      - name: Run Backend Unit Tests (Vitest)
+        run: npm --prefix backend test
 
   quality-gates-status:
     name: Quality Gates Final Status

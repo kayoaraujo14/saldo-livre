@@ -79,8 +79,8 @@ export function getMonthKey(date: Date = new Date()): string {
  */
 export function shiftMonth(monthKey: string, delta: number): string {
   const [yStr, mStr] = monthKey.split('-')
-  let y = parseInt(yStr, 10)
-  let m = parseInt(mStr, 10) - 1 + delta
+  const y = parseInt(yStr, 10)
+  const m = parseInt(mStr, 10) - 1 + delta
   const date = new Date(Date.UTC(y, m, 1))
   const newY = date.getUTCFullYear()
   const newM = String(date.getUTCMonth() + 1).padStart(2, '0')
@@ -217,4 +217,43 @@ export function buildAutoLaunchTransaction(args: {
     userImpact,
     isAutoLaunched: true,
   }
+}
+
+/**
+ * Calcula os limites de corte (Date e epoch ms numérico) para expurgo de activity_logs
+ */
+export function getActivityLogCutoff(
+  now: Date = new Date(),
+  retentionDays = 180
+): { cutoffDate: Date; cutoffMs: number } {
+  const cutoffDate = new Date(now.getTime())
+  cutoffDate.setDate(cutoffDate.getDate() - retentionDays)
+  return {
+    cutoffDate,
+    cutoffMs: cutoffDate.getTime(),
+  }
+}
+
+/**
+ * Verifica se um valor de timestamp de activity_log (number epoch ms ou Date/Timestamp) expirou
+ */
+export function isActivityLogExpired(
+  rawTimestamp: unknown,
+  cutoffMs: number
+): boolean {
+  if (typeof rawTimestamp === 'number' && Number.isFinite(rawTimestamp)) {
+    return rawTimestamp < cutoffMs
+  }
+  if (rawTimestamp instanceof Date) {
+    return rawTimestamp.getTime() < cutoffMs
+  }
+  if (
+    rawTimestamp &&
+    typeof rawTimestamp === 'object' &&
+    'toMillis' in rawTimestamp &&
+    typeof (rawTimestamp as { toMillis: () => number }).toMillis === 'function'
+  ) {
+    return (rawTimestamp as { toMillis: () => number }).toMillis() < cutoffMs
+  }
+  return false
 }

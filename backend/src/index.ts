@@ -7,6 +7,7 @@ import {
   shiftMonth,
   isBillEligibleForMonth,
   buildAutoLaunchTransaction,
+  getActivityLogCutoff,
   type RecurringBillData,
 } from './recurringBills.js'
 
@@ -150,7 +151,18 @@ export const backupFirestoreScheduled = onSchedule(
       const rawBucket = process.env.BACKUP_STORAGE_BUCKET || `gs://${projectId}-backups`
       const bucketName = rawBucket.startsWith('gs://') ? rawBucket : `gs://${rawBucket}`
 
-      const firestoreAdmin = new (admin.firestore as any).v1.FirestoreAdminClient()
+      const firestoreAdmin = new (admin.firestore as unknown as {
+        v1: {
+          FirestoreAdminClient: new () => {
+            databasePath: (p: string, d: string) => string
+            exportDocuments: (req: {
+              name: string
+              outputUriPrefix: string
+              collectionIds: string[]
+            }) => Promise<[{ name?: string }]>
+          }
+        }
+      }).v1.FirestoreAdminClient()
       const databaseName = firestoreAdmin.databasePath(projectId, '(default)')
 
       logger.info(`Disparando exportação para database: ${databaseName} no bucket: ${bucketName}`)
@@ -183,20 +195,30 @@ export const cleanupEphemeralLogsScheduled = onSchedule(
   async () => {
     logger.info('Iniciando expurgo periódico de sessões efêmeras e logs antigos...')
     try {
-      const cutoffDate = new Date()
-      cutoffDate.setDate(cutoffDate.getDate() - 180) // 180 dias de retenção
+      const { cutoffDate, cutoffMs } = getActivityLogCutoff(new Date(), 180)
 
-      const oldLogs = await db
-        .collectionGroup('activity_logs')
-        .where('timestamp', '<', cutoffDate)
-        .limit(200)
-        .get()
+      const [oldNumericLogs, oldDateLogs] = await Promise.all([
+        db
+          .collectionGroup('activity_logs')
+          .where('timestamp', '<', cutoffMs)
+          .limit(200)
+          .get(),
+        db
+          .collectionGroup('activity_logs')
+          .where('timestamp', '<', cutoffDate)
+          .limit(200)
+          .get(),
+      ])
 
-      if (!oldLogs.empty) {
+      const docsByPath = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>()
+      for (const docSnap of oldNumericLogs.docs) docsByPath.set(docSnap.ref.path, docSnap)
+      for (const docSnap of oldDateLogs.docs) docsByPath.set(docSnap.ref.path, docSnap)
+
+      if (docsByPath.size > 0) {
         const batch = db.batch()
-        oldLogs.docs.forEach((doc) => batch.delete(doc.ref))
+        docsByPath.forEach((docSnap) => batch.delete(docSnap.ref))
         await batch.commit()
-        logger.info(`Expurgo finalizado: ${oldLogs.size} logs arquivados deletados.`)
+        logger.info(`Expurgo finalizado: ${docsByPath.size} logs arquivados deletados.`)
       } else {
         logger.info('Nenhum log excedeu o limite de retenção de 180 dias.')
       }

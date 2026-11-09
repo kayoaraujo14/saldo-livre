@@ -32,7 +32,7 @@ jobs:
           cache-dependency-path: 'web/package-lock.json'
 
       - name: Instalar dependencias
-        run: npm --prefix web install
+        run: npm --prefix web ci
 
       - name: Executar Linter (Oxlint)
         run: npm --prefix web run lint
@@ -49,6 +49,8 @@ jobs:
           VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_APPCHECK_ENTERPRISE_KEY: ${{ secrets.VITE_FIREBASE_APPCHECK_ENTERPRISE_KEY }}
+          VITE_FIREBASE_APPCHECK_RECAPTCHA_V3_KEY: ${{ secrets.VITE_FIREBASE_APPCHECK_RECAPTCHA_V3_KEY }}
           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
 
       - name: Deploy Preview no Firebase Hosting
