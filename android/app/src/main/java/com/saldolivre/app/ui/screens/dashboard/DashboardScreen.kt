@@ -78,6 +78,7 @@ fun DashboardScreen(
     var txToDelete by remember { mutableStateOf<Transaction?>(null) }
     var showUndoClosureDialog by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
     var showFinancialHealthDialog by remember { mutableStateOf(false) }
     var showManageBudgetsDialog by remember { mutableStateOf(false) }
     var budgetsDialogTab by remember { mutableIntStateOf(0) }
@@ -86,8 +87,16 @@ fun DashboardScreen(
 
     val formattedIncome = remember(summary.income) { FinanceEngine.formatCurrency(summary.income) }
 
+    LaunchedEffect(uiState.userMessage) {
+        uiState.userMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearMessage()
+        }
+    }
+
     Scaffold(
         containerColor = DarkBackground,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1022,7 +1031,9 @@ fun DashboardScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            viewModel.deleteTransaction(tx.id)
+                            if (!tx.id.startsWith("invoice_")) {
+                                viewModel.deleteTransaction(tx.id)
+                            }
                             txToDelete = null
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Rose500)

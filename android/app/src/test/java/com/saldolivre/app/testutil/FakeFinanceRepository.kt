@@ -58,7 +58,12 @@ class FakeFinanceRepository(
         transactionsFlow.value = transactionsFlow.value.map { if (it.id == tx.id) tx else it }
     }
 
+    var shouldFailDelete: Boolean = false
+
     override suspend fun deleteTransaction(id: String) {
+        if (shouldFailDelete) {
+            throw IllegalStateException("Simulated permission denied error")
+        }
         transactionsFlow.value = transactionsFlow.value.filterNot { it.id == id }
     }
 

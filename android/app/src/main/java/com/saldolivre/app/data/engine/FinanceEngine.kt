@@ -1183,6 +1183,7 @@ object FinanceEngine {
      */
     fun canUserEditTransaction(tx: Transaction, currentUid: String?): Boolean {
         if (currentUid.isNullOrBlank()) return false
+        if (tx.id.startsWith("invoice_")) return false
 
         val isCreator = tx.createdByUid == currentUid || (tx.createdByUid.isNullOrBlank() && tx.paidByUid == currentUid)
         if (isCreator) return true

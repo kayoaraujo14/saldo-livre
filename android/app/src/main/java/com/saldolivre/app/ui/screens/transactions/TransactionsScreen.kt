@@ -49,9 +49,17 @@ fun TransactionsScreen(
     onNavigateToCards: (String?) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
     var txToDelete by remember { mutableStateOf<Transaction?>(null) }
     var showFilterBottomSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.userMessage) {
+        uiState.userMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearMessage()
+        }
+    }
 
     val isListEmpty by remember(uiState.filteredTransactions) {
         derivedStateOf { uiState.filteredTransactions.isEmpty() }
@@ -87,6 +95,7 @@ fun TransactionsScreen(
 
     Scaffold(
         containerColor = DarkBackground,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -612,7 +621,9 @@ fun TransactionsScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            viewModel.deleteTransaction(tx.id)
+                            if (!tx.id.startsWith("invoice_")) {
+                                viewModel.deleteTransaction(tx.id)
+                            }
                             txToDelete = null
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Rose500)

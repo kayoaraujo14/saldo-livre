@@ -224,6 +224,13 @@ class RecurringBillsViewModel(
                 payerUid = user.uid
             )
 
+            val cards = repository.getCards().firstOrNull() ?: emptyList()
+            val linkedCard = if (isCard) cards.find { it.id == bill.cardId } else null
+            val cardUids = linkedCard?.let {
+                (listOfNotNull(it.ownerUid.takeIf { o -> o.isNotBlank() }) + it.sharedWithUids).distinct()
+            } ?: emptyList()
+            val effectiveVisible = (split.visibleToUids + cardUids).distinct()
+
             val tx = Transaction(
                 id = "tx_rec_${UUID.randomUUID().toString().take(8)}",
                 createdByUid = user.uid,
@@ -243,7 +250,7 @@ class RecurringBillsViewModel(
                 recurringBillId = bill.id,
                 allocations = split.allocations,
                 userImpact = split.userImpact,
-                visibleToUids = split.visibleToUids,
+                visibleToUids = effectiveVisible,
                 splitType = if (isIncome) SplitType.MINE else (bill.splitType ?: SplitType.MINE),
                 createdAt = System.currentTimeMillis()
             )

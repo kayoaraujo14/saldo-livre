@@ -454,29 +454,39 @@ class FirestoreFinanceRepository(
     }
 
     override suspend fun deleteTransaction(id: String) {
-        if (id.isNotBlank()) {
+        if (id.isBlank() || id.startsWith("invoice_")) return
+        try {
             firestore.collection("transactions").document(id).delete().await()
+        } catch (e: Exception) {
+            android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir transação $id", e)
+            throw e
         }
     }
 
     override suspend fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int): Int {
         if (groupId.isBlank()) return 0
-        val all = getTransactions().first()
-        val targetIds = all.filter {
-            it.installmentGroupId == groupId &&
-            (it.installmentNumber ?: 1) >= fromInstallmentNumber &&
-            it.status != TransactionStatus.PAID
-        }.map { it.id }
-        if (targetIds.isEmpty()) return 0
+        try {
+            val all = getTransactions().first()
+            val targetIds = all.filter {
+                it.installmentGroupId == groupId &&
+                !it.id.startsWith("invoice_") &&
+                (it.installmentNumber ?: 1) >= fromInstallmentNumber &&
+                it.status != TransactionStatus.PAID
+            }.map { it.id }
+            if (targetIds.isEmpty()) return 0
 
-        for (chunk in targetIds.chunked(450)) {
-            val batch = firestore.batch()
-            for (id in chunk) {
-                batch.delete(firestore.collection("transactions").document(id))
+            for (chunk in targetIds.chunked(450)) {
+                val batch = firestore.batch()
+                for (id in chunk) {
+                    batch.delete(firestore.collection("transactions").document(id))
+                }
+                batch.commit().await()
             }
-            batch.commit().await()
+            return targetIds.size
+        } catch (e: Exception) {
+            android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir parcelas futuras do grupo $groupId", e)
+            throw e
         }
-        return targetIds.size
     }
 
     override suspend fun refundFullInstallmentGroup(groupId: String, targetMonth: String?): Pair<Int, Double> {
@@ -542,18 +552,23 @@ class FirestoreFinanceRepository(
 
     override suspend fun deleteInstallmentGroup(groupId: String): Int {
         if (groupId.isBlank()) return 0
-        val all = getTransactions().first()
-        val targetIds = all.filter { it.installmentGroupId == groupId }.map { it.id }
-        if (targetIds.isEmpty()) return 0
+        try {
+            val all = getTransactions().first()
+            val targetIds = all.filter { it.installmentGroupId == groupId && !it.id.startsWith("invoice_") }.map { it.id }
+            if (targetIds.isEmpty()) return 0
 
-        for (chunk in targetIds.chunked(450)) {
-            val batch = firestore.batch()
-            for (id in chunk) {
-                batch.delete(firestore.collection("transactions").document(id))
+            for (chunk in targetIds.chunked(450)) {
+                val batch = firestore.batch()
+                for (id in chunk) {
+                    batch.delete(firestore.collection("transactions").document(id))
+                }
+                batch.commit().await()
             }
-            batch.commit().await()
+            return targetIds.size
+        } catch (e: Exception) {
+            android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir grupo de parcelamento $groupId", e)
+            throw e
         }
-        return targetIds.size
     }
 
     override suspend fun updateInstallmentGroup(groupId: String, input: InstallmentGroupUpdateInput): Int {
@@ -642,7 +657,10 @@ class FirestoreFinanceRepository(
             )
 
             val customUids = input.customAllocations?.mapNotNull { it.uid } ?: emptyList()
-            val effectiveVisible = (split.visibleToUids + listOfNotNull(targetFriendUid) + card?.sharedWithUids.orEmpty() + customUids).distinct()
+            val cardUids = if (card != null) {
+                (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
+            } else emptyList()
+            val effectiveVisible = (split.visibleToUids + listOfNotNull(targetFriendUid) + cardUids + customUids).distinct()
 
             // 1. Isolamento de Status: cada parcela preserva seu próprio status
             val effectiveStatus = tx.status

@@ -109,7 +109,8 @@ data class DashboardUiState(
     val aiBudgetInsights: List<BudgetInsight>? = null,
     val aiBudgetInsightsMonth: String? = null,
     val isGeneratingBudgetInsights: Boolean = false,
-    val isOnline: Boolean = true
+    val isOnline: Boolean = true,
+    val userMessage: String? = null
 ) {
     /** Insights do Gemini (quando gerados para o mês atual) ou, senão, os insights locais instantâneos. */
     val displayedBudgetInsights: List<BudgetInsight>
@@ -373,7 +374,8 @@ class DashboardViewModel(
                     budgetInsights = FinanceEngine.buildBudgetInsights(categoryBudgetReport),
                     aiBudgetInsights = _uiState.value.aiBudgetInsights,
                     aiBudgetInsightsMonth = _uiState.value.aiBudgetInsightsMonth,
-                    isGeneratingBudgetInsights = _uiState.value.isGeneratingBudgetInsights
+                    isGeneratingBudgetInsights = _uiState.value.isGeneratingBudgetInsights,
+                    userMessage = _uiState.value.userMessage
                 )
             }.collect { newState ->
                 _uiState.value = newState
@@ -385,6 +387,7 @@ class DashboardViewModel(
         viewModelScope.launch {
             val user = _uiState.value.currentUser
             val month = _uiState.value.selectedMonth
+            val cards = repository.getCards().firstOrNull() ?: emptyList()
             val isCardBill = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank()
             val txStatus = when {
                 isCardBill -> com.saldolivre.app.data.model.TransactionStatus.PENDING
@@ -400,6 +403,12 @@ class DashboardViewModel(
                 partnerName = null,
                 payerUid = user.uid
             )
+            val card = candidate.cardId?.let { cid -> cards.find { it.id == cid } }
+            val cardUids = if (isCardBill && card != null) {
+                (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
+            } else emptyList()
+            val effectiveVisible = (split.visibleToUids + cardUids).distinct()
+
             val tx = Transaction(
                 id = "tx_gen_${java.util.UUID.randomUUID().toString().take(8)}",
                 createdByUid = user.uid,
@@ -419,11 +428,17 @@ class DashboardViewModel(
                 recurringBillId = candidate.id,
                 allocations = split.allocations,
                 userImpact = split.userImpact,
-                visibleToUids = split.visibleToUids,
+                visibleToUids = effectiveVisible,
                 createdAt = System.currentTimeMillis()
             )
-            repository.addTransaction(tx)
-            repository.markRecurringResolved(month, candidate.id)
+            try {
+                repository.addTransaction(tx)
+                repository.markRecurringResolved(month, candidate.id)
+                _uiState.update { it.copy(userMessage = "\"${candidate.description}\" lançado com sucesso!") }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao lançar conta recorrente", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível efetivar o lançamento recorrente.") }
+            }
         }
     }
 
@@ -431,6 +446,7 @@ class DashboardViewModel(
         viewModelScope.launch {
             val user = _uiState.value.currentUser
             val month = _uiState.value.selectedMonth
+            val cards = repository.getCards().firstOrNull() ?: emptyList()
             val candidates = _uiState.value.pendingRecurringLaunches.filter { it.matchedManualTx == null }
             val txs = candidates.map { candidate ->
                 val isCardBill = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank()
@@ -448,6 +464,12 @@ class DashboardViewModel(
                     partnerName = null,
                     payerUid = user.uid
                 )
+                val card = candidate.cardId?.let { cid -> cards.find { it.id == cid } }
+                val cardUids = if (isCardBill && card != null) {
+                    (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
+                } else emptyList()
+                val effectiveVisible = (split.visibleToUids + cardUids).distinct()
+
                 Transaction(
                     id = "tx_gen_${java.util.UUID.randomUUID().toString().take(8)}",
                     createdByUid = user.uid,
@@ -467,13 +489,19 @@ class DashboardViewModel(
                     recurringBillId = candidate.id,
                     allocations = split.allocations,
                     userImpact = split.userImpact,
-                    visibleToUids = split.visibleToUids,
+                    visibleToUids = effectiveVisible,
                     createdAt = System.currentTimeMillis()
                 )
             }
             if (txs.isNotEmpty()) {
-                repository.addTransactions(txs)
-                candidates.forEach { repository.markRecurringResolved(month, it.id) }
+                try {
+                    repository.addTransactions(txs)
+                    candidates.forEach { repository.markRecurringResolved(month, it.id) }
+                    _uiState.update { it.copy(userMessage = "${txs.size} contas lançadas com sucesso!") }
+                } catch (e: Exception) {
+                    android.util.Log.e("DashboardViewModel", "Erro ao lançar todas as contas recorrentes", e)
+                    _uiState.update { it.copy(userMessage = "Não foi possível efetivar todas as contas recorrentes.") }
+                }
             }
         }
     }
@@ -606,50 +634,99 @@ class DashboardViewModel(
 
     fun markTransactionPaid(id: String) {
         viewModelScope.launch {
-            repository.markTransactionPaid(id)
+            try {
+                repository.markTransactionPaid(id)
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao marcar transação como paga", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível atualizar o status da despesa.") }
+            }
         }
     }
 
     fun toggleTransactionStatus(id: String) {
         viewModelScope.launch {
-            repository.toggleTransactionStatus(id)
+            try {
+                repository.toggleTransactionStatus(id)
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao alternar status da transação", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível alternar o status da despesa.") }
+            }
         }
     }
 
     fun setStatus(id: String, status: TransactionStatus, actualAmount: Double? = null) {
         viewModelScope.launch {
-            repository.setTransactionStatus(id, status, actualAmount)
+            try {
+                repository.setTransactionStatus(id, status, actualAmount)
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao definir status da transação", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível atualizar o status da despesa.") }
+            }
         }
     }
 
     fun deleteTransaction(id: String) {
         viewModelScope.launch {
-            repository.deleteTransaction(id)
+            try {
+                repository.deleteTransaction(id)
+                _uiState.update { it.copy(userMessage = "Lançamento excluído com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao excluir transação $id", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir o lançamento. Verifique suas permissões.") }
+            }
         }
     }
 
     fun deleteInstallmentGroup(groupId: String) {
         viewModelScope.launch {
-            repository.deleteInstallmentGroup(groupId)
+            try {
+                repository.deleteInstallmentGroup(groupId)
+                _uiState.update { it.copy(userMessage = "Parcelamento excluído com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao excluir parcelamento $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir o parcelamento.") }
+            }
         }
     }
 
     fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int) {
         viewModelScope.launch {
-            repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
+            try {
+                repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
+                _uiState.update { it.copy(userMessage = "Parcelas futuras excluídas com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao excluir parcelas futuras de $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir parcelas futuras.") }
+            }
         }
     }
 
     fun refundFullInstallmentGroup(groupId: String, targetMonth: String? = null) {
         viewModelScope.launch {
-            repository.refundFullInstallmentGroup(groupId, targetMonth)
+            try {
+                repository.refundFullInstallmentGroup(groupId, targetMonth)
+                _uiState.update { it.copy(userMessage = "Estorno integral registrado com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao estornar parcelamento $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível registrar o estorno.") }
+            }
         }
     }
 
     fun anticipateInstallments(groupId: String, count: Int, targetMonth: String, discount: Double = 0.0) {
         viewModelScope.launch {
-            repository.anticipateInstallments(groupId, count, targetMonth, discount)
+            try {
+                repository.anticipateInstallments(groupId, count, targetMonth, discount)
+                _uiState.update { it.copy(userMessage = "Antecipação de parcelas realizada com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("DashboardViewModel", "Erro ao antecipar parcelas de $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível antecipar as parcelas.") }
+            }
         }
+    }
+
+    fun clearMessage() {
+        _uiState.update { it.copy(userMessage = null) }
     }
 
     fun generateBills() {

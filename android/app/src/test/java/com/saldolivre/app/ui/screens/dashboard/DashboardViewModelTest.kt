@@ -130,5 +130,35 @@ class DashboardViewModelTest {
         assertEquals(180.0, state.radar7Days.totalAmount, 0.001)
         assertNotEquals("Sem pendências", state.radar7Days.urgencyBadge)
     }
+
+    @Test
+    fun `deleteTransaction succeeds and sets userMessage`() = runTest {
+        val tx = Transaction(id = "tx_123", createdByUid = myUid)
+        repository.transactionsFlow.value = listOf(tx)
+        viewModel = DashboardViewModel(repository)
+
+        viewModel.deleteTransaction("tx_123")
+
+        val state = viewModel.uiState.value
+        assertEquals("Lançamento excluído com sucesso.", state.userMessage)
+        assertTrue(repository.transactionsFlow.value.none { it.id == "tx_123" })
+
+        viewModel.clearMessage()
+        assertNull(viewModel.uiState.value.userMessage)
+    }
+
+    @Test
+    fun `deleteTransaction catches exception and notifies user without crashing`() = runTest {
+        val tx = Transaction(id = "tx_123", createdByUid = myUid)
+        repository.transactionsFlow.value = listOf(tx)
+        repository.shouldFailDelete = true
+        viewModel = DashboardViewModel(repository)
+
+        // Must not throw uncaught exception
+        viewModel.deleteTransaction("tx_123")
+
+        val state = viewModel.uiState.value
+        assertEquals("Não foi possível excluir o lançamento. Verifique suas permissões.", state.userMessage)
+    }
 }
 

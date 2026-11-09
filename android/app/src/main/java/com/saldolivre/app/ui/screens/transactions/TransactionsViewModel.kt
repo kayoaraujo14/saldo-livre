@@ -64,7 +64,8 @@ data class TransactionsUiState(
     val cushionAmount: Double = 0.0,
     val pendingCount: Int = 0,
     val paidCount: Int = 0,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val userMessage: String? = null
 )
 
 class TransactionsViewModel(
@@ -282,56 +283,110 @@ class TransactionsViewModel(
 
     fun markAsPaid(id: String) {
         viewModelScope.launch {
-            repository.markTransactionPaid(id)
+            try {
+                repository.markTransactionPaid(id)
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao marcar como pago", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível marcar como pago.") }
+            }
         }
     }
 
     fun toggleStatus(id: String) {
         viewModelScope.launch {
-            repository.toggleTransactionStatus(id)
+            try {
+                repository.toggleTransactionStatus(id)
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao alternar status", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível alternar o status.") }
+            }
         }
     }
 
     fun cycleStatus(id: String) {
         viewModelScope.launch {
-            repository.cycleTransactionStatus(id)
+            try {
+                repository.cycleTransactionStatus(id)
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao alternar status", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível alternar o status.") }
+            }
         }
     }
 
     fun setStatus(id: String, status: TransactionStatus, actualAmount: Double? = null) {
         viewModelScope.launch {
-            repository.setTransactionStatus(id, status, actualAmount)
+            try {
+                repository.setTransactionStatus(id, status, actualAmount)
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao definir status", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível atualizar o status.") }
+            }
         }
     }
 
     fun deleteTransaction(id: String) {
         viewModelScope.launch {
-            repository.deleteTransaction(id)
+            try {
+                repository.deleteTransaction(id)
+                _uiState.update { it.copy(userMessage = "Lançamento excluído com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao excluir transação $id", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir o lançamento. Verifique suas permissões.") }
+            }
         }
     }
 
     fun deleteInstallmentGroup(groupId: String) {
         viewModelScope.launch {
-            repository.deleteInstallmentGroup(groupId)
+            try {
+                repository.deleteInstallmentGroup(groupId)
+                _uiState.update { it.copy(userMessage = "Parcelamento excluído com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao excluir parcelamento $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir o parcelamento.") }
+            }
         }
     }
 
     fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int) {
         viewModelScope.launch {
-            repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
+            try {
+                repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
+                _uiState.update { it.copy(userMessage = "Parcelas futuras excluídas com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao excluir parcelas futuras de $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir parcelas futuras.") }
+            }
         }
     }
 
     fun refundFullInstallmentGroup(groupId: String, targetMonth: String? = null) {
         viewModelScope.launch {
-            repository.refundFullInstallmentGroup(groupId, targetMonth)
+            try {
+                repository.refundFullInstallmentGroup(groupId, targetMonth)
+                _uiState.update { it.copy(userMessage = "Estorno integral registrado com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao realizar estorno de $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível registrar o estorno.") }
+            }
         }
     }
 
     fun anticipateInstallments(groupId: String, count: Int, targetMonth: String, discount: Double = 0.0) {
         viewModelScope.launch {
-            repository.anticipateInstallments(groupId, count, targetMonth, discount)
+            try {
+                repository.anticipateInstallments(groupId, count, targetMonth, discount)
+                _uiState.update { it.copy(userMessage = "Antecipação de parcelas realizada com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("TransactionsViewModel", "Erro ao antecipar parcelas de $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível antecipar as parcelas.") }
+            }
         }
+    }
+
+    fun clearMessage() {
+        _uiState.update { it.copy(userMessage = null) }
     }
 
     fun createRefund(origTx: Transaction, refundAmount: Double) {

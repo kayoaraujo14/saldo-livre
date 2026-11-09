@@ -73,7 +73,7 @@ fun TransactionDetailDialog(
         }
     }
     val canEdit = remember(transaction, resolvedUserId) {
-        FinanceEngine.canUserEditTransaction(transaction, resolvedUserId)
+        !transaction.id.startsWith("invoice_") && FinanceEngine.canUserEditTransaction(transaction, resolvedUserId)
     }
     val linkedRefund = remember(transaction.id, allTransactions) {
         allTransactions.find { it.refundedTransactionId == transaction.id }
