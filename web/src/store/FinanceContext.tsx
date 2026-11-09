@@ -872,7 +872,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         commitDemo((s) => ({ ...s, transactions: [withId, ...s.transactions] }))
         return id
       }
-      return fb.fsAddTransaction(tx)
+      const id = await fb.fsAddTransaction(tx)
+      const withId: Transaction = { ...tx, id }
+      fbTxRef.current = [withId, ...fbTxRef.current.filter((t) => t.id !== id)]
+      setFbTx((prev) => [withId, ...prev.filter((t) => t.id !== id)])
+      return id
     },
     [mode, commitDemo],
   )
@@ -940,7 +944,20 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         }))
         return
       }
-      await fb.fsUpdateTransaction(id, patch)
+
+      // Atualização otimista imediata no modo Firebase
+      const previousTxs = fbTxRef.current
+      const updatedTxs = previousTxs.map((t) => (t.id === id ? { ...t, ...patch } : t))
+      fbTxRef.current = updatedTxs
+      setFbTx(updatedTxs)
+
+      try {
+        await fb.fsUpdateTransaction(id, patch)
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
     },
     [mode, commitDemo, currentUid],
   )
@@ -957,7 +974,20 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         commitDemo((s) => ({ ...s, transactions: s.transactions.filter((t) => t.id !== id) }))
         return
       }
-      await fb.fsDeleteTransaction(id)
+
+      // Remoção otimista imediata no modo Firebase
+      const previousTxs = fbTxRef.current
+      const updatedTxs = previousTxs.filter((t) => t.id !== id)
+      fbTxRef.current = updatedTxs
+      setFbTx(updatedTxs)
+
+      try {
+        await fb.fsDeleteTransaction(id)
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
     },
     [mode, commitDemo, currentUid],
   )
@@ -974,8 +1004,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
 
       const targetIds = targetTxs.map((t) => t.id)
+      const set = new Set(targetIds)
       if (mode === 'demo') {
-        const set = new Set(targetIds)
         commitDemo((s) => ({
           ...s,
           transactions: s.transactions.filter((t) => !set.has(t.id)),
@@ -983,8 +1013,20 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         return targetIds.length
       }
 
-      await fb.fsDeleteTransactionsBatch(targetIds)
-      return targetIds.length
+      // Remoção otimista imediata no modo Firebase
+      const previousTxs = fbTxRef.current
+      const updatedTxs = previousTxs.filter((t) => !set.has(t.id))
+      fbTxRef.current = updatedTxs
+      setFbTx(updatedTxs)
+
+      try {
+        await fb.fsDeleteTransactionsBatch(targetIds)
+        return targetIds.length
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
     },
     [mode, commitDemo, currentUid],
   )
@@ -1006,8 +1048,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       }
 
       const targetIds = targetTxs.map((t) => t.id)
+      const set = new Set(targetIds)
       if (mode === 'demo') {
-        const set = new Set(targetIds)
         commitDemo((s) => ({
           ...s,
           transactions: s.transactions.filter((t) => !set.has(t.id)),
@@ -1015,8 +1057,20 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         return targetIds.length
       }
 
-      await fb.fsDeleteTransactionsBatch(targetIds)
-      return targetIds.length
+      // Remoção otimista imediata no modo Firebase
+      const previousTxs = fbTxRef.current
+      const updatedTxs = previousTxs.filter((t) => !set.has(t.id))
+      fbTxRef.current = updatedTxs
+      setFbTx(updatedTxs)
+
+      try {
+        await fb.fsDeleteTransactionsBatch(targetIds)
+        return targetIds.length
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
     },
     [mode, commitDemo, currentUid],
   )
@@ -1050,15 +1104,29 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         return { refundedCount: toDeleteIds.length, refundAmount: totalPaidAmount }
       }
 
-      if (toDeleteIds.length > 0) {
-        await fb.fsDeleteTransactionsBatch(toDeleteIds)
-      }
+      // Atualização otimista imediata no modo Firebase
+      const previousTxs = fbTxRef.current
+      let optimisticTxs = previousTxs.filter((t) => !toDeleteIds.includes(t.id))
       if (refundTransaction) {
-        const { id: _id, ...data } = refundTransaction
-        await fb.fsAddTransaction(data)
+        optimisticTxs = [refundTransaction, ...optimisticTxs]
       }
+      fbTxRef.current = optimisticTxs
+      setFbTx(optimisticTxs)
 
-      return { refundedCount: toDeleteIds.length, refundAmount: totalPaidAmount }
+      try {
+        if (toDeleteIds.length > 0) {
+          await fb.fsDeleteTransactionsBatch(toDeleteIds)
+        }
+        if (refundTransaction) {
+          const { id: _id, ...data } = refundTransaction
+          await fb.fsAddTransaction(data)
+        }
+        return { refundedCount: toDeleteIds.length, refundAmount: totalPaidAmount }
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
     },
     [mode, commitDemo, currentUid, me],
   )
@@ -1096,19 +1164,34 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         return { count: anticipatedCount, discount }
       }
 
-      for (const tx of updatedTransactions) {
-        await fb.fsUpdateTransaction(tx.id, {
-          competenceMonth: tx.competenceMonth,
-          anticipatedFromMonth: tx.anticipatedFromMonth,
-          isAnticipated: true,
-        })
-      }
+      // Atualização otimista imediata no modo Firebase
+      const previousTxs = fbTxRef.current
+      const map = new Map(updatedTransactions.map((t) => [t.id, t]))
+      let optimisticTxs = previousTxs.map((t) => map.get(t.id) || t)
       if (discountTransaction) {
-        const { id: _id, ...data } = discountTransaction
-        await fb.fsAddTransaction(data)
+        optimisticTxs = [discountTransaction, ...optimisticTxs]
       }
+      fbTxRef.current = optimisticTxs
+      setFbTx(optimisticTxs)
 
-      return { count: anticipatedCount, discount }
+      try {
+        for (const tx of updatedTransactions) {
+          await fb.fsUpdateTransaction(tx.id, {
+            competenceMonth: tx.competenceMonth,
+            anticipatedFromMonth: tx.anticipatedFromMonth,
+            isAnticipated: true,
+          })
+        }
+        if (discountTransaction) {
+          const { id: _id, ...data } = discountTransaction
+          await fb.fsAddTransaction(data)
+        }
+        return { count: anticipatedCount, discount }
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
     },
     [mode, commitDemo, me],
   )
@@ -1325,8 +1408,24 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         return updates.length
       }
 
-      await fb.fsUpdateTransactionsBatch(updates)
-      return updates.length
+      // Atualização otimista imediata no modo Firebase
+      const previousTxs = fbTxRef.current
+      const updateMap = new Map(updates.map((u) => [u.id, u.patch]))
+      const optimisticTxs = previousTxs.map((t) => {
+        const patch = updateMap.get(t.id)
+        return patch ? { ...t, ...patch } : t
+      })
+      fbTxRef.current = optimisticTxs
+      setFbTx(optimisticTxs)
+
+      try {
+        await fb.fsUpdateTransactionsBatch(updates)
+        return updates.length
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
     },
     [mode, commitDemo, me, partnerParty, cards, currentUid, friends],
   )

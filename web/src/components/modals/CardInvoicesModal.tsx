@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Drawer as Dialog,
   DrawerContent as DialogContent,
@@ -179,10 +179,19 @@ export function CardInvoicesModal({
   const [itemFilter, setItemFilter] = useState<'all' | 'mine' | 'third_party' | 'open' | 'paid' | 'installments'>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Sincroniza e aplica roteamento inteligente para a fatura aberta quando o mês atual estiver quitado
+  const hasInitializedOpenRef = useRef(false)
+
+  // Sincroniza e aplica roteamento inteligente para a fatura aberta apenas na abertura da modal
   useEffect(() => {
-    if (open) {
-      let targetMonth = initialMonth || month
+    if (!open) {
+      hasInitializedOpenRef.current = false
+      return
+    }
+
+    if (hasInitializedOpenRef.current) return
+    hasInitializedOpenRef.current = true
+
+    let targetMonth = initialMonth || month
       const cardId = initialCardId || selectedCardId || cards[0]?.id
       const currentCard = cards.find((c) => c.id === cardId) || cards[0]
 
@@ -207,7 +216,6 @@ export function CardInvoicesModal({
       setSearchQuery('')
       setSelectedParticipantName(null)
       setSelectedCategory(null)
-    }
   }, [open, month, initialCardId, initialMonth, selectedCardId, cards, transactions, uid])
 
   const invoices = useMemo(

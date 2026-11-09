@@ -345,6 +345,7 @@ export function normalizeCard(id: string, raw: any): Card {
 export function normalizeTransaction(id: string, raw: any): Transaction {
   const data = raw || {}
   return {
+    ...data,
     id,
     createdByUid: data.createdByUid || '',
     paidByUid: data.paidByUid || data.createdByUid || '',
@@ -375,6 +376,11 @@ export function normalizeTransaction(id: string, raw: any): Transaction {
     installmentsTotal: data.installmentsTotal ?? null,
     splitType: data.splitType || null,
     createdAt: Number(data.createdAt) || Date.now(),
+    refundedTransactionId: data.refundedTransactionId || null,
+    isAnticipated: Boolean(data.isAnticipated),
+    anticipatedFromMonth: data.anticipatedFromMonth || null,
+    discountAmount: data.discountAmount ?? null,
+    externalName: data.externalName || null,
   }
 }
 
@@ -410,7 +416,11 @@ export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => v
       const merged = new Map<string, Transaction>()
       for (const [id, tx] of myTxsMap) merged.set(id, tx)
       for (const cardMap of sharedCardTxsMap.values()) {
-        for (const [id, tx] of cardMap) merged.set(id, tx)
+        for (const [id, tx] of cardMap) {
+          if (!merged.has(id)) {
+            merged.set(id, tx)
+          }
+        }
       }
       cb([...merged.values()])
     }

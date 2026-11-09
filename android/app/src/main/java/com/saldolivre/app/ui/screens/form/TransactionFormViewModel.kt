@@ -848,9 +848,11 @@ class TransactionFormViewModel(
                         current.description.trim()
                     }
 
-                    val cardSharedUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.sharedWithUids.orEmpty() else emptyList()
+                    val cardUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+                        (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
+                    } else emptyList()
                     val customUids = customAllocations?.mapNotNull { it.uid } ?: emptyList()
-                    val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
+                    val effectiveVisible = (split.visibleToUids + cardUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
 
                     val (nextAcceptanceStatus, nextRespondedAt) = FinanceEngine.resolveNextAcceptanceStatus(
                         prevTx = origTx,
@@ -965,9 +967,11 @@ class TransactionFormViewModel(
                         customAllocations = curCustomAllocs
                     )
 
-                    val cardSharedUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.sharedWithUids.orEmpty() else emptyList()
+                    val cardUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+                        (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
+                    } else emptyList()
                     val customUids = curCustomAllocs?.mapNotNull { it.uid } ?: emptyList()
-                    val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
+                    val effectiveVisible = (split.visibleToUids + cardUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
 
                     val effectiveStatus = if (i == 1) {
                         current.status
@@ -1046,9 +1050,11 @@ class TransactionFormViewModel(
                     customAllocations = customAllocations
                 )
 
-                val cardSharedUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.sharedWithUids.orEmpty() else emptyList()
+                val cardUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+                    (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
+                } else emptyList()
                 val customUids = customAllocations?.mapNotNull { it.uid } ?: emptyList()
-                val effectiveVisible = (split.visibleToUids + cardSharedUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
+                val effectiveVisible = (split.visibleToUids + cardUids + listOfNotNull(assignedFriendUid) + customUids).distinct()
 
                 val tx = Transaction(
                     id = "tx_" + UUID.randomUUID().toString().take(8),

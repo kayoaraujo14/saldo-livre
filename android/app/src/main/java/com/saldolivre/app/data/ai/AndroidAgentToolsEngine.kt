@@ -282,6 +282,11 @@ class AndroidAgentToolsEngine(
             friendSharePct = friendPct
         )
 
+        val matchedCardUids = if (matchedCard != null) {
+            (listOfNotNull(matchedCard.ownerUid.takeIf { it.isNotBlank() }) + matchedCard.sharedWithUids).distinct()
+        } else emptyList()
+        val effectiveVisibleUids = (splitResult.visibleToUids + matchedCardUids).distinct()
+
         val cleanDesc = FinanceEngine.stripInstallmentSuffix(description)
         val isInstallment = totalInstallments > 1
         val cardText = if (matchedCard != null) " • Cartão ${matchedCard.cardName}" else ""
@@ -417,7 +422,7 @@ class AndroidAgentToolsEngine(
                         totalAmount = curAmount,
                         dueDate = targetDueDate,
                         competenceMonth = targetMonth,
-                        visibleToUids = splitResult.visibleToUids,
+                        visibleToUids = effectiveVisibleUids,
                         userImpact = splitResult.userImpact,
                         allocations = if (isPast) curAllocs.map { it.copy(reimbursed = true) } else curAllocs,
                         splitType = effectiveSplitType,
@@ -480,7 +485,7 @@ class AndroidAgentToolsEngine(
                 totalAmount = totalSigned,
                 dueDate = finalDueDate,
                 competenceMonth = finalCompetenceMonth,
-                visibleToUids = splitResult.visibleToUids,
+                visibleToUids = effectiveVisibleUids,
                 userImpact = splitResult.userImpact,
                 allocations = splitResult.allocations,
                 splitType = effectiveSplitType,
@@ -930,6 +935,11 @@ class AndroidAgentToolsEngine(
             val myImpact = splitResult.userImpact[user.uid] ?: amt
             val acceptanceStatus = if (assignedFriendUid != null) "pending_approval" else null
 
+            val itemCardUids = if (targetCard != null) {
+                (listOfNotNull(targetCard.ownerUid.takeIf { it.isNotBlank() }) + targetCard.sharedWithUids).distinct()
+            } else emptyList()
+            val effectiveItemVisible = (splitResult.visibleToUids + itemCardUids).distinct()
+
             pendingTxMaps.add(
                 mapOf(
                     "data" to dt,
@@ -973,7 +983,7 @@ class AndroidAgentToolsEngine(
                         totalAmount = amt,
                         dueDate = targetDueDate,
                         competenceMonth = targetMonth,
-                        visibleToUids = splitResult.visibleToUids,
+                        visibleToUids = effectiveItemVisible,
                         userImpact = splitResult.userImpact,
                         allocations = if (isPast) splitResult.allocations.map { it.copy(reimbursed = true) } else splitResult.allocations,
                         splitType = effectiveSplitType,
@@ -1005,7 +1015,7 @@ class AndroidAgentToolsEngine(
                     totalAmount = amt,
                     dueDate = resolvedDueDate,
                     competenceMonth = resolvedComp,
-                    visibleToUids = splitResult.visibleToUids,
+                    visibleToUids = effectiveItemVisible,
                     userImpact = splitResult.userImpact,
                     allocations = splitResult.allocations,
                     splitType = effectiveSplitType,

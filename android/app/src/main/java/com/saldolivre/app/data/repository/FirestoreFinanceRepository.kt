@@ -96,18 +96,59 @@ class FirestoreFinanceRepository(
         }
 
         val myTxsMap = mutableMapOf<String, Transaction>()
-        val sharedCardTxsMap = mutableMapOf<String, Map<String, Transaction>>()
-        val sharedCardListeners = mutableMapOf<String, ListenerRegistration>()
+        val cardTxsMap = mutableMapOf<String, Map<String, Transaction>>()
+        val cardListeners = mutableMapOf<String, ListenerRegistration>()
+        val ownedCardIds = mutableSetOf<String>()
+        val sharedCardIds = mutableSetOf<String>()
 
         fun emitMerged() {
             val allMerged = LinkedHashMap<String, Transaction>()
             allMerged.putAll(myTxsMap)
-            for (cardTxs in sharedCardTxsMap.values) {
+            for (cardTxs in cardTxsMap.values) {
                 for ((id, tx) in cardTxs) {
-                    allMerged[id] = tx
+                    if (!allMerged.containsKey(id)) {
+                        allMerged[id] = tx
+                    }
                 }
             }
             trySend(allMerged.values.toList())
+        }
+
+        fun updateCardListeners() {
+            val currentCardIds = (ownedCardIds + sharedCardIds).toSet()
+
+            // Remove listeners de cartões que deixaram de pertencer ou ser compartilhados
+            val removed = cardListeners.keys - currentCardIds
+            for (id in removed) {
+                cardListeners.remove(id)?.remove()
+                cardTxsMap.remove(id)
+            }
+
+            // Adiciona listeners para novos cartões
+            val added = currentCardIds - cardListeners.keys
+            for (cardId in added) {
+                val reg = firestore.collection("transactions")
+                    .whereEqualTo("cardId", cardId)
+                    .addSnapshotListener { txSnap, txErr ->
+                        if (txErr != null) return@addSnapshotListener
+                        val txMap = mutableMapOf<String, Transaction>()
+                        txSnap?.documents?.forEach { doc ->
+                            try {
+                                val tx = parseTransaction(doc)
+                                txMap[tx.id] = tx
+                            } catch (e: Exception) {
+                                android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação de cartão ${doc.id}", e)
+                            }
+                        }
+                        cardTxsMap[cardId] = txMap
+                        emitMerged()
+                    }
+                cardListeners[cardId] = reg
+            }
+
+            if (removed.isNotEmpty()) {
+                emitMerged()
+            }
         }
 
         // 1. Transações com visibleToUids do usuário
@@ -122,57 +163,41 @@ class FirestoreFinanceRepository(
                     try {
                         val tx = parseTransaction(doc)
                         myTxsMap[tx.id] = tx
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação ${doc.id}", e)
+                    }
                 }
                 emitMerged()
             }
 
-        // 2. Escuta cartões compartilhados onde o usuário é convidado e sincroniza todas as transações daquele cartão
+        // 2. Escuta cartões próprios onde o usuário é titular
+        val ownedCardsRegistration = firestore.collection("cards")
+            .whereEqualTo("ownerUid", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                ownedCardIds.clear()
+                snapshot?.documents?.mapNotNull { it.id }?.let { ownedCardIds.addAll(it) }
+                updateCardListeners()
+            }
+
+        // 3. Escuta cartões compartilhados onde o usuário é convidado
         val sharedCardsRegistration = firestore.collection("cards")
             .whereArrayContains("sharedWithUids", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) return@addSnapshotListener
-                val currentSharedCardIds = snapshot?.documents?.mapNotNull { it.id }?.toSet() ?: emptySet()
-
-                // Remove listeners de cartões que deixaram de ser compartilhados
-                val removed = sharedCardListeners.keys - currentSharedCardIds
-                for (id in removed) {
-                    sharedCardListeners.remove(id)?.remove()
-                    sharedCardTxsMap.remove(id)
-                }
-
-                // Adiciona listeners para novos cartões compartilhados
-                val added = currentSharedCardIds - sharedCardListeners.keys
-                for (cardId in added) {
-                    val reg = firestore.collection("transactions")
-                        .whereEqualTo("cardId", cardId)
-                        .addSnapshotListener { txSnap, txErr ->
-                            if (txErr != null) return@addSnapshotListener
-                            val txMap = mutableMapOf<String, Transaction>()
-                            txSnap?.documents?.forEach { doc ->
-                                try {
-                                    val tx = parseTransaction(doc)
-                                    txMap[tx.id] = tx
-                                } catch (_: Exception) {}
-                            }
-                            sharedCardTxsMap[cardId] = txMap
-                            emitMerged()
-                        }
-                    sharedCardListeners[cardId] = reg
-                }
-
-                if (removed.isNotEmpty()) {
-                    emitMerged()
-                }
+                sharedCardIds.clear()
+                snapshot?.documents?.mapNotNull { it.id }?.let { sharedCardIds.addAll(it) }
+                updateCardListeners()
             }
 
         awaitClose {
             myRegistration.remove()
+            ownedCardsRegistration.remove()
             sharedCardsRegistration.remove()
-            for (reg in sharedCardListeners.values) {
+            for (reg in cardListeners.values) {
                 reg.remove()
             }
-            sharedCardListeners.clear()
+            cardListeners.clear()
         }
     }
 
@@ -1188,7 +1213,7 @@ class FirestoreFinanceRepository(
             recipientEmail = doc.getString("recipientEmail") ?: "",
             recipientName = doc.getString("recipientName") ?: "",
             status = FriendshipStatus.from(doc.getString("status")),
-            createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
+            createdAt = doc.getLongSafe("createdAt") ?: System.currentTimeMillis()
         )
     }
 
@@ -1238,9 +1263,9 @@ class FirestoreFinanceRepository(
             email = doc.getString("email") ?: "",
             displayName = doc.getString("displayName") ?: "Meu Perfil",
             photoURL = doc.getString("photoURL"),
-            monthlyIncome = doc.getDouble("monthlyIncome") ?: 5000.0,
-            emergencyReserveBalance = doc.getDouble("emergencyReserveBalance") ?: 0.0,
-            investmentMonthlyTarget = doc.getDouble("investmentMonthlyTarget") ?: 1000.0,
+            monthlyIncome = doc.getDoubleSafe("monthlyIncome") ?: 5000.0,
+            emergencyReserveBalance = doc.getDoubleSafe("emergencyReserveBalance") ?: 0.0,
+            investmentMonthlyTarget = doc.getDoubleSafe("investmentMonthlyTarget") ?: 1000.0,
             investmentAssetBalances = assetBalances,
             categoryBudgets = budgetsMap,
             monthlyCategoryBudgets = monthlyBudgetsMap,
@@ -1269,13 +1294,13 @@ class FirestoreFinanceRepository(
             ownerUid = ownerUid,
             ownerName = doc.getString("ownerName") ?: "",
             cardName = doc.getString("cardName") ?: "Cartão",
-            closingDay = doc.getLong("closingDay")?.toInt() ?: 1,
-            dueDay = doc.getLong("dueDay")?.toInt() ?: 10,
+            closingDay = doc.getIntSafe("closingDay") ?: 1,
+            dueDay = doc.getIntSafe("dueDay") ?: 10,
             sharedWithUsers = rawUsers,
             sharedWithUids = sharedUids,
             frequentThirdParties = rawParties,
             color = doc.getString("color") ?: "violet",
-            limit = doc.getDouble("limit")
+            limit = doc.getDoubleSafe("limit")
         )
     }
 
@@ -1310,17 +1335,17 @@ class FirestoreFinanceRepository(
             description = doc.getString("description") ?: "",
             category = doc.getString("category") ?: "Moradia",
             subcategory = doc.getString("subcategory"),
-            dueDay = doc.getLong("dueDay")?.toInt() ?: 10,
-            defaultAmount = doc.getDouble("defaultAmount") ?: 0.0,
+            dueDay = doc.getIntSafe("dueDay") ?: 10,
+            defaultAmount = doc.getDoubleSafe("defaultAmount") ?: 0.0,
             estimationRule = EstimationRule.from(ruleStr),
-            active = doc.getBoolean("active") ?: true,
+            active = doc.getBooleanSafe("active") ?: true,
             splitType = SplitType.from(splitStr),
             paymentMethod = PaymentMethod.from(payStr),
             cardId = doc.getString("cardId"),
             type = TransactionType.from(typeStr),
             startMonth = doc.getString("startMonth"),
             endMonth = doc.getString("endMonth"),
-            installmentsCount = doc.getLong("installmentsCount")?.toInt(),
+            installmentsCount = doc.getIntSafe("installmentsCount"),
             launchTrigger = LaunchTrigger.from(triggerStr)
         )
     }
@@ -1347,7 +1372,7 @@ class FirestoreFinanceRepository(
         )
     }
 
-    private fun parseTransaction(doc: DocumentSnapshot): Transaction {
+    internal fun parseTransaction(doc: DocumentSnapshot): Transaction {
         val rawVisible = (doc.get("visibleToUids") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
         val createdUid = doc.getString("createdByUid") ?: ""
         val visibleUids = if (rawVisible.isEmpty() && createdUid.isNotBlank()) listOf(createdUid) else rawVisible
@@ -1407,9 +1432,9 @@ class FirestoreFinanceRepository(
             type = TransactionType.from(typeStr),
             paymentMethod = PaymentMethod.from(payStr),
             status = TransactionStatus.from(statusStr),
-            estimatedAmount = doc.getDouble("estimatedAmount"),
-            actualAmount = doc.getDouble("actualAmount"),
-            totalAmount = doc.getDouble("totalAmount") ?: 0.0,
+            estimatedAmount = doc.getDoubleSafe("estimatedAmount"),
+            actualAmount = doc.getDoubleSafe("actualAmount"),
+            totalAmount = doc.getDoubleSafe("totalAmount") ?: 0.0,
             dueDate = doc.getString("dueDate") ?: FinanceEngine.todayKey(),
             competenceMonth = doc.getString("competenceMonth") ?: FinanceEngine.currentMonthKey(),
             visibleToUids = visibleUids,
@@ -1417,17 +1442,22 @@ class FirestoreFinanceRepository(
             allocations = rawAllocations,
             recurringBillId = doc.getString("recurringBillId"),
             reserveCardId = doc.getString("reserveCardId"),
-            createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis(),
+            notes = doc.getString("notes"),
+            createdAt = doc.getLongSafe("createdAt") ?: System.currentTimeMillis(),
             assignedFriendUid = doc.getString("assignedFriendUid"),
             assignedFriendName = doc.getString("assignedFriendName"),
             acceptanceStatus = doc.getString("acceptanceStatus"),
-            friendSharePct = doc.getDouble("friendSharePct"),
-            respondedAt = doc.getLong("respondedAt"),
+            friendSharePct = doc.getDoubleSafe("friendSharePct"),
+            respondedAt = doc.getLongSafe("respondedAt"),
             installmentGroupId = doc.getString("installmentGroupId"),
-            installmentNumber = doc.getLong("installmentNumber")?.toInt(),
-            installmentsTotal = doc.getLong("installmentsTotal")?.toInt(),
+            installmentNumber = doc.getIntSafe("installmentNumber"),
+            installmentsTotal = doc.getIntSafe("installmentsTotal"),
             splitType = parsedSplitType,
-            externalName = extName
+            externalName = extName,
+            refundedTransactionId = doc.getString("refundedTransactionId"),
+            isAnticipated = doc.getBooleanSafe("isAnticipated"),
+            anticipatedFromMonth = doc.getString("anticipatedFromMonth"),
+            discountAmount = doc.getDoubleSafe("discountAmount")
         )
         val finalSplit = parsedSplitType ?: FinanceEngine.detectSplit(tx, createdUid)
         return tx.copy(splitType = finalSplit)
@@ -1474,7 +1504,12 @@ class FirestoreFinanceRepository(
             "installmentsTotal" to tx.installmentsTotal,
             "splitType" to tx.splitType?.value,
             "externalName" to tx.externalName,
-            "thirdPartyName" to tx.externalName
+            "thirdPartyName" to tx.externalName,
+            "refundedTransactionId" to tx.refundedTransactionId,
+            "isAnticipated" to tx.isAnticipated,
+            "anticipatedFromMonth" to tx.anticipatedFromMonth,
+            "discountAmount" to tx.discountAmount,
+            "notes" to tx.notes
         )
     }
 
@@ -1484,12 +1519,12 @@ class FirestoreFinanceRepository(
             uid = doc.getString("uid") ?: "",
             closedMonth = doc.getString("closedMonth") ?: "",
             targetMonth = doc.getString("targetMonth") ?: "",
-            totalSurplus = doc.getDouble("totalSurplus") ?: 0.0,
-            carryoverToNextMonth = doc.getDouble("carryoverToNextMonth") ?: 0.0,
-            investedAmount = doc.getDouble("investedAmount") ?: 0.0,
-            cushionAmount = doc.getDouble("cushionAmount") ?: 0.0,
+            totalSurplus = doc.getDoubleSafe("totalSurplus") ?: 0.0,
+            carryoverToNextMonth = doc.getDoubleSafe("carryoverToNextMonth") ?: 0.0,
+            investedAmount = doc.getDoubleSafe("investedAmount") ?: 0.0,
+            cushionAmount = doc.getDoubleSafe("cushionAmount") ?: 0.0,
             investmentTransactionId = doc.getString("investmentTransactionId"),
-            closedAt = doc.getLong("closedAt") ?: System.currentTimeMillis()
+            closedAt = doc.getLongSafe("closedAt") ?: System.currentTimeMillis()
         )
     }
 
