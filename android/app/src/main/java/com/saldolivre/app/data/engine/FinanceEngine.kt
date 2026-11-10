@@ -1208,7 +1208,7 @@ object FinanceEngine {
         for (tx in monthTxs) {
             val impact = impactFor(tx, uid, all)
             if (tx.type == TransactionType.INCOME) {
-                inc += impact
+                inc += kotlin.math.abs(impact)
             } else {
                 exp += impact
             }
@@ -1311,7 +1311,7 @@ object FinanceEngine {
                     tx.category.contains("investimento", ignoreCase = true) ||
                     (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
                 if (isResgate) {
-                    // Resgates de investimento no mês
+                    totalInvested -= impact
                     val sub = tx.subcategory ?: "Outros Investimentos"
                     investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) - impact
                 }
@@ -1393,7 +1393,7 @@ object FinanceEngine {
 
         val prevMonthKey = shiftMonth(monthKey, -1)
         val prevClosure = closures.firstOrNull { 
-            (it.closedMonth == prevMonthKey || it.targetMonth == monthKey) && it.uid == uid 
+            (it.closedMonth == prevMonthKey || it.targetMonth == monthKey) && (it.uid.isBlank() || it.uid == uid) 
         }
 
         if (prevClosure != null) {
@@ -1417,7 +1417,7 @@ object FinanceEngine {
                     var currentIter = startMonth
 
                     while (currentIter <= endMonth) {
-                        val closure = closures.firstOrNull { it.closedMonth == currentIter && it.uid == uid }
+                        val closure = closures.firstOrNull { it.closedMonth == currentIter && (it.uid.isBlank() || it.uid == uid) }
                         val raw = computeMonthRawBalance(all, uid, currentIter)
                         val finalBalance = runningBalance + raw
 

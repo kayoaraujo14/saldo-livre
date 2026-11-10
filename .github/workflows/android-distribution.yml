@@ -72,17 +72,23 @@ jobs:
         run: |
           echo "GEMINI_API_KEY=${GEMINI_API_KEY}" >> "$GITHUB_WORKSPACE/android/local.properties"
 
-      - name: Decode Signing Keystore (Release)
+      - name: Validate Release Signing Secrets
+        id: check-signing
         working-directory: ./android
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Secret KEYSTORE_BASE64 não configurado. Build de Release exige assinatura de produção válida."
-            exit 1
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/android/app/keystore.jks"
+            echo "has_signing=true" >> "$GITHUB_OUTPUT"
+            echo "Keystore de Release decodificada em android/app/keystore.jks."
+          else
+            echo "has_signing=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secrets de assinatura de Release (KEYSTORE_BASE64, etc.) ausentes. Será compilado APK de Debug para validação contínua."
           fi
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/android/app/keystore.jks"
-          echo "Keystore de Release decodificada em android/app/keystore.jks."
 
       - name: Grant Execute Permission for Gradlew
         working-directory: ./android
@@ -93,6 +99,7 @@ jobs:
         run: ./gradlew testDebugUnitTest --stacktrace
 
       - name: Build Signed Release APK & App Bundle (AAB)
+        if: ${{ steps.check-signing.outputs.has_signing == 'true' }}
         working-directory: ./android
         env:
           KEYSTORE_FILE: ${{ github.workspace }}/android/app/keystore.jks
@@ -102,14 +109,31 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: ./gradlew assembleRelease bundleRelease --stacktrace
 
+      - name: Build Debug APK (QA Fallback)
+        if: ${{ steps.check-signing.outputs.has_signing != 'true' }}
+        working-directory: ./android
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: ./gradlew assembleDebug --stacktrace
+
       - name: Upload Release APK Artifact
+        if: ${{ steps.check-signing.outputs.has_signing == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: saldo-livre-release-apk
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
+      - name: Upload Debug APK Artifact
+        if: ${{ steps.check-signing.outputs.has_signing != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: saldo-livre-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+
       - name: Upload Release AAB Artifact
+        if: ${{ steps.check-signing.outputs.has_signing == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: saldo-livre-release-aab
@@ -117,7 +141,7 @@ jobs:
           if-no-files-found: error
 
       - name: Distribute APK to Firebase App Distribution
-        if: ${{ steps.check-secrets.outputs.has_firebase == 'true' }}
+        if: ${{ steps.check-secrets.outputs.has_firebase == 'true' && steps.check-signing.outputs.has_signing == 'true' }}
         uses: wzieba/Firebase-Distribution-Github-Action@v1
         with:
           appId: ${{ secrets.FIREBASE_APP_ID }}
@@ -128,7 +152,7 @@ jobs:
             Build automático da branch ${{ github.ref_name }} (Commit: ${{ github.sha }})
 
       - name: Upload AAB to Google Play Store (Internal Track)
-        if: ${{ steps.check-secrets.outputs.has_play == 'true' }}
+        if: ${{ steps.check-secrets.outputs.has_play == 'true' && steps.check-signing.outputs.has_signing == 'true' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}

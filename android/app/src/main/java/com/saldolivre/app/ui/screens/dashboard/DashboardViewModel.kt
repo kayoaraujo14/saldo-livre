@@ -46,6 +46,7 @@ data class AutoLaunchNotice(
 @Immutable
 data class IncomeConsumptionState(
     val percentage: Int = 0,
+    val committedPercentage: Int = 0,
     val paid: Double = 0.0,
     val income: Double = 0.0,
     val statusBadge: String = "No Limite"
@@ -128,6 +129,14 @@ class DashboardViewModel(
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     init {
+        // Timeout defensivo de carregamento para nunca travar a UI em skeleton infinito
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(2500)
+            if (_uiState.value.isLoading) {
+                _uiState.update { it.copy(isLoading = false) }
+            }
+        }
+
         viewModelScope.launch {
             networkMonitor.isOnline.collect { online ->
                 _uiState.update { it.copy(isOnline = online) }
@@ -180,6 +189,9 @@ class DashboardViewModel(
                 val consumptionPct = if (summary.income > 0.0) {
                     ((summary.paid / summary.income) * 100.0).roundToInt()
                 } else 0
+                val committedPct = if (summary.income > 0.0) {
+                    (((summary.paid + summary.committed) / summary.income) * 100.0).roundToInt()
+                } else 0
                 val consumptionBadge = when {
                     consumptionPct > 100 -> "Alerta"
                     consumptionPct > 80 -> "Atenção"
@@ -187,6 +199,7 @@ class DashboardViewModel(
                 }
                 val incomeConsumption = IncomeConsumptionState(
                     percentage = consumptionPct,
+                    committedPercentage = committedPct,
                     paid = summary.paid,
                     income = summary.income,
                     statusBadge = consumptionBadge

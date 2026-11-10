@@ -426,5 +426,117 @@ describe('resolveNextAcceptanceStatus & friendShareOf', () => {
     expect(refund.acceptanceStatus).toBe('accepted')
     expect(refund.respondedAt).toBe(1760000000000)
   })
+
+  it('correctly computes freeBalance with previous month closure carryover and investment redemptions parity', () => {
+    const userUid = 'user_abc'
+    const monthKey = '2026-11'
+    const prevMonthKey = '2026-10'
+
+    const txs: Transaction[] = [
+      {
+        id: 'tx_income_1',
+        createdByUid: userUid,
+        paidByUid: userUid,
+        visibleToUids: [userUid],
+        description: 'Salário',
+        category: 'Renda',
+        type: 'income',
+        paymentMethod: 'pix',
+        status: 'paid',
+        totalAmount: 6921.15,
+        dueDate: '2026-11-05',
+        competenceMonth: monthKey,
+        allocations: [],
+        createdAt: 1762000000000,
+      },
+      {
+        id: 'tx_expense_1',
+        createdByUid: userUid,
+        paidByUid: userUid,
+        visibleToUids: [userUid],
+        description: 'Aluguel & Contas',
+        category: 'Moradia',
+        type: 'expense',
+        paymentMethod: 'bill',
+        status: 'paid',
+        totalAmount: 6085.80,
+        dueDate: '2026-11-10',
+        competenceMonth: monthKey,
+        allocations: [],
+        createdAt: 1762000000000,
+      },
+      {
+        id: 'tx_expense_pending',
+        createdByUid: userUid,
+        paidByUid: userUid,
+        visibleToUids: [userUid],
+        description: 'Financiamentos & Dívidas',
+        category: 'Financiamentos & Dívidas',
+        type: 'expense',
+        paymentMethod: 'bill',
+        status: 'pending',
+        totalAmount: 1227.17,
+        dueDate: '2026-11-20',
+        competenceMonth: monthKey,
+        allocations: [],
+        createdAt: 1762000000000,
+      },
+      {
+        id: 'tx_invest_1',
+        createdByUid: userUid,
+        paidByUid: userUid,
+        visibleToUids: [userUid],
+        description: 'Aporte Tesouro',
+        category: 'Investimentos',
+        subcategory: 'Tesouro Direto',
+        type: 'expense',
+        paymentMethod: 'pix',
+        status: 'paid',
+        totalAmount: 3549.55,
+        dueDate: '2026-11-15',
+        competenceMonth: monthKey,
+        allocations: [],
+        createdAt: 1762000000000,
+      },
+      {
+        id: 'tx_invest_resgate',
+        createdByUid: userUid,
+        paidByUid: userUid,
+        visibleToUids: [userUid],
+        description: 'Resgate CDB',
+        category: 'Investimentos',
+        subcategory: 'Resgate',
+        type: 'income',
+        paymentMethod: 'pix',
+        status: 'paid',
+        totalAmount: 450.45,
+        dueDate: '2026-11-18',
+        competenceMonth: monthKey,
+        allocations: [],
+        createdAt: 1762000000000,
+      },
+    ]
+
+    const closures: MonthClosure[] = [
+      {
+        id: 'closure_oct',
+        uid: userUid,
+        closedMonth: prevMonthKey,
+        targetMonth: monthKey,
+        totalSurplus: 927.24,
+        carryoverToNextMonth: 927.24,
+        investedAmount: 0,
+        cushionAmount: 0,
+        closedAt: 1761900000000,
+      },
+    ]
+
+    const summary = computeSummary(txs, userUid, monthKey, [], closures)
+    expect(summary.carryoverAmount).toBe(927.24)
+    // totalInvested should abate the resgate: 4000.00 - 450.45 = 3549.55
+    expect(summary.totalInvested).toBe(3549.55)
+    // freeBalance: income (6921.15 + 450.45) + carryover (927.24) - expenses (6085.80 + 1227.17 + 4000.00) = 535.87
+    expect(summary.income).toBe(7371.6)
+  })
 })
 

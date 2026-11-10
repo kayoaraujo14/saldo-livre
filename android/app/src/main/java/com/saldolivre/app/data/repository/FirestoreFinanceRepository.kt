@@ -37,45 +37,56 @@ class FirestoreFinanceRepository(
     override val allUsers: List<UserProfile>
         get() = listOf(_currentUser.value)
 
-    init {
-        val user = auth.currentUser
-        if (user != null && user.uid.isNotBlank()) {
-            _currentUser.value = UserProfile(
-                uid = user.uid,
-                email = user.email ?: "",
-                displayName = if (!user.displayName.isNullOrBlank()) user.displayName!! else "Meu Perfil",
-                photoURL = user.photoUrl?.toString(),
-                monthlyIncome = 5000.0
-            )
+    private var userProfileListener: ListenerRegistration? = null
 
-            // Escuta perfil em tempo real no Firestore /users/{uid}
-            firestore.collection("users").document(user.uid)
-                .addSnapshotListener { snapshot, error ->
-                    if (error == null && snapshot != null && snapshot.exists()) {
-                        val profile = parseUserProfile(snapshot)
-                        if (profile != null) {
-                            _currentUser.value = profile
+    init {
+        fun attachUser(user: com.google.firebase.auth.FirebaseUser?) {
+            userProfileListener?.remove()
+            userProfileListener = null
+
+            if (user != null && user.uid.isNotBlank()) {
+                _currentUser.value = UserProfile(
+                    uid = user.uid,
+                    email = user.email ?: "",
+                    displayName = if (!user.displayName.isNullOrBlank()) user.displayName!! else "Meu Perfil",
+                    photoURL = user.photoUrl?.toString(),
+                    monthlyIncome = 5000.0
+                )
+
+                // Escuta perfil em tempo real no Firestore /users/{uid}
+                userProfileListener = firestore.collection("users").document(user.uid)
+                    .addSnapshotListener { snapshot, error ->
+                        if (error == null && snapshot != null && snapshot.exists()) {
+                            val profile = parseUserProfile(snapshot)
+                            if (profile != null) {
+                                _currentUser.value = profile
+                            }
+                        } else if (snapshot != null && !snapshot.exists()) {
+                            val defaultDoc = mapOf(
+                                "uid" to user.uid,
+                                "email" to (user.email ?: ""),
+                                "displayName" to (user.displayName ?: "Meu Perfil"),
+                                "monthlyIncome" to 5000.0
+                            )
+                            val publicDoc = mapOf(
+                                "uid" to user.uid,
+                                "email" to (user.email ?: "").lowercase().trim(),
+                                "displayName" to (user.displayName ?: "Meu Perfil"),
+                                "photoURL" to user.photoUrl?.toString(),
+                                "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            )
+                            val batch = firestore.batch()
+                            batch.set(firestore.collection("users").document(user.uid), defaultDoc, com.google.firebase.firestore.SetOptions.merge())
+                            batch.set(firestore.collection("public_profiles").document(user.uid), publicDoc, com.google.firebase.firestore.SetOptions.merge())
+                            batch.commit()
                         }
-                    } else if (snapshot != null && !snapshot.exists()) {
-                        val defaultDoc = mapOf(
-                            "uid" to user.uid,
-                            "email" to (user.email ?: ""),
-                            "displayName" to (user.displayName ?: "Meu Perfil"),
-                            "monthlyIncome" to 5000.0
-                        )
-                        val publicDoc = mapOf(
-                            "uid" to user.uid,
-                            "email" to (user.email ?: "").lowercase().trim(),
-                            "displayName" to (user.displayName ?: "Meu Perfil"),
-                            "photoURL" to user.photoUrl?.toString(),
-                            "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
-                        )
-                        val batch = firestore.batch()
-                        batch.set(firestore.collection("users").document(user.uid), defaultDoc, com.google.firebase.firestore.SetOptions.merge())
-                        batch.set(firestore.collection("public_profiles").document(user.uid), publicDoc, com.google.firebase.firestore.SetOptions.merge())
-                        batch.commit()
                     }
-                }
+            }
+        }
+
+        attachUser(auth.currentUser)
+        auth.addAuthStateListener { firebaseAuth ->
+            attachUser(firebaseAuth.currentUser)
         }
     }
 
@@ -114,6 +125,9 @@ class FirestoreFinanceRepository(
             trySend(allMerged.values.toList())
         }
 
+        // Emite imediatamente lista vazia defensiva para que o combine não fique bloqueado
+        emitMerged()
+
         fun updateCardListeners() {
             val currentCardIds = (ownedCardIds + sharedCardIds).toSet()
 
@@ -130,7 +144,10 @@ class FirestoreFinanceRepository(
                 val reg = firestore.collection("transactions")
                     .whereEqualTo("cardId", cardId)
                     .addSnapshotListener { txSnap, txErr ->
-                        if (txErr != null) return@addSnapshotListener
+                        if (txErr != null) {
+                            emitMerged()
+                            return@addSnapshotListener
+                        }
                         val txMap = mutableMapOf<String, Transaction>()
                         txSnap?.documents?.forEach { doc ->
                             try {
@@ -156,6 +173,7 @@ class FirestoreFinanceRepository(
             .whereArrayContains("visibleToUids", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    emitMerged()
                     return@addSnapshotListener
                 }
                 myTxsMap.clear()
@@ -217,10 +235,14 @@ class FirestoreFinanceRepository(
             trySend(combined)
         }
 
+        // Emite imediatamente defensivo para desbloquear flows downstream
+        emitCombined()
+
         val regOwned = firestore.collection("cards")
             .whereEqualTo("ownerUid", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    emitCombined()
                     return@addSnapshotListener
                 }
                 ownedCardsMap.clear()
@@ -237,6 +259,7 @@ class FirestoreFinanceRepository(
             .whereArrayContains("sharedWithUids", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    emitCombined()
                     return@addSnapshotListener
                 }
                 sharedCardsMap.clear()
@@ -1532,9 +1555,11 @@ class FirestoreFinanceRepository(
     }
 
     private fun parseMonthClosure(doc: com.google.firebase.firestore.DocumentSnapshot): MonthClosure {
+        val currentUid = auth.currentUser?.uid ?: _currentUser.value.uid
+        val parsedUid = doc.getString("uid")?.ifBlank { null } ?: currentUid
         return MonthClosure(
             id = doc.id,
-            uid = doc.getString("uid") ?: "",
+            uid = parsedUid,
             closedMonth = doc.getString("closedMonth") ?: "",
             targetMonth = doc.getString("targetMonth") ?: "",
             totalSurplus = doc.getDoubleSafe("totalSurplus") ?: 0.0,

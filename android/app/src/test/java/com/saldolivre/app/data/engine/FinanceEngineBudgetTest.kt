@@ -534,4 +534,119 @@ class FinanceEngineBudgetTest {
         assertEquals("Pets", FinanceEngine.normalizeBudgetCategory("Pets"))
         assertEquals("Pets", FinanceEngine.normalizeBudgetCategory("pets"))
     }
+
+    @Test
+    fun `computeSummary calculates closure carryover and abates redemptions with parity to Web`() {
+        val userUid = "user_abc"
+        val monthKey = "2026-11"
+        val prevMonthKey = "2026-10"
+
+        val txs = listOf(
+            Transaction(
+                id = "tx_income_1",
+                createdByUid = userUid,
+                paidByUid = userUid,
+                visibleToUids = listOf(userUid),
+                description = "Salário",
+                category = "Renda",
+                type = TransactionType.INCOME,
+                paymentMethod = PaymentMethod.PIX,
+                status = TransactionStatus.PAID,
+                totalAmount = 6921.15,
+                dueDate = "2026-11-05",
+                competenceMonth = monthKey,
+                createdAt = 1762000000000L
+            ),
+            Transaction(
+                id = "tx_expense_1",
+                createdByUid = userUid,
+                paidByUid = userUid,
+                visibleToUids = listOf(userUid),
+                description = "Aluguel & Contas",
+                category = "Moradia",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.BILL,
+                status = TransactionStatus.PAID,
+                totalAmount = 6085.80,
+                dueDate = "2026-11-10",
+                competenceMonth = monthKey,
+                createdAt = 1762000000000L
+            ),
+            Transaction(
+                id = "tx_expense_pending",
+                createdByUid = userUid,
+                paidByUid = userUid,
+                visibleToUids = listOf(userUid),
+                description = "Financiamentos & Dívidas",
+                category = "Financiamentos & Dívidas",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.BILL,
+                status = TransactionStatus.PENDING,
+                totalAmount = 1227.17,
+                dueDate = "2026-11-20",
+                competenceMonth = monthKey,
+                createdAt = 1762000000000L
+            ),
+            Transaction(
+                id = "tx_invest_1",
+                createdByUid = userUid,
+                paidByUid = userUid,
+                visibleToUids = listOf(userUid),
+                description = "Aporte Tesouro",
+                category = "Investimentos",
+                subcategory = "Tesouro Direto",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.PIX,
+                status = TransactionStatus.PAID,
+                totalAmount = 3549.55,
+                dueDate = "2026-11-15",
+                competenceMonth = monthKey,
+                createdAt = 1762000000000L
+            ),
+            Transaction(
+                id = "tx_invest_resgate",
+                createdByUid = userUid,
+                paidByUid = userUid,
+                visibleToUids = listOf(userUid),
+                description = "Resgate CDB",
+                category = "Investimentos",
+                subcategory = "Resgate",
+                type = TransactionType.INCOME,
+                paymentMethod = PaymentMethod.PIX,
+                status = TransactionStatus.PAID,
+                totalAmount = 450.45,
+                dueDate = "2026-11-18",
+                competenceMonth = monthKey,
+                createdAt = 1762000000000L
+            )
+        )
+
+        // Closure com UID em branco ou nulo para validar fallback
+        val closures = listOf(
+            MonthClosure(
+                id = "closure_oct",
+                uid = "", // Testando fallback de paridade
+                closedMonth = prevMonthKey,
+                targetMonth = monthKey,
+                totalSurplus = 927.24,
+                carryoverToNextMonth = 927.24,
+                investedAmount = 0.0,
+                cushionAmount = 0.0,
+                closedAt = 1761900000000L
+            )
+        )
+
+        val summary = FinanceEngine.computeSummary(
+            all = txs,
+            uid = userUid,
+            monthKey = monthKey,
+            cards = emptyList(),
+            closures = closures
+        )
+
+        assertEquals(927.24, summary.carryoverAmount, 0.01)
+        // totalInvested should abate the resgate: 4000.00 - 450.45 = 3549.55
+        assertEquals(3549.55, summary.totalInvested, 0.01)
+        assertEquals(7371.6, summary.income, 0.01)
+    }
 }

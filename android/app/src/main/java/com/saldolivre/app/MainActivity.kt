@@ -123,28 +123,30 @@ class MainActivity : FragmentActivity() {
                                 }
                             )
                         } else {
-                            val repository = remember(isDemoMode, currentUser?.uid) {
-                                if (isDemoMode) {
-                                    MockFinanceRepository(this@MainActivity)
-                                } else {
-                                    FirestoreFinanceRepository()
-                                }
-                            }
-                            app.setRepositoryInstance(repository)
-
-                            val navController = rememberNavController()
-                            AppNavHost(
-                                navController = navController,
-                                repository = repository,
-                                onLogout = {
-                                    securityManager.unlockApp()
-                                    authViewModel.signOut {
-                                        prefs.edit().putBoolean(AuthViewModel.PREF_IS_DEMO_MODE, false).apply()
-                                        isDemoMode = false
-                                        currentUser = null
+                            key(isDemoMode, currentUser?.uid) {
+                                val repository = remember(isDemoMode, currentUser?.uid) {
+                                    if (isDemoMode) {
+                                        MockFinanceRepository(this@MainActivity)
+                                    } else {
+                                        FirestoreFinanceRepository()
                                     }
                                 }
-                            )
+                                app.setRepositoryInstance(repository)
+
+                                val navController = rememberNavController()
+                                AppNavHost(
+                                    navController = navController,
+                                    repository = repository,
+                                    onLogout = {
+                                        securityManager.unlockApp()
+                                        authViewModel.signOut {
+                                            prefs.edit().putBoolean(AuthViewModel.PREF_IS_DEMO_MODE, false).apply()
+                                            isDemoMode = false
+                                            currentUser = null
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }

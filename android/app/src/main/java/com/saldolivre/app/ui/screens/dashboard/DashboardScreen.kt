@@ -459,7 +459,7 @@ fun DashboardScreen(
                             accentColor = consumptionColor,
                             badgeText = consumption.statusBadge,
                             badgeColor = consumptionColor,
-                            subtitle = "${FinanceEngine.formatCurrency(consumption.paid)} pagos no mês",
+                            subtitle = "Pago: ${FinanceEngine.formatCurrency(consumption.paid)} • Comprom.: ${consumption.committedPercentage}%",
                             modifier = Modifier.weight(1f).fillMaxHeight()
                         ) {
                             Box(
@@ -543,7 +543,7 @@ fun DashboardScreen(
                             accentColor = investAccent,
                             badgeText = investment.badgeText,
                             badgeColor = investAccent,
-                            subtitle = "${FinanceEngine.formatCurrency(investment.totalInvested)} aportados no mês",
+                            subtitle = "Aportado: ${FinanceEngine.formatCurrency(investment.totalInvested)}",
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                             onClick = onNavigateToInvestments
                         ) {
@@ -559,7 +559,7 @@ fun DashboardScreen(
                                     strokeWidth = 2.5.dp
                                 )
                                 Text(
-                                    text = "Regra 50/30/20",
+                                    text = "Regra 50/30/20 (Meta 20%)",
                                     fontSize = 10.sp,
                                     color = TextSecondary,
                                     maxLines = 1,
