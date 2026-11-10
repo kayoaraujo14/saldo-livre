@@ -326,37 +326,110 @@ class TransactionsViewModel(
     }
 
     fun deleteTransaction(id: String) {
+        val previousTxs = _uiState.value.transactions
+        val previousRaw = _uiState.value.rawMonthTransactions
+        val previousFiltered = _uiState.value.filteredTransactions
+        val previousAll = _uiState.value.allTransactions
+
+        // Remoção otimista imediata na UI
+        _uiState.update { current ->
+            current.copy(
+                transactions = current.transactions.filter { it.id != id },
+                rawMonthTransactions = current.rawMonthTransactions.filter { it.id != id },
+                allTransactions = current.allTransactions.filter { it.id != id },
+                filteredTransactions = current.filteredTransactions.filter { it.id != id }
+            )
+        }
+        applyFilters()
+
         viewModelScope.launch {
             try {
                 repository.deleteTransaction(id)
                 _uiState.update { it.copy(userMessage = "Lançamento excluído com sucesso.") }
             } catch (e: Exception) {
                 android.util.Log.e("TransactionsViewModel", "Erro ao excluir transação $id", e)
-                _uiState.update { it.copy(userMessage = "Não foi possível excluir o lançamento. Verifique suas permissões.") }
+                _uiState.update {
+                    it.copy(
+                        transactions = previousTxs,
+                        rawMonthTransactions = previousRaw,
+                        allTransactions = previousAll,
+                        filteredTransactions = previousFiltered,
+                        userMessage = "Não foi possível excluir o lançamento. Verifique suas permissões."
+                    )
+                }
+                applyFilters()
             }
         }
     }
 
     fun deleteInstallmentGroup(groupId: String) {
+        val previousTxs = _uiState.value.transactions
+        val previousRaw = _uiState.value.rawMonthTransactions
+        val previousFiltered = _uiState.value.filteredTransactions
+        val previousAll = _uiState.value.allTransactions
+
+        _uiState.update { current ->
+            current.copy(
+                transactions = current.transactions.filter { it.installmentGroupId != groupId },
+                rawMonthTransactions = current.rawMonthTransactions.filter { it.installmentGroupId != groupId },
+                allTransactions = current.allTransactions.filter { it.installmentGroupId != groupId },
+                filteredTransactions = current.filteredTransactions.filter { it.installmentGroupId != groupId }
+            )
+        }
+        applyFilters()
+
         viewModelScope.launch {
             try {
                 repository.deleteInstallmentGroup(groupId)
                 _uiState.update { it.copy(userMessage = "Parcelamento excluído com sucesso.") }
             } catch (e: Exception) {
                 android.util.Log.e("TransactionsViewModel", "Erro ao excluir parcelamento $groupId", e)
-                _uiState.update { it.copy(userMessage = "Não foi possível excluir o parcelamento.") }
+                _uiState.update {
+                    it.copy(
+                        transactions = previousTxs,
+                        rawMonthTransactions = previousRaw,
+                        allTransactions = previousAll,
+                        filteredTransactions = previousFiltered,
+                        userMessage = "Não foi possível excluir o parcelamento."
+                    )
+                }
+                applyFilters()
             }
         }
     }
 
     fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int) {
+        val previousTxs = _uiState.value.transactions
+        val previousRaw = _uiState.value.rawMonthTransactions
+        val previousFiltered = _uiState.value.filteredTransactions
+        val previousAll = _uiState.value.allTransactions
+
+        _uiState.update { current ->
+            current.copy(
+                transactions = current.transactions.filterNot { it.installmentGroupId == groupId && (it.installmentNumber ?: 1) >= fromInstallmentNumber && it.status != TransactionStatus.PAID },
+                rawMonthTransactions = current.rawMonthTransactions.filterNot { it.installmentGroupId == groupId && (it.installmentNumber ?: 1) >= fromInstallmentNumber && it.status != TransactionStatus.PAID },
+                allTransactions = current.allTransactions.filterNot { it.installmentGroupId == groupId && (it.installmentNumber ?: 1) >= fromInstallmentNumber && it.status != TransactionStatus.PAID },
+                filteredTransactions = current.filteredTransactions.filterNot { it.installmentGroupId == groupId && (it.installmentNumber ?: 1) >= fromInstallmentNumber && it.status != TransactionStatus.PAID }
+            )
+        }
+        applyFilters()
+
         viewModelScope.launch {
             try {
                 repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
                 _uiState.update { it.copy(userMessage = "Parcelas futuras excluídas com sucesso.") }
             } catch (e: Exception) {
                 android.util.Log.e("TransactionsViewModel", "Erro ao excluir parcelas futuras de $groupId", e)
-                _uiState.update { it.copy(userMessage = "Não foi possível excluir parcelas futuras.") }
+                _uiState.update {
+                    it.copy(
+                        transactions = previousTxs,
+                        rawMonthTransactions = previousRaw,
+                        allTransactions = previousAll,
+                        filteredTransactions = previousFiltered,
+                        userMessage = "Não foi possível excluir parcelas futuras."
+                    )
+                }
+                applyFilters()
             }
         }
     }

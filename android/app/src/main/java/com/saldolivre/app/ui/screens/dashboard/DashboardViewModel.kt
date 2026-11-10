@@ -669,37 +669,70 @@ class DashboardViewModel(
     }
 
     fun deleteTransaction(id: String) {
+        val previousRecent = _uiState.value.recentTransactions
+        _uiState.update { current ->
+            current.copy(
+                recentTransactions = current.recentTransactions.filter { it.id != id }
+            )
+        }
         viewModelScope.launch {
             try {
                 repository.deleteTransaction(id)
                 _uiState.update { it.copy(userMessage = "Lançamento excluído com sucesso.") }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao excluir transação $id", e)
-                _uiState.update { it.copy(userMessage = "Não foi possível excluir o lançamento. Verifique suas permissões.") }
+                _uiState.update {
+                    it.copy(
+                        recentTransactions = previousRecent,
+                        userMessage = "Não foi possível excluir o lançamento. Verifique suas permissões."
+                    )
+                }
             }
         }
     }
 
     fun deleteInstallmentGroup(groupId: String) {
+        val previousRecent = _uiState.value.recentTransactions
+        _uiState.update { current ->
+            current.copy(
+                recentTransactions = current.recentTransactions.filter { it.installmentGroupId != groupId }
+            )
+        }
         viewModelScope.launch {
             try {
                 repository.deleteInstallmentGroup(groupId)
                 _uiState.update { it.copy(userMessage = "Parcelamento excluído com sucesso.") }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao excluir parcelamento $groupId", e)
-                _uiState.update { it.copy(userMessage = "Não foi possível excluir o parcelamento.") }
+                _uiState.update {
+                    it.copy(
+                        recentTransactions = previousRecent,
+                        userMessage = "Não foi possível excluir o parcelamento."
+                    )
+                }
             }
         }
     }
 
     fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int) {
+        val previousRecent = _uiState.value.recentTransactions
+        _uiState.update { current ->
+            current.copy(
+                recentTransactions = current.recentTransactions.filterNot { it.installmentGroupId == groupId && (it.installmentNumber ?: 1) >= fromInstallmentNumber && it.status != TransactionStatus.PAID }
+            )
+        }
         viewModelScope.launch {
             try {
                 repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
                 _uiState.update { it.copy(userMessage = "Parcelas futuras excluídas com sucesso.") }
             } catch (e: Exception) {
                 android.util.Log.e("DashboardViewModel", "Erro ao excluir parcelas futuras de $groupId", e)
-                _uiState.update { it.copy(userMessage = "Não foi possível excluir parcelas futuras.") }
+                _uiState.update {
+                    it.copy(
+                        recentTransactions = previousRecent,
+                        userMessage = "Não foi possível excluir parcelas futuras."
+                    )
+                }
             }
         }
     }
