@@ -98,242 +98,317 @@ class FirestoreFinanceRepository(
         _selectedMonth.value = monthKey
     }
 
-    override fun getTransactions(): Flow<List<Transaction>> = callbackFlow {
-        val currentUid = auth.currentUser?.uid
-        if (currentUid.isNullOrBlank()) {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
-        }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun getTransactions(): Flow<List<Transaction>> = _currentUser
+        .map { it.uid }
+        .distinctUntilChanged()
+        .flatMapLatest { currentUid ->
+            if (currentUid.isBlank() || currentUid == "default_uid") {
+                flowOf(emptyList())
+            } else {
+                callbackFlow {
+                    val visibleTxsMap = mutableMapOf<String, Transaction>()
+                    val createdTxsMap = mutableMapOf<String, Transaction>()
+                    val paidTxsMap = mutableMapOf<String, Transaction>()
+                    val assignedTxsMap = mutableMapOf<String, Transaction>()
+                    val cardTxsMap = mutableMapOf<String, Map<String, Transaction>>()
+                    val cardListeners = mutableMapOf<String, ListenerRegistration>()
+                    val ownedCardIds = mutableSetOf<String>()
+                    val sharedCardIds = mutableSetOf<String>()
 
-        val myTxsMap = mutableMapOf<String, Transaction>()
-        val cardTxsMap = mutableMapOf<String, Map<String, Transaction>>()
-        val cardListeners = mutableMapOf<String, ListenerRegistration>()
-        val ownedCardIds = mutableSetOf<String>()
-        val sharedCardIds = mutableSetOf<String>()
-
-        fun emitMerged() {
-            val allMerged = LinkedHashMap<String, Transaction>()
-            allMerged.putAll(myTxsMap)
-            for (cardTxs in cardTxsMap.values) {
-                for ((id, tx) in cardTxs) {
-                    if (!allMerged.containsKey(id)) {
-                        allMerged[id] = tx
-                    }
-                }
-            }
-            trySend(allMerged.values.toList())
-        }
-
-        // Emite imediatamente lista vazia defensiva para que o combine não fique bloqueado
-        emitMerged()
-
-        fun updateCardListeners() {
-            val currentCardIds = (ownedCardIds + sharedCardIds).toSet()
-
-            // Remove listeners de cartões que deixaram de pertencer ou ser compartilhados
-            val removed = cardListeners.keys - currentCardIds
-            for (id in removed) {
-                cardListeners.remove(id)?.remove()
-                cardTxsMap.remove(id)
-            }
-
-            // Adiciona listeners para novos cartões
-            val added = currentCardIds - cardListeners.keys
-            for (cardId in added) {
-                val reg = firestore.collection("transactions")
-                    .whereEqualTo("cardId", cardId)
-                    .addSnapshotListener { txSnap, txErr ->
-                        if (txErr != null) {
-                            emitMerged()
-                            return@addSnapshotListener
-                        }
-                        val txMap = mutableMapOf<String, Transaction>()
-                        txSnap?.documents?.forEach { doc ->
-                            try {
-                                val tx = parseTransaction(doc)
-                                txMap[tx.id] = tx
-                            } catch (e: Exception) {
-                                android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação de cartão ${doc.id}", e)
+                    fun emitMerged() {
+                        val allMerged = LinkedHashMap<String, Transaction>()
+                        allMerged.putAll(visibleTxsMap)
+                        allMerged.putAll(createdTxsMap)
+                        allMerged.putAll(paidTxsMap)
+                        allMerged.putAll(assignedTxsMap)
+                        for (cardTxs in cardTxsMap.values) {
+                            for ((id, tx) in cardTxs) {
+                                if (!allMerged.containsKey(id)) {
+                                    allMerged[id] = tx
+                                }
                             }
                         }
-                        cardTxsMap[cardId] = txMap
-                        emitMerged()
+                        trySend(allMerged.values.toList())
                     }
-                cardListeners[cardId] = reg
-            }
 
-            if (removed.isNotEmpty()) {
-                emitMerged()
-            }
-        }
+                    fun updateCardListeners() {
+                        val currentCardIds = (ownedCardIds + sharedCardIds).toSet()
 
-        // 1. Transações com visibleToUids do usuário
-        val myRegistration: ListenerRegistration = firestore.collection("transactions")
-            .whereArrayContains("visibleToUids", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    emitMerged()
-                    return@addSnapshotListener
-                }
-                myTxsMap.clear()
-                snapshot?.documents?.forEach { doc ->
-                    try {
-                        val tx = parseTransaction(doc)
-                        myTxsMap[tx.id] = tx
-                    } catch (e: Exception) {
-                        android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação ${doc.id}", e)
+                        // Remove listeners de cartões que deixaram de pertencer ou ser compartilhados
+                        val removed = cardListeners.keys - currentCardIds
+                        for (id in removed) {
+                            cardListeners.remove(id)?.remove()
+                            cardTxsMap.remove(id)
+                        }
+
+                        // Adiciona listeners para novos cartões
+                        val added = currentCardIds - cardListeners.keys
+                        for (cardId in added) {
+                            val reg = firestore.collection("transactions")
+                                .whereEqualTo("cardId", cardId)
+                                .addSnapshotListener { txSnap, txErr ->
+                                    if (txErr != null) {
+                                        emitMerged()
+                                        return@addSnapshotListener
+                                    }
+                                    val txMap = mutableMapOf<String, Transaction>()
+                                    txSnap?.documents?.forEach { doc ->
+                                        try {
+                                            val tx = parseTransaction(doc)
+                                            txMap[tx.id] = tx
+                                        } catch (e: Exception) {
+                                            android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação de cartão ${doc.id}", e)
+                                        }
+                                    }
+                                    cardTxsMap[cardId] = txMap
+                                    emitMerged()
+                                }
+                            cardListeners[cardId] = reg
+                        }
+
+                        if (removed.isNotEmpty()) {
+                            emitMerged()
+                        }
+                    }
+
+                    // 1. Transações com visibleToUids do usuário
+                    val regVisible: ListenerRegistration = firestore.collection("transactions")
+                        .whereArrayContains("visibleToUids", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                emitMerged()
+                                return@addSnapshotListener
+                            }
+                            visibleTxsMap.clear()
+                            snapshot?.documents?.forEach { doc ->
+                                try {
+                                    val tx = parseTransaction(doc)
+                                    visibleTxsMap[tx.id] = tx
+                                } catch (e: Exception) {
+                                    android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação visibleToUids ${doc.id}", e)
+                                }
+                            }
+                            emitMerged()
+                        }
+
+                    // 2. Transações criadas pelo usuário (garante retorno mesmo se visibleToUids não tiver sido preenchido)
+                    val regCreated: ListenerRegistration = firestore.collection("transactions")
+                        .whereEqualTo("createdByUid", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                emitMerged()
+                                return@addSnapshotListener
+                            }
+                            createdTxsMap.clear()
+                            snapshot?.documents?.forEach { doc ->
+                                try {
+                                    val tx = parseTransaction(doc)
+                                    createdTxsMap[tx.id] = tx
+                                } catch (e: Exception) {
+                                    android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação createdByUid ${doc.id}", e)
+                                }
+                            }
+                            emitMerged()
+                        }
+
+                    // 3. Transações pagas pelo usuário
+                    val regPaid: ListenerRegistration = firestore.collection("transactions")
+                        .whereEqualTo("paidByUid", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                emitMerged()
+                                return@addSnapshotListener
+                            }
+                            paidTxsMap.clear()
+                            snapshot?.documents?.forEach { doc ->
+                                try {
+                                    val tx = parseTransaction(doc)
+                                    paidTxsMap[tx.id] = tx
+                                } catch (e: Exception) {
+                                    android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação paidByUid ${doc.id}", e)
+                                }
+                            }
+                            emitMerged()
+                        }
+
+                    // 4. Transações designadas ao usuário (amigo)
+                    val regAssigned: ListenerRegistration = firestore.collection("transactions")
+                        .whereEqualTo("assignedFriendUid", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                emitMerged()
+                                return@addSnapshotListener
+                            }
+                            assignedTxsMap.clear()
+                            snapshot?.documents?.forEach { doc ->
+                                try {
+                                    val tx = parseTransaction(doc)
+                                    assignedTxsMap[tx.id] = tx
+                                } catch (e: Exception) {
+                                    android.util.Log.w("FirestoreFinanceRepo", "Falha ao analisar transação assignedFriendUid ${doc.id}", e)
+                                }
+                            }
+                            emitMerged()
+                        }
+
+                    // 5. Escuta cartões próprios onde o usuário é titular
+                    val ownedCardsRegistration = firestore.collection("cards")
+                        .whereEqualTo("ownerUid", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) return@addSnapshotListener
+                            ownedCardIds.clear()
+                            snapshot?.documents?.mapNotNull { it.id }?.let { ownedCardIds.addAll(it) }
+                            updateCardListeners()
+                        }
+
+                    // 6. Escuta cartões compartilhados onde o usuário é convidado
+                    val sharedCardsRegistration = firestore.collection("cards")
+                        .whereArrayContains("sharedWithUids", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) return@addSnapshotListener
+                            sharedCardIds.clear()
+                            snapshot?.documents?.mapNotNull { it.id }?.let { sharedCardIds.addAll(it) }
+                            updateCardListeners()
+                        }
+
+                    awaitClose {
+                        regVisible.remove()
+                        regCreated.remove()
+                        regPaid.remove()
+                        regAssigned.remove()
+                        ownedCardsRegistration.remove()
+                        sharedCardsRegistration.remove()
+                        for (reg in cardListeners.values) {
+                            reg.remove()
+                        }
+                        cardListeners.clear()
                     }
                 }
-                emitMerged()
             }
-
-        // 2. Escuta cartões próprios onde o usuário é titular
-        val ownedCardsRegistration = firestore.collection("cards")
-            .whereEqualTo("ownerUid", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                ownedCardIds.clear()
-                snapshot?.documents?.mapNotNull { it.id }?.let { ownedCardIds.addAll(it) }
-                updateCardListeners()
-            }
-
-        // 3. Escuta cartões compartilhados onde o usuário é convidado
-        val sharedCardsRegistration = firestore.collection("cards")
-            .whereArrayContains("sharedWithUids", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                sharedCardIds.clear()
-                snapshot?.documents?.mapNotNull { it.id }?.let { sharedCardIds.addAll(it) }
-                updateCardListeners()
-            }
-
-        awaitClose {
-            myRegistration.remove()
-            ownedCardsRegistration.remove()
-            sharedCardsRegistration.remove()
-            for (reg in cardListeners.values) {
-                reg.remove()
-            }
-            cardListeners.clear()
-        }
-    }
-
-    override fun getCards(): Flow<List<Card>> = callbackFlow {
-        val currentUid = auth.currentUser?.uid ?: _currentUser.value.uid
-        if (currentUid.isBlank() || currentUid == "default_uid") {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
         }
 
-        val ownedCardsMap = mutableMapOf<String, Card>()
-        val sharedCardsMap = mutableMapOf<String, Card>()
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun getCards(): Flow<List<Card>> = _currentUser
+        .map { it.uid }
+        .distinctUntilChanged()
+        .flatMapLatest { currentUid ->
+            if (currentUid.isBlank() || currentUid == "default_uid") {
+                flowOf(emptyList())
+            } else {
+                callbackFlow {
+                    val ownedCardsMap = mutableMapOf<String, Card>()
+                    val sharedCardsMap = mutableMapOf<String, Card>()
 
-        fun emitCombined() {
-            val combined = (ownedCardsMap + sharedCardsMap).values.toList()
-            trySend(combined)
-        }
-
-        // Emite imediatamente defensivo para desbloquear flows downstream
-        emitCombined()
-
-        val regOwned = firestore.collection("cards")
-            .whereEqualTo("ownerUid", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    emitCombined()
-                    return@addSnapshotListener
-                }
-                ownedCardsMap.clear()
-                snapshot?.documents?.forEach { doc ->
-                    try {
-                        val card = parseCard(doc)
-                        ownedCardsMap[card.id] = card
-                    } catch (_: Exception) {}
-                }
-                emitCombined()
-            }
-
-        val regShared = firestore.collection("cards")
-            .whereArrayContains("sharedWithUids", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    emitCombined()
-                    return@addSnapshotListener
-                }
-                sharedCardsMap.clear()
-                snapshot?.documents?.forEach { doc ->
-                    try {
-                        val card = parseCard(doc)
-                        sharedCardsMap[card.id] = card
-                    } catch (_: Exception) {}
-                }
-                emitCombined()
-            }
-
-        awaitClose {
-            regOwned.remove()
-            regShared.remove()
-        }
-    }
-
-    override fun getRecurringBills(): Flow<List<RecurringBill>> = callbackFlow {
-        val currentUid = auth.currentUser?.uid
-        if (currentUid.isNullOrBlank()) {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
-        }
-
-        val registration = firestore.collection("recurring_bills")
-            .whereEqualTo("ownerUid", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    trySend(emptyList())
-                    return@addSnapshotListener
-                }
-                val bills = snapshot?.documents?.mapNotNull { doc ->
-                    try {
-                        parseRecurringBill(doc)
-                    } catch (_: Exception) {
-                        null
+                    fun emitCombined() {
+                        val combined = (ownedCardsMap + sharedCardsMap).values.toList()
+                        trySend(combined)
                     }
-                } ?: emptyList()
-                trySend(bills)
+
+                    val regOwned = firestore.collection("cards")
+                        .whereEqualTo("ownerUid", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                emitCombined()
+                                return@addSnapshotListener
+                            }
+                            ownedCardsMap.clear()
+                            snapshot?.documents?.forEach { doc ->
+                                try {
+                                    val card = parseCard(doc)
+                                    ownedCardsMap[card.id] = card
+                                } catch (_: Exception) {}
+                            }
+                            emitCombined()
+                        }
+
+                    val regShared = firestore.collection("cards")
+                        .whereArrayContains("sharedWithUids", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                emitCombined()
+                                return@addSnapshotListener
+                            }
+                            sharedCardsMap.clear()
+                            snapshot?.documents?.forEach { doc ->
+                                try {
+                                    val card = parseCard(doc)
+                                    sharedCardsMap[card.id] = card
+                                } catch (_: Exception) {}
+                            }
+                            emitCombined()
+                        }
+
+                    awaitClose {
+                        regOwned.remove()
+                        regShared.remove()
+                    }
+                }
             }
-
-        awaitClose { registration.remove() }
-    }
-
-    override fun getMonthClosures(): Flow<List<MonthClosure>> = callbackFlow {
-        val currentUid = auth.currentUser?.uid
-        if (currentUid.isNullOrBlank()) {
-            trySend(emptyList())
-            close()
-            return@callbackFlow
         }
 
-        val registration = firestore.collection("users")
-            .document(currentUid)
-            .collection("month_closures")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    trySend(emptyList())
-                    return@addSnapshotListener
-                }
-                val closures = snapshot?.documents?.mapNotNull { doc ->
-                    try {
-                        parseMonthClosure(doc)
-                    } catch (_: Exception) {
-                        null
-                    }
-                } ?: emptyList()
-                trySend(closures)
-            }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun getRecurringBills(): Flow<List<RecurringBill>> = _currentUser
+        .map { it.uid }
+        .distinctUntilChanged()
+        .flatMapLatest { currentUid ->
+            if (currentUid.isBlank() || currentUid == "default_uid") {
+                flowOf(emptyList())
+            } else {
+                callbackFlow {
+                    val registration = firestore.collection("recurring_bills")
+                        .whereEqualTo("ownerUid", currentUid)
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                trySend(emptyList())
+                                return@addSnapshotListener
+                            }
+                            val bills = snapshot?.documents?.mapNotNull { doc ->
+                                try {
+                                    parseRecurringBill(doc)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                            } ?: emptyList()
+                            trySend(bills)
+                        }
 
-        awaitClose { registration.remove() }
-    }
+                    awaitClose { registration.remove() }
+                }
+            }
+        }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun getMonthClosures(): Flow<List<MonthClosure>> = _currentUser
+        .map { it.uid }
+        .distinctUntilChanged()
+        .flatMapLatest { currentUid ->
+            if (currentUid.isBlank() || currentUid == "default_uid") {
+                flowOf(emptyList())
+            } else {
+                callbackFlow {
+                    val registration = firestore.collection("users")
+                        .document(currentUid)
+                        .collection("month_closures")
+                        .addSnapshotListener { snapshot, error ->
+                            if (error != null) {
+                                trySend(emptyList())
+                                return@addSnapshotListener
+                            }
+                            val closures = snapshot?.documents?.mapNotNull { doc ->
+                                try {
+                                    parseMonthClosure(doc)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                            } ?: emptyList()
+                            trySend(closures)
+                        }
+
+                    awaitClose { registration.remove() }
+                }
+            }
+        }
 
     override fun getMonthSummary(): Flow<MonthSummary> {
         return combine(
@@ -481,34 +556,36 @@ class FirestoreFinanceRepository(
         try {
             firestore.collection("transactions").document(id).delete().await()
         } catch (e: Exception) {
-            android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir transação $id", e)
-            throw e
+            android.util.Log.e("FirestoreFinanceRepo", "Erro defensivo ao excluir transação $id", e)
         }
     }
 
     override suspend fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int): Int {
         if (groupId.isBlank()) return 0
         try {
-            val all = getTransactions().first()
-            val targetIds = all.filter {
-                it.installmentGroupId == groupId &&
-                !it.id.startsWith("invoice_") &&
-                (it.installmentNumber ?: 1) >= fromInstallmentNumber &&
-                it.status != TransactionStatus.PAID
-            }.map { it.id }
-            if (targetIds.isEmpty()) return 0
+            val snap = firestore.collection("transactions")
+                .whereEqualTo("installmentGroupId", groupId)
+                .get()
+                .await()
+            val targetDocs = snap.documents.filter { doc ->
+                if (doc.id.startsWith("invoice_")) return@filter false
+                val num = doc.getLongSafe("installmentNumber") ?: 1L
+                val statusStr = doc.getString("status")?.lowercase()?.trim()
+                num >= fromInstallmentNumber && statusStr != "paid" && statusStr != "pago"
+            }
+            if (targetDocs.isEmpty()) return 0
 
-            for (chunk in targetIds.chunked(450)) {
+            for (chunk in targetDocs.chunked(450)) {
                 val batch = firestore.batch()
-                for (id in chunk) {
-                    batch.delete(firestore.collection("transactions").document(id))
+                for (doc in chunk) {
+                    batch.delete(doc.reference)
                 }
                 batch.commit().await()
             }
-            return targetIds.size
+            return targetDocs.size
         } catch (e: Exception) {
             android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir parcelas futuras do grupo $groupId", e)
-            throw e
+            return 0
         }
     }
 
@@ -576,21 +653,24 @@ class FirestoreFinanceRepository(
     override suspend fun deleteInstallmentGroup(groupId: String): Int {
         if (groupId.isBlank()) return 0
         try {
-            val all = getTransactions().first()
-            val targetIds = all.filter { it.installmentGroupId == groupId && !it.id.startsWith("invoice_") }.map { it.id }
-            if (targetIds.isEmpty()) return 0
+            val snap = firestore.collection("transactions")
+                .whereEqualTo("installmentGroupId", groupId)
+                .get()
+                .await()
+            val targetDocs = snap.documents.filter { !it.id.startsWith("invoice_") }
+            if (targetDocs.isEmpty()) return 0
 
-            for (chunk in targetIds.chunked(450)) {
+            for (chunk in targetDocs.chunked(450)) {
                 val batch = firestore.batch()
-                for (id in chunk) {
-                    batch.delete(firestore.collection("transactions").document(id))
+                for (doc in chunk) {
+                    batch.delete(doc.reference)
                 }
                 batch.commit().await()
             }
-            return targetIds.size
+            return targetDocs.size
         } catch (e: Exception) {
             android.util.Log.e("FirestoreFinanceRepo", "Erro ao excluir grupo de parcelamento $groupId", e)
-            throw e
+            return 0
         }
     }
 
@@ -996,57 +1076,60 @@ class FirestoreFinanceRepository(
         firestore.collection("cards").document(id).delete().await()
     }
 
-    override fun getFriendships(): Flow<List<Friendship>> = callbackFlow {
-        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
-        if (uid.isBlank() || uid == "default_uid") {
-            trySend(emptyList())
-            awaitClose { }
-            return@callbackFlow
-        }
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    override fun getFriendships(): Flow<List<Friendship>> = _currentUser
+        .map { it.uid }
+        .distinctUntilChanged()
+        .flatMapLatest { uid ->
+            if (uid.isBlank() || uid == "default_uid") {
+                flowOf(emptyList())
+            } else {
+                callbackFlow {
+                    val map1 = mutableMapOf<String, Friendship>()
+                    val map2 = mutableMapOf<String, Friendship>()
 
-        val map1 = mutableMapOf<String, Friendship>()
-        val map2 = mutableMapOf<String, Friendship>()
+                    fun emitCombined() {
+                        val combined = (map1 + map2).values.toList()
+                        trySend(combined)
+                    }
 
-        fun emitCombined() {
-            val combined = (map1 + map2).values.toList()
-            trySend(combined)
-        }
+                    val l1 = firestore.collection("friendships")
+                        .whereEqualTo("requesterUid", uid)
+                        .addSnapshotListener { snap, err ->
+                            if (err != null || snap == null) {
+                                map1.clear()
+                                emitCombined()
+                                return@addSnapshotListener
+                            }
+                            map1.clear()
+                            for (doc in snap.documents) {
+                                parseFriendship(doc)?.let { map1[it.id] = it }
+                            }
+                            emitCombined()
+                        }
 
-        val l1 = firestore.collection("friendships")
-            .whereEqualTo("requesterUid", uid)
-            .addSnapshotListener { snap, err ->
-                if (err != null || snap == null) {
-                    map1.clear()
-                    emitCombined()
-                    return@addSnapshotListener
+                    val l2 = firestore.collection("friendships")
+                        .whereEqualTo("recipientUid", uid)
+                        .addSnapshotListener { snap, err ->
+                            if (err != null || snap == null) {
+                                map2.clear()
+                                emitCombined()
+                                return@addSnapshotListener
+                            }
+                            map2.clear()
+                            for (doc in snap.documents) {
+                                parseFriendship(doc)?.let { map2[it.id] = it }
+                            }
+                            emitCombined()
+                        }
+
+                    awaitClose {
+                        l1.remove()
+                        l2.remove()
+                    }
                 }
-                map1.clear()
-                for (doc in snap.documents) {
-                    parseFriendship(doc)?.let { map1[it.id] = it }
-                }
-                emitCombined()
             }
-
-        val l2 = firestore.collection("friendships")
-            .whereEqualTo("recipientUid", uid)
-            .addSnapshotListener { snap, err ->
-                if (err != null || snap == null) {
-                    map2.clear()
-                    emitCombined()
-                    return@addSnapshotListener
-                }
-                map2.clear()
-                for (doc in snap.documents) {
-                    parseFriendship(doc)?.let { map2[it.id] = it }
-                }
-                emitCombined()
-            }
-
-        awaitClose {
-            l1.remove()
-            l2.remove()
         }
-    }
 
     override suspend fun sendFriendRequest(email: String): Pair<Boolean, String> {
         val trimmed = email.trim().lowercase()
@@ -1414,9 +1497,15 @@ class FirestoreFinanceRepository(
     }
 
     internal fun parseTransaction(doc: DocumentSnapshot): Transaction {
-        val rawVisible = (doc.get("visibleToUids") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
-        val createdUid = doc.getString("createdByUid") ?: ""
-        val visibleUids = if (rawVisible.isEmpty() && createdUid.isNotBlank()) listOf(createdUid) else rawVisible
+        val createdUid = doc.getString("createdByUid")?.trim() ?: ""
+        val paidUid = doc.getString("paidByUid")?.trim() ?: createdUid
+        val assignedFriend = doc.getString("assignedFriendUid")?.trim()
+
+        val rawVisible = (doc.get("visibleToUids") as? List<*>)?.mapNotNull { it?.toString()?.trim() }?.filter { it.isNotBlank() } ?: emptyList()
+        val visibleSet = LinkedHashSet<String>(rawVisible)
+        if (createdUid.isNotBlank()) visibleSet.add(createdUid)
+        if (paidUid.isNotBlank()) visibleSet.add(paidUid)
+        if (!assignedFriend.isNullOrBlank()) visibleSet.add(assignedFriend)
 
         val rawAllocationsData = doc.get("allocations")
         val allocationsList: List<*> = when (rawAllocationsData) {
@@ -1426,9 +1515,11 @@ class FirestoreFinanceRepository(
         }
         val rawAllocations = allocationsList.mapNotNull { item ->
             if (item is Map<*, *>) {
+                val allocUid = item["uid"]?.toString()?.trim()
+                if (!allocUid.isNullOrBlank()) visibleSet.add(allocUid)
                 Allocation(
                     type = item["type"]?.toString() ?: "PLATFORM_USER",
-                    uid = item["uid"]?.toString(),
+                    uid = allocUid,
                     name = item["name"]?.toString() ?: "",
                     amount = (item["amount"] as? Number)?.toDouble()
                         ?: item["amount"]?.toString()?.toDoubleOrNull() ?: 0.0,
@@ -1438,11 +1529,14 @@ class FirestoreFinanceRepository(
         }
 
         val rawUserImpact = (doc.get("userImpact") as? Map<*, *>)?.mapNotNull { (k, v) ->
-            val uidKey = k?.toString() ?: return@mapNotNull null
+            val uidKey = k?.toString()?.trim() ?: return@mapNotNull null
+            visibleSet.add(uidKey)
             val valDouble = (v as? Number)?.toDouble()
                 ?: v?.toString()?.toDoubleOrNull() ?: 0.0
             uidKey to valDouble
         }?.toMap() ?: emptyMap()
+
+        val visibleUids = visibleSet.toList()
 
         val resolvedUserImpact = if (rawUserImpact.isNotEmpty()) {
             rawUserImpact
@@ -1462,10 +1556,24 @@ class FirestoreFinanceRepository(
             ?: doc.getString("thirdPartyName")
             ?: rawAllocations.find { it.type == "EXTERNAL" }?.name
 
+        var compMonth = doc.getString("competenceMonth")?.trim() ?: ""
+        if (compMonth.length > 7) {
+            compMonth = compMonth.substring(0, 7)
+        }
+        if (compMonth.isBlank() || compMonth.length < 7) {
+            val due = doc.getString("dueDate")?.trim() ?: ""
+            if (due.length >= 7) {
+                compMonth = due.substring(0, 7)
+            }
+        }
+        if (compMonth.isBlank() || compMonth.length < 7) {
+            compMonth = FinanceEngine.currentMonthKey()
+        }
+
         val tx = Transaction(
             id = doc.id,
             createdByUid = createdUid,
-            paidByUid = doc.getString("paidByUid") ?: createdUid,
+            paidByUid = paidUid,
             cardId = doc.getString("cardId"),
             description = doc.getString("description") ?: "",
             category = doc.getString("category") ?: "Outros",
@@ -1477,7 +1585,7 @@ class FirestoreFinanceRepository(
             actualAmount = doc.getDoubleSafe("actualAmount"),
             totalAmount = doc.getDoubleSafe("totalAmount") ?: 0.0,
             dueDate = doc.getString("dueDate") ?: FinanceEngine.todayKey(),
-            competenceMonth = doc.getString("competenceMonth") ?: FinanceEngine.currentMonthKey(),
+            competenceMonth = compMonth,
             visibleToUids = visibleUids,
             userImpact = resolvedUserImpact,
             allocations = rawAllocations,
@@ -1485,7 +1593,7 @@ class FirestoreFinanceRepository(
             reserveCardId = doc.getString("reserveCardId"),
             notes = doc.getString("notes"),
             createdAt = doc.getLongSafe("createdAt") ?: System.currentTimeMillis(),
-            assignedFriendUid = doc.getString("assignedFriendUid"),
+            assignedFriendUid = assignedFriend,
             assignedFriendName = doc.getString("assignedFriendName"),
             acceptanceStatus = doc.getString("acceptanceStatus"),
             friendSharePct = doc.getDoubleSafe("friendSharePct"),
@@ -1505,6 +1613,16 @@ class FirestoreFinanceRepository(
     }
 
     private fun transactionToMap(tx: Transaction): Map<String, Any?> {
+        val visibleSet = LinkedHashSet<String>(tx.visibleToUids)
+        if (tx.createdByUid.isNotBlank()) visibleSet.add(tx.createdByUid)
+        if (tx.paidByUid.isNotBlank()) visibleSet.add(tx.paidByUid)
+        if (!tx.assignedFriendUid.isNullOrBlank()) visibleSet.add(tx.assignedFriendUid)
+
+        var compMonth = tx.competenceMonth.trim()
+        if (compMonth.length > 7) compMonth = compMonth.substring(0, 7)
+        if (compMonth.isBlank() && tx.dueDate.trim().length >= 7) compMonth = tx.dueDate.trim().substring(0, 7)
+        if (compMonth.isBlank()) compMonth = FinanceEngine.currentMonthKey()
+
         return mapOf(
             "id" to tx.id,
             "createdByUid" to tx.createdByUid,
@@ -1520,8 +1638,8 @@ class FirestoreFinanceRepository(
             "actualAmount" to tx.actualAmount,
             "totalAmount" to tx.totalAmount,
             "dueDate" to tx.dueDate,
-            "competenceMonth" to tx.competenceMonth,
-            "visibleToUids" to tx.visibleToUids,
+            "competenceMonth" to compMonth,
+            "visibleToUids" to visibleSet.toList(),
             "userImpact" to tx.userImpact,
             "allocations" to tx.allocations.map {
                 mapOf(

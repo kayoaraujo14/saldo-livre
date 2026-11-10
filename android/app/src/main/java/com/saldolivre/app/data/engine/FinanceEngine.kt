@@ -1197,12 +1197,22 @@ object FinanceEngine {
         return true
     }
 
+    fun isTxVisibleToUser(tx: Transaction, uid: String): Boolean {
+        if (uid.isBlank()) return false
+        if (tx.visibleToUids.contains(uid)) return true
+        if (tx.createdByUid == uid || tx.paidByUid == uid) return true
+        if (tx.assignedFriendUid == uid) return true
+        if (tx.userImpact.containsKey(uid)) return true
+        if (tx.allocations.any { it.uid == uid }) return true
+        return false
+    }
+
     fun computeMonthRawBalance(
         all: List<Transaction>,
         uid: String,
         monthKey: String
     ): Double {
-        val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
+        val monthTxs = all.filter { it.competenceMonth == monthKey && isTxVisibleToUser(it, uid) }
         var inc = 0.0
         var exp = 0.0
         for (tx in monthTxs) {
@@ -1223,7 +1233,7 @@ object FinanceEngine {
         cards: List<Card> = emptyList(),
         closures: List<MonthClosure> = emptyList()
     ): MonthSummary {
-        val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
+        val monthTxs = all.filter { it.competenceMonth == monthKey && isTxVisibleToUser(it, uid) }
 
         var income = 0.0
         var paid = 0.0
@@ -1542,7 +1552,7 @@ object FinanceEngine {
             round2((summary.pendingClosureSurplus ?: 0.0) - summary.previousMonthDeficit)
         }
 
-        val monthTxs = all.filter { it.competenceMonth == monthKey && it.visibleToUids.contains(uid) }
+        val monthTxs = all.filter { it.competenceMonth == monthKey && isTxVisibleToUser(it, uid) }
 
         // Apenas transações da conta bancária / extrato (exclui compras feitas em cartão de crédito)
         val accountTxs = monthTxs.filter { it.cardId.isNullOrBlank() && it.paymentMethod != PaymentMethod.CREDIT_CARD }

@@ -85,7 +85,7 @@ class TransactionsViewModel(
                 repository.getCards()
             ) { user, month, allTxs, summary, cards ->
                 val rawMonthTxs = allTxs.filter {
-                    it.competenceMonth == month && it.visibleToUids.contains(user.uid)
+                    it.competenceMonth == month && FinanceEngine.isTxVisibleToUser(it, user.uid)
                 }.sortedByDescending { it.dueDate }
 
                 val effectiveTxs = InvoiceEngine.consolidateMonthTransactions(rawMonthTxs, allTxs, cards, user.uid, month, true)
@@ -150,7 +150,7 @@ class TransactionsViewModel(
                         transactions = effectiveTxs,
                         rawMonthTransactions = rawMonthTxs,
                         cards = cards,
-                        allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
+                        allTransactions = allTxs.filter { FinanceEngine.isTxVisibleToUser(it, user.uid) },
                         selectedMonth = month,
                         availableCategories = availableCats,
                         categoryCounts = catCounts,

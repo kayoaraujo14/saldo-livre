@@ -41,7 +41,7 @@ import {
   type Firestore,
 } from 'firebase/firestore'
 import type { Card, ChatSession, Friendship, MonthClosure, NewTransaction, PublicUserProfile, RecurringBill, SharedUser, Transaction, UserLearnedRule, UserProfile } from '@/types'
-import { dateInMonth, daysInMonth, monthLabel, stripUndefined } from './utils'
+import { currentMonthKey, dateInMonth, daysInMonth, monthLabel, stripUndefined } from './utils'
 
 const FIREBASE_CONFIG_STORAGE_KEY = 'saldo-livre:firebase-config'
 
@@ -344,11 +344,53 @@ export function normalizeCard(id: string, raw: any): Card {
 
 export function normalizeTransaction(id: string, raw: any): Transaction {
   const data = raw || {}
+  const createdByUid = String(data.createdByUid || '').trim()
+  const paidByUid = String(data.paidByUid || createdByUid || '').trim()
+  const assignedFriendUid = data.assignedFriendUid ? String(data.assignedFriendUid).trim() : null
+
+  // Normalização ultra-defensiva de visibleToUids
+  const rawVisible: string[] = Array.isArray(data.visibleToUids)
+    ? data.visibleToUids.map((x: any) => String(x || '').trim()).filter(Boolean)
+    : (data.visibleToUids && typeof data.visibleToUids === 'object'
+        ? Object.values(data.visibleToUids).map((x: any) => String(x || '').trim()).filter(Boolean)
+        : [])
+
+  const visibleSet = new Set<string>(rawVisible)
+  if (createdByUid) visibleSet.add(createdByUid)
+  if (paidByUid) visibleSet.add(paidByUid)
+  if (assignedFriendUid) visibleSet.add(assignedFriendUid)
+
+  // Preserva UIDs de allocations e userImpact para visibilidade fiel
+  if (Array.isArray(data.allocations)) {
+    for (const alloc of data.allocations) {
+      if (alloc && alloc.uid && typeof alloc.uid === 'string' && alloc.uid.trim()) {
+        visibleSet.add(alloc.uid.trim())
+      }
+    }
+  }
+
+  if (data.userImpact && typeof data.userImpact === 'object' && !Array.isArray(data.userImpact)) {
+    for (const k of Object.keys(data.userImpact)) {
+      if (k && typeof k === 'string' && k.trim()) {
+        visibleSet.add(k.trim())
+      }
+    }
+  }
+
+  // Normalização de competenceMonth no padrão YYYY-MM
+  let compMonth = String(data.competenceMonth || '').trim()
+  if (compMonth.length > 7) {
+    compMonth = compMonth.slice(0, 7)
+  }
+  if (!compMonth && data.dueDate && String(data.dueDate).trim().length >= 7) {
+    compMonth = String(data.dueDate).trim().slice(0, 7)
+  }
+
   return {
     ...data,
     id,
-    createdByUid: data.createdByUid || '',
-    paidByUid: data.paidByUid || data.createdByUid || '',
+    createdByUid,
+    paidByUid,
     cardId: data.cardId || null,
     reserveCardId: data.reserveCardId || null,
     recurringBillId: data.recurringBillId || null,
@@ -362,13 +404,13 @@ export function normalizeTransaction(id: string, raw: any): Transaction {
     actualAmount: data.actualAmount ?? null,
     totalAmount: Number(data.totalAmount) || 0,
     dueDate: data.dueDate || '',
-    competenceMonth: data.competenceMonth || '',
-    visibleToUids: Array.isArray(data.visibleToUids) ? data.visibleToUids : [],
+    competenceMonth: compMonth || data.competenceMonth || '',
+    visibleToUids: Array.from(visibleSet),
     userImpact: (data.userImpact && typeof data.userImpact === 'object' && !Array.isArray(data.userImpact)) ? data.userImpact : {},
     allocations: Array.isArray(data.allocations) ? data.allocations : [],
-    assignedFriendUid: data.assignedFriendUid || null,
+    assignedFriendUid,
     assignedFriendName: data.assignedFriendName || null,
-    friendSharePct: data.friendSharePct ?? null,
+    friendSharePct: data.friendSharePct != null ? Number(data.friendSharePct) : null,
     acceptanceStatus: data.acceptanceStatus || null,
     respondedAt: data.respondedAt ?? null,
     installmentGroupId: data.installmentGroupId || null,
@@ -409,13 +451,19 @@ export function normalizeRecurringBill(id: string, raw: any): RecurringBill {
 export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => void) {
   try {
     const { db } = ensure()
-    const myTxsMap = new Map<string, Transaction>()
+    const visibleTxsMap = new Map<string, Transaction>()
+    const createdTxsMap = new Map<string, Transaction>()
+    const paidTxsMap = new Map<string, Transaction>()
+    const assignedTxsMap = new Map<string, Transaction>()
     const sharedCardTxsMap = new Map<string, Map<string, Transaction>>()
     const sharedCardUnsubs = new Map<string, () => void>()
 
     const emit = () => {
       const merged = new Map<string, Transaction>()
-      for (const [id, tx] of myTxsMap) merged.set(id, tx)
+      for (const [id, tx] of visibleTxsMap) merged.set(id, tx)
+      for (const [id, tx] of createdTxsMap) merged.set(id, tx)
+      for (const [id, tx] of paidTxsMap) merged.set(id, tx)
+      for (const [id, tx] of assignedTxsMap) merged.set(id, tx)
       for (const cardMap of sharedCardTxsMap.values()) {
         for (const [id, tx] of cardMap) {
           if (!merged.has(id)) {
@@ -426,21 +474,63 @@ export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => v
       cb([...merged.values()])
     }
 
-    // 1. Transações com visibleToUids do usuário
-    const q = query(collection(db, COLLECTIONS.transactions), where('visibleToUids', 'array-contains', uid))
-    const u1 = onSnapshot(
-      q,
+    // 1. Transações com visibleToUids contendo o usuário
+    const qVisible = query(collection(db, COLLECTIONS.transactions), where('visibleToUids', 'array-contains', uid))
+    const uVisible = onSnapshot(
+      qVisible,
       (snap) => {
-        myTxsMap.clear()
+        visibleTxsMap.clear()
         for (const d of snap.docs) {
-          myTxsMap.set(d.id, normalizeTransaction(d.id, d.data()))
+          visibleTxsMap.set(d.id, normalizeTransaction(d.id, d.data()))
         }
         emit()
       },
-      (err) => console.warn('Erro ao sincronizar transações do Firestore:', err)
+      (err) => console.warn('Erro ao sincronizar transações por visibleToUids:', err)
     )
 
-    // 2. Escuta cartões próprios e compartilhados para sincronizar todas as transações desses cartões
+    // 2. Transações criadas pelo usuário
+    const qCreated = query(collection(db, COLLECTIONS.transactions), where('createdByUid', '==', uid))
+    const uCreated = onSnapshot(
+      qCreated,
+      (snap) => {
+        createdTxsMap.clear()
+        for (const d of snap.docs) {
+          createdTxsMap.set(d.id, normalizeTransaction(d.id, d.data()))
+        }
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar transações por createdByUid:', err)
+    )
+
+    // 3. Transações pagas pelo usuário
+    const qPaid = query(collection(db, COLLECTIONS.transactions), where('paidByUid', '==', uid))
+    const uPaid = onSnapshot(
+      qPaid,
+      (snap) => {
+        paidTxsMap.clear()
+        for (const d of snap.docs) {
+          paidTxsMap.set(d.id, normalizeTransaction(d.id, d.data()))
+        }
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar transações por paidByUid:', err)
+    )
+
+    // 4. Transações atribuídas ao usuário (amigo)
+    const qAssigned = query(collection(db, COLLECTIONS.transactions), where('assignedFriendUid', '==', uid))
+    const uAssigned = onSnapshot(
+      qAssigned,
+      (snap) => {
+        assignedTxsMap.clear()
+        for (const d of snap.docs) {
+          assignedTxsMap.set(d.id, normalizeTransaction(d.id, d.data()))
+        }
+        emit()
+      },
+      (err) => console.warn('Erro ao sincronizar transações por assignedFriendUid:', err)
+    )
+
+    // 5. Escuta cartões próprios e compartilhados para sincronizar todas as transações desses cartões
     let ownedCardIds = new Set<string>()
     let sharedCardIds = new Set<string>()
 
@@ -497,7 +587,10 @@ export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => v
     )
 
     return () => {
-      u1()
+      uVisible()
+      uCreated()
+      uPaid()
+      uAssigned()
       uOwnedCards()
       uSharedCards()
       for (const unsub of sharedCardUnsubs.values()) unsub()
@@ -562,15 +655,46 @@ export function subscribeRecurring(uid: string, cb: (bills: RecurringBill[]) => 
 // ------------------------------------------------------------------
 // Mutations
 // ------------------------------------------------------------------
+export function sanitizeTransactionPayload(tx: any) {
+  const data = tx || {}
+  const createdByUid = String(data.createdByUid || '').trim()
+  const paidByUid = String(data.paidByUid || createdByUid || '').trim()
+  const assignedFriendUid = data.assignedFriendUid ? String(data.assignedFriendUid).trim() : null
+
+  const rawVisible: string[] = Array.isArray(data.visibleToUids)
+    ? data.visibleToUids.map((x: any) => String(x || '').trim()).filter(Boolean)
+    : []
+
+  const visibleSet = new Set<string>(rawVisible)
+  if (createdByUid) visibleSet.add(createdByUid)
+  if (paidByUid) visibleSet.add(paidByUid)
+  if (assignedFriendUid) visibleSet.add(assignedFriendUid)
+
+  let compMonth = String(data.competenceMonth || '').trim()
+  if (compMonth.length > 7) compMonth = compMonth.slice(0, 7)
+  if (!compMonth && data.dueDate && String(data.dueDate).length >= 7) {
+    compMonth = String(data.dueDate).slice(0, 7)
+  }
+  if (!compMonth) compMonth = currentMonthKey()
+
+  return stripUndefined({
+    ...data,
+    createdByUid,
+    paidByUid,
+    competenceMonth: compMonth,
+    visibleToUids: Array.from(visibleSet),
+  })
+}
+
 export async function fsAddTransaction(tx: NewTransaction) {
-  const ref = await addDoc(collection(ensure().db, COLLECTIONS.transactions), stripUndefined(tx))
+  const ref = await addDoc(collection(ensure().db, COLLECTIONS.transactions), sanitizeTransactionPayload(tx))
   return ref.id
 }
 
 export async function fsAddTransactions(txs: NewTransaction[]) {
   const { db } = ensure()
   const batch = writeBatch(db)
-  for (const tx of txs) batch.set(doc(collection(db, COLLECTIONS.transactions)), stripUndefined(tx))
+  for (const tx of txs) batch.set(doc(collection(db, COLLECTIONS.transactions)), sanitizeTransactionPayload(tx))
   await batch.commit()
 }
 

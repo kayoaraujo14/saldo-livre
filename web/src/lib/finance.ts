@@ -1089,8 +1089,18 @@ export function getDaysRemaining(monthKey: string) {
   return dim - new Date().getDate() + 1 // inclui o dia de hoje
 }
 
+export function isTxVisibleToUser(tx: Transaction, uid: string): boolean {
+  if (!tx || !uid) return false
+  if (Array.isArray(tx.visibleToUids) && tx.visibleToUids.includes(uid)) return true
+  if (tx.createdByUid === uid || tx.paidByUid === uid) return true
+  if (tx.assignedFriendUid === uid) return true
+  if (tx.userImpact && typeof tx.userImpact === 'object' && uid in tx.userImpact) return true
+  if (Array.isArray(tx.allocations) && tx.allocations.some((a) => a && a.uid === uid)) return true
+  return false
+}
+
 export function computeMonthRawBalance(all: Transaction[], uid: string, monthKey: string): number {
-  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
+  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && isTxVisibleToUser(t, uid))
   let inc = 0
   let exp = 0
   for (const tx of monthTxs) {
@@ -1111,7 +1121,7 @@ export function computeSummary(
   cards: Card[] = [],
   closures: MonthClosure[] = []
 ): MonthSummary {
-  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
+  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && isTxVisibleToUser(t, uid))
   let income = 0
   let paid = 0
   let committedEstimated = 0
@@ -1386,7 +1396,7 @@ export function computeAccountCashFlow(
     ? (summary.carryoverAmount ?? 0)
     : round2((summary.pendingClosureSurplus ?? 0) - (summary.previousMonthDeficit ?? 0))
 
-  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid))
+  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && isTxVisibleToUser(t, uid))
 
   // Apenas transações da conta bancária / extrato (exclui compras feitas em cartão de crédito)
   const accountTxs = monthTxs.filter((t) => !t.cardId && t.paymentMethod !== 'credit_card')
@@ -1438,7 +1448,7 @@ export function listReceivables(all: Transaction[], uid: string, monthKey: strin
   const items: ReceivableItem[] = []
   const payables: ReceivableItem[] = []
   for (const tx of all || []) {
-    if (tx.competenceMonth !== monthKey || tx.type !== 'expense' || !(tx.visibleToUids || []).includes(uid)) continue
+    if (tx.competenceMonth !== monthKey || tx.type !== 'expense' || !isTxVisibleToUser(tx, uid)) continue
     const cardName = cards?.find((c) => c.id === tx.cardId)?.cardName
 
     const allocs = tx.allocations || []

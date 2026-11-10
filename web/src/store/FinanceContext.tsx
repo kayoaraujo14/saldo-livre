@@ -42,6 +42,7 @@ import {
   resolvePartner,
   statusPatch,
   calculateFullInstallmentRefund,
+  isTxVisibleToUser,
   type Party,
 } from '@/lib/finance'
 import { anticipateInstallments as calcAnticipateInstallments } from '@/lib/invoices'
@@ -577,7 +578,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   // ---------------- Lançamentos do mês e resumo ----------------
   const monthTransactions = useMemo(() => {
     if (!currentUid) return []
-    return transactions.filter((t) => t.competenceMonth === month && (t.visibleToUids || []).includes(currentUid))
+    return transactions.filter((t) => t.competenceMonth === month && isTxVisibleToUser(t, currentUid))
   }, [transactions, month, currentUid])
 
   const summary = useMemo(() => {

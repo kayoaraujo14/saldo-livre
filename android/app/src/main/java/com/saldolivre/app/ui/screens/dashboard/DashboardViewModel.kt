@@ -131,7 +131,7 @@ class DashboardViewModel(
     init {
         // Timeout defensivo de carregamento para nunca travar a UI em skeleton infinito
         viewModelScope.launch {
-            kotlinx.coroutines.delay(2500)
+            kotlinx.coroutines.delay(6000)
             if (_uiState.value.isLoading) {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -154,7 +154,7 @@ class DashboardViewModel(
                 val user = userMonth.first
                 val month = userMonth.second
                 val monthTxs = allTxs
-                    .filter { it.competenceMonth == month && it.visibleToUids.contains(user.uid) }
+                    .filter { it.competenceMonth == month && FinanceEngine.isTxVisibleToUser(it, user.uid) }
                     .sortedByDescending { it.createdAt }
 
                 val consolidated = InvoiceEngine.consolidateMonthTransactions(
@@ -217,7 +217,7 @@ class DashboardViewModel(
                     tx.status != TransactionStatus.PAID &&
                     (tx.cardId.isNullOrBlank() || tx.reserveCardId != null) &&
                     tx.dueDate >= todayStr && tx.dueDate <= nextWeekStr &&
-                    tx.visibleToUids.contains(user.uid)
+                    FinanceEngine.isTxVisibleToUser(tx, user.uid)
                 }
                 var radarTotal = upcomingNonCardTxs.sumOf { tx ->
                     FinanceEngine.impactFor(tx, user.uid, allTxs)

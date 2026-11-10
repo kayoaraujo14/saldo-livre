@@ -87,8 +87,6 @@ fun AppNavHost(
         )
     }
 
-    val userScopeKey = "${repository.hashCode()}_${repository.currentUser.value.uid}"
-
     Scaffold(
         containerColor = DarkBackground,
         bottomBar = {
@@ -193,7 +191,7 @@ fun AppNavHost(
         ) {
             // 1. Dashboard (Início)
             composable(BottomNavItem.Dashboard.route) {
-                val dashboardViewModel = viewModel(key = "dashboard_$userScopeKey") { DashboardViewModel(repository) }
+                val dashboardViewModel: DashboardViewModel = viewModel { DashboardViewModel(repository) }
                 DashboardScreen(
                     viewModel = dashboardViewModel,
                     onNavigateToTransactions = {
@@ -219,7 +217,7 @@ fun AppNavHost(
 
             // 2. Transactions (Extrato)
             composable(BottomNavItem.Transactions.route) {
-                val transactionsViewModel = viewModel(key = "transactions_$userScopeKey") { TransactionsViewModel(repository) }
+                val transactionsViewModel: TransactionsViewModel = viewModel { TransactionsViewModel(repository) }
                 TransactionsScreen(
                     viewModel = transactionsViewModel,
                     onNavigateBack = { navController.popBackStack() },
@@ -232,7 +230,7 @@ fun AppNavHost(
 
             // 3. Cartões & Faturas (Fusão na Navbar)
             composable(BottomNavItem.Cards.route) {
-                val cardsViewModel = viewModel(key = "cards_$userScopeKey") { CardsAndInvoicesViewModel(repository) }
+                val cardsViewModel: CardsAndInvoicesViewModel = viewModel { CardsAndInvoicesViewModel(repository) }
                 CardsAndInvoicesScreen(
                     viewModel = cardsViewModel,
                     onEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") },
@@ -268,7 +266,7 @@ fun AppNavHost(
                         scaleOut(targetScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing))
                 }
             ) {
-                val chatViewModel = viewModel(key = "chat_$userScopeKey") { GeminiChatViewModel(repository) }
+                val chatViewModel: GeminiChatViewModel = viewModel { GeminiChatViewModel(repository) }
                 GeminiChatScreen(
                     viewModel = chatViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -277,7 +275,7 @@ fun AppNavHost(
 
             // 5. Menu & Ferramentas
             composable(BottomNavItem.Menu.route) {
-                val menuViewModel = viewModel(key = "menu_$userScopeKey") { MenuViewModel(repository) }
+                val menuViewModel: MenuViewModel = viewModel { MenuViewModel(repository) }
                 MenuScreen(
                     viewModel = menuViewModel,
                     onNavigateToReceivables = { navController.navigate("receivables") },
@@ -306,7 +304,7 @@ fun AppNavHost(
                     ) + fadeOut(animationSpec = tween(180))
                 }
             ) {
-                val formViewModel = viewModel(key = "add_tx_$userScopeKey") { TransactionFormViewModel(repository) }
+                val formViewModel: TransactionFormViewModel = viewModel { TransactionFormViewModel(repository) }
                 TransactionFormScreen(
                     viewModel = formViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -330,7 +328,7 @@ fun AppNavHost(
                 }
             ) { backStackEntry ->
                 val txId = backStackEntry.arguments?.getString("txId")
-                val formViewModel = viewModel(key = "edit_tx_$txId") {
+                val formViewModel: TransactionFormViewModel = viewModel(key = "edit_tx_$txId") {
                     TransactionFormViewModel(repository, editingTxId = txId)
                 }
                 TransactionFormScreen(
@@ -341,7 +339,7 @@ fun AppNavHost(
 
             // Moldes Recorrentes
             composable("recurring_bills") {
-                val recurringViewModel = viewModel(key = "recurring_$userScopeKey") { RecurringBillsViewModel(repository) }
+                val recurringViewModel: RecurringBillsViewModel = viewModel { RecurringBillsViewModel(repository) }
                 RecurringBillsScreen(
                     viewModel = recurringViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -350,7 +348,7 @@ fun AppNavHost(
 
             // Faturas por Cartão (Compatibilidade de rota legada apontando para a tela unificada)
             composable("card_invoices") {
-                val cardsViewModel = viewModel(key = "card_invoices_$userScopeKey") { CardsAndInvoicesViewModel(repository) }
+                val cardsViewModel: CardsAndInvoicesViewModel = viewModel { CardsAndInvoicesViewModel(repository) }
                 CardsAndInvoicesScreen(
                     viewModel = cardsViewModel,
                     onNavigateBack = { navController.popBackStack() },
@@ -361,7 +359,7 @@ fun AppNavHost(
 
             // Investimentos & Patrimônio
             composable("investments") {
-                val investmentsViewModel = viewModel(key = "investments_$userScopeKey") { InvestmentsViewModel(repository) }
+                val investmentsViewModel: InvestmentsViewModel = viewModel { InvestmentsViewModel(repository) }
                 InvestmentsScreen(
                     viewModel = investmentsViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -370,7 +368,7 @@ fun AppNavHost(
 
             // A Receber (Acessível via Menu e Card KPI)
             composable("receivables") {
-                val receivablesViewModel = viewModel(key = "receivables_$userScopeKey") { ReceivablesViewModel(repository) }
+                val receivablesViewModel: ReceivablesViewModel = viewModel { ReceivablesViewModel(repository) }
                 ReceivablesScreen(
                     viewModel = receivablesViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -379,7 +377,7 @@ fun AppNavHost(
 
             // Rede de Amigos & Aprovações
             composable("friends") {
-                val friendsViewModel = viewModel(key = "friends_$userScopeKey") { FriendsViewModel(repository) }
+                val friendsViewModel: FriendsViewModel = viewModel { FriendsViewModel(repository) }
                 FriendsScreen(
                     viewModel = friendsViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -388,7 +386,7 @@ fun AppNavHost(
 
             // Projeção de Fluxo de Caixa (6 Meses)
             composable("projections") {
-                val projectionsViewModel = viewModel(key = "projections_$userScopeKey") { FutureProjectionsViewModel(repository) }
+                val projectionsViewModel: FutureProjectionsViewModel = viewModel { FutureProjectionsViewModel(repository) }
                 FutureProjectionsScreen(
                     viewModel = projectionsViewModel,
                     onNavigateBack = { navController.popBackStack() }
@@ -397,7 +395,7 @@ fun AppNavHost(
 
             // Histórico de Atividades / Auditoria
             composable("recent_activity") {
-                val activityViewModel = viewModel(key = "recent_act_$userScopeKey") { RecentActivityViewModel(repository) }
+                val activityViewModel: RecentActivityViewModel = viewModel { RecentActivityViewModel(repository) }
                 RecentActivityScreen(
                     viewModel = activityViewModel,
                     onNavigateBack = { navController.popBackStack() },
