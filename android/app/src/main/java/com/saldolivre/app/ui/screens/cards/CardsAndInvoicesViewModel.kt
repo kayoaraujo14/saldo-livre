@@ -128,12 +128,6 @@ class CardsAndInvoicesViewModel(
                     }
                 }
 
-                // Sincroniza visibilidade de transações para cartões compartilhados próprios
-                for (c in cards) {
-                    if (c.ownerUid == user.uid && c.sharedWithUids.isNotEmpty()) {
-                        repository.syncCardTransactionsVisibility(c)
-                    }
-                }
 
                 // 1. Invoices computation via InvoiceEngine
                 val rawInvoices = sortedCards.map { card ->
@@ -437,6 +431,64 @@ class CardsAndInvoicesViewModel(
                 _uiState.update { it.copy(userMessage = "Estorno registrado com sucesso!") }
             } catch (e: Exception) {
                 android.util.Log.e("CardsAndInvoicesViewModel", "Erro ao registrar estorno", e)
+            }
+        }
+    }
+
+    fun deleteTransaction(id: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteTransaction(id)
+                _uiState.update { it.copy(userMessage = "Lançamento excluído com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("CardsAndInvoicesViewModel", "Erro ao excluir transação $id", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir o lançamento. Verifique suas permissões.") }
+            }
+        }
+    }
+
+    fun deleteInstallmentGroup(groupId: String) {
+        viewModelScope.launch {
+            try {
+                repository.deleteInstallmentGroup(groupId)
+                _uiState.update { it.copy(userMessage = "Parcelamento excluído com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("CardsAndInvoicesViewModel", "Erro ao excluir parcelamento $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir o parcelamento.") }
+            }
+        }
+    }
+
+    fun deleteFutureInstallments(groupId: String, fromInstallmentNumber: Int) {
+        viewModelScope.launch {
+            try {
+                repository.deleteFutureInstallments(groupId, fromInstallmentNumber)
+                _uiState.update { it.copy(userMessage = "Parcelas futuras excluídas com sucesso.") }
+            } catch (e: Exception) {
+                android.util.Log.e("CardsAndInvoicesViewModel", "Erro ao excluir parcelas futuras de $groupId", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível excluir parcelas futuras.") }
+            }
+        }
+    }
+
+    fun toggleTransactionStatus(id: String) {
+        viewModelScope.launch {
+            try {
+                repository.toggleTransactionStatus(id)
+            } catch (e: Exception) {
+                android.util.Log.e("CardsAndInvoicesViewModel", "Erro ao alternar status da transação", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível alternar o status da despesa.") }
+            }
+        }
+    }
+
+    fun setStatus(id: String, status: TransactionStatus, actualAmount: Double? = null) {
+        viewModelScope.launch {
+            try {
+                repository.setTransactionStatus(id, status, actualAmount)
+            } catch (e: Exception) {
+                android.util.Log.e("CardsAndInvoicesViewModel", "Erro ao definir status da transação", e)
+                _uiState.update { it.copy(userMessage = "Não foi possível atualizar o status da despesa.") }
             }
         }
     }

@@ -568,6 +568,9 @@ fun TransactionsScreen(
             onConfirmRefund = { origTx, refundAmount ->
                 viewModel.createRefund(origTx, refundAmount)
             },
+            onNavigateToCardInvoice = { cardId ->
+                onNavigateToCards(cardId)
+            },
             onDeleteRequest = {
                 txToDelete = tx
                 selectedTxForDetails = null

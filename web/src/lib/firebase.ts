@@ -466,9 +466,7 @@ export function subscribeTransactions(uid: string, cb: (txs: Transaction[]) => v
       for (const [id, tx] of assignedTxsMap) merged.set(id, tx)
       for (const cardMap of sharedCardTxsMap.values()) {
         for (const [id, tx] of cardMap) {
-          if (!merged.has(id)) {
-            merged.set(id, tx)
-          }
+          merged.set(id, tx)
         }
       }
       cb([...merged.values()])

@@ -1,5 +1,6 @@
 package com.saldolivre.app.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -10,6 +11,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Group
@@ -61,6 +63,7 @@ fun TransactionDetailDialog(
     onNavigateToEditTransaction: (String) -> Unit,
     onNavigateToRefundTransaction: (String) -> Unit = {},
     onConfirmRefund: ((Transaction, Double) -> Unit)? = null,
+    onNavigateToCardInvoice: ((String) -> Unit)? = null,
     onDeleteRequest: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -606,6 +609,36 @@ fun TransactionDetailDialog(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Editar Lançamento",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        color = Emerald400,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            } else if (transaction.id.startsWith("invoice_")) {
+                Button(
+                    onClick = {
+                        onDismissRequest()
+                        onNavigateToCardInvoice?.invoke(transaction.cardId ?: "")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Emerald500.copy(alpha = 0.15f),
+                        contentColor = Emerald400
+                    ),
+                    border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.35f))
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CreditCard,
+                        contentDescription = "Ver Fatura",
+                        tint = Emerald400,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "Ver Lançamentos da Fatura",
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 13.sp,
                         color = Emerald400,

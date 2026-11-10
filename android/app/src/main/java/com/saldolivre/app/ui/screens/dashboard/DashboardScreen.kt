@@ -979,6 +979,7 @@ fun DashboardScreen(
             onConfirmRefund = { origTx, refundAmount ->
                 viewModel.createRefund(origTx, refundAmount)
             },
+            onNavigateToCardInvoice = { onNavigateToCards() },
             onDeleteRequest = {
                 txToDelete = tx
                 selectedTxForDetails = null

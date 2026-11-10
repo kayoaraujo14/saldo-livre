@@ -1185,13 +1185,17 @@ object FinanceEngine {
         if (currentUid.isNullOrBlank()) return false
         if (tx.id.startsWith("invoice_")) return false
 
-        val isCreator = tx.createdByUid == currentUid || (tx.createdByUid.isNullOrBlank() && tx.paidByUid == currentUid)
-        if (isCreator) return true
+        // Se o usuário logado é o criador ou o pagador (titular da dívida/cartão), tem permissão total
+        val isCreatorOrPayer = tx.createdByUid == currentUid || tx.paidByUid == currentUid
+        if (isCreatorOrPayer) return true
 
+        // Quem recebeu o rateio como amigo atribuído NÃO pode editar
         if (tx.assignedFriendUid == currentUid) return false
 
+        // Se o usuário faz parte das alocações mas não criou nem pagou o lançamento
         if (tx.allocations.any { it.uid == currentUid }) return false
 
+        // Se outra pessoa criou explicitamente, o usuário atual não pode editar
         if (!tx.createdByUid.isNullOrBlank() && tx.createdByUid != currentUid) return false
 
         return true

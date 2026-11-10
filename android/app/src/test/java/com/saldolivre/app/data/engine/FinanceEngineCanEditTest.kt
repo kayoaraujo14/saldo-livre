@@ -39,6 +39,9 @@ class FinanceEngineCanEditTest {
 
         val tx2 = Transaction(id = "tx_2", createdByUid = "", paidByUid = myUid)
         assertTrue(FinanceEngine.canUserEditTransaction(tx2, myUid))
+
+        val tx3 = Transaction(id = "tx_3_payer", createdByUid = otherUid, paidByUid = myUid)
+        assertTrue(FinanceEngine.canUserEditTransaction(tx3, myUid))
     }
 
     @Test

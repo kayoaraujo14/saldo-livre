@@ -123,11 +123,7 @@ class FirestoreFinanceRepository(
                         allMerged.putAll(paidTxsMap)
                         allMerged.putAll(assignedTxsMap)
                         for (cardTxs in cardTxsMap.values) {
-                            for ((id, tx) in cardTxs) {
-                                if (!allMerged.containsKey(id)) {
-                                    allMerged[id] = tx
-                                }
-                            }
+                            allMerged.putAll(cardTxs)
                         }
                         trySend(allMerged.values.toList())
                     }

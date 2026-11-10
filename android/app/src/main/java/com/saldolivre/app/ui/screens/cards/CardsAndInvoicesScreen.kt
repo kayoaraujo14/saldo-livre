@@ -39,6 +39,9 @@ import com.saldolivre.app.data.engine.InvoiceStatus
 import com.saldolivre.app.data.engine.PredictiveInvoiceAlert
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.CategoryRegistry
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.saldolivre.app.ui.components.DeleteInstallmentDialog
 import com.saldolivre.app.ui.components.InvoiceDateGroup
 import com.saldolivre.app.ui.components.InvoiceDateGroupHeader
 import com.saldolivre.app.ui.components.TransactionDetailDialog
@@ -402,6 +405,7 @@ private fun InvoicesTabContent(
     onNavigateToAddTransaction: () -> Unit = {}
 ) {
     var selectedTxForDetails by remember { mutableStateOf<Transaction?>(null) }
+    var txToDelete by remember { mutableStateOf<Transaction?>(null) }
     val participant = if (uiState.selectedParticipantName != null) {
         selectedInvoice?.splitBreakdown?.find { it.name == uiState.selectedParticipantName }
     } else null
@@ -654,8 +658,8 @@ private fun InvoicesTabContent(
             cardName = selectedInvoice?.card?.cardName,
             allTransactions = selectedInvoice?.items ?: emptyList(),
             onDismissRequest = { selectedTxForDetails = null },
-            onToggleStatus = {},
-            onSetStatus = { _, _ -> },
+            onToggleStatus = { viewModel.toggleTransactionStatus(tx.id) },
+            onSetStatus = { status, actualAmount -> viewModel.setStatus(tx.id, status, actualAmount) },
             onNavigateToEditTransaction = { editTxId ->
                 selectedTxForDetails = null
                 onEditTransaction(editTxId)
@@ -664,9 +668,74 @@ private fun InvoicesTabContent(
                 viewModel.createRefund(origTx, amount)
             },
             onDeleteRequest = {
+                txToDelete = tx
                 selectedTxForDetails = null
             }
         )
+    }
+
+    txToDelete?.let { tx ->
+        if (tx.isInstallment && !tx.installmentGroupId.isNullOrBlank()) {
+            DeleteInstallmentDialog(
+                transaction = tx,
+                allTransactions = selectedInvoice?.items ?: emptyList(),
+                onDismissRequest = { txToDelete = null },
+                onDeleteSingle = { singleTx ->
+                    viewModel.deleteTransaction(singleTx.id)
+                    txToDelete = null
+                },
+                onDeleteAll = { groupId ->
+                    viewModel.deleteInstallmentGroup(groupId)
+                    txToDelete = null
+                },
+                onDeleteFuture = { groupId, fromNum ->
+                    viewModel.deleteFutureInstallments(groupId, fromNum)
+                    txToDelete = null
+                }
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { txToDelete = null },
+                containerColor = DarkSurface,
+                title = {
+                    Text(
+                        text = "Excluir Lançamento",
+                        style = Typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                text = {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        Text(
+                            text = "Deseja realmente excluir \"${tx.description}\"?",
+                            color = TextSecondary,
+                            style = Typography.bodyMedium
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (!tx.id.startsWith("invoice_")) {
+                                viewModel.deleteTransaction(tx.id)
+                            }
+                            txToDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Rose500)
+                    ) {
+                        Text("Excluir", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { txToDelete = null }) {
+                        Text("Cancelar", color = TextSecondary)
+                    }
+                }
+            )
+        }
     }
 }
 

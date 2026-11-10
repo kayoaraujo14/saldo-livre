@@ -10,6 +10,7 @@ import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.ui.screens.friends.FriendItem
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import kotlin.math.max
 
@@ -70,10 +71,16 @@ class TransactionFormViewModel(
                 }
                 val partnerUser = FinanceEngine.resolvePartner(user.uid, cards, repository.allUsers)
                 val ownCards = cards.filter { it.ownerUid == user.uid }
+                val launchableOrEditingCards = if (!editingTxId.isNullOrBlank()) {
+                    cards.filter { it.ownerUid == user.uid || it.id == _state.value.selectedCardId || it.id == _state.value.editingTx?.cardId }
+                } else {
+                    ownCards
+                }
                 _state.update { current ->
                     current.copy(
-                        availableCards = ownCards,
-                        selectedCardId = current.selectedCardId?.takeIf { id -> ownCards.any { it.id == id } } ?: ownCards.firstOrNull()?.id,
+                        availableCards = launchableOrEditingCards,
+                        selectedCardId = current.selectedCardId?.takeIf { id -> launchableOrEditingCards.any { it.id == id } }
+                            ?: if (cards.isEmpty()) current.selectedCardId else ownCards.firstOrNull()?.id,
                         friends = activeFriends,
                         partner = partnerUser
                     )
@@ -83,7 +90,11 @@ class TransactionFormViewModel(
 
         if (!editingTxId.isNullOrBlank()) {
             viewModelScope.launch {
-                val tx = repository.getTransactions().first().find { it.id == editingTxId }
+                val tx = withTimeoutOrNull(5000) {
+                    repository.getTransactions()
+                        .mapNotNull { list -> list.find { it.id == editingTxId } }
+                        .first()
+                }
                 if (tx != null) {
                     val meUid = repository.currentUser.value.uid
                     val baseDesc = if (tx.isInstallment) {

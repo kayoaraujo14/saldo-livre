@@ -666,15 +666,16 @@ export function detectSplit(tx: Transaction, viewerUid: string): SplitType {
  */
 export function canUserEditTransaction(tx: Transaction, currentUid?: string | null): boolean {
   if (!currentUid) return false
+  if (tx.id?.startsWith('invoice_')) return false
 
-  // Se o usuário logado é o criador ou o pagador, tem permissão total
-  const isCreator = tx.createdByUid === currentUid || (!tx.createdByUid && tx.paidByUid === currentUid)
-  if (isCreator) return true
+  // Se o usuário logado é o criador ou o pagador (titular da dívida/cartão), tem permissão total
+  const isCreatorOrPayer = tx.createdByUid === currentUid || tx.paidByUid === currentUid
+  if (isCreatorOrPayer) return true
 
   // Quem recebeu o rateio como amigo atribuído NÃO pode editar
   if (tx.assignedFriendUid === currentUid) return false
 
-  // Se o usuário faz parte das alocações mas não criou o lançamento
+  // Se o usuário faz parte das alocações mas não criou nem pagou o lançamento
   if (tx.allocations?.some((a) => a.uid === currentUid)) return false
 
   // Se outra pessoa criou explicitamente, o usuário atual não pode editar

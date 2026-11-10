@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  canUserEditTransaction,
   computeSummary,
   createRefundForTransaction,
   friendPctOf,
@@ -537,6 +538,62 @@ describe('resolveNextAcceptanceStatus & friendShareOf', () => {
     expect(summary.totalInvested).toBe(3549.55)
     // freeBalance: income (6921.15 + 450.45) + carryover (927.24) - expenses (6085.80 + 1227.17 + 4000.00) = 535.87
     expect(summary.income).toBe(7371.6)
+  })
+
+  describe('canUserEditTransaction', () => {
+    const myUid = 'user_me'
+    const otherUid = 'user_other'
+
+    it('returns false when currentUid is null or blank', () => {
+      const tx = { id: 'tx_1', createdByUid: myUid } as Transaction
+      expect(canUserEditTransaction(tx, null)).toBe(false)
+      expect(canUserEditTransaction(tx, '')).toBe(false)
+    })
+
+    it('returns false for synthetic invoice transactions', () => {
+      const invoiceTx = {
+        id: 'invoice_card123_2026-03',
+        createdByUid: myUid,
+        paidByUid: myUid,
+      } as Transaction
+      expect(canUserEditTransaction(invoiceTx, myUid)).toBe(false)
+    })
+
+    it('returns true when user is creator or payer', () => {
+      const tx1 = { id: 'tx_1', createdByUid: myUid, paidByUid: myUid } as Transaction
+      expect(canUserEditTransaction(tx1, myUid)).toBe(true)
+
+      const tx2 = { id: 'tx_2', createdByUid: '', paidByUid: myUid } as Transaction
+      expect(canUserEditTransaction(tx2, myUid)).toBe(true)
+
+      const tx3 = { id: 'tx_3_payer', createdByUid: otherUid, paidByUid: myUid } as Transaction
+      expect(canUserEditTransaction(tx3, myUid)).toBe(true)
+    })
+
+    it('returns false when transaction was created and paid by another user', () => {
+      const tx = { id: 'tx_4', createdByUid: otherUid, paidByUid: otherUid } as Transaction
+      expect(canUserEditTransaction(tx, myUid)).toBe(false)
+    })
+
+    it('returns false when user is assigned friend in split', () => {
+      const tx = {
+        id: 'tx_5',
+        createdByUid: otherUid,
+        paidByUid: otherUid,
+        assignedFriendUid: myUid,
+      } as Transaction
+      expect(canUserEditTransaction(tx, myUid)).toBe(false)
+    })
+
+    it('returns false when user is in allocations but did not create nor pay', () => {
+      const tx = {
+        id: 'tx_6',
+        createdByUid: otherUid,
+        paidByUid: otherUid,
+        allocations: [{ type: 'PLATFORM_USER', uid: myUid, name: 'Kayo', amount: 50.0 }],
+      } as Transaction
+      expect(canUserEditTransaction(tx, myUid)).toBe(false)
+    })
   })
 })
 
