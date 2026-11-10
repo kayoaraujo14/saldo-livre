@@ -9,6 +9,7 @@ import {
   impactFor,
   calculateFinancialHealthScore,
   resolveEmergencyReserveBalance,
+  computeIncomeConsumption,
 } from '@/lib/finance'
 import {
   Wallet,
@@ -44,15 +45,12 @@ export function KpiGrid({
     isLoading,
   } = useFinance()
 
-  // 1. Consumo da Renda (Sem repetição do valor da renda que já está no Hero Card)
-  const consumptionPct = summary && summary.income > 0
-    ? Math.round((summary.paid / summary.income) * 100)
-    : 0
-  const committedPct = summary && summary.income > 0
-    ? Math.round(((summary.paid + summary.committed) / summary.income) * 100)
-    : 0
-  const consumptionColor = consumptionPct > 100 ? 'rose' : consumptionPct > 80 ? 'amber' : 'emerald'
-  const consumptionBadge = consumptionPct > 100 ? 'Alerta' : consumptionPct > 80 ? 'Atenção' : 'No Limite'
+  // 1. Consumo da Renda (Considera receitas do mês + sobra do mês anterior - déficit anterior)
+  const incomeConsumption = useMemo(() => computeIncomeConsumption(summary), [summary])
+  const consumptionPct = incomeConsumption.consumptionPct
+  const committedPct = incomeConsumption.committedPct
+  const consumptionColor = incomeConsumption.statusColor
+  const consumptionBadge = incomeConsumption.statusBadge
 
   // Formatação da data final da janela de 7 dias
   const formattedEndDate = useMemo(() => nextWeekKey(7).label, [])
@@ -186,7 +184,7 @@ export function KpiGrid({
   }
 
   const isPositiveBalance = summary.freeBalance >= 0
-  const incomeRemainingPct = summary.income > 0 ? Math.round((summary.freeBalance / summary.income) * 100) : 0
+  const incomeRemainingPct = incomeConsumption.remainingPct
   const pctSign = incomeRemainingPct > 0 ? `+${incomeRemainingPct}%` : `${incomeRemainingPct}%`
 
   return (

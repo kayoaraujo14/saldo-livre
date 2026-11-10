@@ -185,24 +185,14 @@ class DashboardViewModel(
                     )
                 } else emptyList()
 
-                // 1. Consumo da Renda (Sem repetição do valor da renda já presente no Hero Card)
-                val consumptionPct = if (summary.income > 0.0) {
-                    ((summary.paid / summary.income) * 100.0).roundToInt()
-                } else 0
-                val committedPct = if (summary.income > 0.0) {
-                    (((summary.paid + summary.committed) / summary.income) * 100.0).roundToInt()
-                } else 0
-                val consumptionBadge = when {
-                    consumptionPct > 100 -> "Alerta"
-                    consumptionPct > 80 -> "Atenção"
-                    else -> "No Limite"
-                }
+                // 1. Consumo da Renda (Considera receitas do mês + sobra do mês anterior - déficit anterior)
+                val consumptionMetrics = FinanceEngine.computeIncomeConsumption(summary)
                 val incomeConsumption = IncomeConsumptionState(
-                    percentage = consumptionPct,
-                    committedPercentage = committedPct,
+                    percentage = consumptionMetrics.consumptionPct,
+                    committedPercentage = consumptionMetrics.committedPct,
                     paid = summary.paid,
-                    income = summary.income,
-                    statusBadge = consumptionBadge
+                    income = consumptionMetrics.effectiveIncome,
+                    statusBadge = consumptionMetrics.statusBadge
                 )
 
                 // 2. Radar 7 Dias (Sem repetições triplas de 'sem contas')

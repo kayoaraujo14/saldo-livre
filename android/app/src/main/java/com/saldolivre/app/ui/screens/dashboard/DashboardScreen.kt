@@ -279,9 +279,7 @@ fun DashboardScreen(
                 // 2. Hero KPI Card: Saldo Livre Real & Limite Diário Seguro
                 item(key = "hero_free_balance", contentType = "hero_free_balance") {
                 val isNegative = summary.freeBalance < 0
-                val incomeRemainingPct = if (summary.income > 0.0) {
-                    ((summary.freeBalance / summary.income) * 100.0).roundToInt()
-                } else 0
+                val incomeRemainingPct = FinanceEngine.computeIncomeConsumption(summary).remainingPct
                 val pctSign = if (incomeRemainingPct > 0) "+$incomeRemainingPct%" else "$incomeRemainingPct%"
 
                 Card(

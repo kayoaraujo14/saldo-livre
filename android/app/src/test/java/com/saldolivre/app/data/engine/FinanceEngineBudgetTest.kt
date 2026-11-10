@@ -649,4 +649,46 @@ class FinanceEngineBudgetTest {
         assertEquals(3549.55, summary.totalInvested, 0.01)
         assertEquals(7371.6, summary.income, 0.01)
     }
+
+    @Test
+    fun `computeIncomeConsumption includes carryoverAmount in effectiveIncome so commitment does not falsely exceed 100pct`() {
+        val summary = MonthSummary(
+            income = 6921.15,
+            carryoverAmount = 927.24,
+            previousMonthDeficit = 0.0,
+            paid = 6085.80,
+            committed = 1227.17,
+            freeBalance = 535.42
+        )
+        val metrics = FinanceEngine.computeIncomeConsumption(summary)
+        // 6921.15 + 927.24 = 7848.39
+        assertEquals(7848.39, metrics.effectiveIncome, 0.01)
+        // 6085.80 / 7848.39 = 77.54% -> 78%
+        assertEquals(78, metrics.consumptionPct)
+        // (6085.80 + 1227.17) / 7848.39 = 7312.97 / 7848.39 = 93.18% -> 93%
+        assertEquals(93, metrics.committedPct)
+        // 535.42 / 7848.39 = 6.82% -> 7%
+        assertEquals(7, metrics.remainingPct)
+        assertEquals("No Limite", metrics.statusBadge)
+        assertEquals("emerald", metrics.statusColor)
+    }
+
+    @Test
+    fun `computeIncomeConsumption subtracts previousMonthDeficit from effectiveIncome`() {
+        val summary = MonthSummary(
+            income = 5000.0,
+            carryoverAmount = 0.0,
+            previousMonthDeficit = 1000.0,
+            paid = 3600.0,
+            committed = 400.0,
+            freeBalance = 0.0
+        )
+        val metrics = FinanceEngine.computeIncomeConsumption(summary)
+        assertEquals(4000.0, metrics.effectiveIncome, 0.01)
+        assertEquals(90, metrics.consumptionPct)
+        assertEquals(100, metrics.committedPct)
+        assertEquals(0, metrics.remainingPct)
+        assertEquals("Atenção", metrics.statusBadge)
+        assertEquals("amber", metrics.statusColor)
+    }
 }

@@ -82,6 +82,20 @@ class DashboardViewModelTest {
         state = viewModel.uiState.value
         assertEquals(110, state.incomeConsumption.percentage)
         assertEquals("Alerta", state.incomeConsumption.statusBadge)
+
+        // Cenário 4: Com saldo remanescente do mês anterior (carryover), não ultrapassa 100% indevidamente
+        repository.summaryFlow.value = MonthSummary(
+            income = 6921.15,
+            carryoverAmount = 927.24,
+            paid = 6085.80,
+            committed = 1227.17,
+            freeBalance = 535.42
+        )
+        state = viewModel.uiState.value
+        assertEquals(78, state.incomeConsumption.percentage)
+        assertEquals(93, state.incomeConsumption.committedPercentage)
+        assertEquals(7848.39, state.incomeConsumption.income, 0.01)
+        assertEquals("No Limite", state.incomeConsumption.statusBadge)
     }
 
     @Test

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   canUserEditTransaction,
+  computeIncomeConsumption,
   computeSummary,
   createRefundForTransaction,
   friendPctOf,
@@ -593,6 +594,48 @@ describe('resolveNextAcceptanceStatus & friendShareOf', () => {
         allocations: [{ type: 'PLATFORM_USER', uid: myUid, name: 'Kayo', amount: 50.0 }],
       } as Transaction
       expect(canUserEditTransaction(tx, myUid)).toBe(false)
+    })
+  })
+
+  describe('computeIncomeConsumption', () => {
+    it('includes carryoverAmount in effectiveIncome so commitment does not falsely exceed 100%', () => {
+      const summary = {
+        income: 6921.15,
+        carryoverAmount: 927.24,
+        previousMonthDeficit: 0,
+        paid: 6085.8,
+        committed: 1227.17,
+        freeBalance: 535.42,
+      } as any
+      const metrics = computeIncomeConsumption(summary)
+      // 6921.15 + 927.24 = 7848.39
+      expect(metrics.effectiveIncome).toBe(7848.39)
+      // 6085.80 / 7848.39 = 77.54% -> 78%
+      expect(metrics.consumptionPct).toBe(78)
+      // (6085.80 + 1227.17) / 7848.39 = 7312.97 / 7848.39 = 93.18% -> 93%
+      expect(metrics.committedPct).toBe(93)
+      // 535.42 / 7848.39 = 6.82% -> 7%
+      expect(metrics.remainingPct).toBe(7)
+      expect(metrics.statusBadge).toBe('No Limite')
+      expect(metrics.statusColor).toBe('emerald')
+    })
+
+    it('subtracts previousMonthDeficit from effectiveIncome', () => {
+      const summary = {
+        income: 5000,
+        carryoverAmount: 0,
+        previousMonthDeficit: 1000,
+        paid: 3600,
+        committed: 400,
+        freeBalance: 0,
+      } as any
+      const metrics = computeIncomeConsumption(summary)
+      expect(metrics.effectiveIncome).toBe(4000)
+      expect(metrics.consumptionPct).toBe(90)
+      expect(metrics.committedPct).toBe(100)
+      expect(metrics.remainingPct).toBe(0)
+      expect(metrics.statusBadge).toBe('Atenção')
+      expect(metrics.statusColor).toBe('amber')
     })
   })
 })

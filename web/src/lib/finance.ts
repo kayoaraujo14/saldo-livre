@@ -1378,6 +1378,52 @@ export function computeSummary(
   }
 }
 
+export interface IncomeConsumptionMetrics {
+  effectiveIncome: number
+  consumptionPct: number
+  committedPct: number
+  remainingPct: number
+  statusBadge: 'Alerta' | 'Atenção' | 'No Limite'
+  statusColor: 'rose' | 'amber' | 'emerald'
+}
+
+/**
+ * Calcula os indicadores de Consumo e Comprometimento da Renda considerando
+ * a renda efetivamente disponível no mês (Receitas + Sobra do Mês Anterior - Déficit Anterior).
+ */
+export function computeIncomeConsumption(summary?: MonthSummary | null): IncomeConsumptionMetrics {
+  if (!summary) {
+    return {
+      effectiveIncome: 0,
+      consumptionPct: 0,
+      committedPct: 0,
+      remainingPct: 0,
+      statusBadge: 'No Limite',
+      statusColor: 'emerald',
+    }
+  }
+  const effectiveIncome = round2(
+    Math.max(0, (summary.income || 0) + (summary.carryoverAmount || 0) - (summary.previousMonthDeficit || 0)),
+  )
+  const consumptionPct = effectiveIncome > 0 ? Math.round(((summary.paid || 0) / effectiveIncome) * 100) : 0
+  const committedPct =
+    effectiveIncome > 0
+      ? Math.round((((summary.paid || 0) + (summary.committed || 0)) / effectiveIncome) * 100)
+      : 0
+  const remainingPct = effectiveIncome > 0 ? Math.round(((summary.freeBalance || 0) / effectiveIncome) * 100) : 0
+  const statusColor = consumptionPct > 100 ? 'rose' : consumptionPct > 80 ? 'amber' : 'emerald'
+  const statusBadge = consumptionPct > 100 ? 'Alerta' : consumptionPct > 80 ? 'Atenção' : 'No Limite'
+
+  return {
+    effectiveIncome,
+    consumptionPct,
+    committedPct,
+    remainingPct,
+    statusBadge,
+    statusColor,
+  }
+}
+
 /**
  * Calcula o fluxo de caixa concreto da conta corrente / extrato bancário até a data de hoje,
  * distinguindo com rigor o saldo imediatamente disponível em conta do Saldo Livre Projetado do mês.

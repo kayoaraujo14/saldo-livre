@@ -10,6 +10,7 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.max
 import kotlin.math.round
+import kotlin.math.roundToInt
 
 object FinanceEngine {
 
@@ -1521,6 +1522,54 @@ object FinanceEngine {
             byCategory = byCategory,
             byInvestmentSubcategory = byInvestSub,
             receivables = receivablesList
+        )
+    }
+
+    @Immutable
+    data class IncomeConsumptionMetrics(
+        val effectiveIncome: Double = 0.0,
+        val consumptionPct: Int = 0,
+        val committedPct: Int = 0,
+        val remainingPct: Int = 0,
+        val statusBadge: String = "No Limite",
+        val statusColor: String = "emerald"
+    )
+
+    /**
+     * Calcula os indicadores de Consumo e Comprometimento da Renda considerando
+     * a renda efetivamente disponível no mês (Receitas + Sobra do Mês Anterior - Déficit Anterior).
+     */
+    fun computeIncomeConsumption(summary: MonthSummary?): IncomeConsumptionMetrics {
+        if (summary == null) return IncomeConsumptionMetrics()
+        val effectiveIncome = round2(
+            kotlin.math.max(0.0, summary.income + summary.carryoverAmount - summary.previousMonthDeficit)
+        )
+        val consumptionPct = if (effectiveIncome > 0.0) {
+            ((summary.paid / effectiveIncome) * 100.0).roundToInt()
+        } else 0
+        val committedPct = if (effectiveIncome > 0.0) {
+            (((summary.paid + summary.committed) / effectiveIncome) * 100.0).roundToInt()
+        } else 0
+        val remainingPct = if (effectiveIncome > 0.0) {
+            ((summary.freeBalance / effectiveIncome) * 100.0).roundToInt()
+        } else 0
+        val statusColor = when {
+            consumptionPct > 100 -> "rose"
+            consumptionPct > 80 -> "amber"
+            else -> "emerald"
+        }
+        val statusBadge = when {
+            consumptionPct > 100 -> "Alerta"
+            consumptionPct > 80 -> "Atenção"
+            else -> "No Limite"
+        }
+        return IncomeConsumptionMetrics(
+            effectiveIncome = effectiveIncome,
+            consumptionPct = consumptionPct,
+            committedPct = committedPct,
+            remainingPct = remainingPct,
+            statusBadge = statusBadge,
+            statusColor = statusColor
         )
     }
 
