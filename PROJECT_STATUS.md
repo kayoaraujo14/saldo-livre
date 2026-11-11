@@ -1,6 +1,6 @@
 # PROJECT_STATUS.md — Fonte da Verdade & Índice Arquitetural (`Saldo Livre`)
 
-> **Última Atualização:** 2026-11-08
+> **Última Atualização:** 2026-11-11
 > **Versão Oficial:** 🏷️ **v1.5.0** (Milestone 4 — Robustez Serverless & Resiliência Multiplataforma)
 > **Status da Fundação:** 🟢 **100% CONCLUÍDA E ESTABILIZADA**
 > **Propósito:** Índice central de arquitetura, mapeamento de paridade Web/Mobile, segurança e histórico de micro-commits para otimização máxima de contexto e tokens.
@@ -101,6 +101,19 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+- **[2026-11-11] Correção de Bug Multiplataforma (Firestore Rules, Web & Android) — Visibilidade de Cartões Compartilhados e Lista de Amigos:**
+  - **1. Firestore Security Rules (`firestore.rules`):**
+    - Coleção `/cards/{cardId}`: Simplificada a cláusula `read` para a sintaxe canônica `resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.sharedWithUids`, permitindo que queries `array-contains` executadas por convidados sejam aprovadas na análise estática de regras sem incorrer em `permission-denied`.
+    - Coleção `/friendships/{friendshipId}`: Removida a exigência estática combinada de campos (`('requesterUid' in resource.data) && ('recipientUid' in resource.data)`), permitindo que consultas parciais por `where('recipientUid', '==', uid)` (convites e amizades recebidas) ou `where('requesterUid', '==', uid)` sejam autorizadas individualmente.
+    - Helper `isTxParticipant`: Ajustada cláusula de `visibleToUids` para formato canônico aceito por query.
+  - **2. Web (`web/src/store/FinanceContext.tsx`):**
+    - Agregação do titular do cartão (`c.ownerUid`, `c.ownerName`) no mapa reativo `users`, permitindo que convidados resolvam corretamente o titular como parceiro (`resolvePartner`) e visualizem dados em modais de faturas e rateio.
+  - **3. Android (`android/.../FirestoreFinanceRepository.kt`):**
+    - `allUsers` dinamizado para agregar o usuário atual, titulares e convidados de cartões e participantes de amizades aceitas, garantindo paridade total com o Web e estabilizando a resolução de parceiro no Android.
+  - **4. Quality Gates 100% Aprovados:**
+    - Web: `oxlint` com 0 diagnósticos, 245 testes unitários Vitest verdes e build Vite concluído em 1.61s.
+    - Android: `compileDebugSources` aprovado e suíte de testes unitários JVM (`testDebugUnitTest`) 100% verde (BUILD SUCCESSFUL).
+
 - **[2026-11-08] Multiplataforma (Web & Android) — Parser Universal de Extratos Bancários OFX e CSV com Deduplicação Inteligente — Issue #70 (Conclusão Integral):**
   - **1. Parser Universal OFX (`OFXParser.ts` / `StatementParser.kt`):**
     - Suporte bidirecional a OFX 1.02 (SGML legado com tags abertas `<STMTTRN>`, `<FITID>`, `<TRNAMT>`, `<DTPOSTED>`, `<MEMO>`) e OFX 2.x (XML).

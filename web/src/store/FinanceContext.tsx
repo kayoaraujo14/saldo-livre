@@ -223,6 +223,15 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     const cardList = Array.isArray(fbCards) ? fbCards : []
     for (const c of cardList) {
       if (!c) continue
+      if (c.ownerUid && !map.has(c.ownerUid)) {
+        map.set(c.ownerUid, {
+          uid: c.ownerUid,
+          email: '',
+          displayName: c.ownerName || 'Titular do Cartão',
+          photoURL: null,
+          monthlyIncome: 0,
+        })
+      }
       const rawShared = Array.isArray(c.sharedWithUsers)
         ? c.sharedWithUsers
         : (c.sharedWithUsers && typeof c.sharedWithUsers === 'object'

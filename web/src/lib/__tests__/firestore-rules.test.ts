@@ -11,6 +11,10 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  collection,
+  query,
+  where,
+  getDocs,
 } from 'firebase/firestore'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -273,6 +277,22 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       await assertSucceeds(getDoc(sharedRef))
       await assertFails(updateDoc(sharedRef, { limit: 50000 }))
       await assertFails(deleteDoc(sharedRef))
+    })
+
+    it('permite que o convidado consulte cartões compartilhados com ele via array-contains', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'cards', 'card_shared_q'), {
+          ownerUid: 'alice',
+          cardName: 'Cartão Compartilhado Query',
+          sharedWithUids: ['bob'],
+        })
+      })
+
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+      const q = query(collection(bobDb, 'cards'), where('sharedWithUids', 'array-contains', 'bob'))
+      await assertSucceeds(getDocs(q))
     })
 
     it('impede que terceiros alheios leiam ou alterem cartões privados', async () => {
@@ -626,6 +646,27 @@ describe('firestore.rules - Blindagem e Isolamento de Privacidade', () => {
       await assertSucceeds(getDoc(doc(aliceDb, 'friendships', 'f_alice_bob')))
       await assertSucceeds(getDoc(doc(bobDb, 'friendships', 'f_alice_bob')))
       await assertFails(getDoc(doc(eveDb, 'friendships', 'f_alice_bob')))
+    })
+
+    it('permite consulta de convites recebidos via recipientUid e enviados via requesterUid', async () => {
+      if (!isEmulatorRunning || !testEnv) return
+
+      await testEnv.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), 'friendships', 'f_q_test'), {
+          requesterUid: 'alice',
+          recipientUid: 'bob',
+          status: 'pending',
+        })
+      })
+
+      const aliceDb = testEnv.authenticatedContext('alice').firestore()
+      const bobDb = testEnv.authenticatedContext('bob').firestore()
+
+      const qSent = query(collection(aliceDb, 'friendships'), where('requesterUid', '==', 'alice'))
+      const qReceived = query(collection(bobDb, 'friendships'), where('recipientUid', '==', 'bob'))
+
+      await assertSucceeds(getDocs(qSent))
+      await assertSucceeds(getDocs(qReceived))
     })
 
     it('garante que requesterUid e recipientUid sejam estritamente imutáveis no update', async () => {

@@ -95,7 +95,7 @@ service cloud.firestore {
 
     function isTxParticipant(data) {
       return data != null && (
-        (('visibleToUids' in data) && data.visibleToUids is list && request.auth.uid in data.visibleToUids) ||
+        (request.auth.uid in data.visibleToUids) ||
         (('assignedFriendUid' in data) && data.assignedFriendUid == request.auth.uid) ||
         (('createdByUid' in data) && data.createdByUid == request.auth.uid) ||
         (('paidByUid' in data) && data.paidByUid == request.auth.uid)
@@ -164,13 +164,10 @@ service cloud.firestore {
 
     // 3. Rede de Amizades (Requester ou Recipient)
     match /friendships/{friendshipId} {
-      allow read: if isAuthenticated() &&
-        resource != null &&
-        ('requesterUid' in resource.data) &&
-        ('recipientUid' in resource.data) && (
-          resource.data.requesterUid == request.auth.uid ||
-          resource.data.recipientUid == request.auth.uid
-        );
+      allow read: if isAuthenticated() && resource != null && (
+        resource.data.requesterUid == request.auth.uid ||
+        resource.data.recipientUid == request.auth.uid
+      );
 
       allow create: if isAuthenticated() &&
         ('requesterUid' in request.resource.data) &&
@@ -209,11 +206,10 @@ service cloud.firestore {
 
     // 4. Cartões (Titular com controle total, Convidado somente leitura)
     match /cards/{cardId} {
-      allow read: if isAuthenticated() &&
-        resource != null && (
-          (('ownerUid' in resource.data) && resource.data.ownerUid == request.auth.uid) ||
-          (('sharedWithUids' in resource.data) && resource.data.sharedWithUids is list && request.auth.uid in resource.data.sharedWithUids)
-        );
+      allow read: if isAuthenticated() && resource != null && (
+        resource.data.ownerUid == request.auth.uid ||
+        request.auth.uid in resource.data.sharedWithUids
+      );
 
       allow create: if isAuthenticated() &&
         ('ownerUid' in request.resource.data) &&

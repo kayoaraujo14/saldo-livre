@@ -34,8 +34,51 @@ class FirestoreFinanceRepository(
     private val _selectedMonth = MutableStateFlow(FinanceEngine.currentMonthKey())
     override val selectedMonth: StateFlow<String> = _selectedMonth.asStateFlow()
 
+    private val _cachedFriendships = MutableStateFlow<List<Friendship>>(emptyList())
+
     override val allUsers: List<UserProfile>
-        get() = listOf(_currentUser.value)
+        get() {
+            val map = LinkedHashMap<String, UserProfile>()
+            val current = _currentUser.value
+            if (current.uid.isNotBlank()) {
+                map[current.uid] = current
+            }
+            val cardsList = _cards.value
+            for (c in cardsList) {
+                if (c.ownerUid.isNotBlank() && !map.containsKey(c.ownerUid)) {
+                    map[c.ownerUid] = UserProfile(
+                        uid = c.ownerUid,
+                        displayName = c.ownerName.ifBlank { "Titular do Cartão" }
+                    )
+                }
+                for (u in c.sharedWithUsers) {
+                    if (u.uid.isNotBlank() && !map.containsKey(u.uid)) {
+                        map[u.uid] = UserProfile(
+                            uid = u.uid,
+                            email = u.email,
+                            displayName = u.name.ifBlank { "Parceiro" }
+                        )
+                    }
+                }
+            }
+            for (f in _cachedFriendships.value) {
+                if (f.requesterUid.isNotBlank() && !map.containsKey(f.requesterUid)) {
+                    map[f.requesterUid] = UserProfile(
+                        uid = f.requesterUid,
+                        email = f.requesterEmail,
+                        displayName = f.requesterName.ifBlank { "Amigo" }
+                    )
+                }
+                if (f.recipientUid.isNotBlank() && !map.containsKey(f.recipientUid)) {
+                    map[f.recipientUid] = UserProfile(
+                        uid = f.recipientUid,
+                        email = f.recipientEmail,
+                        displayName = f.recipientName.ifBlank { "Amigo" }
+                    )
+                }
+            }
+            return map.values.toList()
+        }
 
     private var userProfileListener: ListenerRegistration? = null
 
@@ -1269,6 +1312,7 @@ class FirestoreFinanceRepository(
 
                     fun emitCombined() {
                         val combined = (map1 + map2).values.toList()
+                        _cachedFriendships.value = combined
                         trySend(combined)
                     }
 
