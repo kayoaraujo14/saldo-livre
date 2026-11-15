@@ -8,7 +8,7 @@ import type {
   Transaction,
   TransactionStatus,
 } from '@/types'
-import { INCOME_CATEGORIES, getCategoryDetail, resolveStrictCategory } from '@/types'
+import { INCOME_CATEGORIES, getCategoryDetail, isVaVrCategory, isVaVrTransaction, resolveStrictCategory } from '@/types'
 import { extractCounterparty } from '../pdfParser'
 import { anticipateInstallments as calcAnticipateInstallments } from '../invoices'
 import {
@@ -51,10 +51,25 @@ import {
   sanitizeText,
 } from './common'
 
+const VA_VR_KW_REGEX = /\b(va|vr|va\/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b/i
+const VA_VR_RECHARGE_REGEX = /\b(recarga|dep[oó]sito|cr[eé]dito|receb|caiu|entrou|saldo inicial|ajuste)\b/i
+const VA_VR_INCOME_SUBCATS = new Set(['Recarga VA/VR', 'Vale Alimentação (VA)', 'Vale Refeição (VR)', 'Saldo Inicial / Ajuste'])
+
+function isStrictlyIncomeCategory(cat: unknown, subcat: unknown, desc: string): boolean {
+  const catStr = String(cat ?? '').trim()
+  if (!catStr) return false
+  if (catStr === 'Receita') return true
+  if (isVaVrCategory(catStr, typeof subcat === 'string' ? subcat : null)) {
+    return VA_VR_INCOME_SUBCATS.has(String(subcat ?? '').trim()) || VA_VR_RECHARGE_REGEX.test(desc)
+  }
+  return (INCOME_CATEGORIES as readonly string[]).includes(catStr)
+}
+
 function getAgentSummary(env: AgentEnv, txs: Transaction[], monthKey: string) {
   const cards = env.getCards?.() || []
   const closures = env.getClosures?.() || []
-  return computeSummary(txs, env.me.uid, monthKey, cards, closures)
+  const bills = env.getRecurring?.() || []
+  return computeSummary(txs, env.me.uid, monthKey, cards, closures, bills)
 }
 import type { AgentEnv, ToolResult } from './types'
 
@@ -94,7 +109,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     tipoStr === 'receita' ||
     tipoStr === 'entrada' ||
     args.categoria === 'Receita' ||
-    (INCOME_CATEGORIES as readonly string[]).includes(String(args.categoria))
+    isStrictlyIncomeCategory(args.categoria, args.subcategoria, description)
   const isIncome =
     isExplicitIncome ||
     INCOME_KEYWORDS_REGEX.test(description)
@@ -104,6 +119,11 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
   if (type === 'income') splitType = 'mine'
 
   const explicitMethod = args.metodoPagamento ?? args.paymentMethod
+  const rawCatStr = typeof args.categoria === 'string' ? args.categoria : null
+  const rawSubStr = typeof args.subcategoria === 'string' ? args.subcategoria : null
+  const hasVaVrHint =
+    isVaVrCategory(rawCatStr, rawSubStr) ||
+    VA_VR_KW_REGEX.test(description)
   let method: PaymentMethod | undefined
   if (type === 'income') {
     method = 'pix'
@@ -121,6 +141,8 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     method = 'bill'
   } else if (/cart[aã]o|cr[eé]dito|fatura/i.test(description) || args.cartao || args.cardName) {
     method = 'credit_card'
+  } else if (hasVaVrHint) {
+    method = 'debit'
   }
 
   if (!method) {
@@ -169,8 +191,15 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     category = 'Outras Receitas'
   }
 
-  if (!subcategory && (category === 'Outras Receitas' || (INCOME_CATEGORIES as readonly string[]).includes(category))) {
+  if (!subcategory && type === 'income' && (category === 'Outras Receitas' || (INCOME_CATEGORIES as readonly string[]).includes(category))) {
     subcategory = getCategoryDetail(category)?.subcategories?.[0] || 'Outras Receitas'
+  }
+
+  // Isolamento VA/VR: nunca vincula a fatura de cartão de crédito
+  if (isVaVrCategory(category, subcategory)) {
+    if (!explicitMethod || method === 'credit_card') {
+      method = type === 'income' ? 'pix' : 'debit'
+    }
   }
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args.data)) ? String(args.data) : todayKey()
@@ -790,7 +819,7 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
         rawTipoStr === 'entrada' ||
         item.categoria === 'Receita' ||
         item.category === 'Receita' ||
-        (INCOME_CATEGORIES as readonly string[]).includes(String(item.categoria ?? item.category))
+        isStrictlyIncomeCategory(item.categoria ?? item.category, item.subcategoria ?? item.subcategory, desc)
       const looksLikeIncome = isExplicitIncome || INCOME_KEYWORDS_REGEX.test(desc)
       const resolvedTipo: 'income' | 'expense' = looksLikeIncome ? 'income' : 'expense'
 
@@ -855,6 +884,8 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
       let resolvedItemMetodo: PaymentMethod
       if (resolvedTipo === 'income') {
         resolvedItemMetodo = 'pix'
+      } else if (isVaVrCategory(resolvedCategory, resolvedSubcat)) {
+        resolvedItemMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
       } else if (isBankStatement) {
         if (/pix/i.test(desc)) resolvedItemMetodo = 'pix'
         else if (/debito|débito/i.test(desc)) resolvedItemMetodo = 'debit'
@@ -1011,18 +1042,26 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
       rawTipoStr === 'entrada' ||
       item.categoria === 'Receita' ||
       item.category === 'Receita' ||
-      (INCOME_CATEGORIES as readonly string[]).includes(String(item.categoria ?? item.category))
+      isStrictlyIncomeCategory(item.categoria ?? item.category, item.subcategoria ?? item.subcategory, desc)
     const looksLikeIncome =
       isExplicitIncome ||
       INCOME_KEYWORDS_REGEX.test(desc)
 
     const resolvedTipo = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
 
+    const isVaVrBatchItem =
+      isVaVrCategory(
+        typeof item.categoria === 'string' ? item.categoria : typeof item.category === 'string' ? item.category : null,
+        typeof item.subcategoria === 'string' ? item.subcategoria : typeof item.subcategory === 'string' ? item.subcategory : null,
+      ) || VA_VR_KW_REGEX.test(desc)
+
     // Detecção de forma de pagamento
     const rawPayMethod = item.metodoPagamento ?? item.paymentMethod
     let resolvedMetodo: PaymentMethod
     if (resolvedTipo === 'income') {
       resolvedMetodo = 'pix'
+    } else if (isVaVrBatchItem) {
+      resolvedMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
     } else if (isBankStatement) {
       if (/pix/i.test(desc)) resolvedMetodo = 'pix'
       else if (/debito|débito/i.test(desc)) resolvedMetodo = 'debit'
@@ -1787,7 +1826,8 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
     if (novoTipo) {
       patch.type = novoTipo
       if (novoTipo === 'income') {
-        patch.category = 'Outras Receitas'
+        const keepVaVr = (novaCategoria && isVaVrCategory(novaCategoria)) || isVaVrTransaction(tx)
+        patch.category = keepVaVr ? 'VA/VR' : (novaCategoria || 'Outras Receitas')
         patch.paymentMethod = 'pix'
         patch.cardId = null
         patch.status = 'paid'

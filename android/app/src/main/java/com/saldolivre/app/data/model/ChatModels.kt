@@ -116,7 +116,8 @@ data class ChatSession(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val messages: List<ChatMessage> = emptyList(),
-    val pendingTransactions: List<Map<String, Any?>> = emptyList()
+    val pendingTransactions: List<Map<String, Any?>> = emptyList(),
+    val activeExpenseDraft: ExpenseDraft? = null
 )
 
 @Immutable

@@ -24,12 +24,12 @@ export async function gerenciarEnvelopesOrcamentarios(
   const refDate = todayKey()
   const cards = env.getCards ? env.getCards() : []
   const closures = env.getClosures ? env.getClosures() : []
-  const rawMonthSummary = computeSummary(txs, uid, monthKey, cards, closures)
+  const recurringBills = env.getRecurring ? env.getRecurring() : []
+  const rawMonthSummary = computeSummary(txs, uid, monthKey, cards, closures, recurringBills)
   const expectedMonthIncome =
     rawMonthSummary.income > 0 ? rawMonthSummary.income : (profile?.monthlyIncome || 0)
   const carryoverAmount = rawMonthSummary.carryoverAmount || 0
   const previousMonthDeficit = rawMonthSummary.previousMonthDeficit || 0
-  const recurringBills = env.getRecurring ? env.getRecurring() : []
 
   if (acao === 'consultar') {
     const report = computeCategoryBudgets(

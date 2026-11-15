@@ -51,6 +51,39 @@ object CategoryRegistry {
             )
         ),
         CategoryDetail(
+            name = "VA/VR",
+            color = Color(0xFFF59E0B),
+            icon = Icons.Default.Restaurant,
+            description = "Vale-Alimentação, Vale-Refeição e cartões de benefícios flexíveis",
+            defaultNature = BudgetNature.NEED,
+            subcategories = listOf(
+                "Recarga VA/VR",
+                "Vale Alimentação (VA)",
+                "Vale Refeição (VR)",
+                "Saldo Inicial / Ajuste",
+                "Supermercado",
+                "Restaurante",
+                "Delivery & Lanches",
+                "Padaria & Café",
+                "Feira & Hortifruti",
+                "Açougue & Peixaria",
+                "Outros VA/VR"
+            ),
+            subcategoriesNature = mapOf(
+                "Recarga VA/VR" to BudgetNature.INCOME,
+                "Vale Alimentação (VA)" to BudgetNature.INCOME,
+                "Vale Refeição (VR)" to BudgetNature.INCOME,
+                "Saldo Inicial / Ajuste" to BudgetNature.INCOME,
+                "Supermercado" to BudgetNature.NEED,
+                "Feira & Hortifruti" to BudgetNature.NEED,
+                "Açougue & Peixaria" to BudgetNature.NEED,
+                "Padaria & Café" to BudgetNature.NEED,
+                "Outros VA/VR" to BudgetNature.NEED,
+                "Restaurante" to BudgetNature.WANT,
+                "Delivery & Lanches" to BudgetNature.WANT
+            )
+        ),
+        CategoryDetail(
             name = "Moradia",
             color = Color(0xFF06B6D4),
             icon = Icons.Default.Home,
@@ -363,6 +396,39 @@ object CategoryRegistry {
             )
         ),
         CategoryDetail(
+            name = "VA/VR",
+            color = Color(0xFFF59E0B),
+            icon = Icons.Default.Restaurant,
+            description = "Vale-Alimentação, Vale-Refeição e cartões de benefícios flexíveis",
+            defaultNature = BudgetNature.NEED,
+            subcategories = listOf(
+                "Recarga VA/VR",
+                "Vale Alimentação (VA)",
+                "Vale Refeição (VR)",
+                "Saldo Inicial / Ajuste",
+                "Supermercado",
+                "Restaurante",
+                "Delivery & Lanches",
+                "Padaria & Café",
+                "Feira & Hortifruti",
+                "Açougue & Peixaria",
+                "Outros VA/VR"
+            ),
+            subcategoriesNature = mapOf(
+                "Recarga VA/VR" to BudgetNature.INCOME,
+                "Vale Alimentação (VA)" to BudgetNature.INCOME,
+                "Vale Refeição (VR)" to BudgetNature.INCOME,
+                "Saldo Inicial / Ajuste" to BudgetNature.INCOME,
+                "Supermercado" to BudgetNature.NEED,
+                "Feira & Hortifruti" to BudgetNature.NEED,
+                "Açougue & Peixaria" to BudgetNature.NEED,
+                "Padaria & Café" to BudgetNature.NEED,
+                "Outros VA/VR" to BudgetNature.NEED,
+                "Restaurante" to BudgetNature.WANT,
+                "Delivery & Lanches" to BudgetNature.WANT
+            )
+        ),
+        CategoryDetail(
             name = "Freelance & Serviços",
             color = Color(0xFF06B6D4),
             icon = Icons.Default.Work,
@@ -548,7 +614,7 @@ object CategoryRegistry {
         )
     )
 
-    val CATEGORIES: List<CategoryDetail> = EXPENSE_CATEGORIES + INCOME_CATEGORIES
+    val CATEGORIES: List<CategoryDetail> = (EXPENSE_CATEGORIES + INCOME_CATEGORIES).distinctBy { it.name }
 
     val ACTIVE_CATEGORIES: List<String> = CATEGORIES.map { it.name }
 
@@ -614,6 +680,14 @@ object CategoryRegistry {
         "pets" to "Pets",
         "pet" to "Pets",
         "alimentacao" to "Alimentação",
+        "va/vr" to "VA/VR",
+        "va vr" to "VA/VR",
+        "vavr" to "VA/VR",
+        "vale alimentacao" to "VA/VR",
+        "vale refeicao" to "VA/VR",
+        "vale alimentacao / refeicao" to "VA/VR",
+        "beneficios va/vr" to "VA/VR",
+        "cartao de beneficios" to "VA/VR",
         "moradia" to "Moradia",
         "manutencao & servicos" to "Moradia",
         "manutencao e servicos" to "Moradia",
@@ -863,8 +937,17 @@ object CategoryRegistry {
         "salario" to Pair("Salário & Remuneração", "Salário Principal"),
         "adiantamento" to Pair("Salário & Remuneração", "Adiantamento / Quinzenal"),
         "ferias" to Pair("Salário & Remuneração", "Férias"),
-        "va" to Pair("Benefícios", "Vale Alimentação (VA)"),
-        "vr" to Pair("Benefícios", "Vale Refeição (VR)"),
+        "va" to Pair("VA/VR", "Vale Alimentação (VA)"),
+        "vr" to Pair("VA/VR", "Vale Refeição (VR)"),
+        "recarga va" to Pair("VA/VR", "Recarga VA/VR"),
+        "recarga vr" to Pair("VA/VR", "Recarga VA/VR"),
+        "recarga va/vr" to Pair("VA/VR", "Recarga VA/VR"),
+        "alelo" to Pair("VA/VR", "Recarga VA/VR"),
+        "flash" to Pair("VA/VR", "Recarga VA/VR"),
+        "caju" to Pair("VA/VR", "Recarga VA/VR"),
+        "ticket" to Pair("VA/VR", "Recarga VA/VR"),
+        "pluxee" to Pair("VA/VR", "Recarga VA/VR"),
+        "ifood beneficios" to Pair("VA/VR", "Recarga VA/VR"),
         "freelance" to Pair("Freelance & Serviços", "Projetos Freelance"),
         "dividendos" to Pair("Rendimentos & Investimentos", "Dividendos & JCP"),
         "reembolso" to Pair("Reembolsos & Acertos", "Reembolso de Empresa"),
@@ -1031,9 +1114,56 @@ object CategoryRegistry {
         }
     }
 
+    fun normalizeCategory(cat: String?): String {
+        val trimmed = cat?.trim() ?: ""
+        if (trimmed.isEmpty()) return ""
+        val folded = foldCategoryAccents(trimmed)
+        CATEGORY_CANONICAL_MAP[folded]?.let { return it }
+        val match = (CATEGORIES + LEGACY_CATEGORIES).find { foldCategoryAccents(it.name) == folded }
+        return match?.name ?: trimmed
+    }
+
+    fun isVaVrCategory(category: String?, subcategory: String? = null): Boolean {
+        val normCat = normalizeCategory(category)
+        if (normCat == "VA/VR") return true
+        if (normCat == "Benefícios" && !subcategory.isNullOrBlank()) {
+            val foldedSub = foldCategoryAccents(subcategory)
+            if (
+                foldedSub == "vale alimentacao (va)" ||
+                foldedSub == "vale refeicao (vr)" ||
+                foldedSub.contains("vale alimenta") ||
+                foldedSub.contains("vale refei") ||
+                Regex("""\b(va|vr)\b""").containsMatchIn(foldedSub)
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun isVaVrTransaction(tx: Transaction?): Boolean {
+        if (tx == null) return false
+        return isVaVrCategory(tx.category, tx.subcategory)
+    }
+
     fun getBudgetNature(category: String, subcategory: String? = null): BudgetNature {
         if (category == "Investimentos" || category == "Rendimentos & Investimentos") {
             return BudgetNature.INVESTMENT
+        }
+        if (category == "VA/VR") {
+            if (
+                subcategory == "Recarga VA/VR" ||
+                subcategory == "Vale Alimentação (VA)" ||
+                subcategory == "Vale Refeição (VR)" ||
+                subcategory == "Saldo Inicial / Ajuste"
+            ) {
+                return BudgetNature.INCOME
+            }
+            val detail = get("VA/VR")
+            if (!subcategory.isNullOrBlank()) {
+                detail.subcategoriesNature[subcategory]?.let { return it }
+            }
+            return detail.defaultNature
         }
         val isIncome = INCOME_CATEGORIES.any { it.name == category } || category == "Receita"
         if (isIncome) {

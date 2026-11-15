@@ -20,7 +20,7 @@ import {
   calculateCategoryBreakdownForParticipant,
   type CardInvoice,
 } from '@/lib/invoices'
-import { formatBRL, formatNubankDateHeader, formatShortDate, monthLabel, shiftMonth, shortMonthLabel } from '@/lib/utils'
+import { formatBRL, formatNubankDateHeader, formatShortDate, monthLabel, shiftMonth, shortMonthLabel, todayKey } from '@/lib/utils'
 import { CATEGORY_GROUPS, type Category, type Transaction } from '@/types'
 import {
   Calendar,
@@ -167,7 +167,7 @@ export function CardInvoicesModal({
   initialCardId,
   initialMonth,
 }: CardInvoicesModalProps) {
-  const { cards, transactions, me, month, setStatus, isLoading } = useFinance()
+  const { cards, transactions, me, month, payCardInvoice, isLoading } = useFinance()
   const uid = me?.uid ?? ''
 
   const [viewMonth, setViewMonth] = useState(initialMonth || month)
@@ -175,6 +175,8 @@ export function CardInvoicesModal({
   const [selectedParticipantName, setSelectedParticipantName] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [confirmPay, setConfirmPay] = useState(false)
+  const [editingPaidDate, setEditingPaidDate] = useState(false)
+  const [paymentDate, setPaymentDate] = useState(() => todayKey())
   const [paying, setPaying] = useState(false)
   const [itemFilter, setItemFilter] = useState<'all' | 'mine' | 'third_party' | 'open' | 'paid' | 'installments'>('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -346,11 +348,12 @@ export function CardInvoicesModal({
 
   const handlePayInvoice = async () => {
     if (!selected) return
+    const effectiveDate = paymentDate || todayKey()
     setPaying(true)
     try {
-      const unpaid = selected.items.filter((t) => t.type === 'expense' && t.status !== 'paid')
-      await Promise.all(unpaid.map((t) => setStatus(t, 'paid')))
+      await payCardInvoice(selected.card.id, selected.monthKey, effectiveDate)
       setConfirmPay(false)
+      setEditingPaidDate(false)
     } finally {
       setPaying(false)
     }
@@ -379,6 +382,8 @@ export function CardInvoicesModal({
               setViewMonth((m) => shiftMonth(m, -1))
               setSelectedParticipantName(null)
               setSelectedCategory(null)
+              setConfirmPay(false)
+              setEditingPaidDate(false)
             }}
             className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Fatura anterior"
@@ -395,6 +400,8 @@ export function CardInvoicesModal({
               setViewMonth((m) => shiftMonth(m, 1))
               setSelectedParticipantName(null)
               setSelectedCategory(null)
+              setConfirmPay(false)
+              setEditingPaidDate(false)
             }}
             className="p-2 rounded-xl hover:bg-slate-800 text-slate-300 cursor-pointer transition-colors"
             aria-label="Próxima fatura"
@@ -451,6 +458,7 @@ export function CardInvoicesModal({
                         setSelectedParticipantName(null)
                         setSelectedCategory(null)
                         setConfirmPay(false)
+                        setEditingPaidDate(false)
                         // Se a fatura atual deste cartão estiver paga no viewMonth, avança para fatura aberta
                         if (inv.status === 'paid') {
                           for (let step = 1; step <= 12; step++) {
@@ -574,7 +582,7 @@ export function CardInvoicesModal({
                     )}
 
                     {/* Ação de pagamento */}
-                    {selected.openAmount > 0 && (
+                    {(selected.openAmount > 0 || (selected.status === 'paid' && selected.card.ownerUid === uid)) && (
                       <div className="mt-4 pt-3 border-t border-white/15 relative z-10">
                         {selected.card.ownerUid !== uid ? (
                           <div className="p-3 rounded-xl bg-indigo-950/60 border border-indigo-400/30 text-indigo-200 text-xs flex items-center justify-between gap-2 backdrop-blur-md">
@@ -588,18 +596,40 @@ export function CardInvoicesModal({
                               Somente Leitura
                             </span>
                           </div>
-                        ) : confirmPay ? (
-                          <div className="rounded-xl border border-emerald-400/40 bg-emerald-950/60 p-3 space-y-2 backdrop-blur-md">
+                        ) : confirmPay || editingPaidDate ? (
+                          <div className="rounded-xl border border-emerald-400/40 bg-emerald-950/60 p-3 space-y-2.5 backdrop-blur-md">
                             <p className="text-xs text-emerald-200">
-                              Marcar {selected.items.filter((t) => t.type === 'expense' && t.status !== 'paid').length} lançamento(s) como
-                              pagos, totalizando <strong>{formatBRL(selected.openAmount)}</strong>?
+                              {editingPaidDate ? (
+                                <>Alterar a data efetiva de pagamento desta fatura no extrato (as datas originais das compras serão mantidas).</>
+                              ) : (
+                                <>
+                                  Marcar {selected.items.filter((t) => t.type === 'expense' && t.status !== 'paid').length} lançamento(s) como
+                                  pagos, totalizando <strong>{formatBRL(selected.openAmount)}</strong>?
+                                </>
+                              )}
                             </p>
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+                              <label htmlFor="invoice-modal-payment-date" className="text-[11px] font-medium text-emerald-200 whitespace-nowrap">
+                                Data do pagamento:
+                              </label>
+                              <Input
+                                id="invoice-modal-payment-date"
+                                type="date"
+                                value={paymentDate}
+                                onChange={(e) => setPaymentDate(e.target.value)}
+                                disabled={paying}
+                                className="h-8 text-xs bg-slate-950/70 border-emerald-400/30 text-white"
+                              />
+                            </div>
                             <div className="flex gap-2 justify-end">
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="h-8 text-xs border-white/20 text-white hover:bg-white/10 cursor-pointer"
-                                onClick={() => setConfirmPay(false)}
+                                onClick={() => {
+                                  setConfirmPay(false)
+                                  setEditingPaidDate(false)
+                                }}
                                 disabled={paying}
                               >
                                 Cancelar
@@ -608,19 +638,36 @@ export function CardInvoicesModal({
                                 size="sm"
                                 className="h-8 text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer"
                                 onClick={handlePayInvoice}
-                                disabled={paying}
+                                disabled={paying || !paymentDate}
                               >
-                                {paying ? 'Pagando...' : 'Confirmar pagamento'}
+                                {paying ? 'Salvando...' : editingPaidDate ? 'Salvar data' : 'Confirmar pagamento'}
                               </Button>
                             </div>
                           </div>
-                        ) : (
+                        ) : selected.openAmount > 0 ? (
                           <Button
-                            onClick={() => setConfirmPay(true)}
+                            onClick={() => {
+                              setPaymentDate(selected.paidDate || todayKey())
+                              setEditingPaidDate(false)
+                              setConfirmPay(true)
+                            }}
                             className="w-full h-10 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl cursor-pointer shadow-lg transition-transform active:scale-95"
                           >
                             <CheckCircle2 className="size-4 mr-1.5" />
                             Pagar fatura ({formatBRL(selected.openAmount)})
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setPaymentDate(selected.paidDate || todayKey())
+                              setConfirmPay(false)
+                              setEditingPaidDate(true)
+                            }}
+                            className="w-full h-9 border-emerald-400/40 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-200 font-semibold text-xs rounded-xl cursor-pointer transition-colors"
+                          >
+                            <Calendar className="size-3.5 mr-1.5" />
+                            Alterar data do pagamento
                           </Button>
                         )}
                       </div>

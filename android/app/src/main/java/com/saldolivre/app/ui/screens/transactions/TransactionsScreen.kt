@@ -254,6 +254,47 @@ fun TransactionsScreen(
                 }
             }
 
+            // Chip rápido para módulo VA/VR quando houver movimentações no mês ou filtro ativo
+            val isVaVrFilterActive = uiState.selectedCategories.any { CategoryRegistry.isVaVrCategory(it) }
+            if (uiState.vaVrCount > 0 || isVaVrFilterActive) {
+                val tealAccent = Color(0xFF2DD4BF)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (isVaVrFilterActive) tealAccent.copy(alpha = 0.22f) else DarkSurface)
+                            .border(
+                                1.dp,
+                                if (isVaVrFilterActive) tealAccent.copy(alpha = 0.6f) else DarkBorder,
+                                CircleShape
+                            )
+                            .clickable { viewModel.toggleCategoryFilter("VA/VR") }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Restaurant,
+                            contentDescription = null,
+                            tint = if (isVaVrFilterActive) tealAccent else TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "VA/VR (${uiState.vaVrCount})",
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isVaVrFilterActive) FontWeight.Bold else FontWeight.SemiBold,
+                            color = if (isVaVrFilterActive) tealAccent else TextPrimary
+                        )
+                    }
+                }
+            }
+
             // Exibição de filtros ativos (Consome espaço vertical APENAS se houver filtros ativos)
             if (uiState.isFiltered) {
                 Row(

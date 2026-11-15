@@ -125,6 +125,7 @@ export interface FinanceContextValue {
   updateInstallmentGroup: (groupId: string, input: InstallmentGroupUpdateInput) => Promise<number>
   cycleStatus: (tx: Transaction) => Promise<void>
   setStatus: (tx: Transaction, status: TransactionStatus) => Promise<void>
+  payCardInvoice: (cardId: string, monthKey: string, paymentDate?: string) => Promise<void>
   changeSplit: (
     tx: Transaction,
     splitType: SplitType,

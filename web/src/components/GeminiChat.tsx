@@ -1068,6 +1068,15 @@ Atenção crítica:
               totalInvested: summary.totalInvested,
               totalInvestedAccumulated: summary.totalInvestedAccumulated,
               byInvestmentSubcategory: summary.byInvestmentSubcategory,
+              vaVrCarryover: summary.vaVrCarryover,
+              vaVrIncome: summary.vaVrIncome,
+              vaVrIncomePaid: summary.vaVrIncomePaid,
+              vaVrSpent: summary.vaVrSpent,
+              vaVrSpentPaid: summary.vaVrSpentPaid,
+              vaVrAvailableBalance: summary.vaVrAvailableBalance,
+              vaVrProjectedBalance: summary.vaVrProjectedBalance,
+              vaVrDailyLimit: summary.vaVrDailyLimit,
+              vaVrBySubcategory: summary.vaVrBySubcategory,
             }
           : null,
         recentTransactions: (monthTransactions || []).slice(0, 40).map((t) => {

@@ -10,6 +10,7 @@ import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
   getCategoryDetail,
+  isVaVrCategory,
   type Category,
   type EstimationRule,
   type PaymentMethod,
@@ -458,7 +459,9 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   type="button"
                   onClick={() => {
                     setBillType('expense')
-                    if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
+                    if (isVaVrCategory(category)) {
+                      setSubcategory('Supermercado')
+                    } else if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
                       setCategory('Moradia')
                       setSubcategory(getCategoryDetail('Moradia')?.subcategories?.[0] || null)
                     }
@@ -476,8 +479,12 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   type="button"
                   onClick={() => {
                     setBillType('income')
-                    setCategory('Salário & Remuneração')
-                    setSubcategory(getCategoryDetail('Salário & Remuneração')?.subcategories?.[0] || null)
+                    if (isVaVrCategory(category)) {
+                      setSubcategory('Recarga VA/VR')
+                    } else {
+                      setCategory('Salário & Remuneração')
+                      setSubcategory(getCategoryDetail('Salário & Remuneração')?.subcategories?.[0] || null)
+                    }
                   }}
                   className={`py-1.5 px-3 rounded-lg font-semibold cursor-pointer transition-all flex items-center gap-1.5 ${
                     billType === 'income'
@@ -514,7 +521,16 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   onValueChange={(v) => {
                     const newCat = v as Category
                     setCategory(newCat)
-                    setSubcategory(getCategoryDetail(newCat)?.subcategories?.[0] || null)
+                    const subs = getCategoryDetail(newCat)?.subcategories || []
+                    if (isVaVrCategory(newCat)) {
+                      setSubcategory(
+                        billType === 'income'
+                          ? (subs.includes('Recarga VA/VR') ? 'Recarga VA/VR' : subs[0] || null)
+                          : (subs.includes('Supermercado') ? 'Supermercado' : subs[0] || null),
+                      )
+                    } else {
+                      setSubcategory(subs[0] || null)
+                    }
                   }}
                 >
                   <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs sm:text-sm">

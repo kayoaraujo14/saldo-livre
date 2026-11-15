@@ -45,6 +45,8 @@ data class CardInvoicesUiState(
     val searchQuery: String = "",
     val showPayConfirm: Boolean = false,
     val isPaying: Boolean = false,
+    val paymentDate: String = FinanceEngine.todayKey(),
+    val isEditingPaymentDate: Boolean = false,
     val isLoading: Boolean = true,
     val userMessage: String? = null
 ) {
@@ -139,14 +141,14 @@ class CardInvoicesViewModel(
 
     fun goToMonth(monthKey: String) {
         viewMonth.value = monthKey
-        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null, selectedCategory = null) }
+        _uiState.update { it.copy(showPayConfirm = false, isEditingPaymentDate = false, selectedParticipantName = null, selectedCategory = null) }
     }
 
     private fun changeMonth(delta: Int) = goToMonth(FinanceEngine.shiftMonth(viewMonth.value, delta))
 
     fun selectCard(cardId: String) {
         selectedCardId.value = cardId
-        _uiState.update { it.copy(showPayConfirm = false, selectedParticipantName = null, selectedCategory = null) }
+        _uiState.update { it.copy(showPayConfirm = false, isEditingPaymentDate = false, selectedParticipantName = null, selectedCategory = null) }
     }
 
     fun toggleCategoryFilter(category: String) {
@@ -174,23 +176,58 @@ class CardInvoicesViewModel(
     fun setFilter(filter: InvoiceItemFilter) = _uiState.update { it.copy(itemFilter = filter) }
     fun setSearchQuery(query: String) = _uiState.update { it.copy(searchQuery = query) }
 
-    fun requestPay() = _uiState.update { it.copy(showPayConfirm = true) }
-    fun dismissPay() = _uiState.update { it.copy(showPayConfirm = false) }
+    fun requestPay() {
+        val selected = _uiState.value.selected
+        if (selected != null && selected.card.ownerUid != _uiState.value.currentUser.uid) {
+            _uiState.update { it.copy(userMessage = "Apenas o titular pode quitar a fatura bancária.") }
+            return
+        }
+        val defaultDate = selected?.paidDate ?: FinanceEngine.todayKey()
+        _uiState.update { it.copy(showPayConfirm = true, paymentDate = defaultDate, isEditingPaymentDate = false) }
+    }
 
-    /** Quita a fatura marcando todos os lançamentos de despesa em aberto como pagos. */
+    fun requestEditPaymentDate() {
+        val selected = _uiState.value.selected ?: return
+        if (selected.card.ownerUid != _uiState.value.currentUser.uid) {
+            _uiState.update { it.copy(userMessage = "Apenas o titular pode alterar a data de pagamento.") }
+            return
+        }
+        if (selected.status != InvoiceStatus.PAID) return
+        val initialDate = selected.paidDate ?: FinanceEngine.todayKey()
+        _uiState.update { it.copy(showPayConfirm = true, paymentDate = initialDate, isEditingPaymentDate = true) }
+    }
+
+    fun dismissPay() = _uiState.update { it.copy(showPayConfirm = false, isEditingPaymentDate = false) }
+
+    fun setPaymentDate(date: String) {
+        _uiState.update { it.copy(paymentDate = date) }
+    }
+
+    /** Quita a fatura ou atualiza a data efetiva de pagamento da fatura quitada. */
     fun confirmPay() {
-        val invoice = _uiState.value.selected ?: return
-        val unpaid = invoice.unpaidExpenses
-        if (unpaid.isEmpty()) return
+        val state = _uiState.value
+        val invoice = state.selected ?: return
+        if (invoice.card.ownerUid != state.currentUser.uid) {
+            _uiState.update { it.copy(userMessage = "Apenas o titular pode quitar a fatura bancária.") }
+            return
+        }
+        val wasPaidEdit = state.isEditingPaymentDate || invoice.status == InvoiceStatus.PAID
+        if (!wasPaidEdit && invoice.unpaidExpenses.isEmpty()) return
+        val chosenDate = state.paymentDate.ifBlank { FinanceEngine.todayKey() }
         _uiState.update { it.copy(isPaying = true) }
         viewModelScope.launch {
             try {
-                unpaid.forEach { repository.setTransactionStatus(it.id, TransactionStatus.PAID) }
+                repository.payCardInvoice(invoice.card.id, invoice.monthKey, chosenDate)
                 _uiState.update {
                     it.copy(
                         isPaying = false,
                         showPayConfirm = false,
-                        userMessage = "Fatura ${invoice.card.cardName} paga: ${FinanceEngine.formatCurrency(invoice.openAmount)}"
+                        isEditingPaymentDate = false,
+                        userMessage = if (wasPaidEdit) {
+                            "Data de pagamento da fatura ${invoice.card.cardName} atualizada para ${FinanceEngine.formatShortDate(chosenDate)}"
+                        } else {
+                            "Fatura ${invoice.card.cardName} paga em ${FinanceEngine.formatShortDate(chosenDate)}: ${FinanceEngine.formatCurrency(invoice.openAmount)}"
+                        }
                     )
                 }
             } catch (e: Exception) {

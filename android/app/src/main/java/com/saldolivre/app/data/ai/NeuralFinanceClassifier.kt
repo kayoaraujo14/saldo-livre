@@ -69,7 +69,7 @@ class NeuralFinanceClassifier(
             Triple("Moradia", "Aluguel & Condomínio", Regex("""(aluguel|condom[ií]nio|quintoandar|loca[çc][aã]o)""", RegexOption.IGNORE_CASE)),
             Triple("Moradia", "Energia Elétrica", Regex("""(luz|energia|enel|cemig|light|copel|cpfl|eletropaulo|conta de luz)""", RegexOption.IGNORE_CASE)),
             Triple("Moradia", "Água & Saneamento", Regex("""([aá]gua|sabesp|sanepar|copasa|saneamento|conta de [aá]gua)""", RegexOption.IGNORE_CASE)),
-            Triple("Moradia", "Gás", Regex("""(g[aá]s|comgas|ultragaz|botij[aã]o)""", RegexOption.IGNORE_CASE)),
+            Triple("Moradia", "Gás", Regex("""(\bg[aá]s\b|comgas|ultragaz|botij[aã]o)""", RegexOption.IGNORE_CASE)),
             Triple("Moradia", "Internet & TV a Cabo", Regex("""(internet|fibra|wifi|wi-fi|claro|vivo fibra|oi fibra|tim live)""", RegexOption.IGNORE_CASE)),
             Triple("Moradia", "IPTU & Taxas", Regex("""(iptu|taxa de lixo)""", RegexOption.IGNORE_CASE)),
             Triple("Moradia", "Manutenção & Reparos", Regex("""(encanador|eletricista|pintor|reforma|manuten[çc][aã]o da casa)""", RegexOption.IGNORE_CASE)),
@@ -152,8 +152,8 @@ class NeuralFinanceClassifier(
 
             // Receitas
             Triple("Salário & Remuneração", "Salário Principal", Regex("""(sal[aá]rio|folha de pag|holerite|pro-?labore)""", RegexOption.IGNORE_CASE)),
-            Triple("Benefícios", "Vale Alimentação (VA)", Regex("""(vale alimenta[çc][aã]o|\bva\b|alelo alimenta[çc][aã]o|ticket alimenta[çc][aã]o)""", RegexOption.IGNORE_CASE)),
-            Triple("Benefícios", "Vale Refeição (VR)", Regex("""(vale refei[çc][aã]o|\bvr\b|alelo refei[çc][aã]o|ticket refei[çc][aã]o)""", RegexOption.IGNORE_CASE)),
+            Triple("VA/VR", "Vale Alimentação (VA)", Regex("""(vale alimenta[çc][aã]o|\bva\b|alelo alimenta[çc][aã]o|ticket alimenta[çc][aã]o)""", RegexOption.IGNORE_CASE)),
+            Triple("VA/VR", "Vale Refeição (VR)", Regex("""(vale refei[çc][aã]o|\bvr\b|alelo refei[çc][aã]o|ticket refei[çc][aã]o)""", RegexOption.IGNORE_CASE)),
             Triple("Freelance & Serviços", "Projetos Freelance", Regex("""(freela|freelance|projeto freela)""", RegexOption.IGNORE_CASE)),
             Triple("Reembolsos & Acertos", "Acerto de Amigo / Cartão", Regex("""(acerto|divis[aã]o de conta|pagamento de amigo|reembolso)""", RegexOption.IGNORE_CASE)),
             Triple("Outras Receitas", "Pix Recebido", Regex("""(pix recebido|ted recebida|doc recebido|dep[oó]sito)""", RegexOption.IGNORE_CASE)),
@@ -180,7 +180,7 @@ class NeuralFinanceClassifier(
             "Compras & Estilo de Vida" to Regex("""(roupa|t[eê]nis|shopping|eletr[oô]nico|celular|magazine|presente|brinquedo)""", RegexOption.IGNORE_CASE),
             "Pets" to Regex("""(pet|ra[çc][aã]o|veterin[aá]rio|cobasi)""", RegexOption.IGNORE_CASE),
             "Salário & Remuneração" to Regex("""(sal[aá]rio|folha de pag|holerite|pro-?labore)""", RegexOption.IGNORE_CASE),
-            "Benefícios" to Regex("""(vale alimenta[çc][aã]o|vale refei[çc][aã]o|\bva\b|\bvr\b)""", RegexOption.IGNORE_CASE)
+            "VA/VR" to Regex("""(vale alimenta[çc][aã]o|vale refei[çc][aã]o|\bva\b|\bvr\b|va/vr|ifood benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo)""", RegexOption.IGNORE_CASE)
         )
     }
 
@@ -218,12 +218,52 @@ class NeuralFinanceClassifier(
     /**
      * Classifica categoria e subcategoria com base em regras neurais e pesos semânticos.
      */
-    fun guessCategoryAndSubcategory(text: String, @Suppress("UNUSED_PARAMETER") amount: Double? = null): CategoryGuess {
+    fun guessCategoryAndSubcategory(
+        text: String,
+        @Suppress("UNUSED_PARAMETER") amount: Double? = null,
+        type: TransactionType? = null
+    ): CategoryGuess {
         val normText = normalize(text)
 
         // Se o texto explicitamente indicar estorno/reembolso
         if (Regex("""\b(estorno|reembolso|devolu[cç][aã]o|cr[eé]dito na fatura)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText)) {
             return CategoryGuess("Estorno", "Crédito na Fatura", 1.0f)
+        }
+
+        // Módulo VA/VR (Vale-Alimentação / Vale-Refeição / Cartões de Benefícios)
+        val hasVaVrKeyword = Regex(
+            """\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""",
+            RegexOption.IGNORE_CASE
+        ).containsMatchIn(normText)
+        if (hasVaVrKeyword) {
+            val cleanedFoodText = normText
+                .replace(Regex("""ifood[\s-]+benef[ií]cios""", RegexOption.IGNORE_CASE), " ")
+                .replace(Regex("""\bflash\b""", RegexOption.IGNORE_CASE), " ")
+                .trim()
+            val isExplicitRecharge = Regex(
+                """\b(recarga|dep[oó]sito|cr[eé]dito|receb|caiu|entrou|saldo|ajuste)\b""",
+                RegexOption.IGNORE_CASE
+            ).containsMatchIn(normText)
+            val inferredSubcat = when {
+                type == TransactionType.INCOME -> when {
+                    Regex("""\b(vale[- ]?refei[cç][aã]o|\bvr\b|refeicao)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText) -> "Vale Refeição (VR)"
+                    Regex("""\b(vale[- ]?alimenta[cç][aã]o|\bva\b|alimentacao)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText) -> "Vale Alimentação (VA)"
+                    Regex("""\b(ajuste|saldo inicial)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText) -> "Saldo Inicial / Ajuste"
+                    else -> "Recarga VA/VR"
+                }
+                Regex("""(supermercado|mercado|atacad[aã]o|atacado|assa[ií]|carrefour|p[aã]o de a[cç][uú]car|extra|hortifruti|a[cç]ougue|sacol[aã]o|feira|hiper|mercearia|minimercado|emp[oó]rio)""", RegexOption.IGNORE_CASE).containsMatchIn(cleanedFoodText) -> "Supermercado"
+                Regex("""(padaria|panificadora|confeitaria|cafeteria|caf[eé]|starbucks|doceria)""", RegexOption.IGNORE_CASE).containsMatchIn(cleanedFoodText) -> "Padaria"
+                Regex("""(ifood|rappi|aiqfome|delivery|entrega|lanches|hamburguer|burger|mcdonald|bk|pizza|pizzaria|a[cç]a[ií]|pastel|salgado)""", RegexOption.IGNORE_CASE).containsMatchIn(cleanedFoodText) -> "Delivery & Lanches"
+                Regex("""(restaurante|almo[cç]o|jantar|janta|marmita|marmitex|quentinha|self[- ]?service|churrascaria|rod[ií]zio|cantina|sushi|japon[eê]s|comida|buffet|bistr[oô])""", RegexOption.IGNORE_CASE).containsMatchIn(cleanedFoodText) -> "Restaurante"
+                isExplicitRecharge -> when {
+                    Regex("""\b(vale[- ]?refei[cç][aã]o|\bvr\b)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText) -> "Vale Refeição (VR)"
+                    Regex("""\b(vale[- ]?alimenta[cç][aã]o|\bva\b)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText) -> "Vale Alimentação (VA)"
+                    Regex("""\b(ajuste|saldo inicial)\b""", RegexOption.IGNORE_CASE).containsMatchIn(normText) -> "Saldo Inicial / Ajuste"
+                    else -> "Recarga VA/VR"
+                }
+                else -> "Outros VA/VR"
+            }
+            return CategoryGuess("VA/VR", inferredSubcat, 0.96f)
         }
 
         // Verifica regras memorizadas do usuário primeiro
@@ -470,7 +510,7 @@ class NeuralFinanceClassifier(
     fun parseNaturalIntent(text: String): ExtractedIntent? {
         val amount = parseAmount(text) ?: return null
         val txType = detectTransactionType(text)
-        val guess = guessCategoryAndSubcategory(text, amount)
+        val guess = guessCategoryAndSubcategory(text, amount, txType)
         val desc = extractDescription(text)
         val (splitType, thirdParty) = detectSplitType(text)
         val paymentMethod = detectPaymentMethod(text)

@@ -7,9 +7,11 @@ import androidx.lifecycle.viewModelScope
 import com.saldolivre.app.SaldoLivreApplication
 import com.saldolivre.app.data.ai.GeminiLoadBalancer
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.ExpenseDraft
 import com.saldolivre.app.data.model.FriendshipStatus
 import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.UserProfile
+import com.saldolivre.app.data.notification.ExpenseDraftManager
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.data.repository.MockFinanceRepository
 import com.saldolivre.app.data.security.AppSecurityManager
@@ -35,7 +37,12 @@ data class MenuUiState(
     val biometricEnabled: Boolean = false,
     val lockTimeoutMinutes: Int = 2,
     val flagSecureEnabled: Boolean = false,
-    val biometricAvailable: Boolean = false
+    val biometricAvailable: Boolean = false,
+    val notificationListenerGranted: Boolean = false,
+    val notificationCaptureEnabled: Boolean = true,
+    val isSimulatingNotification: Boolean = false,
+    val simulatedNotificationMessage: String? = null,
+    val lastSimulatedDraft: ExpenseDraft? = null
 )
 
 class MenuViewModel(
@@ -45,6 +52,7 @@ class MenuViewModel(
     private val appContext = runCatching { SaldoLivreApplication.instance }.getOrNull()
     private val loadBalancer = GeminiLoadBalancer(appContext)
     private val securityManager = appContext?.let { AppSecurityManager.getInstance(it) }
+    private val expenseDraftManager = appContext?.let { ExpenseDraftManager.getInstance(it) }
 
     companion object {
         val AVAILABLE_MODELS = GeminiLoadBalancer.DEFAULT_MODELS_POOL
@@ -55,7 +63,9 @@ class MenuViewModel(
             biometricEnabled = securityManager?.isBiometricEnabled ?: false,
             lockTimeoutMinutes = securityManager?.lockTimeoutMinutes ?: 2,
             flagSecureEnabled = securityManager?.isFlagSecureEnabled ?: false,
-            biometricAvailable = securityManager?.isBiometricAvailable() ?: false
+            biometricAvailable = securityManager?.isBiometricAvailable() ?: false,
+            notificationListenerGranted = expenseDraftManager?.isListenerPermissionGranted() ?: false,
+            notificationCaptureEnabled = expenseDraftManager?.isCaptureEnabled ?: true
         )
     )
     val uiState: StateFlow<MenuUiState> = _uiState.asStateFlow()
@@ -124,7 +134,9 @@ class MenuViewModel(
                     biometricEnabled = securityManager?.isBiometricEnabled ?: false,
                     lockTimeoutMinutes = securityManager?.lockTimeoutMinutes ?: 2,
                     flagSecureEnabled = securityManager?.isFlagSecureEnabled ?: false,
-                    biometricAvailable = securityManager?.isBiometricAvailable() ?: false
+                    biometricAvailable = securityManager?.isBiometricAvailable() ?: false,
+                    notificationListenerGranted = expenseDraftManager?.isListenerPermissionGranted() ?: false,
+                    notificationCaptureEnabled = expenseDraftManager?.isCaptureEnabled ?: true
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -150,6 +162,65 @@ class MenuViewModel(
         securityManager?.isFlagSecureEnabled = enabled
         activity?.let { securityManager?.applyFlagSecure(it) }
         _uiState.update { it.copy(flagSecureEnabled = enabled) }
+    }
+
+    // --------------------------------------------------------------------------
+    // CAPTURA AUTOMÁTICA DE NOTIFICAÇÕES BANCÁRIAS
+    // --------------------------------------------------------------------------
+
+    fun refreshNotificationListenerStatus() {
+        _uiState.update {
+            it.copy(
+                notificationListenerGranted = expenseDraftManager?.isListenerPermissionGranted() ?: false,
+                notificationCaptureEnabled = expenseDraftManager?.isCaptureEnabled ?: true
+            )
+        }
+    }
+
+    fun setNotificationCaptureEnabled(enabled: Boolean) {
+        expenseDraftManager?.isCaptureEnabled = enabled
+        _uiState.update { it.copy(notificationCaptureEnabled = enabled) }
+    }
+
+    fun simulateBankNotification() {
+        val manager = expenseDraftManager ?: return
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(isSimulatingNotification = true, simulatedNotificationMessage = null)
+            }
+            try {
+                val draft = manager.simulateTestNotification(repository)
+                if (draft != null) {
+                    val amountText = FinanceEngine.formatCurrency(draft.amount).replace('\u00A0', ' ')
+                    val msg = if (manager.hasPostNotificationsPermission()) {
+                        "Notificação disparada! Esboço: ${draft.description} ($amountText • ${draft.category}). Toque na notificação ou abra no Chat."
+                    } else {
+                        "Esboço criado: ${draft.description} ($amountText • ${draft.category}). Permissão POST_NOTIFICATIONS pendente; você já pode revisar direto no Chat."
+                    }
+                    _uiState.update {
+                        it.copy(
+                            isSimulatingNotification = false,
+                            simulatedNotificationMessage = msg,
+                            lastSimulatedDraft = draft
+                        )
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isSimulatingNotification = false,
+                            simulatedNotificationMessage = "Não foi possível gerar esboço a partir do texto de teste."
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSimulatingNotification = false,
+                        simulatedNotificationMessage = "Erro ao simular notificação: ${e.message ?: "desconhecido"}"
+                    )
+                }
+            }
+        }
     }
 
     // --------------------------------------------------------------------------

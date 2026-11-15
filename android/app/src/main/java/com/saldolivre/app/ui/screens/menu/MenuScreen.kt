@@ -1,7 +1,18 @@
 package com.saldolivre.app.ui.screens.menu
 
+import android.Manifest
 import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -33,6 +44,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.ExpenseDraft
+import com.saldolivre.app.ui.screens.chat.GeminiChatViewModel
 import com.saldolivre.app.ui.theme.*
 
 private val DarkEmeraldHeroTint = Color(0xFF064E3B)
@@ -53,11 +66,29 @@ fun MenuScreen(
     onNavigateToFriends: () -> Unit = {},
     onNavigateToProjections: () -> Unit = {},
     onNavigateToRecentActivity: () -> Unit = {},
+    onNavigateToChat: () -> Unit = {},
     onLogout: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val scrollState = rememberScrollState()
     var showAiSheet by remember { mutableStateOf(false) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshNotificationListenerStatus()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val postNotificationsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        viewModel.simulateBankNotification()
+    }
 
     Scaffold(
         containerColor = DarkBackground,
@@ -282,6 +313,47 @@ fun MenuScreen(
                 onSelectTimeout = { viewModel.setLockTimeoutMinutes(it) },
                 onToggleFlagSecure = { enabled ->
                     viewModel.setFlagSecureEnabled(enabled, activity)
+                }
+            )
+
+            // 5.5 Grupo: Captura Automática de Notificações Bancárias
+            MenuNotificationCaptureSection(
+                uiState = uiState,
+                onOpenListenerSettings = {
+                    val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { context.startActivity(intent) }.onFailure {
+                        context.startActivity(
+                            Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                },
+                onToggleCapture = { enabled ->
+                    if (enabled && !uiState.notificationListenerGranted) {
+                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { context.startActivity(intent) }
+                    } else {
+                        viewModel.setNotificationCaptureEnabled(enabled)
+                    }
+                },
+                onSimulateTestNotification = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                        ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        postNotificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        viewModel.simulateBankNotification()
+                    }
+                },
+                onOpenSimulatedDraftInChat = { draft ->
+                    GeminiChatViewModel.submitPendingExpenseDraft(draft)
+                    onNavigateToChat()
                 }
             )
 
@@ -578,6 +650,228 @@ private data class MenuToolItemData(
     val highlightBadge: Boolean = false,
     val onClick: () -> Unit
 )
+
+@Composable
+private fun MenuNotificationCaptureSection(
+    uiState: MenuUiState,
+    onOpenListenerSettings: () -> Unit,
+    onToggleCapture: (Boolean) -> Unit,
+    onSimulateTestNotification: () -> Unit,
+    onOpenSimulatedDraftInChat: (ExpenseDraft) -> Unit
+) {
+    val isActive = uiState.notificationListenerGranted && uiState.notificationCaptureEnabled
+    val statusLabel = when {
+        !uiState.notificationListenerGranted -> "Permissão Pendente"
+        uiState.notificationCaptureEnabled -> "Ativa"
+        else -> "Pausada"
+    }
+    val statusColor = when {
+        !uiState.notificationListenerGranted -> Amber500
+        uiState.notificationCaptureEnabled -> Emerald400
+        else -> TextMuted
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "CAPTURA AUTOMÁTICA DE NOTIFICAÇÕES",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextMuted,
+            letterSpacing = 0.8.sp,
+            modifier = Modifier.padding(start = 4.dp)
+        )
+
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = DarkSurface,
+            border = BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(statusColor.copy(alpha = 0.14f))
+                            .border(1.dp, statusColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.NotificationsActive,
+                            contentDescription = "Captura de Notificações",
+                            tint = statusColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Leitor de Compras Bancárias",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = statusColor.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, statusColor.copy(alpha = 0.35f))
+                        ) {
+                            Text(
+                                text = statusLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = statusColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Switch(
+                        checked = isActive,
+                        onCheckedChange = onToggleCapture,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Emerald500,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = DarkBackground,
+                            uncheckedBorderColor = DarkBorder
+                        )
+                    )
+                }
+
+                Text(
+                    text = if (uiState.notificationListenerGranted) {
+                        "Compras no Crédito, Débito ou Pix enviadas pelos apps bancários geram um esboço inteligente para revisão rápida ou aprovação via Chat."
+                    } else {
+                        "Conceda acesso às notificações do Android para que o Saldo Livre detecte despesas bancárias em tempo real com sanitização local."
+                    },
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    lineHeight = 17.sp
+                )
+
+                OutlinedButton(
+                    onClick = onOpenListenerSettings,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (uiState.notificationListenerGranted) DarkBorder else Amber500.copy(alpha = 0.55f)
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (uiState.notificationListenerGranted) TextPrimary else Amber500
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (uiState.notificationListenerGranted) {
+                            "Gerenciar Permissão no Sistema"
+                        } else {
+                            "Autorizar Leitura de Notificações"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Button(
+                    onClick = onSimulateTestNotification,
+                    enabled = !uiState.isSimulatingNotification,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Emerald500,
+                        contentColor = Color.White
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (uiState.isSimulatingNotification) {
+                            "Simulando Notificação..."
+                        } else {
+                            "Simular Notificação de Teste"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                val feedback = uiState.simulatedNotificationMessage
+                val simulatedDraft = uiState.lastSimulatedDraft
+                if (!feedback.isNullOrBlank()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkBackground)
+                            .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = feedback,
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            lineHeight = 16.sp
+                        )
+                        if (simulatedDraft != null) {
+                            OutlinedButton(
+                                onClick = { onOpenSimulatedDraftInChat(simulatedDraft) },
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Cyan400.copy(alpha = 0.5f)),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan400),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Revisar Esboço no Chat IA",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun MenuSecuritySection(

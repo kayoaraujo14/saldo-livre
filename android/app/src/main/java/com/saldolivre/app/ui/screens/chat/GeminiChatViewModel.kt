@@ -13,6 +13,7 @@ import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonToken
 import java.io.StringReader
 import com.saldolivre.app.SaldoLivreApplication
+import com.saldolivre.app.data.ai.AgentSecuritySanitizer
 import com.saldolivre.app.data.ai.AndroidAgentToolsEngine
 import com.saldolivre.app.data.ai.AndroidSpeechManager
 import com.saldolivre.app.data.ai.ChatSessionManager
@@ -23,6 +24,7 @@ import com.saldolivre.app.data.ai.NeuralFinanceClassifier
 import com.saldolivre.app.data.ai.ToolExecutionResult
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
+import com.saldolivre.app.data.notification.ExpenseDraftManager
 import com.saldolivre.app.data.parser.ParsedStatementItem
 import com.saldolivre.app.data.parser.StatementParser
 import com.saldolivre.app.data.repository.FinanceRepository
@@ -32,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import java.util.UUID
 
 @Immutable
@@ -69,7 +72,9 @@ data class ChatUiState(
     // Sugestões Dinâmicas
     val displayedSuggestions: List<String> = emptyList(),
     val suggestionOffset: Int = 0,
-    val isOnline: Boolean = true
+    val isOnline: Boolean = true,
+    // Esboço de notificação bancária em revisão ativa
+    val activeExpenseDraft: ExpenseDraft? = null
 )
 
 class GeminiChatViewModel(
@@ -98,6 +103,19 @@ class GeminiChatViewModel(
 
         @Volatile
         var pendingInitialPrompt: String? = null
+
+        private val _pendingExpenseDraft = MutableStateFlow<ExpenseDraft?>(null)
+        val pendingExpenseDraft: StateFlow<ExpenseDraft?> = _pendingExpenseDraft.asStateFlow()
+
+        fun submitPendingExpenseDraft(draft: ExpenseDraft) {
+            _pendingExpenseDraft.value = draft
+        }
+
+        fun consumePendingExpenseDraft(): ExpenseDraft? {
+            val d = _pendingExpenseDraft.value
+            _pendingExpenseDraft.value = null
+            return d
+        }
 
         fun consumePendingPrompt(): String? {
             val p = pendingInitialPrompt
@@ -139,6 +157,10 @@ class GeminiChatViewModel(
                 messages = fresh.messages,
                 learnedRules = initialRules
             )
+        }
+
+        consumePendingExpenseDraft()?.let { draft ->
+            openWithExpenseDraft(draft)
         }
 
         // Observa alterações do usuário logado para carregar sessões e regras vinculadas
@@ -191,11 +213,13 @@ class GeminiChatViewModel(
         }
 
         _uiState.update {
+            val preservedDraft = activeSession.activeExpenseDraft ?: it.activeExpenseDraft
             it.copy(
                 sessions = combinedSessions,
                 currentSessionId = activeSession.id,
                 messages = activeSession.messages,
-                learnedRules = loadedRules
+                learnedRules = loadedRules,
+                activeExpenseDraft = preservedDraft
             )
         }
 
@@ -272,6 +296,7 @@ class GeminiChatViewModel(
             it.copy(
                 currentSessionId = sessionId,
                 messages = target.messages,
+                activeExpenseDraft = target.activeExpenseDraft,
                 isHistoryOpen = false
             )
         }
@@ -304,6 +329,7 @@ class GeminiChatViewModel(
                 messages = fresh.messages,
                 inputText = "",
                 pendingAttachment = null,
+                activeExpenseDraft = null,
                 isHistoryOpen = false,
                 isRulesOpen = false
             )
@@ -373,7 +399,8 @@ class GeminiChatViewModel(
                         title = title,
                         updatedAt = System.currentTimeMillis(),
                         messages = newMessages,
-                        pendingTransactions = if (latestPendingTxs.isNotEmpty()) latestPendingTxs else s.pendingTransactions
+                        pendingTransactions = if (latestPendingTxs.isNotEmpty()) latestPendingTxs else s.pendingTransactions,
+                        activeExpenseDraft = state.activeExpenseDraft
                     )
                     sessionManager.saveSession(userUid, updatedSession)
                     updatedSession
@@ -998,6 +1025,15 @@ class GeminiChatViewModel(
             _uiState.update { it.copy(isTyping = true) }
             try {
                 val toolResult = toolsEngine.executeConfirmedAction(pendingAction)
+                val activeDraft = _uiState.value.activeExpenseDraft
+                if (activeDraft != null &&
+                    pendingAction.toolName in listOf("CREATE_TRANSACTION", "registrarTransacao") &&
+                    !toolResult.text.startsWith("⚠️")
+                ) {
+                    val finalDesc = pendingAction.args["description"] as? String ?: activeDraft.description
+                    val finalCat = pendingAction.args["category"] as? String ?: activeDraft.category
+                    finalizeActiveExpenseDraft(activeDraft, finalDesc, finalCat)
+                }
                 val resultCards = toolResult.actions ?: toolResult.actionCard?.let { listOf(it) }
                 val successMsg = ChatMessage(
                     sender = MessageSender.ASSISTANT,
@@ -1026,6 +1062,542 @@ class GeminiChatViewModel(
             text = "❌ **Ação cancelada.** Nada foi alterado no seu Saldo Livre. Se quiser ajustar algum detalhe, basta me avisar!"
         )
         updateActiveSessionMessages(currentMsgs + cancelMsg)
+        if (pendingAction.id.startsWith("act_draft_")) {
+            _uiState.value.activeExpenseDraft?.let { clearActiveExpenseDraftOnly(it.id) }
+        }
+    }
+
+    // -------------------------------------------------------------
+    // REVISÃO CONVERSACIONAL DE ESBOÇO DE NOTIFICAÇÃO BANCÁRIA
+    // -------------------------------------------------------------
+
+    fun consumeAndOpenPendingDraft() {
+        val draft = consumePendingExpenseDraft() ?: return
+        openWithExpenseDraft(draft)
+    }
+
+    fun openWithExpenseDraft(draft: ExpenseDraft) {
+        if (_uiState.value.activeExpenseDraft?.id == draft.id &&
+            _uiState.value.messages.any { it.id == "draft_greeting_${draft.id}" }
+        ) {
+            return
+        }
+
+        val userUid = repository.currentUser.value.uid
+        val cards = _uiState.value.availableCards
+        val resolvedCard = draft.cardId?.let { cid -> cards.find { it.id == cid } }
+            ?: draft.cardName?.let { cname -> cards.find { it.cardName.equals(cname, ignoreCase = true) } }
+        val effectiveDraft = if (resolvedCard != null && draft.cardName != resolvedCard.cardName) {
+            draft.copy(cardId = resolvedCard.id, cardName = resolvedCard.cardName)
+        } else {
+            draft
+        }
+
+        val greetingMsg = buildDraftGreetingMessage(effectiveDraft)
+        val newSession = ChatSession(
+            id = "sess_draft_${effectiveDraft.id}",
+            title = "Revisão: ${effectiveDraft.description.take(24)}",
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis(),
+            messages = listOf(greetingMsg),
+            activeExpenseDraft = effectiveDraft
+        )
+
+        val currentState = _uiState.value
+        val filtered = currentState.sessions.filterNot {
+            it.id == newSession.id || sessionManager.isBlankInitialSession(it)
+        }
+        val updatedSessions = listOf(newSession) + filtered
+        sessionManager.saveSession(userUid, newSession, syncToCloud = false)
+
+        _uiState.update {
+            it.copy(
+                sessions = updatedSessions,
+                currentSessionId = newSession.id,
+                messages = newSession.messages,
+                activeExpenseDraft = effectiveDraft,
+                isHistoryOpen = false,
+                isRulesOpen = false
+            )
+        }
+
+        if (effectiveDraft.paymentMethod == PaymentMethod.CREDIT_CARD &&
+            effectiveDraft.cardName.isNullOrBlank() &&
+            cards.isEmpty()
+        ) {
+            viewModelScope.launch {
+                val fetchedCards = runCatching { repository.getCards().first() }.getOrDefault(emptyList())
+                val matched = effectiveDraft.cardId?.let { cid -> fetchedCards.find { it.id == cid } }
+                    ?: fetchedCards.firstOrNull {
+                        effectiveDraft.rawNotificationText.contains(it.cardName, ignoreCase = true)
+                    }
+                if (matched != null && _uiState.value.activeExpenseDraft?.id == effectiveDraft.id) {
+                    val refreshedDraft = effectiveDraft.copy(cardId = matched.id, cardName = matched.cardName)
+                    val refreshedMsg = buildDraftGreetingMessage(refreshedDraft)
+                    _uiState.update { state ->
+                        val updatedMsgs = state.messages.map { m ->
+                            if (m.id == refreshedMsg.id) refreshedMsg else m
+                        }
+                        val updatedSessList = state.sessions.map { s ->
+                            if (s.id == newSession.id) {
+                                val patched = s.copy(messages = updatedMsgs, activeExpenseDraft = refreshedDraft)
+                                sessionManager.saveSession(userUid, patched, syncToCloud = false)
+                                patched
+                            } else s
+                        }
+                        state.copy(
+                            sessions = updatedSessList,
+                            messages = updatedMsgs,
+                            activeExpenseDraft = refreshedDraft
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun buildExpenseDraftGreeting(draft: ExpenseDraft): String {
+        val formattedValue = FinanceEngine.formatCurrency(draft.amount).replace('\u00A0', ' ')
+        return buildString {
+            appendLine("Detectei uma nova despesa pela notificação do seu celular:")
+            appendLine("• **Estabelecimento:** ${draft.description}")
+            appendLine("• **Valor:** $formattedValue")
+            appendLine("• **Forma:** ${draft.paymentMethodChatLabel()}")
+            appendLine("• **Categoria sugerida:** ${draft.category}")
+            append("Deseja confirmar o lançamento assim ou quer ajustar algum detalhe?")
+        }
+    }
+
+    private fun buildDraftPendingAction(draft: ExpenseDraft): PendingAction {
+        val formattedValue = FinanceEngine.formatCurrency(draft.amount).replace('\u00A0', ' ')
+        return PendingAction(
+            id = "act_draft_${draft.id}",
+            toolName = "CREATE_TRANSACTION",
+            title = "Confirmar Despesa Detectada",
+            description = "${draft.description} — $formattedValue",
+            detail = "${draft.category} • ${draft.paymentMethodChatLabel()}",
+            args = buildMap<String, Any?> {
+                put("description", draft.description)
+                put("amount", draft.amount)
+                put("type", "expense")
+                put("category", draft.category)
+                draft.subcategory?.let { put("subcategory", it) }
+                put("paymentMethod", draft.paymentMethod.name)
+                draft.cardName?.let { put("cardName", it) }
+                put("customDueDate", draft.date)
+                put("dueDate", draft.date)
+                put("confirmed", true)
+            },
+            status = PendingActionStatus.PENDING
+        )
+    }
+
+    private fun buildDraftGreetingMessage(draft: ExpenseDraft): ChatMessage {
+        val formattedValue = FinanceEngine.formatCurrency(draft.amount).replace('\u00A0', ' ')
+        val pendingAction = buildDraftPendingAction(draft)
+        return ChatMessage(
+            id = "draft_greeting_${draft.id}",
+            sender = MessageSender.ASSISTANT,
+            text = buildExpenseDraftGreeting(draft),
+            actionCard = ActionCardData(
+                title = "Confirmar Despesa Detectada",
+                description = "${draft.description} — $formattedValue",
+                detail = "${draft.category} • ${draft.paymentMethodChatLabel()}",
+                isSuccess = true,
+                pendingAction = pendingAction
+            )
+        )
+    }
+
+    private fun finalizeActiveExpenseDraft(
+        draft: ExpenseDraft,
+        finalDescription: String,
+        finalCategory: String
+    ) {
+        val userUid = repository.currentUser.value.uid
+        appContext?.let { ctx ->
+            val draftManager = ExpenseDraftManager.getInstance(ctx)
+            draftManager.removeDraft(draft.id)
+            draftManager.cancelDraftNotification(draft.id)
+            draftManager.learnRuleForDraft(
+                description = finalDescription,
+                category = finalCategory,
+                uid = userUid,
+                rulesManager = rulesManager,
+                neuralClassifier = neuralClassifier
+            )
+        }
+        val refreshedRules = rulesManager.getLocalRules(userUid)
+        val currentId = _uiState.value.currentSessionId
+        _uiState.update { state ->
+            val updatedSessions = state.sessions.map { s ->
+                if (s.id == currentId) {
+                    val clean = s.copy(activeExpenseDraft = null)
+                    sessionManager.saveSession(userUid, clean, syncToCloud = false)
+                    clean
+                } else s
+            }
+            state.copy(
+                activeExpenseDraft = null,
+                sessions = updatedSessions,
+                learnedRules = refreshedRules
+            )
+        }
+    }
+
+    private fun clearActiveExpenseDraftOnly(draftId: String) {
+        val userUid = repository.currentUser.value.uid
+        appContext?.let { ctx ->
+            val draftManager = ExpenseDraftManager.getInstance(ctx)
+            draftManager.removeDraft(draftId)
+            draftManager.cancelDraftNotification(draftId)
+        }
+        val currentId = _uiState.value.currentSessionId
+        _uiState.update { state ->
+            val updatedSessions = state.sessions.map { s ->
+                if (s.id == currentId) {
+                    val clean = s.copy(activeExpenseDraft = null)
+                    sessionManager.saveSession(userUid, clean, syncToCloud = false)
+                    clean
+                } else s
+            }
+            state.copy(
+                activeExpenseDraft = null,
+                sessions = updatedSessions
+            )
+        }
+    }
+
+    private data class AdjustedDraftParams(
+        val description: String,
+        val amount: Double,
+        val category: String,
+        val subcategory: String?,
+        val paymentMethod: PaymentMethod,
+        val cardId: String?,
+        val cardName: String?,
+        val totalInstallments: Int,
+        val hasAnyAdjustment: Boolean
+    )
+
+    private fun extractDraftAdjustments(
+        draft: ExpenseDraft,
+        rawInput: String,
+        cards: List<Card>
+    ): AdjustedDraftParams {
+        val folded = CategoryRegistry.foldCategoryAccents(rawInput).lowercase(Locale.ROOT).trim()
+        var hasAdjustment = false
+
+        // 1. Cartão mencionado (ex: "foi no cartão Sicredi")
+        val genericCardTokens = setOf("cartao", "cartão", "credito", "crédito", "bank", "banco", "card", "black", "platinum")
+        val sortedCards = cards.sortedByDescending { it.cardName.length }
+        var matchedCard: Card? = null
+        for (card in sortedCards) {
+            val foldedCardName = CategoryRegistry.foldCategoryAccents(card.cardName).lowercase(Locale.ROOT).trim()
+            if (foldedCardName.length >= 2 && folded.contains(foldedCardName)) {
+                matchedCard = card
+                break
+            }
+            val tokens = foldedCardName.split(Regex("""[\s\-_/]+"""))
+                .filter { it.length >= 3 && it !in genericCardTokens }
+            if (tokens.any { token -> Regex("""\b${Regex.escape(token)}\b""").containsMatchIn(folded) }) {
+                matchedCard = card
+                break
+            }
+        }
+        val mentionedCardPhrase = Regex("""\bno\s+cart[aã]o\s+([a-z0-9\s]{2,25})""", RegexOption.IGNORE_CASE)
+            .find(rawInput)
+            ?.groupValues?.getOrNull(1)
+            ?.replace(Regex("""\b(parcelad[oa].*|\d+\s*x|e\s+(?:confirma|aprova).*)\b""", RegexOption.IGNORE_CASE), "")
+            ?.trim()
+            ?.takeIf { it.length >= 2 }
+
+        if (matchedCard != null || mentionedCardPhrase != null) {
+            hasAdjustment = true
+        }
+
+        // 2. Parcelamento ("parcelado em 2x", "em 3x", "2x")
+        val instRegex1 = Regex("""(?:parcelad[oa]\s*(?:em)?\s*|em\s+)\b(\d{1,2})\s*x\b""")
+        val instRegex2 = Regex("""\b(\d{1,2})\s*x\b""")
+        val instRegex3 = Regex("""\bparcelad[oa]\s+em\s+(\d{1,2})(?:\s+vezes|\s+parcelas)?\b""")
+        val parsedInst = (instRegex1.find(folded) ?: instRegex3.find(folded) ?: instRegex2.find(folded))
+            ?.groupValues?.getOrNull(1)?.toIntOrNull()?.takeIf { it in 2..48 }
+        val totalInstallments = parsedInst ?: 1
+        if (parsedInst != null) {
+            hasAdjustment = true
+        }
+
+        // 3. Método de pagamento
+        val explicitPix = Regex("""\bpix\b""").containsMatchIn(folded)
+        val explicitDebit = Regex("""\bd[eé]bito\b""").containsMatchIn(folded)
+        val explicitBill = Regex("""\bboleto\b""").containsMatchIn(folded)
+        val explicitCredit = matchedCard != null || mentionedCardPhrase != null || totalInstallments > 1 ||
+            Regex("""\b(cr[eé]dito|cart[aã]o)\b""").containsMatchIn(folded)
+
+        val finalMethod = when {
+            explicitPix -> PaymentMethod.PIX
+            explicitDebit -> PaymentMethod.DEBIT
+            explicitBill -> PaymentMethod.BILL
+            explicitCredit -> PaymentMethod.CREDIT_CARD
+            else -> draft.paymentMethod
+        }
+        if (finalMethod != draft.paymentMethod) {
+            hasAdjustment = true
+        }
+
+        val finalCardId = when {
+            finalMethod != PaymentMethod.CREDIT_CARD -> null
+            matchedCard != null -> matchedCard.id
+            else -> draft.cardId
+        }
+        val finalCardName = when {
+            finalMethod != PaymentMethod.CREDIT_CARD -> null
+            matchedCard != null -> matchedCard.cardName
+            mentionedCardPhrase != null -> mentionedCardPhrase
+            else -> draft.cardName
+        }
+
+        // 4. Categoria mencionada (ex: "muda a categoria para Alimentação e confirma")
+        var matchedCat: Pair<String, String?>? = null
+        val explicitCatPhrase = Regex(
+            """(?:categoria\s+(?:para|como|em|de)?|muda(?:\s+a\s+categoria)?\s+para|altera(?:\s+a\s+categoria)?\s+para|classifica(?:r)?\s+(?:como|em|para)|coloca\s+(?:na\s+categoria|em|como))\s+([^\n,.;]+?)(?:\s+(?:e\s+(?:confirma|aprova|salva|lanca|registra)|no\s+cartao|na\s+fatura|parcelad|\d+\s*x)|$)"""
+        ).find(folded)?.groupValues?.getOrNull(1)?.trim()
+
+        if (!explicitCatPhrase.isNullOrBlank()) {
+            val cleanedPhrase = explicitCatPhrase
+                .replace(Regex("""\s+(?:e\s+(?:confirma|aprova|salva|lanca|registra))$"""), "")
+                .trim()
+            if (cleanedPhrase.isNotBlank()) {
+                val candidateKeys = (CategoryRegistry.EXPENSE_CATEGORIES.map { it.name } +
+                    CategoryRegistry.CATEGORY_CANONICAL_MAP.keys)
+                    .distinct()
+                    .sortedByDescending { it.length }
+                val matchedKey = candidateKeys.firstOrNull { key ->
+                    val fk = CategoryRegistry.foldCategoryAccents(key)
+                    fk == cleanedPhrase || cleanedPhrase.contains(fk)
+                }
+                if (matchedKey != null) {
+                    matchedCat = CategoryRegistry.resolveStrictCategory(
+                        rawCategory = matchedKey,
+                        type = TransactionType.EXPENSE,
+                        description = draft.description
+                    )
+                } else {
+                    val directGuess = neuralClassifier.guessCategoryAndSubcategory(cleanedPhrase, draft.amount)
+                    matchedCat = CategoryRegistry.resolveStrictCategory(
+                        rawCategory = cleanedPhrase,
+                        rawSubcategory = directGuess.subcategory,
+                        type = TransactionType.EXPENSE,
+                        description = cleanedPhrase
+                    )
+                }
+            }
+        }
+        if (matchedCat == null) {
+            val officialCat = CategoryRegistry.EXPENSE_CATEGORIES.firstOrNull { catDef ->
+                val fk = CategoryRegistry.foldCategoryAccents(catDef.name)
+                Regex("""\b${Regex.escape(fk)}\b""").containsMatchIn(folded)
+            }
+            if (officialCat != null) {
+                matchedCat = CategoryRegistry.resolveStrictCategory(
+                    rawCategory = officialCat.name,
+                    type = TransactionType.EXPENSE,
+                    description = draft.description
+                )
+            }
+        }
+        if (matchedCat != null) {
+            hasAdjustment = true
+        }
+
+        // 5. Valor explícito (ex: "valor para R$ 52,00")
+        val amountMatch = Regex("""\b(?:valor|preco|total)\s*(?:de|para|=)?\s*(?:r\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+[.,]\d{1,2}|\d+)\b""")
+            .find(folded)?.groupValues?.getOrNull(1)
+        val parsedAmount = amountMatch?.let { raw ->
+            val normalized = if (raw.contains(",") && raw.contains(".")) {
+                raw.replace(".", "").replace(",", ".")
+            } else if (raw.contains(",")) {
+                raw.replace(",", ".")
+            } else raw
+            AgentSecuritySanitizer.sanitizeAmount(normalized.toDoubleOrNull(), allowNegative = false)
+        }?.takeIf { it > 0.0 }
+        if (parsedAmount != null) {
+            hasAdjustment = true
+        }
+
+        // 6. Descrição explícita (ex: "estabelecimento para Padaria Central")
+        val descMatch = Regex("""\b(?:descricao|estabelecimento|nome)\s+(?:para|como|=)\s+([^\n,.;]+?)(?:\s+e\s+(?:confirma|aprova)|$)""")
+            .find(folded)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.length >= 2 }
+        if (descMatch != null) {
+            hasAdjustment = true
+        }
+
+        return AdjustedDraftParams(
+            description = descMatch ?: draft.description,
+            amount = parsedAmount ?: draft.amount,
+            category = matchedCat?.first ?: draft.category,
+            subcategory = matchedCat?.second ?: draft.subcategory,
+            paymentMethod = finalMethod,
+            cardId = finalCardId,
+            cardName = finalCardName,
+            totalInstallments = totalInstallments,
+            hasAnyAdjustment = hasAdjustment
+        )
+    }
+
+    private fun tryHandleExpenseDraftReply(rawInput: String, attachment: ChatAttachment?): Boolean {
+        val draft = _uiState.value.activeExpenseDraft ?: return false
+        if (attachment != null) return false
+
+        val folded = CategoryRegistry.foldCategoryAccents(rawInput).lowercase(Locale.ROOT).trim()
+        val hasConfirmWord = Regex(
+            """\b(aprova|aprove|aprovado|confirma|confirme|confirmado|lanca|lancar|registra|registre|registrar|salva|salve|salvar|sim|ok|pode|fechado|beleza|manda|isso)\b"""
+        ).containsMatchIn(folded)
+        val isDiscard = Regex(
+            """\b(ignora|ignorar|descarta|descartar|cancela|cancelar|apaga|apagar|esquece|nao\s+lanca)\b"""
+        ).containsMatchIn(folded)
+
+        if (isDiscard && !hasConfirmWord) {
+            val activePending = _uiState.value.messages
+                .lastOrNull { it.sender == MessageSender.ASSISTANT }
+                ?.allActionCards()
+                ?.firstNotNullOfOrNull { it.pendingAction }
+                ?.takeIf { it.status == PendingActionStatus.PENDING }
+            val currentMsgs = if (activePending != null) {
+                markPendingActionStatus(_uiState.value.messages, activePending, PendingActionStatus.CANCELLED)
+            } else _uiState.value.messages
+
+            val userMsg = ChatMessage(sender = MessageSender.USER, text = rawInput)
+            val replyMsg = ChatMessage(
+                sender = MessageSender.ASSISTANT,
+                text = "🗑️ **Esboço ignorado.** Removi o alerta de **${draft.description}** e nada foi lançado no seu Saldo Livre."
+            )
+            _uiState.update { it.copy(inputText = "") }
+            updateActiveSessionMessages(currentMsgs + userMsg + replyMsg)
+            clearActiveExpenseDraftOnly(draft.id)
+            return true
+        }
+
+        val isComplexSplit = Regex(
+            """\b(divide|dividir|racha|rachar|50\s*/\s*50|parceir|marina|amigo|amiga|terceiro|reembols|com\s+a\s+[a-z]+)\b"""
+        ).containsMatchIn(folded)
+        val isQuestion = (rawInput.contains("?") ||
+            Regex("""^(qual|quanto|quais|como|onde|me\s+mostra|mostre|liste|gere|faca\s+um\s+grafico)\b""").containsMatchIn(folded)) &&
+            !hasConfirmWord
+        if (isQuestion) return false
+        if (isComplexSplit && _uiState.value.apiKey.isNotBlank() && _uiState.value.isOnline && networkMonitor.isCurrentlyOnline()) {
+            return false
+        }
+
+        val adjusted = extractDraftAdjustments(draft, rawInput, _uiState.value.availableCards)
+        val isExplicitHold = Regex(
+            """\b(sem\s+confirmar|nao\s+confirma(?:\s+ainda)?|apenas\s+(?:muda|altera|ajusta)|so\s+(?:muda|altera|ajusta))\b"""
+        ).containsMatchIn(folded)
+
+        if (!hasConfirmWord && !adjusted.hasAnyAdjustment) {
+            return false
+        }
+
+        _uiState.update { it.copy(inputText = "") }
+        val userMsg = ChatMessage(sender = MessageSender.USER, text = rawInput)
+
+        val activePending = _uiState.value.messages
+            .lastOrNull { it.sender == MessageSender.ASSISTANT }
+            ?.allActionCards()
+            ?.firstNotNullOfOrNull { it.pendingAction }
+            ?.takeIf { it.status == PendingActionStatus.PENDING }
+        val baseMessages = if (activePending != null && !isExplicitHold) {
+            markPendingActionStatus(_uiState.value.messages, activePending, PendingActionStatus.CONFIRMED)
+        } else {
+            _uiState.value.messages
+        }
+        updateActiveSessionMessages(baseMessages + userMsg)
+
+        if (isExplicitHold) {
+            val updatedDraft = draft.copy(
+                description = adjusted.description,
+                amount = adjusted.amount,
+                category = adjusted.category,
+                subcategory = adjusted.subcategory,
+                paymentMethod = adjusted.paymentMethod,
+                cardId = adjusted.cardId,
+                cardName = adjusted.cardName
+            )
+            appContext?.let { ExpenseDraftManager.getInstance(it).saveDraft(updatedDraft) }
+            val updatedMsg = buildDraftGreetingMessage(updatedDraft).copy(
+                id = "msg_${System.currentTimeMillis()}"
+            )
+            _uiState.update { state ->
+                val updatedSess = state.sessions.map { s ->
+                    if (s.id == state.currentSessionId) s.copy(activeExpenseDraft = updatedDraft) else s
+                }
+                state.copy(activeExpenseDraft = updatedDraft, sessions = updatedSess)
+            }
+            updateActiveSessionMessages(_uiState.value.messages + updatedMsg)
+            return true
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTyping = true) }
+            try {
+                val cards = _uiState.value.availableCards.takeIf { it.isNotEmpty() }
+                    ?: runCatching { repository.getCards().first() }.getOrDefault(emptyList())
+                val finalAdjusted = if (_uiState.value.availableCards.isEmpty() && cards.isNotEmpty()) {
+                    extractDraftAdjustments(draft, rawInput, cards)
+                } else adjusted
+
+                val txAmount = if (finalAdjusted.totalInstallments > 1) {
+                    FinanceEngine.calculateInstallmentAmount(
+                        total = finalAdjusted.amount,
+                        installmentNumber = 1,
+                        installmentsTotal = finalAdjusted.totalInstallments,
+                        isPerInstallment = false
+                    )
+                } else {
+                    finalAdjusted.amount
+                }
+
+                val toolResult = toolsEngine.executeCreateTransaction(
+                    description = finalAdjusted.description,
+                    amount = txAmount,
+                    type = TransactionType.EXPENSE,
+                    category = finalAdjusted.category,
+                    subcategory = finalAdjusted.subcategory,
+                    paymentMethod = finalAdjusted.paymentMethod,
+                    cardName = finalAdjusted.cardName,
+                    splitType = SplitType.MINE,
+                    currentInstallment = 1,
+                    totalInstallments = finalAdjusted.totalInstallments,
+                    customDueDate = draft.date,
+                    confirmed = true,
+                    totalPurchaseAmount = if (finalAdjusted.totalInstallments > 1) finalAdjusted.amount else null,
+                    isPerInstallment = false
+                )
+
+                if (!toolResult.text.startsWith("⚠️")) {
+                    finalizeActiveExpenseDraft(draft, finalAdjusted.description, finalAdjusted.category)
+                }
+
+                val resultCards = toolResult.actions ?: toolResult.actionCard?.let { listOf(it) }
+                val botMsg = ChatMessage(
+                    sender = MessageSender.ASSISTANT,
+                    text = toolResult.text.ifBlank { "✅ **Despesa confirmada e lançada com sucesso!**" },
+                    actions = resultCards,
+                    actionCard = resultCards?.firstOrNull(),
+                    chartPayload = toolResult.chartPayload
+                )
+                updateActiveSessionMessages(_uiState.value.messages + botMsg)
+            } catch (e: Exception) {
+                val errMsg = ChatMessage(
+                    sender = MessageSender.ASSISTANT,
+                    text = "⚠️ Não foi possível registrar o esboço: ${e.message ?: "erro inesperado"}"
+                )
+                updateActiveSessionMessages(_uiState.value.messages + errMsg)
+            } finally {
+                _uiState.update { it.copy(isTyping = false) }
+            }
+        }
+        return true
     }
 
     // -------------------------------------------------------------
@@ -1038,6 +1610,11 @@ class GeminiChatViewModel(
 
         if (rawInput.isBlank() && attachment == null) return
         if (_uiState.value.isTyping) return
+
+        // Preflight: se houver um ExpenseDraft de notificação ativo em revisão, processa confirmação/ajustes diretamente
+        if (tryHandleExpenseDraftReply(rawInput, attachment)) {
+            return
+        }
 
         // 0. Intercepta requisição se offline, sem disparar erros 500 no console
         if (!_uiState.value.isOnline || !networkMonitor.isCurrentlyOnline()) {
@@ -1347,6 +1924,12 @@ class GeminiChatViewModel(
 
 
 
+        val vaVrSubcatDesc = if (summary.vaVrBySubcategory.isNotEmpty()) {
+            "\n- Gastos VA/VR por Subcategoria:\n  " +
+                summary.vaVrBySubcategory.joinToString("\n  ") { "* ${it.subcategory}: R$ ${FinanceEngine.round2(it.amount)} (${it.count}x)" }
+        } else ""
+        val vaVrDailyDesc = summary.vaVrDailyLimit?.let { "R$ ${FinanceEngine.round2(it)}/dia" } ?: "Sem saldo positivo ou mês encerrado"
+
         // Fluxo de caixa concreto da conta bancária vs Saldo Livre
         val cashFlow = FinanceEngine.computeAccountCashFlow(
             all = transactions,
@@ -1405,6 +1988,11 @@ PLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE PROJETADO):
 - Total Investido no Mês: R$ ${FinanceEngine.round2(summary.totalInvested)}$byInvestmentDesc
 - Assinaturas e Contas Fixas Cadastradas [ATENÇÃO: PREVISÕES TEÓRICAS - NÃO SÃO TRANSAÇÕES EFETIVADAS ATÉ SEREM LANÇADAS]:
   $recurringDesc
+
+MÓDULO VA/VR (VALE-ALIMENTAÇÃO / REFEIÇÃO — 100% ISOLADO DA CONTA CORRENTE):
+- Saldo VA/VR Disponível Agora: R$ ${FinanceEngine.round2(summary.vaVrAvailableBalance)} (Carryover anterior: R$ ${FinanceEngine.round2(summary.vaVrCarryover)} + Recargas pagas: R$ ${FinanceEngine.round2(summary.vaVrIncomePaid)} - Gastos pagos: R$ ${FinanceEngine.round2(summary.vaVrSpentPaid)})
+- Saldo VA/VR Projetado no Mês: R$ ${FinanceEngine.round2(summary.vaVrProjectedBalance)} (Recargas totais/previstas: R$ ${FinanceEngine.round2(summary.vaVrIncome)} | Gastos totais: R$ ${FinanceEngine.round2(summary.vaVrSpent)})
+- Limite Diário VA/VR Sugerido: $vaVrDailyDesc$vaVrSubcatDesc
 
 TERMÔMETRO DE SAÚDE FINANCEIRA (4 PILARES EM TEMPO REAL):
 - Score Geral: ${healthScore.score}/100 (${healthScore.label}) — ${healthScore.description}
@@ -1480,6 +2068,26 @@ ATENÇÃO: Se o usuário pedir para corrigir ou alterar itens de um LOTE PENDENT
             "Nenhuma regra memorizada ainda. Você pode aprender novas regras sempre que o usuário pedir (\"Aprenda que...\", \"Lembre-se que...\", \"Sempre que eu falar X faça Y\")."
         }
 
+        val activeDraft = _uiState.value.activeExpenseDraft
+        val draftContextDesc = if (activeDraft != null) {
+            val safeDraftDesc = AgentSecuritySanitizer.sanitizeText(activeDraft.description, maxLength = 120)
+            """
+            
+            ESBOÇO DE DESPESA DETECTADA VIA NOTIFICAÇÃO (EM REVISÃO ATIVA):
+            - draftId: ${activeDraft.id}
+            - description: $safeDraftDesc
+            - amount: ${activeDraft.amount}
+            - paymentMethod: ${activeDraft.paymentMethod.name}
+            - cardId: ${activeDraft.cardId ?: "nenhum"}
+            - cardName: ${activeDraft.cardName ?: "não identificado"}
+            - category: ${activeDraft.category}
+            - subcategory: ${activeDraft.subcategory ?: ""}
+            - date: ${activeDraft.date}
+            - INSTRUÇÃO CRÍTICA PARA ESTE ESBOÇO:
+              O usuário está revisando este rascunho. Se ele confirmar ou solicitar ajustes (como trocar categoria, definir cartão, dividir ou parcelar em Nx), execute CREATE_TRANSACTION aplicando todos os dados deste rascunho somados aos ajustes pedidos e envie "confirmed": true (não peça confirmação duplicada).
+            """.trimIndent()
+        } else ""
+
         return """
 Você é o "Copiloto Saldo Livre", um agente financeiro pessoal brasileiro, ultra-preciso, direto e acolhedor. Responda SEMPRE em português do Brasil.
 
@@ -1496,6 +2104,7 @@ $summaryDescText
 $recentTxsDesc
 
 $pendingTxsDescText
+$draftContextDesc
 
 REGRAS E PREFERÊNCIAS APRENDIDAS DO USUÁRIO (MEMÓRIA VIVA):
 $learnedRulesDesc
@@ -1952,8 +2561,9 @@ REGRAS DE FUNCIONAMENTO:
   * Responda educadamente explicando que o Saldo Livre utiliza uma taxonomia fixa e padronizada para manter a consistência dos envelopes orçamentários, gráficos e diagnósticos de saúde financeira.
   * Oriente e sugira a categoria e subcategoria oficial mais apropriada do sistema (ex: para "Bichos" ou "Pets" -> categoria "Pets", subcategoria "Acessórios & Brinquedos" ou "Veterinário & Medicamentos"; para "Viagem" -> categoria "Lazer & Entretenimento", subcategoria "Viagens & Hospedagem"; para "Farmácia" -> categoria "Saúde", subcategoria "Farmácia & Remédios").
 - No campo "category" das chamadas de ferramentas ("CREATE_TRANSACTION", "BATCH_TRANSACTIONS", "EDIT_TRANSACTION"), utilize SEMPRE e EXCLUSIVAMENTE uma das categorias oficiais ativas:
-  * Despesas (16 categorias): Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
-  * Receitas (7 categorias): Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
+  * Despesas (17 categorias): VA/VR, Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
+  * Receitas (8 categorias): VA/VR, Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
+  * REGRA DO MÓDULO VA/VR: Lançamentos com marcas Alelo, Flash, Caju, Ticket, Pluxee, Sodexo, iFood Benefícios, VA ou VR devem usar category: "VA/VR", paymentMethod: "debit" (saída) ou "pix" (entrada) — NUNCA credit_card — e NÃO impactam o Saldo Livre bancário nem os envelopes de Alimentação. Subcategorias VA/VR: Recarga VA/VR, Vale Alimentação (VA), Vale Refeição (VR), Saldo Inicial / Ajuste, Supermercado, Restaurante, Delivery & Lanches, Padaria, Outros VA/VR.
 - Subcategorias oficiais por grupo:
   * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
   * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
@@ -2108,7 +2718,7 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
      - IGNORE movimentações internas de reserva (Aplicações RDB, Resgates RDB, Guardar Dinheiro) e pagamentos de fatura de cartão já existentes.
   2. IDENTIFIQUE O TIPO DE DOCUMENTO:
      A) EXTRATO DE CONTA BANCÁRIA (Conta Corrente / Poupança / NuConta / Inter / Itaú / Bradesco):
-        - ENTRADAS / CRÉDITOS (+, C, Pix Recebido, Salário, Depósito, TED Recebida, Rendimento): type "income", category específica de receita (ex: "Salário & Remuneração", "Benefícios", "Investimentos & Rendimentos", "Outras Receitas"), paymentMethod "pix" ou "debit". Entradas AUMENTAM o Saldo Livre!
+        - ENTRADAS / CRÉDITOS (+, C, Pix Recebido, Salário, Depósito, TED Recebida, Rendimento): type "income", category específica de receita (ex: "Salário & Remuneração", "VA/VR", "Benefícios", "Investimentos & Rendimentos", "Outras Receitas"), paymentMethod "pix" ou "debit". Entradas normais AUMENTAM o Saldo Livre; entradas "VA/VR" somam exclusivamente no Módulo VA/VR.
         - SAÍDAS / DÉBITOS (-, D, Pix Enviado, Compra Débito, Pagamento de Boleto): type "expense", paymentMethod "pix", "debit" ou "bill". NUNCA marque como credit_card a menos que a linha diga "Compra Cartão de Crédito"!
         - competenceMonth: mês em que as transações ocorreram; date: a data de cada movimentação.
      B) FATURA DE CARTÃO DE CRÉDITO (Nubank, Itaú, C6, Santander, Bradesco, etc.):
@@ -2247,12 +2857,29 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
             val allActions = mutableListOf<ActionCardData>()
             var lastChartPayload: ChartPayload? = fenceChart
             var fallbackText = ""
+            var executedDraftDesc: String? = null
+            var executedDraftCat: String? = null
 
             for (block in extractedBlocks) {
                 try {
                     val jsonObj = gson.fromJson(block.jsonContent, JsonObject::class.java)
                     if (jsonObj != null && (jsonObj.has("action") || jsonObj.has("toolName"))) {
                         val toolResult = toolsEngine.executeFromJson(jsonObj)
+                        val actionName = (jsonObj.get("action")?.asString ?: jsonObj.get("toolName")?.asString)
+                            .orEmpty()
+                            .uppercase(Locale.ROOT)
+                        if (actionName in listOf("CREATE_TRANSACTION", "REGISTRARTRANSACAO") &&
+                            toolResult.actionCard?.pendingAction == null &&
+                            toolResult.actions.orEmpty().none { it.pendingAction != null } &&
+                            !toolResult.text.startsWith("⚠️")
+                        ) {
+                            executedDraftDesc = runCatching {
+                                jsonObj.get("description")?.asString ?: jsonObj.get("descricao")?.asString
+                            }.getOrNull()
+                            executedDraftCat = runCatching {
+                                jsonObj.get("category")?.asString ?: jsonObj.get("categoria")?.asString
+                            }.getOrNull()
+                        }
                         if (toolResult.actions != null) {
                             allActions.addAll(toolResult.actions)
                         } else if (toolResult.actionCard != null) {
@@ -2311,6 +2938,14 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
             }
 
             val isPending = finalActionsList.any { it.pendingAction != null }
+            val currentDraft = _uiState.value.activeExpenseDraft
+            if (!isPending && currentDraft != null && (executedDraftDesc != null || executedDraftCat != null)) {
+                finalizeActiveExpenseDraft(
+                    draft = currentDraft,
+                    finalDescription = executedDraftDesc ?: currentDraft.description,
+                    finalCategory = executedDraftCat ?: currentDraft.category
+                )
+            }
             val claimsSaved = Regex("""cadastrad[oa] com sucesso|registrad[oa] com sucesso|salv[oa] com sucesso|atualizad[oa] com sucesso|editad[oa] com sucesso|excl[uú][ií]d[oa] com sucesso|removid[oa] com sucesso|apagad[oa] com sucesso""", RegexOption.IGNORE_CASE).containsMatchIn(cleanText)
 
             val isSearchOrQuery = extractedBlocks.any { block ->

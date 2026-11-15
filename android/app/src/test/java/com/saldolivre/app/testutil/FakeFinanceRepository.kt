@@ -149,7 +149,42 @@ class FakeFinanceRepository(
 
     override suspend fun setTransactionStatus(id: String, status: TransactionStatus, actualAmount: Double?) {
         transactionsFlow.value = transactionsFlow.value.map {
-            if (it.id == id) it.copy(status = status, actualAmount = actualAmount ?: it.actualAmount) else it
+            if (it.id == id) FinanceEngine.applyStatusPatch(it, status, actualAmount) else it
+        }
+    }
+
+    override suspend fun payCardInvoice(cardId: String, monthKey: String, paymentDate: String) {
+        val uid = _currentUser.value.uid
+        val targetDate = paymentDate.trim().takeIf { it.matches(Regex("""^\d{4}-\d{2}-\d{2}$""")) }
+            ?: FinanceEngine.todayKey()
+        val card = cardsFlow.value.find { it.id == cardId }
+        if (card != null && card.ownerUid != uid) return
+
+        val cycleExpenses = if (card != null) {
+            InvoiceEngine.buildInvoice(card, monthKey, transactionsFlow.value, uid).items
+                .filter { it.type == TransactionType.EXPENSE }
+        } else {
+            transactionsFlow.value.filter {
+                it.paymentMethod == PaymentMethod.CREDIT_CARD &&
+                    it.cardId == cardId &&
+                    it.competenceMonth == monthKey &&
+                    it.type == TransactionType.EXPENSE
+            }
+        }
+        val targetIds = cycleExpenses
+            .filter {
+                FinanceEngine.canUserEditTransaction(it, uid) &&
+                    (it.status != TransactionStatus.PAID || it.paidAt != targetDate)
+            }
+            .map { it.id }
+            .toSet()
+
+        if (targetIds.isEmpty()) return
+
+        transactionsFlow.value = transactionsFlow.value.map {
+            if (it.id in targetIds) {
+                FinanceEngine.applyStatusPatch(it, TransactionStatus.PAID, paidAt = targetDate)
+            } else it
         }
     }
 

@@ -3,7 +3,9 @@ import { type Transaction, type Card as CardType } from '@/types'
 import { getCategoryDetail } from '@/types'
 import { canUserEditTransaction, effectiveAmount, impactFor, getThirdPartyInfo } from '@/lib/finance'
 import { formatBRL } from '@/lib/utils'
+import { type ConsolidatedTransaction } from '@/lib/invoices'
 import {
+  Calendar,
   Edit2,
   Trash2,
   RotateCcw,
@@ -25,6 +27,7 @@ interface MobileTransactionCardProps {
   onRefund?: (tx: Transaction) => void
   onDelete: (tx: Transaction) => void
   onCycleStatus: (tx: Transaction) => void
+  onPayConsolidatedInvoice?: (tx: ConsolidatedTransaction) => void
 }
 
 export function MobileTransactionCard({
@@ -36,6 +39,7 @@ export function MobileTransactionCard({
   onRefund,
   onDelete,
   onCycleStatus,
+  onPayConsolidatedInvoice,
 }: MobileTransactionCardProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const effAmount = effectiveAmount(tx)
@@ -51,6 +55,7 @@ export function MobileTransactionCard({
 
   if (tx.id.startsWith('invoice_')) {
     const isOwner = card?.ownerUid === currentUid
+    const consolidatedTx = 'invoiceMeta' in tx ? (tx as ConsolidatedTransaction) : null
     return (
       <div
         onClick={() => onEdit(tx)}
@@ -79,7 +84,7 @@ export function MobileTransactionCard({
               )}
             </div>
             <p className="text-[10px] text-slate-400 truncate mt-0.5">
-              <span>Vencimento dia {card?.dueDay || tx.dueDate.slice(8, 10)}</span>
+              <span>{tx.subcategory || `Vencimento dia ${card?.dueDay || tx.dueDate.slice(8, 10)}`}</span>
               {isOwner ? (
                 <span className="text-sky-300"> · Toque para ver compras</span>
               ) : (
@@ -89,10 +94,30 @@ export function MobileTransactionCard({
           </div>
         </div>
 
-        <div className="text-right shrink-0">
+        <div className="text-right shrink-0 flex flex-col items-end gap-1">
           <p className="text-xs font-bold text-white font-mono whitespace-nowrap">
             {formatBRL(effAmount)}
           </p>
+          {isOwner && consolidatedTx?.invoiceMeta && onPayConsolidatedInvoice && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onPayConsolidatedInvoice(consolidatedTx)
+              }}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 cursor-pointer whitespace-nowrap"
+            >
+              {tx.status === 'paid' ? (
+                <>
+                  <Calendar className="size-2.5" /> Alterar data
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="size-2.5" /> Pagar
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     )

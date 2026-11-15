@@ -10,6 +10,7 @@ import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.engine.InvoiceEngine
 import com.saldolivre.app.data.engine.InvoiceStatus
 import com.saldolivre.app.data.model.Card
+import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.RecurringBill
 import com.saldolivre.app.data.model.Transaction
@@ -203,6 +204,7 @@ class DashboardViewModel(
 
                 val upcomingNonCardTxs = allTxs.filter { tx ->
                     tx.type == TransactionType.EXPENSE &&
+                    !CategoryRegistry.isVaVrTransaction(tx) &&
                     !tx.isRefund &&
                     tx.status != TransactionStatus.PAID &&
                     (tx.cardId.isNullOrBlank() || tx.reserveCardId != null) &&

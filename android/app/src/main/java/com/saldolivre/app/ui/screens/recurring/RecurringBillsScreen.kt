@@ -1020,8 +1020,15 @@ private fun RecurringBillFormDialog(
                                     .border(1.dp, if (selected) accent else DarkBorder, RoundedCornerShape(12.dp))
                                     .clickable {
                                         type = t
-                                        if (t == TransactionType.INCOME) {
-                                            category = "Receita"
+                                        if (CategoryRegistry.isVaVrCategory(category)) {
+                                            category = "VA/VR"
+                                            subcategory = if (t == TransactionType.INCOME) "Recarga VA/VR" else "Supermercado"
+                                            if (t == TransactionType.INCOME) {
+                                                paymentMethod = PaymentMethod.PIX
+                                                cardId = null
+                                            }
+                                        } else if (t == TransactionType.INCOME) {
+                                            category = "Salário & Remuneração"
                                             subcategory = "Salário Principal"
                                             paymentMethod = PaymentMethod.PIX
                                             cardId = null
@@ -1097,8 +1104,8 @@ private fun RecurringBillFormDialog(
                         )
                     }
 
-                    // Categoria & Subcategoria (Dropdowns)
-                    if (type == TransactionType.EXPENSE) {
+                    // Categoria & Subcategoria (Dropdowns para Despesa e Renda Fixa — inclui VA/VR)
+                    run {
                         var catExpanded by remember { mutableStateOf(false) }
                         ExposedDropdownMenuBox(
                             expanded = catExpanded,
@@ -1131,7 +1138,11 @@ private fun RecurringBillFormDialog(
                                         text = { Text(cat.name, color = TextPrimary) },
                                         onClick = {
                                             category = cat.name
-                                            subcategory = cat.subcategories.firstOrNull()
+                                            subcategory = if (CategoryRegistry.isVaVrCategory(cat.name)) {
+                                                if (type == TransactionType.INCOME) "Recarga VA/VR" else "Supermercado"
+                                            } else {
+                                                cat.subcategories.firstOrNull()
+                                            }
                                             catExpanded = false
                                         }
                                     )

@@ -11,6 +11,7 @@ import {
   INCOME_CATEGORIES,
   LEGACY_CATEGORIES,
   getCategoryDetail,
+  isVaVrTransaction,
   type Category,
   type SplitType,
   type Transaction,
@@ -30,7 +31,7 @@ import {
   isPureMineTx,
   isSharedWithMeTx,
 } from '@/lib/finance'
-import { formatBRL, formatNubankDateHeader, formatShortDate, round2 } from '@/lib/utils'
+import { formatBRL, formatNubankDateHeader, formatShortDate, round2, todayKey } from '@/lib/utils'
 import {
   Search,
   RefreshCw,
@@ -60,11 +61,19 @@ import {
 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/ui/EmptyState'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { DeleteInstallmentDialog } from './modals/DeleteInstallmentDialog'
 import { MobileTransactionCard } from './mobile/MobileTransactionCard'
 import { consolidateMonthTransactions, type ConsolidatedTransaction } from '@/lib/invoices'
 
-type TabFilter = 'all' | 'income' | 'expense' | 'my_expenses' | 'refund' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
+type TabFilter = 'all' | 'income' | 'expense' | 'my_expenses' | 'refund' | 'va_vr' | 'pending_estimated' | 'paid' | 'shared_card' | 'third_party' | 'friends_installments'
 
 
 interface DesktopCarryoverItem {
@@ -156,7 +165,7 @@ export function TransactionTable({
     me,
     partner,
     cycleStatus,
-    setStatus,
+    payCardInvoice,
     changeSplit,
     changeAmount,
     updateTransaction,
@@ -177,6 +186,9 @@ export function TransactionTable({
   const [editDate, setEditDate] = useState('')
   const [editAmount, setEditAmount] = useState('')
   const [deleteGroupTx, setDeleteGroupTx] = useState<Transaction | null>(null)
+  const [invoicePayDialogTx, setInvoicePayDialogTx] = useState<ConsolidatedTransaction | null>(null)
+  const [invoicePaymentDate, setInvoicePaymentDate] = useState('')
+  const [isPayingInvoice, setIsPayingInvoice] = useState(false)
 
   const currentUid = me?.uid ?? ''
 
@@ -328,6 +340,8 @@ export function TransactionTable({
       } else if (activeTab === 'refund') {
         const isRef = tx.category === 'Estorno' || tx.totalAmount < 0 || effectiveAmount(tx) < 0
         if (!isRef) return false
+      } else if (activeTab === 'va_vr') {
+        if (!isVaVrTransaction(tx)) return false
       } else if (activeTab === 'pending_estimated') {
         if (tx.status === 'paid') return false
       } else if (activeTab === 'paid') {
@@ -719,6 +733,7 @@ export function TransactionTable({
       expense: txs.filter((t: Transaction) => t && t.type !== 'income').length,
       myExpenses: txs.filter((t: Transaction) => t && isMyExpenseTx(t, currentUid, txs)).length,
       refund: txs.filter((t: Transaction) => t && (t.category === 'Estorno' || t.totalAmount < 0 || effectiveAmount(t) < 0)).length,
+      va_vr: txs.filter((t: Transaction) => t && isVaVrTransaction(t)).length,
       pending: txs.filter((t: Transaction) => t && t.status !== 'paid').length,
       paid: txs.filter((t: Transaction) => t && t.status === 'paid').length,
       shared: txs.filter((t: Transaction) => {
@@ -731,14 +746,27 @@ export function TransactionTable({
     }
   }, [effectiveTransactions, cards, currentUid])
 
-  const handlePayConsolidatedInvoice = async (invoiceTx: ConsolidatedTransaction) => {
+  const handlePayConsolidatedInvoice = (invoiceTx: ConsolidatedTransaction) => {
     if (!invoiceTx.invoiceMeta) return
     const { invoice, card } = invoiceTx.invoiceMeta
     if (card.ownerUid !== currentUid) return
-    const unpaidItems = invoice.items.filter((t) => t.type === 'expense' && t.status !== 'paid')
-    if (unpaidItems.length === 0) return
-    if (confirm(`Confirmar o pagamento da fatura ${card.cardName} no valor de ${formatBRL(invoice.openAmount)}? Todos os ${unpaidItems.length} lançamentos vinculados serão marcados como pagos.`)) {
-      await Promise.all(unpaidItems.map((item) => setStatus(item, 'paid')))
+    const isPaidEdit = invoice.status === 'paid'
+    const hasUnpaid = invoice.items.some((t) => t.type === 'expense' && t.status !== 'paid')
+    if (!isPaidEdit && !hasUnpaid) return
+    setInvoicePaymentDate(invoice.paidDate || todayKey())
+    setInvoicePayDialogTx(invoiceTx)
+  }
+
+  const handleConfirmPayConsolidatedInvoice = async () => {
+    if (!invoicePayDialogTx?.invoiceMeta) return
+    const { card, invoice } = invoicePayDialogTx.invoiceMeta
+    const effectiveDate = invoicePaymentDate || todayKey()
+    setIsPayingInvoice(true)
+    try {
+      await payCardInvoice?.(card.id, invoice.monthKey, effectiveDate)
+      setInvoicePayDialogTx(null)
+    } finally {
+      setIsPayingInvoice(false)
     }
   }
 
@@ -974,6 +1002,21 @@ export function TransactionTable({
             >
               <span>🧑‍🤝‍🧑 Amigos / Parcelados</span>
               <span className="text-[10px] opacity-70">({counts.friends_installments})</span>
+            </button>
+          )}
+
+          {(counts.va_vr > 0 || activeTab === 'va_vr') && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('va_vr')}
+              className={`px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'va_vr'
+                  ? 'bg-teal-500/25 text-teal-200 border border-teal-500/40 font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-teal-300 hover:bg-slate-800/50'
+              }`}
+            >
+              <span>🍽️ VA/VR</span>
+              <span className="text-[10px] opacity-70">({counts.va_vr})</span>
             </button>
           )}
         </div>
@@ -1363,6 +1406,7 @@ export function TransactionTable({
                       }
                     }}
                     onCycleStatus={cycleStatus}
+                    onPayConsolidatedInvoice={handlePayConsolidatedInvoice}
                   />
                 </div>
               )
@@ -2191,6 +2235,12 @@ export function TransactionTable({
                               </button>
                             </div>
 
+                            {tx.subcategory && (
+                              <p className="text-[10px] text-slate-400 mt-0.5 truncate">
+                                {tx.subcategory}
+                              </p>
+                            )}
+
                             {!isOwner && (
                               <p className="text-[10px] text-indigo-300 mt-0.5 truncate">
                                 Cartão compartilhado por <strong>{invMeta.card.ownerName}</strong>
@@ -2250,6 +2300,18 @@ export function TransactionTable({
                               title="Pagar fatura"
                             >
                               <CheckCircle2 className="size-3.5 text-emerald-400" />
+                            </Button>
+                          )}
+                          {isOwner && tx.status === 'paid' && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handlePayConsolidatedInvoice(tx)}
+                              className="text-slate-400 hover:text-emerald-400 h-7 w-7 rounded-lg cursor-pointer"
+                              title="Alterar data do pagamento"
+                            >
+                              <Calendar className="size-3.5 text-emerald-400" />
                             </Button>
                           )}
                         </div>
@@ -2980,6 +3042,69 @@ export function TransactionTable({
         onOpenChange={(open) => !open && setDeleteGroupTx(null)}
         tx={deleteGroupTx}
       />
+
+      {/* Modal para pagamento ou alteração da data de pagamento da fatura consolidada */}
+      <Dialog
+        open={Boolean(invoicePayDialogTx)}
+        onOpenChange={(open) => {
+          if (!open && !isPayingInvoice) setInvoicePayDialogTx(null)
+        }}
+      >
+        <DialogContent className="bg-slate-950 border border-white/[0.1] text-slate-100 max-w-md">
+          {invoicePayDialogTx?.invoiceMeta && (() => {
+            const { card, invoice } = invoicePayDialogTx.invoiceMeta
+            const isPaidEdit = invoice.status === 'paid'
+            const unpaidCount = invoice.items.filter((t) => t.type === 'expense' && t.status !== 'paid').length
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-base font-bold text-white">
+                    <CreditCard className="size-4 text-emerald-400" />
+                    {isPaidEdit ? 'Alterar data do pagamento' : `Pagar fatura ${card.cardName}`}
+                  </DialogTitle>
+                  <DialogDescription className="text-xs text-slate-400">
+                    {isPaidEdit
+                      ? `Atualize a data em que a fatura ${card.cardName} (${formatBRL(invoice.total)}) foi paga no extrato. As datas originais das compras serão mantidas.`
+                      : `Marcar ${unpaidCount} lançamento(s) da fatura ${card.cardName} como pagos (${formatBRL(invoice.openAmount)}) e atualizar a data da fatura no extrato.`}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 py-2">
+                  <label htmlFor="statement-invoice-payment-date" className="text-xs font-medium text-slate-300 block">
+                    Data efetiva do pagamento
+                  </label>
+                  <Input
+                    id="statement-invoice-payment-date"
+                    type="date"
+                    value={invoicePaymentDate}
+                    onChange={(e) => setInvoicePaymentDate(e.target.value)}
+                    disabled={isPayingInvoice}
+                    className="bg-slate-900 border-slate-700 text-white text-xs"
+                  />
+                </div>
+                <DialogFooter className="gap-2 sm:gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setInvoicePayDialogTx(null)}
+                    disabled={isPayingInvoice}
+                    className="border-slate-700 text-slate-200 hover:bg-slate-800 cursor-pointer"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleConfirmPayConsolidatedInvoice}
+                    disabled={isPayingInvoice || !invoicePaymentDate}
+                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold cursor-pointer"
+                  >
+                    {isPayingInvoice ? 'Salvando...' : isPaidEdit ? 'Salvar data' : 'Confirmar pagamento'}
+                  </Button>
+                </DialogFooter>
+              </>
+            )
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

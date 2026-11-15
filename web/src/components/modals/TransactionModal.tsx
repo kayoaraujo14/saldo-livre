@@ -17,6 +17,7 @@ import {
   INCOME_CATEGORIES,
   LEGACY_CATEGORIES,
   getCategoryDetail,
+  isVaVrCategory,
   type Allocation,
   type Category,
   type PaymentMethod,
@@ -68,9 +69,16 @@ interface TransactionModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   editingTx?: Transaction | null
+  initialPreset?: {
+    type: 'expense' | 'income'
+    category: Category
+    subcategory: string
+    paymentMethod: PaymentMethod
+    status: TransactionStatus
+  } | null
 }
 
-export function TransactionModal({ open, onOpenChange, editingTx }: TransactionModalProps) {
+export function TransactionModal({ open, onOpenChange, editingTx, initialPreset }: TransactionModalProps) {
   const {
     createManual,
     updateTransaction,
@@ -202,15 +210,15 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
     } else {
       setDescription('')
       setAmount('')
-      setCategory('Alimentação')
-      setSubcategory('Supermercado')
+      setCategory(initialPreset?.category ?? 'Alimentação')
+      setSubcategory(initialPreset?.subcategory ?? 'Supermercado')
       setDate(todayKey())
-      setType('expense')
-      setStatus('pending')
+      setType(initialPreset?.type ?? 'expense')
+      setStatus(initialPreset?.status ?? 'pending')
       setSplitType('mine')
       setExternalName('Mãe')
       setCustomParticipants([])
-      setPaymentMethod('credit_card')
+      setPaymentMethod(initialPreset?.paymentMethod ?? 'credit_card')
       setCardId(cards[0]?.id || '')
       setIsReserve(false)
       setIsInstallment(false)
@@ -218,7 +226,7 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
       setInstallmentMode('total')
       setEditScope('all')
     }
-  }, [editingTx, open, cards, me, friends, partner])
+  }, [editingTx, initialPreset, open, cards, me, friends, partner])
 
   const handleAmountChange = (newAmountStr: string) => {
     setAmount(newAmountStr)
@@ -764,7 +772,13 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                 onClick={() => {
                   setType('expense')
                   if (status === 'estimated') setStatus('pending')
-                  if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
+                  if (isVaVrCategory(category)) {
+                    const expenseSubs = ['Supermercado', 'Restaurante', 'Delivery & Lanches', 'Padaria', 'Outros VA/VR']
+                    if (!expenseSubs.includes(subcategory)) {
+                      setSubcategory('Supermercado')
+                    }
+                    setPaymentMethod('debit')
+                  } else if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
                     setCategory('Alimentação')
                     setSubcategory('Supermercado')
                   }
@@ -781,8 +795,16 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                 type="button"
                 onClick={() => {
                   setType('income')
-                  setCategory('Salário & Remuneração')
-                  setSubcategory('Salário Principal')
+                  if (isVaVrCategory(category)) {
+                    const incomeSubs = ['Recarga VA/VR', 'Vale Alimentação (VA)', 'Vale Refeição (VR)', 'Saldo Inicial / Ajuste']
+                    if (!incomeSubs.includes(subcategory)) {
+                      setSubcategory('Recarga VA/VR')
+                    }
+                    setPaymentMethod('pix')
+                  } else {
+                    setCategory('Salário & Remuneração')
+                    setSubcategory('Salário Principal')
+                  }
                   setSplitType('mine')
                   setIsInstallment(false)
                   setStatus('paid')
@@ -847,9 +869,21 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                   setDescription(val)
                   if (!editingTx && val.trim().length >= 3) {
                     const guess = guessCategoryAndSubcategory(val, undefined, type)
-                    setCategory(guess.category)
-                    const subs = getCategoryDetail(guess.category)?.subcategories || []
-                    setSubcategory(guess.subcategory || subs[0] || '')
+                    if (initialPreset && isVaVrCategory(initialPreset.category)) {
+                      setCategory('VA/VR')
+                      const vaSubs = getCategoryDetail('VA/VR')?.subcategories || []
+                      if (guess.subcategory && vaSubs.includes(guess.subcategory)) {
+                        setSubcategory(guess.subcategory)
+                      }
+                    } else {
+                      setCategory(guess.category)
+                      const subs = getCategoryDetail(guess.category)?.subcategories || []
+                      setSubcategory(guess.subcategory || subs[0] || '')
+                      if (isVaVrCategory(guess.category)) {
+                        setPaymentMethod(type === 'income' ? 'pix' : 'debit')
+                        setStatus('paid')
+                      }
+                    }
                   }
                 }}
                 placeholder={isIncomeType ? 'Ex: Salário, Rendimentos, Pix de Amigo...' : 'Ex: Supermercado, Aluguel, Amazon Prime, Uber...'}
@@ -884,7 +918,13 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                       const newCat = v as Category
                       setCategory(newCat)
                       const subs = getCategoryDetail(newCat)?.subcategories || []
-                      setSubcategory(subs[0] || '')
+                      if (isVaVrCategory(newCat)) {
+                        setSubcategory(subs.includes('Recarga VA/VR') ? 'Recarga VA/VR' : (subs[0] || ''))
+                        setPaymentMethod('pix')
+                        setStatus('paid')
+                      } else {
+                        setSubcategory(subs[0] || '')
+                      }
                     }}
                   >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
@@ -946,7 +986,13 @@ export function TransactionModal({ open, onOpenChange, editingTx }: TransactionM
                       const newCat = v as Category
                       setCategory(newCat)
                       const subs = getCategoryDetail(newCat)?.subcategories || []
-                      setSubcategory(subs[0] || '')
+                      if (isVaVrCategory(newCat)) {
+                        setSubcategory(subs.includes('Supermercado') ? 'Supermercado' : (subs[0] || ''))
+                        setPaymentMethod('debit')
+                        setStatus('paid')
+                      } else {
+                        setSubcategory(subs[0] || '')
+                      }
                     }}
                   >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">

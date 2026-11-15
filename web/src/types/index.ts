@@ -11,6 +11,7 @@ export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external' 
 
 export const EXPENSE_CATEGORIES = [
   'Alimentação',
+  'VA/VR',
   'Moradia',
   'Transporte',
   'Saúde',
@@ -31,6 +32,7 @@ export const EXPENSE_CATEGORIES = [
 export const INCOME_CATEGORIES = [
   'Salário & Remuneração',
   'Benefícios',
+  'VA/VR',
   'Freelance & Serviços',
   'Rendimentos & Investimentos',
   'Reembolsos & Acertos',
@@ -49,16 +51,13 @@ export const LEGACY_CATEGORIES = [
   'Receita',
 ] as const
 
-export const ACTIVE_CATEGORIES = [
-  ...EXPENSE_CATEGORIES,
-  ...INCOME_CATEGORIES,
-] as const
+export const ACTIVE_CATEGORIES: readonly (ExpenseCategory | IncomeCategory)[] = Array.from(
+  new Set<ExpenseCategory | IncomeCategory>([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES]),
+)
 
-export const CATEGORIES = [
-  ...EXPENSE_CATEGORIES,
-  ...INCOME_CATEGORIES,
-  ...LEGACY_CATEGORIES,
-] as const
+export const CATEGORIES: readonly Category[] = Array.from(
+  new Set<Category>([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES, ...LEGACY_CATEGORIES]),
+)
 
 function foldCategoryAccents(s: string): string {
   return (s || '')
@@ -122,6 +121,14 @@ const CATEGORY_CANONICAL_MAP: Record<string, Category> = {
   'pets': 'Pets',
   'pet': 'Pets',
   'alimentacao': 'Alimentação',
+  'va/vr': 'VA/VR',
+  'va vr': 'VA/VR',
+  'vavr': 'VA/VR',
+  'vale alimentacao': 'VA/VR',
+  'vale refeicao': 'VA/VR',
+  'vale alimentacao / refeicao': 'VA/VR',
+  'beneficios va/vr': 'VA/VR',
+  'cartao de beneficios': 'VA/VR',
   'moradia': 'Moradia',
   'manutencao & servicos': 'Moradia',
   'manutencao e servicos': 'Moradia',
@@ -175,10 +182,10 @@ export function normalizeCategory(cat: string): Category {
   return (match || trimmed) as Category
 }
 
-export type Category = (typeof CATEGORIES)[number]
 export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number]
 export type IncomeCategory = (typeof INCOME_CATEGORIES)[number]
 export type LegacyCategory = (typeof LEGACY_CATEGORIES)[number]
+export type Category = ExpenseCategory | IncomeCategory | LegacyCategory
 
 export type BudgetNature = 'need' | 'want' | 'investment' | 'income'
 
@@ -215,6 +222,38 @@ export const CATEGORY_GROUPS: Record<Category, CategoryDetail> = {
       'Restaurante': 'want',
       'Delivery & Lanches': 'want',
       'Bares & Bebidas': 'want',
+    },
+  },
+  'VA/VR': {
+    icon: 'Utensils',
+    color: '#f59e0b',
+    description: 'Vale-Alimentação, Vale-Refeição e cartões de benefícios flexíveis (Alelo, Flash, iFood Benefícios, Caju, Pluxee, Ticket)',
+    defaultNature: 'need',
+    subcategories: [
+      'Recarga VA/VR',
+      'Vale Alimentação (VA)',
+      'Vale Refeição (VR)',
+      'Saldo Inicial / Ajuste',
+      'Supermercado',
+      'Restaurante',
+      'Delivery & Lanches',
+      'Padaria & Café',
+      'Feira & Hortifruti',
+      'Açougue & Peixaria',
+      'Outros VA/VR',
+    ],
+    subcategoriesNature: {
+      'Recarga VA/VR': 'income',
+      'Vale Alimentação (VA)': 'income',
+      'Vale Refeição (VR)': 'income',
+      'Saldo Inicial / Ajuste': 'income',
+      'Supermercado': 'need',
+      'Feira & Hortifruti': 'need',
+      'Açougue & Peixaria': 'need',
+      'Padaria & Café': 'need',
+      'Outros VA/VR': 'need',
+      'Restaurante': 'want',
+      'Delivery & Lanches': 'want',
     },
   },
   Moradia: {
@@ -753,9 +792,47 @@ export function getCategoryDetail(name: string): CategoryDetail {
   }
 }
 
+export function isVaVrCategory(category?: string | null, subcategory?: string | null): boolean {
+  const normCat = normalizeCategory(category ?? '')
+  if (normCat === 'VA/VR') return true
+  if (normCat === 'Benefícios' && subcategory) {
+    const foldedSub = foldCategoryAccents(subcategory)
+    if (
+      foldedSub === 'vale alimentacao (va)' ||
+      foldedSub === 'vale refeicao (vr)' ||
+      foldedSub.includes('vale alimenta') ||
+      foldedSub.includes('vale refei') ||
+      /\b(va|vr)\b/.test(foldedSub)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+export function isVaVrTransaction(tx?: Pick<Transaction, 'category' | 'subcategory'> | null): boolean {
+  if (!tx) return false
+  return isVaVrCategory(tx.category, tx.subcategory)
+}
+
 export function getBudgetNature(category: string, subcategory?: string | null): BudgetNature {
   if (category === 'Investimentos' || category === 'Rendimentos & Investimentos') {
     return 'investment'
+  }
+  if (category === 'VA/VR') {
+    if (
+      subcategory === 'Recarga VA/VR' ||
+      subcategory === 'Vale Alimentação (VA)' ||
+      subcategory === 'Vale Refeição (VR)' ||
+      subcategory === 'Saldo Inicial / Ajuste'
+    ) {
+      return 'income'
+    }
+    const detail = getCategoryDetail('VA/VR')
+    if (subcategory && detail.subcategoriesNature?.[subcategory]) {
+      return detail.subcategoriesNature[subcategory]
+    }
+    return detail.defaultNature || 'need'
   }
   if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
     return 'income'
@@ -1023,8 +1100,17 @@ const SUBCATEGORY_ALIASES: Record<string, { category: Category; officialSubcateg
   'salario': { category: 'Salário & Remuneração', officialSubcategory: 'Salário Principal' },
   'adiantamento': { category: 'Salário & Remuneração', officialSubcategory: 'Adiantamento / Quinzenal' },
   'ferias': { category: 'Salário & Remuneração', officialSubcategory: 'Férias' },
-  'va': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
-  'vr': { category: 'Benefícios', officialSubcategory: 'Vale Refeição (VR)' },
+  'va': { category: 'VA/VR', officialSubcategory: 'Vale Alimentação (VA)' },
+  'vr': { category: 'VA/VR', officialSubcategory: 'Vale Refeição (VR)' },
+  'recarga va': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'recarga vr': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'recarga va/vr': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'alelo': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'flash': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'caju': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'ticket': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'pluxee': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'ifood beneficios': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
   'freelance': { category: 'Freelance & Serviços', officialSubcategory: 'Projetos Freelance' },
   'dividendos': { category: 'Rendimentos & Investimentos', officialSubcategory: 'Dividendos & JCP' },
   'reembolso': { category: 'Reembolsos & Acertos', officialSubcategory: 'Reembolso de Empresa' },
@@ -1435,6 +1521,8 @@ export interface Transaction {
   isAnticipated?: boolean | null
   anticipatedFromMonth?: string | null
   discountAmount?: number | null
+  /** Data efetiva de pagamento (YYYY-MM-DD), preservando dueDate original */
+  paidAt?: string | null
 }
 
 export interface FriendSplitInput {
@@ -1523,6 +1611,28 @@ export interface MonthSummary {
   totalInvested: number
   totalInvestedAccumulated: number
   byInvestmentSubcategory?: { subcategory: string; amount: number; percentage: number }[]
+  /** Saldo acumulado de VA/VR vindo de meses anteriores (>= 0) */
+  vaVrCarryover?: number
+  /** Total de recargas/entradas de VA/VR já recebidas (status === 'paid') no mês */
+  vaVrIncomePaid?: number
+  /** Total de recargas/entradas de VA/VR pendentes/estimadas no mês */
+  vaVrIncomePending?: number
+  /** Total de recargas/entradas de VA/VR no mês (paid + pending + estimated) */
+  vaVrIncome?: number
+  /** Total gasto no VA/VR já pago (status === 'paid') no mês */
+  vaVrSpentPaid?: number
+  /** Total gasto no VA/VR pendente/estimado no mês */
+  vaVrSpentPending?: number
+  /** Total gasto no VA/VR no mês (paid + pending + estimated) */
+  vaVrSpent?: number
+  /** Saldo disponível agora no cartão VA/VR (vaVrCarryover + vaVrIncomePaid - vaVrSpentPaid). Pode ser negativo. */
+  vaVrAvailableBalance?: number
+  /** Saldo projetado de VA/VR no fim do mês (vaVrCarryover + vaVrIncome - vaVrSpent). Pode ser negativo. */
+  vaVrProjectedBalance?: number
+  /** Sugestão de limite diário de VA/VR (Math.max(0, vaVrAvailableBalance) / daysRemaining) */
+  vaVrDailyLimit?: number | null
+  /** Detalhamento de gastos de VA/VR por subcategoria no mês */
+  vaVrBySubcategory?: { subcategory: string; amount: number; count: number }[]
 }
 
 export interface AccountCashFlowSummary {

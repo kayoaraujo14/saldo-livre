@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
-import { EXPENSE_CATEGORIES, getCategoryDetail } from '@/types'
+import { EXPENSE_CATEGORIES, getCategoryDetail, isVaVrCategory } from '@/types'
 import type { SmartBudgetPlan } from '@/types'
 import { formatBRL, monthLabel, round2, shiftMonth } from '@/lib/utils'
 import {
@@ -619,7 +619,7 @@ export function ManageBudgetsModal({
 
               {/* Lista de Categorias com Sliders, Mínimo Comprometido e Chips Rápidos */}
               <div className="space-y-3">
-                {EXPENSE_CATEGORIES.map((cat) => {
+                {EXPENSE_CATEGORIES.filter((cat) => !isVaVrCategory(cat)).map((cat) => {
                   const detail = getCategoryDetail(cat)
                   const canon = normalizeBudgetCategory(cat)
                   const currentValStr = budgetsState[canon] ?? budgetsState[cat] ?? ''

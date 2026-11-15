@@ -39,6 +39,7 @@ data class ConsolidatedInvoiceMeta(
     val itemsCount: Int,
     val closingDate: String,
     val dueDate: String,
+    val paidDate: String? = null,
     val invoiceStatus: InvoiceStatus,
     val isOwner: Boolean
 )
@@ -99,6 +100,7 @@ data class CardInvoice(
     val monthKey: String,
     val closingDate: String,
     val dueDate: String,
+    val paidDate: String? = null,
     val status: InvoiceStatus,
     val total: Double,
     val grossExpenses: Double,
@@ -134,6 +136,7 @@ data class CardInvoice(
 }
 
 object InvoiceEngine {
+    private val ISO_DATE_REGEX = Regex("""^\d{4}-\d{2}-\d{2}$""")
 
     private fun clampDay(monthKey: String, day: Int): String {
         val d = day.coerceIn(1, FinanceEngine.daysInMonth(monthKey))
@@ -200,6 +203,12 @@ object InvoiceEngine {
             today < closingDate -> InvoiceStatus.OPEN
             today <= dueDate -> InvoiceStatus.CLOSED
             else -> InvoiceStatus.OVERDUE
+        }
+
+        val paidDate: String? = if (status == InvoiceStatus.PAID) {
+            expenses.mapNotNull { it.paidAt?.trim()?.takeIf { d -> d.matches(ISO_DATE_REGEX) } }.maxOrNull()
+        } else {
+            null
         }
 
         val limit = card.limit?.takeIf { it > 0.0 }
@@ -286,6 +295,7 @@ object InvoiceEngine {
             monthKey = monthKey,
             closingDate = closingDate,
             dueDate = dueDate,
+            paidDate = paidDate,
             status = status,
             total = total,
             grossExpenses = gross,
@@ -328,7 +338,11 @@ object InvoiceEngine {
         }
 
     fun countdownLabel(inv: CardInvoice): String = when (inv.status) {
-        InvoiceStatus.PAID -> "Fatura quitada"
+        InvoiceStatus.PAID -> if (!inv.paidDate.isNullOrBlank()) {
+            "Fatura quitada em ${FinanceEngine.formatShortDate(inv.paidDate)}"
+        } else {
+            "Fatura quitada"
+        }
         InvoiceStatus.EMPTY -> "Nenhuma compra neste ciclo"
         InvoiceStatus.OPEN ->
             if (inv.daysToClose == 0) "Fecha hoje"
@@ -522,6 +536,16 @@ object InvoiceEngine {
         }
 
         val desc = "Fatura ${card.cardName}"
+        val effectiveDueDate = if (invoice.status == InvoiceStatus.PAID && !invoice.paidDate.isNullOrBlank()) {
+            invoice.paidDate
+        } else {
+            invoice.dueDate
+        }
+        val effectiveSubcategory = if (invoice.status == InvoiceStatus.PAID && !invoice.paidDate.isNullOrBlank()) {
+            "Paga em ${FinanceEngine.formatShortDate(invoice.paidDate)} (Venc. dia ${card.dueDay})"
+        } else {
+            "Vencimento dia ${card.dueDay}"
+        }
 
         val meta = ConsolidatedInvoiceMeta(
             card = card,
@@ -532,6 +556,7 @@ object InvoiceEngine {
             itemsCount = invoice.itemsCount,
             closingDate = invoice.closingDate,
             dueDate = invoice.dueDate,
+            paidDate = invoice.paidDate,
             invoiceStatus = invoice.status,
             isOwner = isOwner
         )
@@ -563,18 +588,19 @@ object InvoiceEngine {
             cardId = card.id,
             description = desc,
             category = "Outros",
-            subcategory = "Vencimento dia ${card.dueDay}",
+            subcategory = effectiveSubcategory,
             type = TransactionType.EXPENSE,
             paymentMethod = PaymentMethod.CREDIT_CARD,
             status = status,
             estimatedAmount = if (status == TransactionStatus.PAID) null else myShare,
             actualAmount = if (status == TransactionStatus.PAID) myShare else null,
             totalAmount = myShare,
-            dueDate = invoice.dueDate,
+            dueDate = effectiveDueDate,
             competenceMonth = monthKey,
             visibleToUids = listOf(uid),
             userImpact = mapOf(uid to myShare),
             allocations = allocationsList,
+            paidAt = invoice.paidDate,
             invoiceMeta = meta
         )
     }

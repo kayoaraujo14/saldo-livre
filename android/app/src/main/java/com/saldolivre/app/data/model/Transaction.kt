@@ -30,8 +30,19 @@ enum class PaymentMethod(val value: String, val label: String) {
     BILL("bill", "Boleto");
 
     companion object {
-        fun from(value: String?): PaymentMethod =
-            entries.find { it.value.equals(value, ignoreCase = true) } ?: PIX
+        val CREDIT: PaymentMethod
+            get() = CREDIT_CARD
+
+        fun from(value: String?): PaymentMethod {
+            if (value.isNullOrBlank()) return PIX
+            return when (value.trim().lowercase()) {
+                "credit", "credit_card", "credito", "crédito", "cartao", "cartão" -> CREDIT_CARD
+                "debit", "debito", "débito" -> DEBIT
+                "pix" -> PIX
+                "bill", "boleto" -> BILL
+                else -> entries.find { it.value.equals(value.trim(), ignoreCase = true) || it.name.equals(value.trim(), ignoreCase = true) } ?: PIX
+            }
+        }
     }
 }
 
@@ -186,6 +197,7 @@ data class Transaction(
     val isAnticipated: Boolean? = null,
     val anticipatedFromMonth: String? = null,
     val discountAmount: Double? = null,
+    val paidAt: String? = null,
     val invoiceMeta: com.saldolivre.app.data.engine.ConsolidatedInvoiceMeta? = null
 ) {
     val effectiveAmount: Double

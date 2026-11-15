@@ -11,6 +11,7 @@ import {
   resolveEmergencyReserveBalance,
   computeIncomeConsumption,
 } from '@/lib/finance'
+import { isVaVrTransaction } from '@/types'
 import {
   Wallet,
   TrendingUp,
@@ -20,18 +21,23 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Utensils,
+  Plus,
+  AlertTriangle,
 } from 'lucide-react'
 
 interface KpiGridProps {
   onOpenReceivables?: () => void
   onOpenInvestments?: () => void
   onOpenFinancialHealth?: () => void
+  onLaunchVaVr?: (type: 'expense' | 'income') => void
 }
 
 export function KpiGrid({
   onOpenReceivables,
   onOpenInvestments,
   onOpenFinancialHealth,
+  onLaunchVaVr,
 }: KpiGridProps) {
   const {
     summary,
@@ -62,9 +68,10 @@ export function KpiGrid({
     const today = todayKey()
     const nextWeekStr = nextWeekKey(7).dateStr
 
-    // Despesas avulsas não vinculadas a fatura de cartão
+    // Despesas avulsas não vinculadas a fatura de cartão (excluindo módulo VA/VR isolado)
     const nonCardTxs = transactions.filter((tx) => {
       if (tx.type !== 'expense' || tx.status === 'paid') return false
+      if (isVaVrTransaction(tx)) return false
       if (tx.category === 'Estorno' || (tx.subcategory && tx.subcategory.includes('Estorno'))) return false
       if (tx.cardId && tx.reserveCardId == null) return false
       return tx.dueDate >= today && tx.dueDate <= nextWeekStr
@@ -508,6 +515,185 @@ export function KpiGrid({
           </span>
         </div>
       </div>
+
+      {/* 5.5 Módulo VA/VR Dedicado (100% isolado do Saldo Livre bancário) */}
+      {(() => {
+        const vaVrCarryover = summary.vaVrCarryover ?? 0
+        const vaVrIncome = summary.vaVrIncome ?? 0
+        const vaVrSpent = summary.vaVrSpent ?? 0
+        const vaVrAvailable = summary.vaVrAvailableBalance ?? 0
+        const vaVrProjected = summary.vaVrProjectedBalance ?? 0
+        const vaVrDailyLimit = summary.vaVrDailyLimit ?? null
+        const vaVrTotalPot = vaVrCarryover + vaVrIncome
+        const vaVrUsagePct =
+          vaVrTotalPot > 0
+            ? round2((vaVrSpent / vaVrTotalPot) * 100)
+            : vaVrSpent > 0
+              ? 100
+              : 0
+        const vaVrCount = (summary.vaVrBySubcategory || []).reduce(
+          (acc, item) => acc + (item.count || 0),
+          0,
+        )
+        const isNegative = vaVrAvailable < 0
+        const hasActivity =
+          vaVrCarryover !== 0 ||
+          vaVrIncome > 0 ||
+          vaVrSpent > 0 ||
+          vaVrCount > 0
+        const usageWidth = Math.min(100, Math.max(0, vaVrUsagePct))
+        const barColor = isNegative
+          ? 'bg-rose-500'
+          : vaVrUsagePct >= 90
+            ? 'bg-amber-400'
+            : 'bg-teal-400'
+
+        return (
+          <div
+            className={`col-span-2 lg:col-span-12 rounded-2xl p-3 sm:p-3.5 backdrop-blur-md border transition-all shadow-sm min-w-0 ${
+              isNegative
+                ? 'bg-rose-950/20 border-rose-500/35 hover:border-rose-500/50'
+                : 'bg-slate-900/60 border-teal-500/20 hover:border-teal-500/35'
+            }`}
+          >
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 min-w-0">
+              {/* Lado Esquerdo: Título, Disponível Agora & Projetado */}
+              <div className="flex items-start sm:items-center gap-3 min-w-0">
+                <div
+                  className={`size-9 sm:size-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                    isNegative
+                      ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                      : 'bg-teal-500/15 border-teal-500/30 text-teal-400'
+                  }`}
+                >
+                  <Utensils className="size-4 sm:size-5" />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center flex-wrap gap-1.5">
+                    <span className="text-xs sm:text-sm font-bold text-white tracking-tight">
+                      Benefícios VA / VR
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className="text-[9px] px-1.5 py-0 border-teal-500/30 bg-teal-500/10 text-teal-300"
+                    >
+                      Pote Isolado
+                    </Badge>
+                    {isNegative && (
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] px-1.5 py-0 border-rose-500/40 bg-rose-500/15 text-rose-300 inline-flex items-center gap-1"
+                      >
+                        <AlertTriangle className="size-2.5" />
+                        Estouro • ajuste necessário
+                      </Badge>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mt-1">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">
+                        Disponível Agora:
+                      </span>
+                      <span
+                        className={`text-base sm:text-lg font-extrabold font-mono tracking-tight ${
+                          isNegative ? 'text-rose-400' : 'text-teal-300'
+                        }`}
+                      >
+                        <NumberTicker value={vaVrAvailable} />
+                      </span>
+                    </div>
+
+                    <span className="text-[11px] text-slate-400">
+                      Projetado no mês:{' '}
+                      <strong
+                        className={`font-semibold font-mono ${
+                          vaVrProjected < 0 ? 'text-rose-300' : 'text-slate-200'
+                        }`}
+                      >
+                        {formatBRL(vaVrProjected)}
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Centro: KPIs Detalhados & Barra de Progresso */}
+              <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 lg:px-4 lg:border-x border-white/[0.06] min-w-0">
+                <div className="min-w-0">
+                  <div className="text-[10px] text-slate-400 truncate">Acumulado Ant.</div>
+                  <div className="text-xs font-bold font-mono text-slate-200 truncate">
+                    {formatBRL(vaVrCarryover)}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] text-slate-400 truncate">Recargas / Mês</div>
+                  <div className="text-xs font-bold font-mono text-emerald-400 truncate">
+                    +{formatBRL(vaVrIncome)}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] text-slate-400 truncate">Gasto VA/VR</div>
+                  <div className="text-xs font-bold font-mono text-rose-300 truncate">
+                    -{formatBRL(vaVrSpent)}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] text-slate-400 truncate">Limite Diário</div>
+                  <div className="text-xs font-bold font-mono text-teal-300 truncate">
+                    {vaVrDailyLimit !== null ? `${formatBRL(vaVrDailyLimit)}/dia` : '—'}
+                  </div>
+                </div>
+
+                {/* Barra de uso sobre (carryover + entradas) */}
+                <div className="col-span-2 sm:col-span-4 space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-slate-400">
+                    <span>
+                      {hasActivity
+                        ? `Consumo do pote no mês (${vaVrUsagePct.toFixed(0)}%)`
+                        : 'Lance uma recarga inicial ou despesa para acompanhar seu saldo VA/VR'}
+                    </span>
+                    <span className="font-mono text-slate-300">
+                      {vaVrCount} {vaVrCount === 1 ? 'gasto' : 'gastos'}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-slate-800/90 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                      style={{ width: `${usageWidth}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Lado Direito: Ações Rápidas */}
+              {onLaunchVaVr && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onLaunchVaVr('income')}
+                    className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold transition-all cursor-pointer inline-flex items-center gap-1"
+                    title="Lançar recarga ou ajuste de saldo no VA/VR"
+                  >
+                    <Plus className="size-3.5" />
+                    <span>Recarga</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onLaunchVaVr('expense')}
+                    className="px-2.5 py-1.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/35 text-teal-200 text-[11px] font-semibold transition-all cursor-pointer inline-flex items-center gap-1"
+                    title="Lançar gasto rápido na categoria VA/VR"
+                  >
+                    <Plus className="size-3.5" />
+                    <span>VA/VR</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 6. Termômetro de Saúde Financeira (Score 0 a 100 - 4 Pilares) */}
       <div

@@ -1,5 +1,6 @@
 package com.saldolivre.app.data.repository
 
+import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,6 +34,7 @@ interface FinanceRepository {
     suspend fun toggleTransactionStatus(id: String)
     suspend fun cycleTransactionStatus(id: String)
     suspend fun setTransactionStatus(id: String, status: TransactionStatus, actualAmount: Double? = null)
+    suspend fun payCardInvoice(cardId: String, monthKey: String, paymentDate: String = FinanceEngine.todayKey())
     suspend fun markAllocationReimbursed(transactionId: String, nameOrUid: String)
     suspend fun updateEstimatedWithActual(id: String, actualAmount: Double)
     suspend fun generateBillsForMonth(monthKey: String): Pair<Int, Int>

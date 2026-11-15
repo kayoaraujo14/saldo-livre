@@ -139,6 +139,14 @@ fun GeminiChatScreen(
         }
     }
 
+    // Ponte para rascunhos de despesas capturadas automaticamente via notificação bancária
+    val pendingExpenseDraft by GeminiChatViewModel.pendingExpenseDraft.collectAsState()
+    LaunchedEffect(pendingExpenseDraft?.id) {
+        if (pendingExpenseDraft != null) {
+            viewModel.consumeAndOpenPendingDraft()
+        }
+    }
+
     // Smooth Scroll automático para o final da tela durante o streaming contínuo das mensagens da IA
     LaunchedEffect(messagesCount, lastMessageText, isTyping) {
         if (uiState.messages.isNotEmpty()) {

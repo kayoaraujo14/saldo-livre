@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -26,9 +27,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.navArgument
+import com.saldolivre.app.data.model.ExpenseDraft
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.ui.screens.activity.RecentActivityScreen
 import com.saldolivre.app.ui.screens.activity.RecentActivityViewModel
@@ -64,10 +68,22 @@ import com.saldolivre.app.ui.theme.*
 fun AppNavHost(
     navController: NavHostController,
     repository: FinanceRepository,
+    pendingExpenseDraft: ExpenseDraft? = null,
+    onConsumeExpenseDraft: () -> Unit = {},
     onLogout: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+    LaunchedEffect(pendingExpenseDraft?.id) {
+        if (pendingExpenseDraft != null) {
+            GeminiChatViewModel.submitPendingExpenseDraft(pendingExpenseDraft)
+            navController.navigate("chat") {
+                launchSingleTop = true
+            }
+            onConsumeExpenseDraft()
+        }
+    }
 
     val bottomNavItems = listOf(
         BottomNavItem.Dashboard,
@@ -208,6 +224,13 @@ fun AppNavHost(
                     onNavigateToEditTransaction = { txId -> navController.navigate("edit_transaction/$txId") },
                     onNavigateToRefundTransaction = {},
                     onNavigateToCards = { navController.navigate(BottomNavItem.Cards.route) },
+                    onNavigateToAddTransaction = { preset ->
+                        if (preset.isNullOrBlank()) {
+                            navController.navigate("add_transaction")
+                        } else {
+                            navController.navigate("add_transaction?preset=$preset")
+                        }
+                    },
                     onNavigateToChatWithPrompt = { prompt ->
                         GeminiChatViewModel.pendingInitialPrompt = prompt
                         navController.navigate("chat")
@@ -284,13 +307,25 @@ fun AppNavHost(
                     onNavigateToFriends = { navController.navigate("friends") },
                     onNavigateToProjections = { navController.navigate("projections") },
                     onNavigateToRecentActivity = { navController.navigate("recent_activity") },
+                    onNavigateToChat = {
+                        navController.navigate("chat") {
+                            launchSingleTop = true
+                        }
+                    },
                     onLogout = onLogout
                 )
             }
 
             // Form: Nova Transação (Modal Slide Up)
             composable(
-                route = "add_transaction",
+                route = "add_transaction?preset={preset}",
+                arguments = listOf(
+                    navArgument("preset") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                ),
                 enterTransition = {
                     slideIntoContainer(
                         towards = AnimatedContentTransitionScope.SlideDirection.Up,
@@ -303,8 +338,11 @@ fun AppNavHost(
                         animationSpec = tween(240, easing = FastOutSlowInEasing)
                     ) + fadeOut(animationSpec = tween(180))
                 }
-            ) {
-                val formViewModel: TransactionFormViewModel = viewModel { TransactionFormViewModel(repository) }
+            ) { backStackEntry ->
+                val preset = backStackEntry.arguments?.getString("preset")
+                val formViewModel: TransactionFormViewModel = viewModel(key = "add_tx_${preset ?: "default"}") {
+                    TransactionFormViewModel(repository, initialPreset = preset)
+                }
                 TransactionFormScreen(
                     viewModel = formViewModel,
                     onNavigateBack = { navController.popBackStack() }

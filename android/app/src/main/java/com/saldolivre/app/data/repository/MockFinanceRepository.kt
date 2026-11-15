@@ -263,18 +263,26 @@ class MockFinanceRepository(
 
     override fun getMonthSummary(): Flow<MonthSummary> {
         return combine(
-            _transactions,
-            _currentUser,
-            _selectedMonth,
-            _cards,
-            _monthClosures
-        ) { txs, user, month, cards, closures ->
+            combine(
+                _transactions,
+                _currentUser,
+                _selectedMonth,
+                ::Triple
+            ),
+            combine(
+                _cards,
+                _monthClosures,
+                _recurringBills,
+                ::Triple
+            )
+        ) { (txs, user, month), (cards, closures, bills) ->
             FinanceEngine.computeSummary(
                 all = txs,
                 uid = user.uid,
                 monthKey = month,
                 cards = cards,
-                closures = closures
+                closures = closures,
+                recurringBills = bills
             )
         }
     }
@@ -622,6 +630,45 @@ class MockFinanceRepository(
             val updated = current.map { tx ->
                 if (tx.id == id) {
                     FinanceEngine.applyStatusPatch(tx, status, actualAmount)
+                } else tx
+            }
+            persistTransactions(updated)
+            updated
+        }
+    }
+
+    override suspend fun payCardInvoice(cardId: String, monthKey: String, paymentDate: String) {
+        val uid = _currentUser.value.uid
+        val targetDate = paymentDate.trim().takeIf { it.matches(Regex("""^\d{4}-\d{2}-\d{2}$""")) }
+            ?: FinanceEngine.todayKey()
+        val card = _cards.value.find { it.id == cardId }
+        if (card != null && card.ownerUid != uid) return
+
+        _transactions.update { current ->
+            val cycleExpenses = if (card != null) {
+                InvoiceEngine.buildInvoice(card, monthKey, current, uid).items
+                    .filter { it.type == TransactionType.EXPENSE }
+            } else {
+                current.filter {
+                    it.paymentMethod == PaymentMethod.CREDIT_CARD &&
+                        it.cardId == cardId &&
+                        it.competenceMonth == monthKey &&
+                        it.type == TransactionType.EXPENSE
+                }
+            }
+            val updatedIds = cycleExpenses
+                .filter {
+                    FinanceEngine.canUserEditTransaction(it, uid) &&
+                        (it.status != TransactionStatus.PAID || it.paidAt != targetDate)
+                }
+                .map { it.id }
+                .toSet()
+
+            if (updatedIds.isEmpty()) return@update current
+
+            val updated = current.map { tx ->
+                if (tx.id in updatedIds) {
+                    FinanceEngine.applyStatusPatch(tx, TransactionStatus.PAID, paidAt = targetDate)
                 } else tx
             }
             persistTransactions(updated)

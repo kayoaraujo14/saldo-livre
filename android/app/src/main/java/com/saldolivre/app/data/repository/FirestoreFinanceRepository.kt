@@ -439,18 +439,26 @@ class FirestoreFinanceRepository(
 
     override fun getMonthSummary(): Flow<MonthSummary> {
         return combine(
-            getTransactions(),
-            _currentUser,
-            _selectedMonth,
-            getCards(),
-            getMonthClosures()
-        ) { txs, user, month, cards, closures ->
+            combine(
+                getTransactions(),
+                _currentUser,
+                _selectedMonth,
+                ::Triple
+            ),
+            combine(
+                getCards(),
+                getMonthClosures(),
+                getRecurringBills(),
+                ::Triple
+            )
+        ) { (txs, user, month), (cards, closures, bills) ->
             FinanceEngine.computeSummary(
                 all = txs,
                 uid = user.uid,
                 monthKey = month,
                 cards = cards,
-                closures = closures
+                closures = closures,
+                recurringBills = bills
             )
         }
     }
@@ -1030,6 +1038,74 @@ class FirestoreFinanceRepository(
                 _transactions.value = previousTxs
             }
             android.util.Log.e("FirestoreFinanceRepo", "Erro ao definir status da transação", e)
+            throw e
+        }
+    }
+
+    override suspend fun payCardInvoice(cardId: String, monthKey: String, paymentDate: String) {
+        val uid = auth.currentUser?.uid ?: _currentUser.value.uid
+        val targetDate = paymentDate.trim().takeIf { it.matches(Regex("""^\d{4}-\d{2}-\d{2}$""")) }
+            ?: FinanceEngine.todayKey()
+        val card = _cards.value.find { it.id == cardId }
+        if (card != null && card.ownerUid != uid) return
+
+        val previousTxs = _transactions.value
+        val cycleExpenses = if (card != null) {
+            InvoiceEngine.buildInvoice(card, monthKey, previousTxs, uid).items
+                .filter { it.type == TransactionType.EXPENSE }
+        } else {
+            previousTxs.filter {
+                it.paymentMethod == PaymentMethod.CREDIT_CARD &&
+                    it.cardId == cardId &&
+                    it.competenceMonth == monthKey &&
+                    it.type == TransactionType.EXPENSE
+            }
+        }
+
+        val updatedById = cycleExpenses
+            .filter {
+                FinanceEngine.canUserEditTransaction(it, uid) &&
+                    (it.status != TransactionStatus.PAID || it.paidAt != targetDate)
+            }
+            .associate {
+                it.id to FinanceEngine.applyStatusPatch(it, TransactionStatus.PAID, paidAt = targetDate)
+            }
+
+        if (updatedById.isEmpty()) return
+
+        synchronized(syncLock) {
+            _transactions.value = previousTxs.map { updatedById[it.id] ?: it }
+            updatedById.forEach { (id, updated) ->
+                if (visibleTxsMap.containsKey(id)) visibleTxsMap[id] = updated
+                if (createdTxsMap.containsKey(id)) createdTxsMap[id] = updated
+                if (paidTxsMap.containsKey(id)) paidTxsMap[id] = updated
+            }
+        }
+
+        try {
+            val updatesList = updatedById.values.toList()
+            for (chunk in updatesList.chunked(450)) {
+                val batch = firestore.batch()
+                chunk.forEach { updatedTx ->
+                    batch.set(
+                        firestore.collection("transactions").document(updatedTx.id),
+                        transactionToMap(updatedTx)
+                    )
+                }
+                batch.commit().await()
+            }
+        } catch (e: Exception) {
+            synchronized(syncLock) {
+                _transactions.value = previousTxs
+                previousTxs.forEach { orig ->
+                    if (updatedById.containsKey(orig.id)) {
+                        if (visibleTxsMap.containsKey(orig.id)) visibleTxsMap[orig.id] = orig
+                        if (createdTxsMap.containsKey(orig.id)) createdTxsMap[orig.id] = orig
+                        if (paidTxsMap.containsKey(orig.id)) paidTxsMap[orig.id] = orig
+                    }
+                }
+            }
+            android.util.Log.e("FirestoreFinanceRepo", "Erro ao pagar fatura do cartão", e)
             throw e
         }
     }
@@ -1829,7 +1905,8 @@ class FirestoreFinanceRepository(
             refundedTransactionId = doc.getString("refundedTransactionId"),
             isAnticipated = doc.getBooleanSafe("isAnticipated"),
             anticipatedFromMonth = doc.getString("anticipatedFromMonth"),
-            discountAmount = doc.getDoubleSafe("discountAmount")
+            discountAmount = doc.getDoubleSafe("discountAmount"),
+            paidAt = doc.getString("paidAt")?.trim()?.takeIf { it.isNotBlank() }
         )
         val finalSplit = parsedSplitType ?: FinanceEngine.detectSplit(tx, createdUid)
         return tx.copy(splitType = finalSplit)
@@ -1891,6 +1968,7 @@ class FirestoreFinanceRepository(
             "isAnticipated" to tx.isAnticipated,
             "anticipatedFromMonth" to tx.anticipatedFromMonth,
             "discountAmount" to tx.discountAmount,
+            "paidAt" to tx.paidAt,
             "notes" to tx.notes
         )
     }

@@ -1,8 +1,15 @@
 package com.saldolivre.app
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import com.saldolivre.app.data.model.ExpenseDraft
+import com.saldolivre.app.data.notification.ExpenseDraftManager
+import com.saldolivre.app.ui.screens.chat.GeminiChatViewModel
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -27,9 +34,11 @@ import com.saldolivre.app.ui.theme.SaldoLivreTheme
 class MainActivity : FragmentActivity() {
 
     private val securityManager by lazy { AppSecurityManager.getInstance(this) }
+    private var pendingExpenseDraftState by mutableStateOf<ExpenseDraft?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleExpenseDraftIntent(intent)
 
         // Aplica proteção de tela e multitarefa conforme preferências do usuário
         securityManager.applyFlagSecure(this)
@@ -137,6 +146,8 @@ class MainActivity : FragmentActivity() {
                                 AppNavHost(
                                     navController = navController,
                                     repository = repository,
+                                    pendingExpenseDraft = pendingExpenseDraftState,
+                                    onConsumeExpenseDraft = { pendingExpenseDraftState = null },
                                     onLogout = {
                                         securityManager.unlockApp()
                                         authViewModel.signOut {
@@ -152,6 +163,20 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleExpenseDraftIntent(intent)
+    }
+
+    private fun handleExpenseDraftIntent(intent: Intent?) {
+        val draftManager = ExpenseDraftManager.getInstance(this)
+        val draft = draftManager.extractDraftFromIntent(intent) ?: return
+        pendingExpenseDraftState = draft
+        GeminiChatViewModel.submitPendingExpenseDraft(draft)
+        draftManager.clearDraftExtras(intent)
     }
 
     override fun onStart() {

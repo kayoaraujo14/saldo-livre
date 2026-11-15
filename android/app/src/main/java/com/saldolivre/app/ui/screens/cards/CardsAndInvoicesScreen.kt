@@ -53,6 +53,9 @@ import com.saldolivre.app.ui.components.CardsAndInvoicesSkeleton
 import com.saldolivre.app.ui.components.EmptyState
 import com.saldolivre.app.ui.screens.invoices.InvoiceItemFilter
 import com.saldolivre.app.ui.theme.*
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.Locale
 
 private fun cardColor(name: String?): Color = when (name) {
@@ -531,7 +534,11 @@ private fun InvoicesTabContent(
                     isOwner = selectedInvoice.card.ownerUid == uiState.currentUser.uid,
                     showConfirm = uiState.showPayConfirm,
                     isPaying = uiState.isPaying,
+                    paymentDate = uiState.paymentDate,
+                    isEditingPaymentDate = uiState.isEditingPaymentDate,
                     onPay = viewModel::requestPay,
+                    onRequestEditPaymentDate = viewModel::requestEditPaymentDate,
+                    onPaymentDateChange = viewModel::setPaymentDate,
                     onConfirm = viewModel::confirmPay,
                     onDismiss = viewModel::dismissPay,
                     onEditCard = { viewModel.editCard(selectedInvoice.card) }
@@ -924,19 +931,25 @@ private fun CardChip(invoice: CardInvoice, selected: Boolean, onClick: () -> Uni
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InvoiceSummaryCard(
     invoice: CardInvoice,
     isOwner: Boolean = true,
     showConfirm: Boolean,
     isPaying: Boolean,
+    paymentDate: String = FinanceEngine.todayKey(),
+    isEditingPaymentDate: Boolean = false,
     onPay: () -> Unit,
+    onRequestEditPaymentDate: () -> Unit = {},
+    onPaymentDateChange: (String) -> Unit = {},
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     onEditCard: () -> Unit
 ) {
     val gradientColors = cardDarkGradient(invoice.card.color)
     val paidProgress by animateFloatAsState(invoice.paidRatio, label = "paidProgress")
+    var showDatePicker by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -1137,42 +1150,8 @@ private fun InvoiceSummaryCard(
             )
         }
 
-        if (invoice.openAmount > 0) {
-            if (showConfirm) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Emerald500.copy(alpha = 0.15f))
-                        .border(1.dp, Emerald500.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "Marcar ${invoice.unpaidExpenses.size} lançamento(s) como pagos, totalizando " +
-                            "${FinanceEngine.formatCurrency(invoice.openAmount)}?",
-                        fontSize = 12.sp,
-                        color = Emerald400
-                    )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                        OutlinedButton(onClick = onDismiss, enabled = !isPaying, shape = RoundedCornerShape(12.dp)) {
-                            Text("Cancelar", fontSize = 12.sp, color = TextSecondary)
-                        }
-                        Button(
-                            onClick = onConfirm,
-                            enabled = !isPaying,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500, contentColor = Color.Black)
-                        ) {
-                            if (isPaying) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.Black)
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(if (isPaying) "Pagando..." else "Confirmar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            } else if (!isOwner) {
+        if (invoice.openAmount > 0 || (invoice.status == InvoiceStatus.PAID && isOwner)) {
+            if (invoice.openAmount > 0 && !isOwner) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1195,7 +1174,88 @@ private fun InvoiceSummaryCard(
                         )
                     }
                 }
-            } else {
+            } else if (showConfirm && (invoice.openAmount > 0 || isEditingPaymentDate)) {
+                val effectiveDate = paymentDate.ifBlank { FinanceEngine.todayKey() }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Emerald500.copy(alpha = 0.15f))
+                        .border(1.dp, Emerald500.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = if (isEditingPaymentDate) {
+                            "Alterar a data efetiva de pagamento desta fatura no extrato (as datas originais das compras serão mantidas)."
+                        } else {
+                            "Marcar ${invoice.unpaidExpenses.size} lançamento(s) como pagos, totalizando " +
+                                "${FinanceEngine.formatCurrency(invoice.openAmount)}?"
+                        },
+                        fontSize = 12.sp,
+                        color = Emerald400
+                    )
+                    Surface(
+                        onClick = { if (!isPaying) showDatePicker = true },
+                        shape = RoundedCornerShape(10.dp),
+                        color = DarkSurface.copy(alpha = 0.65f),
+                        border = BorderStroke(1.dp, Emerald500.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CalendarToday,
+                                    contentDescription = null,
+                                    tint = Emerald400,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Data do pagamento",
+                                    fontSize = 11.sp,
+                                    color = Color.White.copy(alpha = 0.85f)
+                                )
+                            }
+                            Text(
+                                text = FinanceEngine.formatFullDate(effectiveDate),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Emerald400
+                            )
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                        OutlinedButton(onClick = onDismiss, enabled = !isPaying, shape = RoundedCornerShape(12.dp)) {
+                            Text("Cancelar", fontSize = 12.sp, color = TextSecondary)
+                        }
+                        Button(
+                            onClick = onConfirm,
+                            enabled = !isPaying,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald500, contentColor = Color.Black)
+                        ) {
+                            if (isPaying) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.Black)
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            Text(
+                                if (isPaying) "Salvando..." else if (isEditingPaymentDate) "Salvar data" else "Confirmar",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            } else if (invoice.openAmount > 0) {
                 Button(
                     onClick = onPay,
                     modifier = Modifier.fillMaxWidth(),
@@ -1210,8 +1270,64 @@ private fun InvoiceSummaryCard(
                         fontSize = 13.sp
                     )
                 }
+            } else if (invoice.status == InvoiceStatus.PAID && isOwner) {
+                OutlinedButton(
+                    onClick = onRequestEditPaymentDate,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Emerald400)
+                ) {
+                    Icon(Icons.Default.CalendarToday, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Alterar data do pagamento",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp
+                    )
+                }
             }
         }
+    }
+}
+
+if (showDatePicker) {
+    val initialMillis = remember(paymentDate) {
+        runCatching {
+            LocalDate.parse(paymentDate.ifBlank { FinanceEngine.todayKey() })
+                .atStartOfDay(ZoneOffset.UTC)
+                .toInstant()
+                .toEpochMilli()
+        }.getOrElse {
+            LocalDate.now(ZoneOffset.UTC).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        }
+    }
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    DatePickerDialog(
+        onDismissRequest = { showDatePicker = false },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val picked = Instant.ofEpochMilli(millis)
+                            .atZone(ZoneOffset.UTC)
+                            .toLocalDate()
+                            .toString()
+                        onPaymentDateChange(picked)
+                    }
+                    showDatePicker = false
+                }
+            ) {
+                Text("OK", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { showDatePicker = false }) {
+                Text("Cancelar")
+            }
+        }
+    ) {
+        DatePicker(state = datePickerState)
     }
 }
 }

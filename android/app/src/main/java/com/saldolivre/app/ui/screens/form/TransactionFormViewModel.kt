@@ -47,10 +47,29 @@ data class TransactionFormState(
 
 class TransactionFormViewModel(
     private val repository: FinanceRepository,
-    private val editingTxId: String? = null
+    private val editingTxId: String? = null,
+    private val initialPreset: String? = null
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(TransactionFormState())
+    private val _state = MutableStateFlow(
+        when (initialPreset) {
+            "va_vr_income" -> TransactionFormState(
+                type = TransactionType.INCOME,
+                category = "VA/VR",
+                subcategory = "Recarga VA/VR",
+                paymentMethod = PaymentMethod.PIX,
+                status = TransactionStatus.PAID
+            )
+            "va_vr_expense" -> TransactionFormState(
+                type = TransactionType.EXPENSE,
+                category = "VA/VR",
+                subcategory = "Supermercado",
+                paymentMethod = PaymentMethod.DEBIT,
+                status = TransactionStatus.PAID
+            )
+            else -> TransactionFormState()
+        }
+    )
     val state: StateFlow<TransactionFormState> = _state.asStateFlow()
 
     init {
@@ -254,20 +273,30 @@ class TransactionFormViewModel(
     }
 
     fun onTypeChange(type: TransactionType) {
-        val defaultCat = when (type) {
+        val current = _state.value
+        val keepVaVr = CategoryRegistry.isVaVrCategory(current.category)
+        val defaultCat = if (keepVaVr) "VA/VR" else when (type) {
             TransactionType.INCOME -> "Salário & Remuneração"
             TransactionType.EXPENSE -> "Alimentação"
         }
-        val defaultSubcat = when (type) {
+        val defaultSubcat = if (keepVaVr) {
+            if (type == TransactionType.INCOME) "Recarga VA/VR" else "Supermercado"
+        } else when (type) {
             TransactionType.INCOME -> "Salário Principal"
             TransactionType.EXPENSE -> "Supermercado"
         }
+        val nextPaymentMethod = if (keepVaVr) {
+            if (type == TransactionType.INCOME) PaymentMethod.PIX else PaymentMethod.DEBIT
+        } else current.paymentMethod
+        val nextStatus = if (keepVaVr) TransactionStatus.PAID else current.status
         _state.update {
             it.copy(
                 type = type,
                 isEstorno = false,
                 category = defaultCat,
                 subcategory = defaultSubcat,
+                paymentMethod = nextPaymentMethod,
+                status = nextStatus,
                 isInstallment = if (type == TransactionType.INCOME) false else it.isInstallment,
                 installmentsCount = if (type == TransactionType.INCOME) 1 else it.installmentsCount
             )
@@ -298,9 +327,27 @@ class TransactionFormViewModel(
     }
 
     fun onCategoryChange(cat: String, subcat: String? = null) {
-        val isEstorno = cat.equals("Estorno", ignoreCase = true) || _state.value.isEstorno
-        val resolvedSubcat = subcat ?: CategoryRegistry.get(cat).subcategories.firstOrNull()
-        _state.update { it.copy(category = cat, subcategory = resolvedSubcat, isEstorno = isEstorno) }
+        val current = _state.value
+        val isEstorno = cat.equals("Estorno", ignoreCase = true) || current.isEstorno
+        val isVaVr = CategoryRegistry.isVaVrCategory(cat)
+        val subs = CategoryRegistry.get(cat).subcategories
+        val resolvedSubcat = subcat ?: if (isVaVr) {
+            if (current.type == TransactionType.INCOME) "Recarga VA/VR"
+            else if (subs.contains("Supermercado")) "Supermercado" else subs.firstOrNull()
+        } else subs.firstOrNull()
+        val nextPaymentMethod = if (isVaVr) {
+            if (current.type == TransactionType.INCOME) PaymentMethod.PIX else PaymentMethod.DEBIT
+        } else current.paymentMethod
+        val nextStatus = if (isVaVr) TransactionStatus.PAID else current.status
+        _state.update {
+            it.copy(
+                category = cat,
+                subcategory = resolvedSubcat,
+                paymentMethod = nextPaymentMethod,
+                status = nextStatus,
+                isEstorno = isEstorno
+            )
+        }
     }
 
     fun onSubcategoryChange(subcat: String?) {

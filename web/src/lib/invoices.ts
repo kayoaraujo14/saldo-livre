@@ -7,7 +7,7 @@
  */
 import type { Card, Transaction } from '@/types'
 import { clampPct, effectiveAmount } from './finance'
-import { daysInMonth, formatBRL, round2, shiftMonth, stripInstallmentSuffix, todayKey } from './utils'
+import { daysInMonth, formatBRL, formatShortDate, round2, shiftMonth, stripInstallmentSuffix, todayKey } from './utils'
 
 export type InvoiceStatus = 'empty' | 'open' | 'closed' | 'overdue' | 'paid'
 
@@ -57,6 +57,8 @@ export interface CardInvoice {
   monthKey: string
   closingDate: string // YYYY-MM-DD
   dueDate: string // YYYY-MM-DD
+  /** Data efetiva de quitação da fatura (YYYY-MM-DD), derivada quando status === 'paid' */
+  paidDate?: string | null
   status: InvoiceStatus
   /** Valor bruto da fatura (compras - créditos/estornos) */
   total: number
@@ -179,6 +181,16 @@ export function buildCardInvoice(
   else if (today <= dueDate) status = 'closed'
   else status = 'overdue'
 
+  const isoDateRe = /^\d{4}-\d{2}-\d{2}$/
+  let paidDate: string | null = null
+  if (status === 'paid') {
+    const paidDates = expenses
+      .map((t) => (typeof t.paidAt === 'string' ? t.paidAt.trim() : ''))
+      .filter((d) => isoDateRe.test(d))
+      .sort()
+    paidDate = paidDates.length > 0 ? paidDates[paidDates.length - 1] : null
+  }
+
   const limit = card.limit && card.limit > 0 ? card.limit : null
 
   // Rateio detalhado por participante baseado nas cotas reais de cada lançamento
@@ -262,6 +274,7 @@ export function buildCardInvoice(
     monthKey,
     closingDate,
     dueDate,
+    paidDate,
     status,
     total,
     grossExpenses,
@@ -310,7 +323,9 @@ export function buildInvoiceHistory(
 
 /** Texto amigável de prazo: "vence em 3 dias", "venceu há 2 dias"... */
 export function dueCountdownLabel(inv: CardInvoice) {
-  if (inv.status === 'paid') return 'Fatura quitada'
+  if (inv.status === 'paid') {
+    return inv.paidDate ? `Fatura quitada em ${formatShortDate(inv.paidDate)}` : 'Fatura quitada'
+  }
   if (inv.status === 'empty') return 'Nenhuma compra neste ciclo'
   if (inv.status === 'open') {
     if (inv.daysToClose === 0) return 'Fecha hoje'
@@ -498,6 +513,7 @@ export interface ConsolidatedInvoiceMeta {
   itemsCount: number
   closingDate: string
   dueDate: string
+  paidDate?: string | null
   invoiceStatus: InvoiceStatus
   isOwner: boolean
 }
@@ -517,6 +533,11 @@ export function createConsolidatedInvoiceTx(
   const status = invoice.status === 'paid' ? 'paid' : (invoice.status === 'open' ? 'estimated' : 'pending')
 
   const desc = `Fatura ${card.cardName}`
+  const effectiveDueDate = invoice.status === 'paid' && invoice.paidDate ? invoice.paidDate : invoice.dueDate
+  const effectiveSubcategory =
+    invoice.status === 'paid' && invoice.paidDate
+      ? `Paga em ${formatShortDate(invoice.paidDate)} (Venc. dia ${card.dueDay})`
+      : `Vencimento dia ${card.dueDay}`
 
   const meta: ConsolidatedInvoiceMeta = {
     isConsolidatedInvoice: true,
@@ -528,6 +549,7 @@ export function createConsolidatedInvoiceTx(
     itemsCount: invoice.itemsCount,
     closingDate: invoice.closingDate,
     dueDate: invoice.dueDate,
+    paidDate: invoice.paidDate ?? null,
     invoiceStatus: invoice.status,
     isOwner,
   }
@@ -539,14 +561,15 @@ export function createConsolidatedInvoiceTx(
     cardId: card.id,
     description: desc,
     category: 'Outros',
-    subcategory: `Vencimento dia ${card.dueDay}`,
+    subcategory: effectiveSubcategory,
     type: 'expense',
     paymentMethod: 'credit_card',
     status,
     estimatedAmount: status === 'paid' ? null : myShare,
     actualAmount: status === 'paid' ? myShare : null,
+    paidAt: invoice.paidDate ?? null,
     totalAmount: myShare,
-    dueDate: invoice.dueDate,
+    dueDate: effectiveDueDate,
     competenceMonth: monthKey,
     visibleToUids: [uid],
     userImpact: { [uid]: myShare },

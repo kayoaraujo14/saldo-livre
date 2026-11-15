@@ -16,6 +16,13 @@ data class InvestmentSubcat(
 )
 
 @Immutable
+data class VaVrSubcat(
+    val subcategory: String,
+    val amount: Double,
+    val count: Int
+)
+
+@Immutable
 data class ReceivableItem(
     val transactionId: String,
     val description: String,
@@ -57,5 +64,29 @@ data class MonthSummary(
     val pendingClosureSurplus: Double? = null,
     val pendingClosureMonth: String? = null,
     val closure: MonthClosure? = null,
-    val previousMonthClosure: MonthClosure? = null
-)
+    val previousMonthClosure: MonthClosure? = null,
+    val vaVrCarryover: Double = 0.0,
+    val vaVrIncomePaid: Double = 0.0,
+    val vaVrIncomePending: Double = 0.0,
+    val vaVrIncome: Double = 0.0,
+    val vaVrSpentPaid: Double = 0.0,
+    val vaVrSpentPending: Double = 0.0,
+    val vaVrSpent: Double = 0.0,
+    val vaVrAvailableBalance: Double = 0.0,
+    val vaVrProjectedBalance: Double = 0.0,
+    val vaVrDailyLimit: Double? = null,
+    val vaVrBySubcategory: List<VaVrSubcat> = emptyList()
+) {
+    val vaVrCount: Int
+        get() = vaVrBySubcategory.sumOf { it.count }
+
+    val vaVrUsagePct: Double
+        get() {
+            val totalPot = vaVrCarryover + vaVrIncome
+            return when {
+                totalPot > 0.0 -> (vaVrSpent / totalPot) * 100.0
+                vaVrSpent > 0.0 -> 100.0
+                else -> 0.0
+            }
+        }
+}

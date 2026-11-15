@@ -37,13 +37,17 @@ export function sanitizeText(
   // 2. Remove tags HTML / scripts
   str = str.replace(HTML_TAGS_REGEX, '')
 
-  // 3. Detecta e neutraliza tentativas de prompt injection em extratos bancários
+  // 3. Detecta e neutraliza tentativas de prompt injection em extratos bancários e notificações
   if (detectPromptInjection(str)) {
     console.warn('[Security] Tentativa de prompt injection detectada e neutralizada:', str)
-    str = str.replace(/ignore\s+previous\s+instructions/gi, '[neutralizado]')
-    str = str.replace(/disregard\s+earlier\s+instructions/gi, '[neutralizado]')
-    str = str.replace(/system\s+prompt\s*:/gi, '[neutralizado]:')
-    str = str.replace(/developer\s+mode/gi, '[neutralizado]')
+    str = str.replace(/\bignore\s+(all\s+)?previous\s+instructions\b/gi, '[neutralizado]')
+    str = str.replace(/\bdisregard\s+(all\s+)?earlier\s+instructions\b/gi, '[neutralizado]')
+    str = str.replace(/\bsystem\s+prompt\s*:/gi, '[neutralizado]:')
+    str = str.replace(/\b(?:you\s+are\s+now\s+(?:in\s+)?)?developer\s+mode\b/gi, '[neutralizado]')
+    str = str.replace(/\bforget\s+all\s+(prior|previous)\s+rules\b/gi, '[neutralizado]')
+    str = str.replace(/\bnew\s+instructions\s*:\s*delete\b/gi, '[neutralizado]')
+    str = str.replace(/\bbypass\s+all\s+safety\s+filters\b/gi, '[neutralizado]')
+    str = str.replace(/\bexfiltrate\s+(data|database|keys)\b/gi, '[neutralizado]')
   }
 
   // 4. Normaliza espaços múltiplos

@@ -14,7 +14,7 @@ import { NetworkStatusIndicator } from '@/components/NetworkStatusIndicator'
 import { Button } from '@/components/ui/button'
 import { Clock, ArrowRight, ReceiptText, Sparkles, Plus } from 'lucide-react'
 import { EmptyState } from '@/components/ui/EmptyState'
-import type { Transaction } from '@/types'
+import type { Category, PaymentMethod, Transaction, TransactionStatus } from '@/types'
 import { consolidateMonthTransactions } from '@/lib/invoices'
 import { formatBRL, monthLabel } from '@/lib/utils'
 
@@ -86,6 +86,13 @@ function MainDashboard() {
   const [invoicesModalOpen, setInvoicesModalOpen] = useState(() => initialAction === 'invoices')
   const [invoicesInitialCardId, setInvoicesInitialCardId] = useState<string | null>(null)
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
+  const [txInitialPreset, setTxInitialPreset] = useState<{
+    type: 'expense' | 'income'
+    category: Category
+    subcategory: string
+    paymentMethod: PaymentMethod
+    status: TransactionStatus
+  } | null>(null)
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
   const [mobileTab, setMobileTab] = useState<MobileTab>(() => (initialAction === 'chat' ? 'chat' : 'home'))
@@ -129,6 +136,29 @@ function MainDashboard() {
 
   const handleOpenNewTx = () => {
     setEditingTx(null)
+    setTxInitialPreset(null)
+    setTxModalOpen(true)
+  }
+
+  const handleLaunchVaVr = (txType: 'expense' | 'income') => {
+    setEditingTx(null)
+    setTxInitialPreset(
+      txType === 'income'
+        ? {
+            type: 'income',
+            category: 'VA/VR',
+            subcategory: 'Recarga VA/VR',
+            paymentMethod: 'pix',
+            status: 'paid',
+          }
+        : {
+            type: 'expense',
+            category: 'VA/VR',
+            subcategory: 'Supermercado',
+            paymentMethod: 'debit',
+            status: 'paid',
+          },
+    )
     setTxModalOpen(true)
   }
 
@@ -243,6 +273,7 @@ function MainDashboard() {
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
                 onOpenInvestments={() => setInvestmentsModalOpen(true)}
                 onOpenFinancialHealth={() => setFinancialHealthModalOpen(true)}
+                onLaunchVaVr={handleLaunchVaVr}
               />
               <CategoryBudgetsCard />
             </div>
@@ -375,6 +406,7 @@ function MainDashboard() {
                 onOpenReceivables={() => setReceivablesModalOpen(true)}
                 onOpenInvestments={() => setInvestmentsModalOpen(true)}
                 onOpenFinancialHealth={() => setFinancialHealthModalOpen(true)}
+                onLaunchVaVr={handleLaunchVaVr}
               />
 
               {/* Envelopes Orçamentários */}
@@ -497,9 +529,11 @@ function MainDashboard() {
               setTxModalOpen(open)
               if (!open) {
                 setEditingTx(null)
+                setTxInitialPreset(null)
               }
             }}
             editingTx={editingTx}
+            initialPreset={txInitialPreset}
           />
         )}
         {projectionModalOpen && (

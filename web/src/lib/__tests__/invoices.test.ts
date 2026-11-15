@@ -8,7 +8,9 @@ import {
   calculateCategoryBreakdownForParticipant,
   consolidateMonthTransactions,
   computePredictiveAlert,
+  createConsolidatedInvoiceTx,
 } from '../invoices'
+import { statusPatch } from '../finance'
 import type { Card, Transaction } from '@/types'
 
 describe('invoices.ts - Motor de Faturas e Ciclos de Cartão', () => {
@@ -461,6 +463,113 @@ describe('invoices.ts - Motor de Faturas e Ciclos de Cartão', () => {
       expect(cinemaSlice?.pct).toBe(67) // 80/120 = 66.7% -> 67%
       expect(mercadoSlice?.amount).toBe(40)
       expect(mercadoSlice?.pct).toBe(33) // 40/120 = 33.3% -> 33%
+    })
+  })
+
+  describe('10. Data Efetiva de Pagamento da Fatura (paidDate / paidAt)', () => {
+    it('atualiza data e subtitulo da fatura consolidada no extrato ao quitar com paidAt preservando data original das compras', () => {
+      const exp1 = buildExpense({
+        dueDate: '2026-10-08',
+        actualAmount: 150,
+        status: 'paid',
+        paidAt: '2026-10-22',
+      })
+      const exp2 = buildExpense({
+        dueDate: '2026-10-14',
+        actualAmount: 250,
+        status: 'paid',
+        paidAt: '2026-10-22',
+      })
+
+      const invoice = buildCardInvoice(sampleCard, '2026-10', [exp1, exp2], ownerUid, '2026-10-25')
+      expect(invoice.status).toBe('paid')
+      expect(invoice.dueDate).toBe('2026-10-27')
+      expect(invoice.paidDate).toBe('2026-10-22')
+      expect(dueCountdownLabel(invoice)).toBe('Fatura quitada em 22/10')
+
+      const consolidated = createConsolidatedInvoiceTx(invoice, ownerUid, '2026-10')
+      expect(consolidated.status).toBe('paid')
+      expect(consolidated.dueDate).toBe('2026-10-22')
+      expect(consolidated.paidAt).toBe('2026-10-22')
+      expect(consolidated.subcategory).toBe('Paga em 22/10 (Venc. dia 27)')
+      expect(consolidated.invoiceMeta.paidDate).toBe('2026-10-22')
+      expect(consolidated.invoiceMeta.dueDate).toBe('2026-10-27')
+
+      // Garante que as compras originais não tiveram dueDate sobrescrita
+      expect(exp1.dueDate).toBe('2026-10-08')
+      expect(exp2.dueDate).toBe('2026-10-14')
+
+      // Garante refletido também via consolidateMonthTransactions no extrato
+      const consolidatedRows = consolidateMonthTransactions(
+        [exp1, exp2],
+        [exp1, exp2],
+        [sampleCard],
+        ownerUid,
+        '2026-10',
+        true,
+      )
+      expect(consolidatedRows).toHaveLength(1)
+      expect(consolidatedRows[0].dueDate).toBe('2026-10-22')
+      expect(consolidatedRows[0].subcategory).toBe('Paga em 22/10 (Venc. dia 27)')
+    })
+
+    it('usa a maior data paidAt entre despesas quitadas e atualiza ao alterar data do pagamento', () => {
+      const exp1 = buildExpense({ actualAmount: 100, status: 'paid', paidAt: '2026-10-18' })
+      const exp2 = buildExpense({ actualAmount: 200, status: 'paid', paidAt: '2026-10-24' })
+
+      const invoice1 = buildCardInvoice(sampleCard, '2026-10', [exp1, exp2], ownerUid)
+      expect(invoice1.paidDate).toBe('2026-10-24')
+      expect(createConsolidatedInvoiceTx(invoice1, ownerUid, '2026-10').dueDate).toBe('2026-10-24')
+
+      // Altera data do pagamento para 2026-10-29
+      const patch1 = statusPatch(exp1, 'paid', '2026-10-29')
+      const patch2 = statusPatch(exp2, 'paid', '2026-10-29')
+      const updated = [{ ...exp1, ...patch1 }, { ...exp2, ...patch2 }]
+
+      const invoice2 = buildCardInvoice(sampleCard, '2026-10', updated, ownerUid)
+      expect(invoice2.paidDate).toBe('2026-10-29')
+      const consolidated2 = createConsolidatedInvoiceTx(invoice2, ownerUid, '2026-10')
+      expect(consolidated2.dueDate).toBe('2026-10-29')
+      expect(consolidated2.subcategory).toBe('Paga em 29/10 (Venc. dia 27)')
+    })
+
+    it('mantém comportamento legado seguro quando fatura paga não possui paidAt', () => {
+      const legacyPaid = buildExpense({ actualAmount: 180, status: 'paid', paidAt: null })
+      const invoice = buildCardInvoice(sampleCard, '2026-10', [legacyPaid], ownerUid)
+
+      expect(invoice.status).toBe('paid')
+      expect(invoice.paidDate).toBeNull()
+      expect(dueCountdownLabel(invoice)).toBe('Fatura quitada')
+
+      const consolidated = createConsolidatedInvoiceTx(invoice, ownerUid, '2026-10')
+      expect(consolidated.dueDate).toBe('2026-10-27')
+      expect(consolidated.subcategory).toBe('Vencimento dia 27')
+    })
+
+    it('reverte data e subtitulo para o vencimento original ao reabrir fatura e statusPatch limpa paidAt', () => {
+      const exp1 = buildExpense({ dueDate: '2026-10-05', actualAmount: 100, status: 'paid', paidAt: '2026-10-21' })
+      const exp2 = buildExpense({ dueDate: '2026-10-09', actualAmount: 150, status: 'paid', paidAt: '2026-10-21' })
+
+      // Reabrir uma despesa via statusPatch deve limpar paidAt
+      const reopenPatch = statusPatch(exp2, 'pending')
+      expect(reopenPatch.status).toBe('pending')
+      expect(reopenPatch.paidAt).toBeNull()
+
+      const reopenedList = [exp1, { ...exp2, ...reopenPatch }]
+      const reopenedInvoice = buildCardInvoice(sampleCard, '2026-10', reopenedList, ownerUid, '2026-10-23')
+      expect(reopenedInvoice.status).toBe('closed')
+      expect(reopenedInvoice.paidDate).toBeNull()
+
+      const consolidatedReopened = createConsolidatedInvoiceTx(reopenedInvoice, ownerUid, '2026-10')
+      expect(consolidatedReopened.dueDate).toBe('2026-10-27')
+      expect(consolidatedReopened.subcategory).toBe('Vencimento dia 27')
+
+      // Nova despesa não paga adicionada no ciclo também reabre a fatura
+      const newUnpaid = buildExpense({ dueDate: '2026-10-19', actualAmount: 50, status: 'pending' })
+      const invoiceWithNewItem = buildCardInvoice(sampleCard, '2026-10', [exp1, exp2, newUnpaid], ownerUid, '2026-10-23')
+      expect(invoiceWithNewItem.status).not.toBe('paid')
+      expect(invoiceWithNewItem.paidDate).toBeNull()
+      expect(createConsolidatedInvoiceTx(invoiceWithNewItem, ownerUid, '2026-10').dueDate).toBe('2026-10-27')
     })
   })
 })

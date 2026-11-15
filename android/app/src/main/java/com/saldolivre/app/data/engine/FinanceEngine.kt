@@ -898,7 +898,12 @@ object FinanceEngine {
         )
     }
 
-    fun applyStatusPatch(tx: Transaction, newStatus: TransactionStatus, customActualAmount: Double? = null): Transaction {
+    fun applyStatusPatch(
+        tx: Transaction,
+        newStatus: TransactionStatus,
+        customActualAmount: Double? = null,
+        paidAt: String? = null
+    ): Transaction {
         val resolvedActual = when {
             customActualAmount != null && customActualAmount > 0.0 -> round2(customActualAmount)
             newStatus == TransactionStatus.PAID && tx.actualAmount == null -> round2(tx.estimatedAmount ?: tx.totalAmount)
@@ -911,9 +916,16 @@ object FinanceEngine {
         } else {
             tx
         }
+        val resolvedPaidAt = when {
+            newStatus != TransactionStatus.PAID -> null
+            !paidAt.isNullOrBlank() -> paidAt.trim()
+            !base.paidAt.isNullOrBlank() -> base.paidAt
+            else -> todayKey()
+        }
         return base.copy(
             status = newStatus,
-            actualAmount = resolvedActual
+            actualAmount = resolvedActual,
+            paidAt = resolvedPaidAt
         )
     }
 
@@ -1212,6 +1224,52 @@ object FinanceEngine {
         return false
     }
 
+    fun isVaVrCategory(category: String?, subcategory: String? = null): Boolean =
+        CategoryRegistry.isVaVrCategory(category, subcategory)
+
+    fun isVaVrTransaction(tx: Transaction?): Boolean =
+        CategoryRegistry.isVaVrTransaction(tx)
+
+    fun vaVrAmountForUser(tx: Transaction, uid: String, all: List<Transaction>): Double {
+        if (!isVaVrTransaction(tx) || uid.isBlank()) return 0.0
+        if (!tx.reserveCardId.isNullOrBlank()) return 0.0
+        if (tx.type == TransactionType.INCOME) {
+            return round2(max(0.0, kotlin.math.abs(impactFor(tx, uid, all))))
+        }
+        if (tx.paidByUid == uid || (tx.paidByUid.isBlank() && tx.createdByUid == uid)) {
+            return round2(kotlin.math.abs(effectiveAmount(tx)))
+        }
+        return 0.0
+    }
+
+    fun computeVaVrCarryover(
+        all: List<Transaction>,
+        uid: String,
+        targetMonthKey: String
+    ): Double {
+        val pastVaVrTxs = all.filter {
+            it.competenceMonth.isNotBlank() &&
+                it.competenceMonth < targetMonthKey &&
+                isTxVisibleToUser(it, uid) &&
+                isVaVrTransaction(it)
+        }
+        if (pastVaVrTxs.isEmpty()) return 0.0
+        val months = pastVaVrTxs.map { it.competenceMonth }.distinct().sorted()
+        var running = 0.0
+        for (m in months) {
+            var mInc = 0.0
+            var mExp = 0.0
+            for (tx in pastVaVrTxs) {
+                if (tx.competenceMonth != m) continue
+                val amt = vaVrAmountForUser(tx, uid, all)
+                if (amt <= 0.0) continue
+                if (tx.type == TransactionType.INCOME) mInc += amt else mExp += amt
+            }
+            running = round2(max(0.0, running + mInc - mExp))
+        }
+        return running
+    }
+
     fun computeMonthRawBalance(
         all: List<Transaction>,
         uid: String,
@@ -1221,6 +1279,7 @@ object FinanceEngine {
         var inc = 0.0
         var exp = 0.0
         for (tx in monthTxs) {
+            if (isVaVrTransaction(tx)) continue
             val impact = impactFor(tx, uid, all)
             if (tx.type == TransactionType.INCOME) {
                 inc += kotlin.math.abs(impact)
@@ -1236,7 +1295,8 @@ object FinanceEngine {
         uid: String,
         monthKey: String,
         cards: List<Card> = emptyList(),
-        closures: List<MonthClosure> = emptyList()
+        closures: List<MonthClosure> = emptyList(),
+        recurringBills: List<RecurringBill> = emptyList()
     ): MonthSummary {
         val monthTxs = all.filter { it.competenceMonth == monthKey && isTxVisibleToUser(it, uid) }
 
@@ -1252,16 +1312,23 @@ object FinanceEngine {
         var totalInvested = 0.0
         var grossInvested = 0.0
 
+        var vaVrIncomePaid = 0.0
+        var vaVrIncomePending = 0.0
+        var vaVrSpentPaid = 0.0
+        var vaVrSpentPending = 0.0
+
         val categoryMap = mutableMapOf<String, Double>()
         val investSubcatMap = mutableMapOf<String, Double>()
+        val vaVrSubcatMap = mutableMapOf<String, Pair<Double, Int>>()
         val receivablesList = mutableListOf<ReceivableItem>()
 
         val cardMap = cards.associateBy { it.id }
 
         val nonCardTxs = monthTxs.filter { it.cardId.isNullOrBlank() || !cardMap.containsKey(it.cardId) }
 
-        // 1. Não-cartões (Pix, Boleto, Salário, etc.)
+        // 1. Não-cartões (Pix, Boleto, Salário, etc.) — módulo VA/VR permanece 100% isolado do fluxo principal
         for (tx in nonCardTxs) {
+            if (isVaVrTransaction(tx)) continue
             val impact = impactFor(tx, uid, all)
 
             if (tx.type == TransactionType.INCOME) {
@@ -1303,36 +1370,50 @@ object FinanceEngine {
             }
         }
 
-        // 3. Categorias, Investimentos e A Receber / A Pagar (processa todas as despesas do mês)
+        // 3. Categorias, Investimentos, Módulo VA/VR e A Receber / A Pagar (processa todas as transações do mês)
         for (tx in monthTxs) {
-            val impact = impactFor(tx, uid, all)
-
-            if (tx.type == TransactionType.EXPENSE && impact > 0.0) {
-                categoryMap[tx.category] = (categoryMap[tx.category] ?: 0.0) + impact
-
-                val isAporte = tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)
-                if (isAporte) {
-                    grossInvested += impact
-                    totalInvested += impact
-                    val sub = tx.subcategory ?: "Outros Investimentos"
-                    investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) + impact
-                    if (tx.category != "Investimentos") {
-                        categoryMap["Investimentos"] = (categoryMap["Investimentos"] ?: 0.0) + impact
+            if (isVaVrTransaction(tx)) {
+                val vaAmt = vaVrAmountForUser(tx, uid, all)
+                if (tx.type == TransactionType.INCOME) {
+                    if (vaAmt > 0.0) {
+                        if (tx.status == TransactionStatus.PAID) vaVrIncomePaid += vaAmt else vaVrIncomePending += vaAmt
                     }
+                } else if (vaAmt > 0.0) {
+                    if (tx.status == TransactionStatus.PAID) vaVrSpentPaid += vaAmt else vaVrSpentPending += vaAmt
+                    val sub = tx.subcategory?.ifBlank { null } ?: "Outros VA/VR"
+                    val prev = vaVrSubcatMap[sub]
+                    vaVrSubcatMap[sub] = Pair((prev?.first ?: 0.0) + vaAmt, (prev?.second ?: 0) + 1)
                 }
-            } else if (tx.type == TransactionType.INCOME && impact > 0.0) {
-                // Abate resgates do total investido no mês
-                val isResgate = tx.category == "Investimentos" ||
-                    tx.category.contains("investimento", ignoreCase = true) ||
-                    (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
-                if (isResgate) {
-                    totalInvested -= impact
-                    val sub = tx.subcategory ?: "Outros Investimentos"
-                    investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) - impact
+            } else {
+                val impact = impactFor(tx, uid, all)
+
+                if (tx.type == TransactionType.EXPENSE && impact > 0.0) {
+                    categoryMap[tx.category] = (categoryMap[tx.category] ?: 0.0) + impact
+
+                    val isAporte = tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)
+                    if (isAporte) {
+                        grossInvested += impact
+                        totalInvested += impact
+                        val sub = tx.subcategory ?: "Outros Investimentos"
+                        investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) + impact
+                        if (tx.category != "Investimentos") {
+                            categoryMap["Investimentos"] = (categoryMap["Investimentos"] ?: 0.0) + impact
+                        }
+                    }
+                } else if (tx.type == TransactionType.INCOME && impact > 0.0) {
+                    // Abate resgates do total investido no mês
+                    val isResgate = tx.category == "Investimentos" ||
+                        tx.category.contains("investimento", ignoreCase = true) ||
+                        (tx.category == "Rendimentos & Investimentos" && (tx.subcategory?.contains("Resgate", ignoreCase = true) == true))
+                    if (isResgate) {
+                        totalInvested -= impact
+                        val sub = tx.subcategory ?: "Outros Investimentos"
+                        investSubcatMap[sub] = (investSubcatMap[sub] ?: 0.0) - impact
+                    }
                 }
             }
 
-            // A Receber / A Pagar logic
+            // A Receber / A Pagar logic (roda inclusive para compras rateadas pagas com VA/VR)
             if (tx.paidByUid == uid) {
                 for (a in tx.allocations) {
                     if (a.reimbursed) continue
@@ -1376,6 +1457,25 @@ object FinanceEngine {
                         payableToOthers += a.amount
                     }
                 }
+            }
+        }
+
+        // Contas/recargas fixas de VA/VR ainda não lançadas no mês compõem a projeção do módulo VA/VR
+        val activeVaVrBills = recurringBills.filter {
+            it.active && it.ownerUid == uid && isVaVrCategory(it.category, it.subcategory)
+        }
+        for (bill in activeVaVrBills) {
+            if (!bill.startMonth.isNullOrBlank() && monthKey < bill.startMonth) continue
+            if (!bill.endMonth.isNullOrBlank() && monthKey > bill.endMonth) continue
+            if (monthTxs.any { it.recurringBillId == bill.id }) continue
+            if (findMatchingManualBill(monthTxs, monthKey, bill) != null) continue
+            val amount = estimateRecurring(bill, all, monthKey).amount
+            val myFraction = if (bill.splitType == SplitType.SPLIT_50) round2(amount / 2.0) else kotlin.math.abs(amount)
+            if (myFraction <= 0.0) continue
+            if (bill.type == TransactionType.INCOME) {
+                vaVrIncomePending += myFraction
+            } else {
+                vaVrSpentPending += myFraction
             }
         }
 
@@ -1492,6 +1592,24 @@ object FinanceEngine {
 
         val thisMonthClosure = closures.firstOrNull { it.closedMonth == monthKey && it.uid == uid }
 
+        val vaVrCarryover = computeVaVrCarryover(all, uid, monthKey)
+        val vaVrIncomePaidRounded = round2(vaVrIncomePaid)
+        val vaVrIncomePendingRounded = round2(vaVrIncomePending)
+        val vaVrIncomeTotal = round2(vaVrIncomePaid + vaVrIncomePending)
+        val vaVrSpentPaidRounded = round2(vaVrSpentPaid)
+        val vaVrSpentPendingRounded = round2(vaVrSpentPending)
+        val vaVrSpentTotal = round2(vaVrSpentPaid + vaVrSpentPending)
+        val vaVrAvailableBalance = round2(vaVrCarryover + vaVrIncomePaid - vaVrSpentPaid)
+        val vaVrProjectedBalance = round2(vaVrCarryover + vaVrIncomeTotal - vaVrSpentTotal)
+        val vaVrDailyLimit = if (daysRemaining > 0) round2(max(0.0, vaVrAvailableBalance) / daysRemaining) else null
+        val vaVrBySubcategory = vaVrSubcatMap.entries.map { (sub, acc) ->
+            VaVrSubcat(
+                subcategory = sub,
+                amount = round2(acc.first),
+                count = acc.second
+            )
+        }.sortedByDescending { it.amount }
+
         return MonthSummary(
             monthKey = monthKey,
             income = round2(income),
@@ -1521,7 +1639,18 @@ object FinanceEngine {
             totalInvestedAccumulated = totalInvestedAccumulated,
             byCategory = byCategory,
             byInvestmentSubcategory = byInvestSub,
-            receivables = receivablesList
+            receivables = receivablesList,
+            vaVrCarryover = vaVrCarryover,
+            vaVrIncomePaid = vaVrIncomePaidRounded,
+            vaVrIncomePending = vaVrIncomePendingRounded,
+            vaVrIncome = vaVrIncomeTotal,
+            vaVrSpentPaid = vaVrSpentPaidRounded,
+            vaVrSpentPending = vaVrSpentPendingRounded,
+            vaVrSpent = vaVrSpentTotal,
+            vaVrAvailableBalance = vaVrAvailableBalance,
+            vaVrProjectedBalance = vaVrProjectedBalance,
+            vaVrDailyLimit = vaVrDailyLimit,
+            vaVrBySubcategory = vaVrBySubcategory
         )
     }
 
@@ -1605,9 +1734,9 @@ object FinanceEngine {
             round2((summary.pendingClosureSurplus ?: 0.0) - summary.previousMonthDeficit)
         }
 
-        val monthTxs = all.filter { it.competenceMonth == monthKey && isTxVisibleToUser(it, uid) }
+        val monthTxs = all.filter { it.competenceMonth == monthKey && isTxVisibleToUser(it, uid) && !isVaVrTransaction(it) }
 
-        // Apenas transações da conta bancária / extrato (exclui compras feitas em cartão de crédito)
+        // Apenas transações da conta bancária / extrato (exclui compras feitas em cartão de crédito e módulo VA/VR)
         val accountTxs = monthTxs.filter { it.cardId.isNullOrBlank() && it.paymentMethod != PaymentMethod.CREDIT_CARD }
 
         val accountIncomesReceived = round2(accountTxs.filter {
@@ -1620,7 +1749,8 @@ object FinanceEngine {
 
         val paidInvoicesAmount = round2(cards.sumOf { card ->
             val invoice = InvoiceEngine.buildInvoice(card, monthKey, all, uid, today)
-            if (invoice.status == InvoiceStatus.PAID && invoice.dueDate <= today) {
+            val effectiveDate = invoice.paidDate ?: invoice.dueDate
+            if (invoice.status == InvoiceStatus.PAID && effectiveDate <= today) {
                 invoice.myShare
             } else {
                 0.0
@@ -2194,7 +2324,7 @@ object FinanceEngine {
             }
 
             val monthTxs = all.filter {
-                it.competenceMonth == monthKey && it.visibleToUids.contains(uid) && it.reserveCardId == null
+                it.competenceMonth == monthKey && it.visibleToUids.contains(uid) && it.reserveCardId == null && !isVaVrTransaction(it)
             }
 
             var projectedIncome = 0.0
@@ -2328,7 +2458,7 @@ object FinanceEngine {
             }
 
             var ungeneratedCount = 0
-            for (bill in bills.filter { it.active && it.ownerUid == uid }) {
+            for (bill in bills.filter { it.active && it.ownerUid == uid && !isVaVrCategory(it.category, it.subcategory) }) {
                 if (monthTxs.any { it.recurringBillId == bill.id }) continue
                 if (findMatchingManualBill(monthTxs, monthKey, bill) != null) continue
 
@@ -2578,9 +2708,9 @@ object FinanceEngine {
         "Impostos & Tributos"
     )
 
-    /** Entradas, patrimônio e legados de crédito/terceiros nunca geram envelope de despesa. */
+    /** Entradas, patrimônio, módulo VA/VR auto-orçado e legados de crédito/terceiros nunca geram envelope de despesa. */
     val NON_ENVELOPE_CATEGORIES: Set<String> =
-        setOf("Investimentos", "Receita", "Estorno", "Cartão Terceiros") +
+        setOf("Investimentos", "VA/VR", "Receita", "Estorno", "Cartão Terceiros") +
             com.saldolivre.app.data.model.CategoryRegistry.INCOME_CATEGORIES.map { it.name }
 
     private val CATEGORY_CANONICAL_MAP = mapOf(
@@ -2657,6 +2787,14 @@ object FinanceEngine {
         "pet" to "Pets",
         "alimentação" to "Alimentação",
         "alimentacao" to "Alimentação",
+        "va/vr" to "VA/VR",
+        "va vr" to "VA/VR",
+        "vavr" to "VA/VR",
+        "vale alimentacao" to "VA/VR",
+        "vale refeicao" to "VA/VR",
+        "vale alimentacao / refeicao" to "VA/VR",
+        "beneficios va/vr" to "VA/VR",
+        "cartao de beneficios" to "VA/VR",
         "moradia" to "Moradia",
         "transporte" to "Transporte",
         "transportes" to "Transporte",
@@ -2756,7 +2894,7 @@ object FinanceEngine {
                     summary.paid + summary.committed
                 }
             }
-            summary.byCategory.isNotEmpty() -> summary.byCategory.sumOf { it.amount }
+            summary.byCategory.isNotEmpty() -> summary.byCategory.filter { !isVaVrCategory(it.category) }.sumOf { it.amount }
             else -> 0.0
         }
         val totalInvested = kotlin.math.max(0.0, summary.totalInvested)
@@ -3020,7 +3158,7 @@ object FinanceEngine {
     ): CategoryBudgetReport {
         val spentMap = mutableMapOf<String, Double>()
         for (item in byCategory) {
-            if (item.category.isNotBlank()) {
+            if (item.category.isNotBlank() && !isVaVrCategory(item.category)) {
                 spentMap[item.category] = (spentMap[item.category] ?: 0.0) + item.amount
             }
         }
@@ -3053,6 +3191,7 @@ object FinanceEngine {
         var monthIncomeFromTx = 0.0
 
         for (tx in transactions) {
+            if (isVaVrTransaction(tx)) continue
             if (tx.competenceMonth == monthKey && (tx.visibleToUids.isEmpty() || tx.visibleToUids.contains(uid))) {
                 val impact = impactFor(tx, uid, allTransactions)
                 val isAporte = (tx.category == "Investimentos" || tx.category.contains("investimento", ignoreCase = true)) && tx.type == TransactionType.EXPENSE
@@ -3076,7 +3215,9 @@ object FinanceEngine {
 
         // Contas fixas e recorrentes ativas a vencer no mês que ainda não geraram lançamento
         if (recurringBills.isNotEmpty()) {
-            val activeBills = recurringBills.filter { it.active && it.ownerUid == uid && it.type != TransactionType.INCOME }
+            val activeBills = recurringBills.filter {
+                it.active && it.ownerUid == uid && it.type != TransactionType.INCOME && !isVaVrCategory(it.category, it.subcategory)
+            }
             for (bill in activeBills) {
                 if (!bill.startMonth.isNullOrBlank() && monthKey < bill.startMonth) continue
                 if (!bill.endMonth.isNullOrBlank() && monthKey > bill.endMonth) continue
@@ -3132,7 +3273,9 @@ object FinanceEngine {
         val consolidatedBudgets = linkedMapOf<String, Double>()
         for ((rawCat, valAmt) in categoryBudgets) {
             if (valAmt <= 0.0) continue
+            if (CategoryRegistry.isVaVrCategory(rawCat)) continue
             val norm = normalizeBudgetCategory(rawCat)
+            if (CategoryRegistry.isVaVrCategory(norm)) continue
             val displayKey = normalizedBudgetKeyMap[norm] ?: rawCat
             normalizedBudgetKeyMap[norm] = displayKey
             consolidatedBudgets[displayKey] = round2((consolidatedBudgets[displayKey] ?: 0.0) + valAmt)
@@ -3611,10 +3754,10 @@ object FinanceEngine {
             shiftMonth(referenceMonth, -3)
         )
 
-        // Calcula a entrada prevista real do mês de referência a partir dos lançamentos de receita
+        // Calcula a entrada prevista real do mês de referência a partir dos lançamentos de receita (isolando VA/VR)
         var referenceMonthIncome = 0.0
         for (tx in allTransactions) {
-            if (tx.type != TransactionType.INCOME) continue
+            if (tx.type != TransactionType.INCOME || isVaVrTransaction(tx)) continue
             val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
             if (m != referenceMonth) continue
             val imp = impactFor(tx, uid, allTransactions)
@@ -3637,7 +3780,7 @@ object FinanceEngine {
 
         var matchingCount = 0
         for (tx in allTransactions) {
-            if (tx.type != TransactionType.EXPENSE) continue
+            if (tx.type != TransactionType.EXPENSE || isVaVrTransaction(tx)) continue
             val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
             if (m !in previousMonths) continue
             val impact = impactFor(tx, uid, allTransactions)
@@ -3651,6 +3794,7 @@ object FinanceEngine {
         val curMonthExpenseMap = mutableMapOf<String, Double>()
         var referenceMonthInvested = 0.0
         for (tx in allTransactions) {
+            if (isVaVrTransaction(tx)) continue
             val m = tx.competenceMonth.ifBlank { tx.dueDate.take(7) }
             if (m != referenceMonth) continue
             val impact = impactFor(tx, uid, allTransactions)

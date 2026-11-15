@@ -64,6 +64,7 @@ data class TransactionsUiState(
     val cushionAmount: Double = 0.0,
     val pendingCount: Int = 0,
     val paidCount: Int = 0,
+    val vaVrCount: Int = 0,
     val isLoading: Boolean = false,
     val userMessage: String? = null
 )
@@ -98,6 +99,7 @@ class TransactionsViewModel(
                 }
                 val paidCount = rawMonthTxs.count { it.status == TransactionStatus.PAID }
                 val pendingCount = rawMonthTxs.count { it.status != TransactionStatus.PAID }
+                val vaVrCount = rawMonthTxs.count { CategoryRegistry.isVaVrTransaction(it) }
 
                 val expenseCats = CategoryRegistry.EXPENSE_CATEGORIES.map { it.name }
                 val incomeCats = CategoryRegistry.INCOME_CATEGORIES.map { it.name }
@@ -166,6 +168,7 @@ class TransactionsViewModel(
                         cushionAmount = summary.cushionAmount,
                         pendingCount = pendingCount,
                         paidCount = paidCount,
+                        vaVrCount = vaVrCount,
                         isLoading = false
                     )
                 }
@@ -508,6 +511,7 @@ class TransactionsViewModel(
             val matchesCategory = when {
                 state.selectedCategories.isNotEmpty() -> {
                     if (tx.category in state.selectedCategories) true
+                    else if (state.selectedCategories.any { CategoryRegistry.isVaVrCategory(it) } && CategoryRegistry.isVaVrTransaction(tx)) true
                     else if (tx.invoiceMeta?.invoice?.items?.any { it.category in state.selectedCategories } == true) true
                     else if (tx.category == "Receita") {
                         // Compatibilidade com transações legadas registradas como "Receita"
@@ -520,6 +524,7 @@ class TransactionsViewModel(
                 }
                 state.selectedCategory != null -> {
                     tx.category == state.selectedCategory ||
+                    (CategoryRegistry.isVaVrCategory(state.selectedCategory) && CategoryRegistry.isVaVrTransaction(tx)) ||
                     tx.invoiceMeta?.invoice?.items?.any { it.category == state.selectedCategory } == true
                 }
                 else -> true

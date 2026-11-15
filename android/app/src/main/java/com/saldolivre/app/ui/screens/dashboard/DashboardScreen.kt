@@ -28,7 +28,9 @@ import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.CategoryBudgetAlertStatus
 import com.saldolivre.app.data.model.FinancialHealthClassification
+import com.saldolivre.app.data.model.MonthSummary
 import com.saldolivre.app.data.model.Transaction
+import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.ui.screens.dashboard.budgets.*
 import com.saldolivre.app.ui.components.DashboardSkeleton
 import com.saldolivre.app.ui.components.DeleteInstallmentDialog
@@ -71,6 +73,7 @@ fun DashboardScreen(
     onNavigateToEditTransaction: (String) -> Unit = {},
     onNavigateToRefundTransaction: (String) -> Unit = {},
     onNavigateToCards: () -> Unit = {},
+    onNavigateToAddTransaction: (String?) -> Unit = {},
     onNavigateToChatWithPrompt: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -567,6 +570,15 @@ fun DashboardScreen(
                         }
                     }
                 }
+            }
+
+            // 3.0 Card Dedicado: Benefícios VA / VR (Pote 100% Isolado)
+            item(key = "va_vr_module", contentType = "va_vr_module") {
+                VaVrModuleCard(
+                    summary = summary,
+                    onLaunchExpense = { onNavigateToAddTransaction("va_vr_expense") },
+                    onLaunchIncome = { onNavigateToAddTransaction("va_vr_income") }
+                )
             }
 
             // 3.1 Card Compacto de Saúde Financeira
@@ -1184,6 +1196,277 @@ fun DashboardScreen(
                 viewModel.clearSmartBudgetPlan()
                 showManageBudgetsDialog = false
             }
+        )
+    }
+}
+
+@Composable
+private fun VaVrModuleCard(
+    summary: MonthSummary,
+    onLaunchExpense: () -> Unit,
+    onLaunchIncome: () -> Unit
+) {
+    val isNegative = summary.vaVrAvailableBalance < 0.0
+    val vaVrTotalPot = summary.vaVrCarryover + summary.vaVrIncome
+    val vaVrUsagePct = if (vaVrTotalPot > 0.0) {
+        FinanceEngine.round2((summary.vaVrSpent / vaVrTotalPot) * 100.0)
+    } else if (summary.vaVrSpent > 0.0) {
+        100.0
+    } else {
+        0.0
+    }
+    val vaVrCount = summary.vaVrBySubcategory.sumOf { it.count }
+    val hasActivity = summary.vaVrCarryover != 0.0 ||
+        summary.vaVrIncome > 0.0 ||
+        summary.vaVrSpent > 0.0 ||
+        vaVrCount > 0
+    val tealAccent = Color(0xFF2DD4BF)
+    val tealBorder = Color(0xFF14B8A6)
+    val cardAccent = if (isNegative) Rose400 else tealAccent
+    val borderColor = if (isNegative) Rose500.copy(alpha = 0.45f) else tealBorder.copy(alpha = 0.30f)
+    val barFraction = (vaVrUsagePct / 100.0).toFloat().coerceIn(0f, 1f)
+    val barColor = when {
+        isNegative -> Rose500
+        vaVrUsagePct >= 90.0 -> Amber400
+        else -> tealAccent
+    }
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = DarkSurface,
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header + Badges
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(cardAccent.copy(alpha = 0.16f))
+                            .border(1.dp, cardAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Restaurant,
+                            contentDescription = null,
+                            tint = cardAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Benefícios VA / VR",
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(tealAccent.copy(alpha = 0.14f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Isolado",
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = tealAccent
+                                )
+                            }
+                        }
+                        if (isNegative) {
+                            Text(
+                                text = "Saldo negativo — ajuste ou recarga necessária",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Rose400
+                            )
+                        }
+                    }
+                }
+
+                // Ações rápidas (+ Recarga / + VA/VR)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Emerald500.copy(alpha = 0.15f))
+                            .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                            .clickable { onLaunchIncome() }
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "+ Recarga",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Emerald400
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(tealAccent.copy(alpha = 0.18f))
+                            .border(1.dp, tealAccent.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                            .clickable { onLaunchExpense() }
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "+ VA/VR",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tealAccent
+                        )
+                    }
+                }
+            }
+
+            // Hero: Disponível Agora vs Projetado no Mês
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Column {
+                    Text(
+                        text = "DISPONÍVEL AGORA",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary,
+                        letterSpacing = 0.4.sp
+                    )
+                    Text(
+                        text = FinanceEngine.formatCurrency(summary.vaVrAvailableBalance),
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (isNegative) Rose400 else tealAccent
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Projetado no mês",
+                        fontSize = 10.sp,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = FinanceEngine.formatCurrency(summary.vaVrProjectedBalance),
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (summary.vaVrProjectedBalance < 0.0) Rose400 else TextPrimary
+                    )
+                }
+            }
+
+            // Métricas secundárias (Acumulado | Recargas | Gasto | Limite Diário)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                VaVrMiniMetric(
+                    label = "Acumulado",
+                    value = FinanceEngine.formatCurrency(summary.vaVrCarryover),
+                    valueColor = TextPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                VaVrMiniMetric(
+                    label = "Recargas",
+                    value = "+${FinanceEngine.formatCurrency(summary.vaVrIncome)}",
+                    valueColor = Emerald400,
+                    modifier = Modifier.weight(1f)
+                )
+                VaVrMiniMetric(
+                    label = "Gasto",
+                    value = "-${FinanceEngine.formatCurrency(summary.vaVrSpent)}",
+                    valueColor = Rose400,
+                    modifier = Modifier.weight(1f)
+                )
+                VaVrMiniMetric(
+                    label = "Limite/Dia",
+                    value = summary.vaVrDailyLimit?.let { "${FinanceEngine.formatCurrency(it)}/d" } ?: "—",
+                    valueColor = tealAccent,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Barra de progresso
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (hasActivity) "Consumo do pote (${vaVrUsagePct.roundToInt()}%)"
+                        else "Lance recarga ou gasto para iniciar",
+                        fontSize = 10.5.sp,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "$vaVrCount ${if (vaVrCount == 1) "gasto" else "gastos"}",
+                        fontSize = 10.5.sp,
+                        color = TextMuted
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = barFraction)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(barColor)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VaVrMiniMetric(
+    label: String,
+    value: String,
+    valueColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            fontSize = 9.5.sp,
+            color = TextMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = value,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = valueColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

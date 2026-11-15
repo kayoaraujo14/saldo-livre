@@ -797,6 +797,15 @@ export function buildSystemInstruction(ctx: {
     totalInvested?: number
     totalInvestedAccumulated?: number
     byInvestmentSubcategory?: Array<{ subcategory: string; amount: number; percentage: number }>
+    vaVrCarryover?: number
+    vaVrIncome?: number
+    vaVrIncomePaid?: number
+    vaVrSpent?: number
+    vaVrSpentPaid?: number
+    vaVrAvailableBalance?: number
+    vaVrProjectedBalance?: number
+    vaVrDailyLimit?: number | null
+    vaVrBySubcategory?: Array<{ subcategory: string; amount: number; count: number }>
   } | null
   recentTransactions?: Array<{
     id?: string
@@ -873,7 +882,11 @@ ${cashFlowDesc ? `${cashFlowDesc}\n\nPLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE P
 ${ctx.summary.bySubcategory && ctx.summary.bySubcategory.length > 0 ? `- Gastos Detalhados por Subgrupo/Subcategoria:\n  ${ctx.summary.bySubcategory.map((s) => `* ${s.category} › ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count} item${s.count > 1 ? 's' : ''})`).join('\n  ')}` : ''}
 - Total Investido no Mês: R$ ${ctx.summary.totalInvested != null ? ctx.summary.totalInvested.toFixed(2) : '0.00'}
 - Patrimônio Total Investido Acumulado: R$ ${ctx.summary.totalInvestedAccumulated != null ? ctx.summary.totalInvestedAccumulated.toFixed(2) : '0.00'}
-${ctx.summary.byInvestmentSubcategory && ctx.summary.byInvestmentSubcategory.length > 0 ? `- Alocação de Investimentos por Subcategoria:\n  ${ctx.summary.byInvestmentSubcategory.map((i) => `* ${i.subcategory}: R$ ${i.amount.toFixed(2)} (${i.percentage.toFixed(1)}%)`).join('\n  ')}` : ''}${healthAndBudgetsDesc}`
+${ctx.summary.byInvestmentSubcategory && ctx.summary.byInvestmentSubcategory.length > 0 ? `- Alocação de Investimentos por Subcategoria:\n  ${ctx.summary.byInvestmentSubcategory.map((i) => `* ${i.subcategory}: R$ ${i.amount.toFixed(2)} (${i.percentage.toFixed(1)}%)`).join('\n  ')}` : ''}
+MÓDULO VA/VR (VALE-ALIMENTAÇÃO / REFEIÇÃO — 100% ISOLADO DA CONTA CORRENTE):
+- Saldo VA/VR Disponível Agora: R$ ${(ctx.summary.vaVrAvailableBalance ?? 0).toFixed(2)} (Carryover anterior: R$ ${(ctx.summary.vaVrCarryover ?? 0).toFixed(2)} + Recargas pagas: R$ ${(ctx.summary.vaVrIncomePaid ?? 0).toFixed(2)} - Gastos pagos: R$ ${(ctx.summary.vaVrSpentPaid ?? 0).toFixed(2)})
+- Saldo VA/VR Projetado no Mês: R$ ${(ctx.summary.vaVrProjectedBalance ?? 0).toFixed(2)} (Recargas totais/previstas: R$ ${(ctx.summary.vaVrIncome ?? 0).toFixed(2)} | Gastos totais: R$ ${(ctx.summary.vaVrSpent ?? 0).toFixed(2)})
+- Limite Diário VA/VR Sugerido: ${ctx.summary.vaVrDailyLimit != null ? `R$ ${ctx.summary.vaVrDailyLimit.toFixed(2)}/dia` : 'Sem saldo positivo ou mês encerrado'}${ctx.summary.vaVrBySubcategory && ctx.summary.vaVrBySubcategory.length > 0 ? `\n- Gastos VA/VR por Subcategoria:\n  ${ctx.summary.vaVrBySubcategory.map((s) => `* ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count}x)`).join('\n  ')}` : ''}${healthAndBudgetsDesc}`
     : `DADOS FINANCEIROS: Mês ${ctx.monthLabel} (${ctx.monthKey})${healthAndBudgetsDesc}`
 
   const recentTxsDesc =
@@ -1049,8 +1062,9 @@ REGRAS DE FUNCIONAMENTO:
   * Responda educadamente explicando que o Saldo Livre utiliza uma taxonomia fixa e padronizada para manter a consistência dos envelopes orçamentários, gráficos e diagnósticos de saúde financeira.
   * Oriente e sugira a categoria e subcategoria oficial mais apropriada do sistema (ex: para "Bichos" ou "Pets" -> categoria "Pets", subcategoria "Acessórios & Brinquedos" ou "Veterinário & Medicamentos"; para "Viagem" -> categoria "Lazer & Entretenimento", subcategoria "Viagens & Hospedagem"; para "Farmácia" -> categoria "Saúde", subcategoria "Farmácia & Remédios").
 - No campo "categoria" das chamadas de ferramentas ("registrarTransacao", "registrarTransacoesLote", "editarTransacoes"), utilize SEMPRE e EXCLUSIVAMENTE uma das categorias oficiais ativas:
-  * Despesas (16 categorias): Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
-  * Receitas (7 categorias): Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
+  * Despesas (17 categorias): VA/VR, Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
+  * Receitas (8 categorias): VA/VR, Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
+  * REGRA DO MÓDULO VA/VR: Lançamentos com marcas Alelo, Flash, Caju, Ticket, Pluxee, Sodexo, iFood Benefícios, VA ou VR devem usar categoria: "VA/VR", metodoPagamento: "debit" (saída) ou "pix" (entrada) — NUNCA credit_card — e NÃO impactam o Saldo Livre da conta corrente nem os envelopes de Alimentação. Subcategorias VA/VR: Recarga VA/VR, Vale Alimentação (VA), Vale Refeição (VR), Saldo Inicial / Ajuste, Supermercado, Restaurante, Delivery & Lanches, Padaria, Outros VA/VR.
 - Subcategorias oficiais por grupo:
   * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
   * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.

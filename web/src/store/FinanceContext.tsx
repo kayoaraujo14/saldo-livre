@@ -45,7 +45,7 @@ import {
   isTxVisibleToUser,
   type Party,
 } from '@/lib/finance'
-import { anticipateInstallments as calcAnticipateInstallments } from '@/lib/invoices'
+import { anticipateInstallments as calcAnticipateInstallments, buildCardInvoice } from '@/lib/invoices'
 import * as fb from '@/lib/firebase'
 import { createToolExecutor, getLearnedRules, saveLearnedRules, addLearnedRule, removeLearnedRule, type UserRule } from '@/lib/agentTools'
 import { currentMonthKey, uid as makeId, shiftDateMonth, shiftMonth, round2, dateInMonth, daysInMonth, monthLabel, formatInstallmentDesc, stripInstallmentSuffix, todayKey } from '@/lib/utils'
@@ -592,8 +592,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
 
   const summary = useMemo(() => {
     if (!currentUid) return null
-    return computeSummary(transactions, currentUid, month, cards, monthClosures)
-  }, [transactions, currentUid, month, monthClosures, cards])
+    return computeSummary(transactions, currentUid, month, cards, monthClosures, recurring)
+  }, [transactions, currentUid, month, monthClosures, cards, recurring])
 
   const currentMonthBudgets = useMemo(() => {
     const monthly = profile?.monthlyCategoryBudgets?.[month]
@@ -1720,6 +1720,70 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     [updateTransaction, currentUid],
   )
 
+  const payCardInvoice = useCallback(
+    async (cardId: string, monthKey: string, paymentDate?: string) => {
+      const targetDate =
+        paymentDate && /^\d{4}-\d{2}-\d{2}$/.test(paymentDate.trim()) ? paymentDate.trim() : todayKey()
+      const uid = currentUid || me?.uid || 'me'
+      const card = cards.find((c) => c.id === cardId)
+      if (card && card.ownerUid !== uid) return
+
+      const pickTargets = (source: Transaction[]) => {
+        const items = card
+          ? buildCardInvoice(card, monthKey, source, uid).items.filter((t) => t.type === 'expense')
+          : source.filter(
+              (t) =>
+                t.paymentMethod === 'credit_card' &&
+                t.cardId === cardId &&
+                t.competenceMonth === monthKey &&
+                t.type === 'expense',
+            )
+        return items.filter(
+          (t) => canUserEditTransaction(t, uid) && (t.status !== 'paid' || t.paidAt !== targetDate),
+        )
+      }
+
+      if (mode === 'demo') {
+        const targets = pickTargets(demoRef.current.transactions)
+        if (targets.length === 0) return
+        const patchMap = new Map(targets.map((t) => [t.id, statusPatch(t, 'paid', targetDate)]))
+        commitDemo((d) => ({
+          ...d,
+          transactions: d.transactions.map((t) => {
+            const p = patchMap.get(t.id)
+            return p ? { ...t, ...p } : t
+          }),
+        }))
+        return
+      }
+
+      const previousTxs = fbTxRef.current
+      const targets = pickTargets(previousTxs)
+      if (targets.length === 0) return
+
+      const updates = targets.map((t) => ({
+        id: t.id,
+        patch: statusPatch(t, 'paid', targetDate),
+      }))
+      const patchMap = new Map(updates.map((u) => [u.id, u.patch]))
+      const optimisticTxs = previousTxs.map((t) => {
+        const p = patchMap.get(t.id)
+        return p ? { ...t, ...p } : t
+      })
+      fbTxRef.current = optimisticTxs
+      setFbTx(optimisticTxs)
+
+      try {
+        await fb.fsUpdateTransactionsBatch(updates)
+      } catch (err) {
+        fbTxRef.current = previousTxs
+        setFbTx(previousTxs)
+        throw err
+      }
+    },
+    [mode, commitDemo, cards, currentUid, me?.uid],
+  )
+
   const changeSplit = useCallback(
     async (
       tx: Transaction,
@@ -2306,6 +2370,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     updateInstallmentGroup,
     cycleStatus,
     setStatus,
+    payCardInvoice,
     changeSplit,
     changeAmount,
     markReimbursed,

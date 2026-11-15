@@ -424,6 +424,7 @@ export function normalizeTransaction(id: string, raw: any): Transaction {
     discountAmount: data.discountAmount != null ? Number(data.discountAmount) : null,
     externalName: data.externalName || data.thirdPartyName || null,
     notes: data.notes || null,
+    paidAt: data.paidAt ? String(data.paidAt).trim() : null,
   }
 }
 

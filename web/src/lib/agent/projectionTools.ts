@@ -19,12 +19,12 @@ export async function relatorio(env: AgentEnv, args?: Record<string, unknown>): 
   const cartaoFiltro = typeof args?.cartao === 'string' ? args.cartao.trim() : ''
   const closures = env.getClosures?.() || []
   const cards = env.getCards()
-  const s = computeSummary(all, env.me.uid, targetMonth, cards, closures)
+  const bills = env.getRecurring?.() || []
+  const s = computeSummary(all, env.me.uid, targetMonth, cards, closures, bills)
   const { receivables, payables } = listReceivables(all, env.me.uid, targetMonth, cards)
   const monthTxs = all.filter((t) => t.competenceMonth === targetMonth && (t.visibleToUids || []).includes(env.me.uid))
 
   const isFutureMonth = targetMonth > currentMonthKey()
-  const bills = env.getRecurring?.() || []
   const profile = env.getProfile?.() || null
 
   const projections12 = projectFutureMonths({
@@ -223,6 +223,17 @@ export async function relatorio(env: AgentEnv, args?: Record<string, unknown>): 
       totalInvestido: s.totalInvested || 0,
       totalInvestidoAcumulado: s.totalInvestedAccumulated || 0,
       investimentosPorClasse: s.byInvestmentSubcategory || [],
+      moduloVaVr: {
+        saldoDisponivelAgora: s.vaVrAvailableBalance,
+        saldoProjetadoMes: s.vaVrProjectedBalance,
+        carryoverAnterior: s.vaVrCarryover,
+        recargasMes: s.vaVrIncome,
+        recargasPagas: s.vaVrIncomePaid,
+        gastosMes: s.vaVrSpent,
+        gastosPagos: s.vaVrSpentPaid,
+        limiteDiarioVaVr: s.vaVrDailyLimit,
+        porSubcategoria: s.vaVrBySubcategory || [],
+      },
       contasEmAberto: open,
       contasEstimadasLista: estimatedTxs,
       reservasDeCartao: reserves,
@@ -247,6 +258,12 @@ export async function relatorio(env: AgentEnv, args?: Record<string, unknown>): 
         { label: 'Faturas de Cartão', value: money(totalFaturasCartao) },
         { label: 'Extrato (Fixas + Pix/Débito)', value: money(totalExtratoConta) },
         { label: 'Total Comprometido', value: money(effectiveExpense) },
+        ...((s.vaVrCarryover ?? 0) > 0 || (s.vaVrIncome ?? 0) > 0 || (s.vaVrSpent ?? 0) > 0
+          ? [
+              { label: 'Saldo VA/VR Disponível', value: money(s.vaVrAvailableBalance ?? 0), tone: (s.vaVrAvailableBalance ?? 0) >= 0 ? ('positive' as const) : ('negative' as const) },
+              { label: 'VA/VR Projetado Mês', value: money(s.vaVrProjectedBalance ?? 0) },
+            ]
+          : []),
       ],
     },
   }

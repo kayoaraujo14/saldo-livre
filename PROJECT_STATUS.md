@@ -101,6 +101,37 @@ O **Saldo Livre** é um ecossistema financeiro inteligente multiplataforma (Mono
 ## 4. Registro de Mudanças (Changelog Recente)
 
 > *Este espaço registra cada micro-commit validado pelo Squad Multidisciplinar.*
+- **[2026-11-15] Multiplataforma (Web & Android) — Módulo de Benefícios VA/VR (Vale-Alimentação / Vale-Refeição) com Paridade 100%:**
+  - **1. Domínio Unificado e Motor Financeiro Isolado (`web/src/types/index.ts`, `web/src/lib/finance.ts`, `Category.kt`, `MonthSummary.kt`, `FinanceEngine.kt`, `FinanceContext.tsx`):**
+    - Categoria dual `'VA/VR'` presente em despesas e receitas (preservando compatibilidade com `'Benefícios'` e subcategorias de VA/VR via `isVaVrCategory` / `isVaVrTransaction` / `CategoryRegistry`).
+    - Isolamento integral do fluxo de caixa da conta corrente (`freeBalance`, `computeAccountCashFlow`, `projectFutureMonths`, orçamentos tradicionais e `calculateFinancialHealthScore`), mantendo apenas recebíveis/dívidas de rateios no fluxo principal enquanto o valor cheio compra abate no pote VA/VR.
+    - Cálculo cronológico automático de repasse positivo (`vaVrCarryover`), separação entre **Disponível Agora** (`vaVrAvailableBalance`) e **Projetado no Mês** (`vaVrProjectedBalance`), suporte a saldo negativo sem tocar no `freeBalance` e sugestão de **Limite Diário** (`vaVrDailyLimit`).
+  - **2. Copiloto Gemini, Classificadores & Recorrências (`agent/*.ts`, `gemini.ts`, `GeminiChat.tsx`, `AndroidAgentToolsEngine.kt`, `NeuralFinanceClassifier.kt`, `GeminiChatViewModel.kt`, `FirestoreFinanceRepository.kt`, `MockFinanceRepository.kt`):**
+    - Reconhecimento de operadoras e termos brasileiros (`va`, `vr`, `vale alimentacao`, `vale refeicao`, `ifood beneficios`, `alelo`, `flash`, `caju`, `ticket`, `pluxee`, `sodexo`), consultas/criação via Function Calling (`moduloVaVr`) e suporte a recargas mensais fixas (`RecurringBill` com `type: 'income'` na categoria `'VA/VR'`).
+  - **3. UI/UX Dashboard, Lançamento Rápido e Filtros (`KpiGrid.tsx`, `App.tsx`, `TransactionModal.tsx`, `RecurringBillsModal.tsx`, `ManageBudgetsModal.tsx`, `TransactionTable.tsx`, `DashboardViewModel.kt`, `DashboardScreen.kt`, `AppNavHost.kt`, `TransactionFormViewModel.kt`, `TransactionsViewModel.kt`, `TransactionsScreen.kt`, `RecurringBillsScreen.kt`):**
+    - Widget dedicado **Benefícios VA / VR** no Dashboard Web e Android com Saldo Disponível, Projetado, Acumulado, Recebido/Gasto no mês, Barra de Progresso, Limite Diário, alerta de estouro negativo e botões rápidos (`+ Recarga` / `+ VA/VR`) pré-selecionando a categoria `'VA/VR'`.
+    - Chip de filtro dedicado (`VA/VR`) nas telas de Transações e exclusão de `'VA/VR'` do modal/tela de orçamentos tradicionais.
+  - **4. Testes e Qualidade (`vaVrModule.test.ts`, `FinanceEngineVaVrTest.kt`):**
+    - Web: `oxlint` (`0` avisos/erros), Vitest (`26/26` arquivos, `255/255` testes) e `tsc -b && vite build` concluídos com sucesso.
+    - Android: `./gradlew.bat testDebugUnitTest` concluído com sucesso (`136/136` testes aprovados, incluindo os 6 cenários de `FinanceEngineVaVrTest`).
+
+- **[2026-11-15] Android Nativo — Captura Automática de Notificações Bancárias com Esboços (Drafts) e Revisão no Chat IA (`NotificationListenerService` + Gemini):**
+  - **1. Captura Segura e Deduplicação (`BankNotificationListenerService.kt`, `AndroidManifest.xml`, `AgentSecuritySanitizer.kt`):**
+    - Registrado `BankNotificationListenerService` com `BIND_NOTIFICATION_LISTENER_SERVICE` e permissão `POST_NOTIFICATIONS` no `AndroidManifest.xml` (e `MainActivity` com `launchMode="singleTop"`).
+    - Monitoramento de pacotes de bancos e carteiras brasileiras (Nubank, Itaú, Bradesco, Inter, Santander, Banco do Brasil, Caixa, Sicredi, C6 Bank, PicPay, Mercado Pago, iFood Benefícios, etc.), descartando notificações `isOngoing`, `FLAG_GROUP_SUMMARY` e duplicatas na janela de 2 minutos (`NotificationDeduplicationCache`).
+    - Todo texto bruto passa por `AgentSecuritySanitizer.sanitizeText` (com neutralização das regex de Prompt Injection sincronizada também em `web/src/lib/agent/security.ts`) antes de qualquer processamento ou injeção no Gemini.
+  - **2. Parser Inteligente e Classificação em Cascata (`NotificationExpenseParser.kt`, `NeuralFinanceClassifier.kt`):**
+    - Parse seguro de valores monetários em BRL (`R$ 1.234,56` -> `1234.56`), descartando notificações promocionais (empréstimo/limite), receitas (Pix recebido), códigos 2FA e compras negadas.
+    - Detecção de método de pagamento (`CREDIT_CARD`/`CREDIT`, `DEBIT`, `PIX`), associação automática a cartão cadastrado em `FinanceRepository` pelo nome do banco ou últimos 4 dígitos, extração do estabelecimento/destinatário e inferência de categoria em cascata via `LearnedRulesManager` -> `NeuralFinanceClassifier` -> `CategoryRegistry`.
+  - **3. Modelo de Esboço e Notificação Interativa (`ExpenseDraft.kt`, `ExpenseDraftManager.kt`, `DraftActionReceiver.kt`):**
+    - Criação e persistência local de `ExpenseDraft` com emissão de notificação local de alta prioridade do Saldo Livre (`ic_notification`) contendo clique principal (`ContentIntent`) para abrir direto o Chat IA e botões rápidos **Aprovar** (efetiva no `FinanceRepository` e salva regra no `LearnedRulesManager`) e **Ignorar** via `DraftActionReceiver`.
+  - **4. Navegação, Chat IA e Configurações (`MainActivity.kt`, `AppNavHost.kt`, `GeminiChatViewModel.kt`, `GeminiChatScreen.kt`, `ChatSessionManager.kt`, `MenuScreen.kt`, `MenuViewModel.kt`):**
+    - Captura de `EXTRA_EXPENSE_DRAFT_JSON`/`EXTRA_EXPENSE_DRAFT_ID` em `onCreate`/`onNewIntent` redirecionando para o `GeminiChatScreen`, injetando resumo estruturado do esboço no chat e mantendo `activeExpenseDraft` em contexto para aprovar ou aplicar ajustes em linguagem natural via `AndroidAgentToolsEngine`.
+    - Seção **"Captura Automática de Notificações"** adicionada em `MenuScreen` com detecção de permissão via `NotificationManagerCompat.getEnabledListenerPackages`, atalho para `ACTION_NOTIFICATION_LISTENER_SETTINGS`, controle de ativação e botão **"Simular Notificação de Teste"**.
+  - **5. Qualidade e Testes (`NotificationExpenseParserTest.kt`, `testDebugUnitTest`):**
+    - 9 testes unitários em `NotificationExpenseParserTest.kt` cobrindo compras no crédito (Nubank, Itaú, Sicredi, Inter), débito, Pix enviado, cascata com `LearnedRulesManager`, descarte de notificações inválidas/2FA/propagandas, neutralização de Prompt Injection e cache de deduplicação.
+    - Suíte Android `./gradlew testDebugUnitTest` executada com sucesso (`136/136` testes aprovados, `BUILD SUCCESSFUL`).
+
 - **[2026-11-11] Correção de Bug Multiplataforma (Firestore Rules, Web & Android) — Visibilidade de Cartões Compartilhados e Lista de Amigos:**
   - **1. Firestore Security Rules (`firestore.rules`):**
     - Coleção `/cards/{cardId}`: Simplificada a cláusula `read` para a sintaxe canônica `resource.data.ownerUid == request.auth.uid || request.auth.uid in resource.data.sharedWithUids`, permitindo que queries `array-contains` executadas por convidados sejam aprovadas na análise estática de regras sem incorrer em `permission-denied`.

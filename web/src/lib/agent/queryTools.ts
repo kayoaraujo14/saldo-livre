@@ -1,4 +1,5 @@
 import type { Card } from '@/types'
+import { isVaVrCategory, isVaVrTransaction } from '@/types'
 import {
   estimateRecurring,
   findMatchingManualBill,
@@ -72,8 +73,8 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
     if (tipoFiltro && tipoFiltro !== 'all') {
       if (t.type !== tipoFiltro) return false
     } else if (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria) {
-      // Por padrão em análises de gastos e faturas, filtra despesas a menos que o usuário peça receitas
-      if (t.type !== 'expense' && categoria !== 'Receita') return false
+      // Por padrão em análises de gastos e faturas, filtra despesas a menos que o usuário peça receitas ou módulo VA/VR
+      if (t.type !== 'expense' && categoria !== 'Receita' && !isVaVrCategory(categoria)) return false
     }
 
     // 2. Mês de competência
@@ -94,7 +95,13 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
     }
 
     // 5. Categoria e Subcategoria
-    if (categoria && t.category !== categoria) return false
+    if (categoria) {
+      if (isVaVrCategory(categoria)) {
+        if (!isVaVrTransaction(t)) return false
+      } else if (t.category !== categoria) {
+        return false
+      }
+    }
     if (subcategoria) {
       if (t.subcategory) {
         if (!normalize(t.subcategory).includes(normalize(subcategoria))) return false
@@ -201,8 +208,14 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
 
       const bType = bill.type ?? 'expense'
       if (tipoFiltro && tipoFiltro !== 'all' && bType !== tipoFiltro) continue
-      if (!tipoFiltro && (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria) && bType !== 'expense' && categoria !== 'Receita') continue
-      if (categoria && bill.category !== categoria) continue
+      if (!tipoFiltro && (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria) && bType !== 'expense' && categoria !== 'Receita' && !isVaVrCategory(categoria)) continue
+      if (categoria) {
+        if (isVaVrCategory(categoria)) {
+          if (!isVaVrCategory(bill.category, bill.subcategory)) continue
+        } else if (bill.category !== categoria) {
+          continue
+        }
+      }
       if (subcategoria && (!bill.subcategory || !normalize(bill.subcategory).includes(normalize(subcategoria)))) continue
       if (termo && !matchesSearch(bill.description, termo)) continue
       if (apenasTerceiros && bill.splitType !== 'split_50') continue
@@ -429,7 +442,9 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
   } else if (matchedCard) {
     reportTitle = `Fatura Cartão ${matchedCard.cardName} (${filtered.length} compras)`
   } else if (categoria) {
-    reportTitle = `Despesas em ${categoria}${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
+    reportTitle = isVaVrCategory(categoria)
+      ? `Extrato VA/VR${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
+      : `Despesas em ${categoria}${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
   } else if (termo) {
     reportTitle = `${termo} (${filtered.length} itens)`
   }

@@ -41,12 +41,16 @@ object AgentSecuritySanitizer {
         // 2. Remove tags HTML / scripts
         str = HTML_TAGS_REGEX.replace(str, "")
 
-        // 3. Detecta e neutraliza tentativas de prompt injection em extratos bancários
+        // 3. Detecta e neutraliza tentativas de prompt injection em extratos bancários e notificações
         if (detectPromptInjection(str)) {
-            str = str.replace(Regex("""ignore\s+previous\s+instructions""", RegexOption.IGNORE_CASE), "[neutralizado]")
-            str = str.replace(Regex("""disregard\s+earlier\s+instructions""", RegexOption.IGNORE_CASE), "[neutralizado]")
-            str = str.replace(Regex("""system\s+prompt\s*:""", RegexOption.IGNORE_CASE), "[neutralizado]:")
-            str = str.replace(Regex("""developer\s+mode""", RegexOption.IGNORE_CASE), "[neutralizado]")
+            str = str.replace(Regex("""\bignore\s+(all\s+)?previous\s+instructions\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
+            str = str.replace(Regex("""\bdisregard\s+(all\s+)?earlier\s+instructions\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
+            str = str.replace(Regex("""\bsystem\s+prompt\s*:""", RegexOption.IGNORE_CASE), "[neutralizado]:")
+            str = str.replace(Regex("""\b(?:you\s+are\s+now\s+(?:in\s+)?)?developer\s+mode\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
+            str = str.replace(Regex("""\bforget\s+all\s+(prior|previous)\s+rules\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
+            str = str.replace(Regex("""\bnew\s+instructions\s*:\s*delete\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
+            str = str.replace(Regex("""\bbypass\s+all\s+safety\s+filters\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
+            str = str.replace(Regex("""\bexfiltrate\s+(data|database|keys)\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
         }
 
         // 4. Normaliza espaços múltiplos

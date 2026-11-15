@@ -9,6 +9,7 @@ import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -37,7 +38,10 @@ class InvoiceEngineTest {
         friendSharePct: Double? = null,
         externalName: String? = null,
         allocations: List<Allocation> = emptyList(),
-        userImpact: Map<String, Double> = emptyMap()
+        userImpact: Map<String, Double> = emptyMap(),
+        status: TransactionStatus = TransactionStatus.PENDING,
+        dueDate: String = "2026-10-10",
+        paidAt: String? = null
     ): Transaction {
         return Transaction(
             id = id,
@@ -48,10 +52,10 @@ class InvoiceEngineTest {
             category = category,
             type = TransactionType.EXPENSE,
             paymentMethod = PaymentMethod.CREDIT_CARD,
-            status = TransactionStatus.PENDING,
+            status = status,
             totalAmount = amount,
             actualAmount = amount,
-            dueDate = "2026-10-10",
+            dueDate = dueDate,
             competenceMonth = "2026-10",
             visibleToUids = listOf(myUid),
             splitType = splitType,
@@ -60,7 +64,8 @@ class InvoiceEngineTest {
             friendSharePct = friendSharePct,
             externalName = externalName,
             allocations = allocations,
-            userImpact = userImpact
+            userImpact = userImpact,
+            paidAt = paidAt
         )
     }
 
@@ -268,5 +273,102 @@ class InvoiceEngineTest {
         val pastYearHeader = FinanceEngine.formatNubankDateHeader("2025-12-15", today = baseDate)
         assertEquals("15 DEZ 2025", pastYearHeader.title)
         assertEquals("segunda-feira", pastYearHeader.subtitle)
+    }
+
+    @Test
+    fun `paid invoice derives paidDate, updates consolidated dueDate and countdown while keeping original purchase dates`() {
+        val exp1 = createExpense(
+            id = "e1",
+            description = "Supermercado",
+            category = "Alimentação",
+            amount = 150.0,
+            status = TransactionStatus.PAID,
+            dueDate = "2026-10-08",
+            paidAt = "2026-10-22"
+        )
+        val exp2 = createExpense(
+            id = "e2",
+            description = "Farmácia",
+            category = "Saúde",
+            amount = 250.0,
+            status = TransactionStatus.PAID,
+            dueDate = "2026-10-14",
+            paidAt = "2026-10-22"
+        )
+
+        val invoice = InvoiceEngine.buildInvoice(testCard, "2026-10", listOf(exp1, exp2), myUid, today = "2026-10-25")
+        assertEquals(InvoiceStatus.PAID, invoice.status)
+        assertEquals("2026-10-10", invoice.dueDate)
+        assertEquals("2026-10-22", invoice.paidDate)
+        assertEquals("Fatura quitada em 22/10", InvoiceEngine.countdownLabel(invoice))
+
+        val consolidated = InvoiceEngine.createConsolidatedInvoiceTx(invoice, myUid, "2026-10")
+        assertEquals(TransactionStatus.PAID, consolidated.status)
+        assertEquals("2026-10-22", consolidated.dueDate)
+        assertEquals("2026-10-22", consolidated.paidAt)
+        assertEquals("Paga em 22/10 (Venc. dia 10)", consolidated.subcategory)
+        assertEquals("2026-10-22", consolidated.invoiceMeta?.paidDate)
+        assertEquals("2026-10-10", consolidated.invoiceMeta?.dueDate)
+
+        // Compras originais permanecem com sua data original
+        assertEquals("2026-10-08", exp1.dueDate)
+        assertEquals("2026-10-14", exp2.dueDate)
+    }
+
+    @Test
+    fun `paid invoice resolves latest paidAt and updates when payment date is changed`() {
+        val exp1 = createExpense("e1", "Item 1", "Outros", 100.0, status = TransactionStatus.PAID, paidAt = "2026-10-18")
+        val exp2 = createExpense("e2", "Item 2", "Outros", 200.0, status = TransactionStatus.PAID, paidAt = "2026-10-24")
+
+        val inv1 = InvoiceEngine.buildInvoice(testCard, "2026-10", listOf(exp1, exp2), myUid)
+        assertEquals("2026-10-24", inv1.paidDate)
+        assertEquals("2026-10-24", InvoiceEngine.createConsolidatedInvoiceTx(inv1, myUid, "2026-10").dueDate)
+
+        val updated = listOf(exp1, exp2).map {
+            FinanceEngine.applyStatusPatch(it, TransactionStatus.PAID, paidAt = "2026-10-29")
+        }
+        val inv2 = InvoiceEngine.buildInvoice(testCard, "2026-10", updated, myUid)
+        assertEquals("2026-10-29", inv2.paidDate)
+        val consolidated2 = InvoiceEngine.createConsolidatedInvoiceTx(inv2, myUid, "2026-10")
+        assertEquals("2026-10-29", consolidated2.dueDate)
+        assertEquals("Paga em 29/10 (Venc. dia 10)", consolidated2.subcategory)
+    }
+
+    @Test
+    fun `legacy paid invoice without paidAt falls back to original dueDate and quitada label`() {
+        val legacy = createExpense("e_legacy", "Assinatura", "Outros", 99.0, status = TransactionStatus.PAID, paidAt = null)
+        val invoice = InvoiceEngine.buildInvoice(testCard, "2026-10", listOf(legacy), myUid)
+
+        assertEquals(InvoiceStatus.PAID, invoice.status)
+        assertNull(invoice.paidDate)
+        assertEquals("Fatura quitada", InvoiceEngine.countdownLabel(invoice))
+
+        val consolidated = InvoiceEngine.createConsolidatedInvoiceTx(invoice, myUid, "2026-10")
+        assertEquals("2026-10-10", consolidated.dueDate)
+        assertEquals("Vencimento dia 10", consolidated.subcategory)
+    }
+
+    @Test
+    fun `reopening invoice clears paidDate and reverts consolidated dueDate and subcategory`() {
+        val exp1 = createExpense("e1", "Compra A", "Outros", 100.0, status = TransactionStatus.PAID, paidAt = "2026-10-21")
+        val exp2 = createExpense("e2", "Compra B", "Outros", 150.0, status = TransactionStatus.PAID, paidAt = "2026-10-21")
+
+        val reopenedExp2 = FinanceEngine.applyStatusPatch(exp2, TransactionStatus.PENDING)
+        assertEquals(TransactionStatus.PENDING, reopenedExp2.status)
+        assertNull(reopenedExp2.paidAt)
+
+        val reopenedInvoice = InvoiceEngine.buildInvoice(testCard, "2026-10", listOf(exp1, reopenedExp2), myUid, today = "2026-10-23")
+        assertTrue(reopenedInvoice.status != InvoiceStatus.PAID)
+        assertNull(reopenedInvoice.paidDate)
+
+        val consolidated = InvoiceEngine.createConsolidatedInvoiceTx(reopenedInvoice, myUid, "2026-10")
+        assertEquals("2026-10-10", consolidated.dueDate)
+        assertEquals("Vencimento dia 10", consolidated.subcategory)
+
+        val newUnpaid = createExpense("e3", "Compra C", "Outros", 50.0, status = TransactionStatus.PENDING)
+        val withNewItem = InvoiceEngine.buildInvoice(testCard, "2026-10", listOf(exp1, exp2, newUnpaid), myUid, today = "2026-10-23")
+        assertTrue(withNewItem.status != InvoiceStatus.PAID)
+        assertNull(withNewItem.paidDate)
+        assertEquals("2026-10-10", InvoiceEngine.createConsolidatedInvoiceTx(withNewItem, myUid, "2026-10").dueDate)
     }
 }

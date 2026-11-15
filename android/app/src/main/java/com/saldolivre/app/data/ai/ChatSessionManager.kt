@@ -62,8 +62,12 @@ class ChatSessionManager(
     }
 
     fun isBlankInitialSession(session: ChatSession): Boolean {
+        if (session.activeExpenseDraft != null) return false
         val msgs = session.messages
         if (msgs.isEmpty()) return true
+        if (msgs.first().text.contains("Detectei uma nova despesa pela notificação")) {
+            return false
+        }
         if (msgs.size == 1 && msgs.first().sender == MessageSender.ASSISTANT &&
             (msgs.first().id == WELCOME_MESSAGE_ID || msgs.first().text.contains("Copiloto Saldo Livre"))
         ) {
