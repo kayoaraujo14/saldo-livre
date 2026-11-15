@@ -404,4 +404,119 @@ class NotificationExpenseParserTest {
         assertFalse(foodDraft.description.contains("LTDA", ignoreCase = true))
         assertTrue(foodDraft.rawMerchant.contains("UBER EATS", ignoreCase = true))
     }
+
+    @Test
+    fun `deve identificar Google Wallet e Samsung Wallet no formato curto com mascara de cartao e relogio`() {
+        assertTrue(NotificationExpenseParser.isSmartWalletPackage("com.google.android.apps.walletnfcrel"))
+        assertTrue(NotificationExpenseParser.isSmartWalletPackage("com.google.android.apps.nbu.paisa.user"))
+        assertTrue(NotificationExpenseParser.isSmartWalletPackage("com.samsung.android.spay"))
+        assertTrue(NotificationExpenseParser.isSmartWalletPackage("com.samsung.android.spaymini"))
+        assertTrue(NotificationExpenseParser.isSmartWalletPackage("com.samsung.android.samsungpay.gear"))
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("com.samsung.android.samsungpay.gear"))
+
+        // 1. Google Wallet (formato curto: loja no título, "R$ XX,XX com Visa •••• 4821" no corpo)
+        val googleWalletDraft = NotificationExpenseParser.parse(
+            packageName = "com.google.android.apps.walletnfcrel",
+            title = "DROGASIL FILIAL 12",
+            text = "R$ 48,90 com Visa •••• 4821",
+            cards = sampleCards
+        )
+        assertNotNull(googleWalletDraft)
+        googleWalletDraft!!
+        assertEquals(48.90, googleWalletDraft.amount, 0.001)
+        assertEquals(PaymentMethod.CREDIT_CARD, googleWalletDraft.paymentMethod)
+        assertEquals("card_itau", googleWalletDraft.cardId)
+        assertEquals("Itaú Click 4821", googleWalletDraft.cardName)
+        assertEquals("Farmácia Drogasil", googleWalletDraft.description)
+        assertEquals("Saúde", googleWalletDraft.category)
+
+        // 2. Samsung Wallet (formato com estabelecimento no texto + sufixo de bandeira/cartão)
+        val samsungWalletDraft = NotificationExpenseParser.parse(
+            packageName = "com.samsung.android.spay",
+            title = "Samsung Wallet",
+            text = "R$ 129,90 em SUPERMERCADO CARREFOUR com Mastercard •••• 4821",
+            cards = sampleCards
+        )
+        assertNotNull(samsungWalletDraft)
+        samsungWalletDraft!!
+        assertEquals(129.90, samsungWalletDraft.amount, 0.001)
+        assertEquals(PaymentMethod.CREDIT_CARD, samsungWalletDraft.paymentMethod)
+        assertEquals("card_itau", samsungWalletDraft.cardId)
+        assertEquals("Supermercado Carrefour", samsungWalletDraft.description)
+        assertEquals("Alimentação", samsungWalletDraft.category)
+
+        // 3. Samsung Pay Galaxy Watch (título = loja, corpo = "R$ 35,00 • Sicredi")
+        val watchDraft = NotificationExpenseParser.parse(
+            packageName = "com.samsung.android.samsungpay.gear",
+            title = "IFD*IFOOD",
+            text = "R$ 35,00 • Sicredi",
+            cards = sampleCards
+        )
+        assertNotNull(watchDraft)
+        watchDraft!!
+        assertEquals(35.00, watchDraft.amount, 0.001)
+        assertEquals(PaymentMethod.CREDIT_CARD, watchDraft.paymentMethod)
+        assertEquals("card_sicredi", watchDraft.cardId)
+        assertEquals("Pedido no iFood", watchDraft.description)
+    }
+
+    @Test
+    fun `cache de deduplicacao deve evitar duplicata cruzada entre Smart Wallet e app do banco`() {
+        val cache = NotificationDeduplicationCache(windowMillis = 2 * 60 * 1000L)
+        val t0 = 1_700_000_000_000L
+
+        // Google Wallet notifica primeiro, Sicredi notifica o mesmo valor 4s depois -> bloquear segunda
+        assertFalse(
+            cache.isDuplicateAndRecord(
+                packageName = "com.google.android.apps.walletnfcrel",
+                title = "PADARIA CENTRAL",
+                text = "R$ 64,90 com Mastercard •••• 1234",
+                nowMs = t0
+            )
+        )
+        assertTrue(
+            cache.isDuplicateAndRecord(
+                packageName = "br.com.sicredi.g2",
+                title = "Sicredi Cartões",
+                text = "Compra aprovada no crédito de R$ 64,90 em PADARIA CENTRAL",
+                nowMs = t0 + 4_000L
+            )
+        )
+
+        // Ordem inversa: Itaú notifica primeiro, Samsung Pay notifica o mesmo valor 2s depois -> bloquear segunda
+        assertFalse(
+            cache.isDuplicateAndRecord(
+                packageName = "com.itau",
+                title = "Compra aprovada",
+                text = "Compra aprovada no cartão de R$ 82,00 em FARMACIA SAO PAULO",
+                nowMs = t0 + 10_000L
+            )
+        )
+        assertTrue(
+            cache.isDuplicateAndRecord(
+                packageName = "com.samsung.android.spay",
+                title = "FARMACIA SAO PAULO",
+                text = "R$ 82,00 com Visa •••• 4821",
+                nowMs = t0 + 12_000L
+            )
+        )
+
+        // Dois bancos diferentes sem envolvimento de Smart Wallet não devem se bloquear pelo valor
+        assertFalse(
+            cache.isDuplicateAndRecord(
+                packageName = "com.nu.production",
+                title = "Compra aprovada",
+                text = "Compra aprovada de R$ 50,00 em LOJA X",
+                nowMs = t0 + 20_000L
+            )
+        )
+        assertFalse(
+            cache.isDuplicateAndRecord(
+                packageName = "br.com.intermedium",
+                title = "Compra aprovada",
+                text = "Compra aprovada de R$ 50,00 em LOJA Y",
+                nowMs = t0 + 21_000L
+            )
+        )
+    }
 }

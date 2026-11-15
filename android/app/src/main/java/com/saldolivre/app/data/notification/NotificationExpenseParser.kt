@@ -13,10 +13,12 @@ import com.saldolivre.app.data.model.UserLearnedRule
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.roundToLong
 
 /**
  * Cache de deduplicação em memória para evitar criação de esboços duplicados
- * quando bancos emitem notificações repetidas ou atualizações em sequência.
+ * quando bancos emitem notificações repetidas, atualizações em sequência
+ * ou quando Smart Wallets (Google Pay / Samsung Pay) e o app do banco notificam a mesma compra.
  */
 class NotificationDeduplicationCache(
     private val windowMillis: Long = DEFAULT_WINDOW_MILLIS
@@ -25,7 +27,14 @@ class NotificationDeduplicationCache(
         const val DEFAULT_WINDOW_MILLIS = 2 * 60 * 1000L // 2 minutos
     }
 
+    private data class RecordedAmountEntry(
+        val packageName: String,
+        val isSmartWallet: Boolean,
+        val timestampMs: Long
+    )
+
     private val seenHashes = ConcurrentHashMap<String, Long>()
+    private val seenAmounts = ConcurrentHashMap<Long, MutableList<RecordedAmountEntry>>()
 
     fun computeKeyHash(packageName: String, title: String?, text: String?): String {
         val normPkg = packageName.trim().lowercase(Locale.ROOT)
@@ -43,25 +52,81 @@ class NotificationDeduplicationCache(
         nowMs: Long = System.currentTimeMillis()
     ): Boolean {
         purgeExpired(nowMs)
-        val hash = computeKeyHash(packageName, title, text)
+        val normPkg = packageName.trim().lowercase(Locale.ROOT)
+        val hash = computeKeyHash(normPkg, title, text)
         val previous = seenHashes[hash]
         if (previous != null && (nowMs - previous) < windowMillis) {
             return true
         }
+
+        val combinedForAmount = listOfNotNull(title, text)
+            .filter { it.isNotBlank() }
+            .joinToString(" - ")
+        val isSmartWallet = NotificationExpenseParser.isSmartWalletPackage(normPkg)
+        val amountCents = if (combinedForAmount.isNotBlank() &&
+            !NotificationExpenseParser.isIgnorableNotification(combinedForAmount)
+        ) {
+            NotificationExpenseParser.parseBrlAmount(combinedForAmount)?.let { (it * 100.0).roundToLong() }
+        } else {
+            null
+        }
+
+        if (amountCents != null) {
+            val entries = seenAmounts[amountCents]
+            if (entries != null) {
+                val hasCrossAppWalletDuplicate = synchronized(entries) {
+                    entries.any { entry ->
+                        (nowMs - entry.timestampMs) < windowMillis &&
+                            entry.packageName != normPkg &&
+                            (isSmartWallet || entry.isSmartWallet)
+                    }
+                }
+                if (hasCrossAppWalletDuplicate) {
+                    return true
+                }
+            }
+        }
+
         seenHashes[hash] = nowMs
+        if (amountCents != null) {
+            val list = seenAmounts.computeIfAbsent(amountCents) { mutableListOf() }
+            synchronized(list) {
+                list.add(
+                    RecordedAmountEntry(
+                        packageName = normPkg,
+                        isSmartWallet = isSmartWallet,
+                        timestampMs = nowMs
+                    )
+                )
+            }
+        }
         return false
     }
 
     fun clear() {
         seenHashes.clear()
+        seenAmounts.clear()
     }
 
     private fun purgeExpired(nowMs: Long) {
-        val iterator = seenHashes.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
+        val hashIterator = seenHashes.entries.iterator()
+        while (hashIterator.hasNext()) {
+            val entry = hashIterator.next()
             if ((nowMs - entry.value) >= windowMillis) {
-                iterator.remove()
+                hashIterator.remove()
+            }
+        }
+
+        val amountIterator = seenAmounts.entries.iterator()
+        while (amountIterator.hasNext()) {
+            val entry = amountIterator.next()
+            val list = entry.value
+            val isEmpty = synchronized(list) {
+                list.removeAll { (nowMs - it.timestampMs) >= windowMillis }
+                list.isEmpty()
+            }
+            if (isEmpty) {
+                amountIterator.remove()
             }
         }
     }
@@ -73,6 +138,17 @@ class NotificationDeduplicationCache(
  * extrai valor, método de pagamento, cartão vinculado, descrição e infere categoria em cascata.
  */
 object NotificationExpenseParser {
+
+    val SMART_WALLET_PACKAGES: Set<String> = setOf(
+        "com.google.android.apps.walletnfcrel",
+        "com.google.android.apps.nbu.paisa.user",
+        "com.samsung.android.spay",
+        "com.samsung.android.spaymini",
+        "com.samsung.android.samsungpay.gear"
+    )
+
+    private val SMART_WALLET_PACKAGES_LOWER: Set<String> =
+        SMART_WALLET_PACKAGES.map { it.lowercase(Locale.ROOT) }.toSet()
 
     val SUPPORTED_BANK_PACKAGES: Set<String> = setOf(
         // Nubank
@@ -170,11 +246,8 @@ object NotificationExpenseParser {
         "br.com.sodexo.sodexobr.sodexoclub",
         "com.pluxee.br",
         "br.com.ticket.app",
-        "com.swile.app",
-        // Carteiras NFC
-        "com.google.android.apps.walletnfcrel",
-        "com.samsung.android.spay"
-    )
+        "com.swile.app"
+    ) + SMART_WALLET_PACKAGES
 
     private val SUPPORTED_BANK_PACKAGES_LOWER: Set<String> =
         SUPPORTED_BANK_PACKAGES.map { it.lowercase(Locale.ROOT) }.toSet()
@@ -210,7 +283,8 @@ object NotificationExpenseParser {
         "bancopan", "bancobmg", "sofisa", "agibank", "safra",
         "cora", "stone", "asaas", "gerencianet", "recargapay",
         "nomad", "transferwise", "revolut", "pluxee", "sodexo",
-        "alelo", "caju", "flashapp", "swile"
+        "alelo", "caju", "flashapp", "swile",
+        "walletnfcrel", "samsungpay", "googlepay", "spay"
     )
 
     private val PACKAGE_BANK_HINTS: Map<String, List<String>> = mapOf(
@@ -371,9 +445,34 @@ object NotificationExpenseParser {
     )
 
     private val CARD_LAST_4_REGEX = Regex(
-        """\b(?:final|terminado\s+em|cart[aã]o(?:\s+de\s+cr[eé]dito)?(?:\s+final)?|[*•x]{2,4})\s*(\d{4})\b""",
+        """(?:(?:\b(?:final|terminado\s+em|cart[aã]o(?:\s+de\s+cr[eé]dito)?(?:\s+final)?)\b[:\s]*)|[*•·xX]{2,4}\s*)(\d{4})\b""",
         RegexOption.IGNORE_CASE
     )
+
+    private val SMART_WALLET_CARD_HINT_REGEX = Regex(
+        """(?:\b(?:visa|mastercard|maestro|elo|amex|american\s+express|hipercard|cart[aã]o|cr[eé]dito|d[eé]bito|aproxima[çc][aã]o|nfc|final)\b|[*•·xX]{2,4}\s*\d{4})""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val GENERIC_NOTIFICATION_TITLES_REGEX = Regex(
+        """^(?:compra(?:\s+(?:aprovada|no\s+(?:credito|debito)|com\s+cartao|realizada|efetuada))?|pagamento(?:\s+(?:aprovado|realizado|efetuado|enviado|via\s+pix))?|transacao(?:\s+(?:aprovada|realizada))?|transferencia(?:\s+(?:enviada|realizada|pix))?|envio\s+de\s+pix|pix(?:\s+(?:enviado|realizado))?|debito|credito|notificacao|aviso|alerta|google\s*(?:pay|wallet)|carteira\s+do\s+google|samsung\s*(?:pay|wallet)|apple\s*pay|nubank|itau|itaucard|iti|credicard|hipercard|bradesco(?:\s+debito|\s+cartoes)?|next|banco\s+inter|inter|santander(?:\s+way)?|way|banco\s+do\s+brasil|ourocard|caixa(?:\s+tem|\s+cartoes)?|sicredi(?:\s+cartoes|\s+pix)?|woop|infinite\s*pay|c6\s*bank|picpay|mercado\s+pago|btg(?:\s+pactual)?|xp|neon|pagbank|pagseguro|sicoob|unicred|cresol|banrisul|brb|will\s*bank|digio|banco\s+pan|bv|bmg|sofisa|agibank|original|safra|stone|ton|cora|asaas|efi|recargapay|nomad|wise|revolut|avenue|ifood\s+beneficios|caju|flash|alelo|pluxee|sodexo|ticket|swile)$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun isSmartWalletPackage(packageName: String?): Boolean {
+        val norm = packageName?.trim()?.lowercase(Locale.ROOT) ?: return false
+        if (norm.isBlank()) return false
+        if (norm in SMART_WALLET_PACKAGES_LOWER) return true
+        return norm.contains("walletnfcrel") ||
+            norm.contains("samsungpay") ||
+            norm.endsWith(".spay") ||
+            norm.endsWith(".spaymini")
+    }
+
+    fun isIgnorableNotification(text: String?): Boolean {
+        if (text.isNullOrBlank()) return false
+        return IGNORE_PATTERNS.any { it.containsMatchIn(text) }
+    }
 
     fun isExcludedNonBankPackage(packageName: String?): Boolean {
         val norm = packageName?.trim()?.lowercase(Locale.ROOT) ?: return true
@@ -409,7 +508,7 @@ object NotificationExpenseParser {
             maxLength = 600
         )
         if (sanitized.isBlank()) return false
-        if (IGNORE_PATTERNS.any { it.containsMatchIn(sanitized) }) return false
+        if (isIgnorableNotification(sanitized)) return false
         if (!containsCurrencyAmount(sanitized)) return false
         return INCOME_TRIGGER_REGEX.containsMatchIn(sanitized) ||
             (EXPENSE_TRIGGER_REGEX.containsMatchIn(sanitized) &&
@@ -439,14 +538,18 @@ object NotificationExpenseParser {
         if (combinedRaw.isBlank()) return null
 
         // 2. Descarta notificações ignoráveis (vendas POS lojista, propaganda, limite, 2FA, compra negada)
-        if (IGNORE_PATTERNS.any { it.containsMatchIn(combinedRaw) }) {
+        if (isIgnorableNotification(combinedRaw)) {
             return null
         }
 
         // 3. Detecta se a notificação representa uma entrada (Pix/transferência recebida) ou despesa
+        val isSmartWallet = isSmartWalletPackage(packageName)
         val transactionType = when {
             INCOME_TRIGGER_REGEX.containsMatchIn(combinedRaw) -> TransactionType.INCOME
             EXPENSE_TRIGGER_REGEX.containsMatchIn(combinedRaw) -> TransactionType.EXPENSE
+            isSmartWallet &&
+                (SMART_WALLET_CARD_HINT_REGEX.containsMatchIn(combinedRaw) ||
+                    containsCurrencyAmount(sanitizedText)) -> TransactionType.EXPENSE
             else -> return null
         }
 
@@ -702,7 +805,7 @@ object NotificationExpenseParser {
 
             // Padrão 1: "em <Estabelecimento>" ou "no estabelecimento <Estabelecimento>"
             val merchantRegex = Regex(
-                """\b(?:no\s+estabelecimento|estabelecimento|em)\s+(.+?)(?=\s+(?:para\s+o\s+cart[aã]o|no\s+cart[aã]o|com\s+o\s+cart[aã]o|no\s+seu\s+cart[aã]o|cart[aã]o(?:\s+final)?|final\s+\d{4}|no\s+valor|valor\s+de|com\s+sucesso|em\s+\d{1,2}/\d{1,2}|em\s+\d{4}|[àa]s\s+\d{1,2}[:h]|via\s+pix|com\s+pix|aprovad[ao]|realizada|efetuada|pelo\s+app|pela\s+maquininha)\b|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
+                """\b(?:no\s+estabelecimento|estabelecimento|em)\s+(.+?)(?=\s+(?:para\s+o\s+cart[aã]o|no\s+cart[aã]o|com\s+o\s+cart[aã]o|no\s+seu\s+cart[aã]o|cart[aã]o(?:\s+final)?|final\s+\d{4}|no\s+valor|valor\s+de|com\s+sucesso|em\s+\d{1,2}/\d{1,2}|em\s+\d{4}|[àa]s\s+\d{1,2}[:h]|via\s+pix|com\s+pix|aprovad[ao]|realizada|efetuada|pelo\s+app|pela\s+maquininha|com\s+(?:visa|mastercard|maestro|elo|amex|american\s+express|hipercard|cart[aã]o|final))\b|\s+com\s+[*•·xX]{2,4}|\s*[*•·xX]{2,4}\s*\d{4}|\s+[•·]\s+|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
                 RegexOption.IGNORE_CASE
             )
             for (match in merchantRegex.findAll(safeText)) {
@@ -738,7 +841,7 @@ object NotificationExpenseParser {
 
             // Padrão 3: Separador com hífen após valor (ex: "Débito em conta de R$ 75,00 - Farmácia São Paulo")
             val dashMerchantRegex = Regex(
-                """r\$\s*[\d.,]+\s*[-–—]\s*(.+?)(?=\s+(?:no\s+cart[aã]o|final\s+\d{4}|com\s+sucesso|[àa]s\s+\d{1,2}[:h]|em\s+\d{1,2}/\d{1,2})|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
+                """r\$\s*[\d.,]+\s*[-–—]\s*(.+?)(?=\s+(?:no\s+cart[aã]o|final\s+\d{4}|com\s+sucesso|[àa]s\s+\d{1,2}[:h]|em\s+\d{1,2}/\d{1,2}|com\s+(?:visa|mastercard|maestro|elo|amex|american\s+express|hipercard|cart[aã]o|final))\b|\s+com\s+[*•·xX]{2,4}|\s*[*•·xX]{2,4}\s*\d{4}|\s+[•·]\s+|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
                 RegexOption.IGNORE_CASE
             )
             val dashMatch = dashMerchantRegex.find(safeText)
@@ -748,6 +851,21 @@ object NotificationExpenseParser {
                     return cleanMerchantName(rawDash)
                 }
             }
+        }
+
+        // Padrão 4: Título como nome do estabelecimento (comum em Google Wallet e Samsung Wallet)
+        val cleanedTitleCandidate = sanitizedTitle
+            .replace(Regex("""[\u00A0\u2007\u202F]+"""), " ")
+            .replace(Regex("""\[neutralizado\]:?""", RegexOption.IGNORE_CASE), "")
+            .trim()
+        if (cleanedTitleCandidate.isNotBlank() &&
+            !containsCurrencyAmount(cleanedTitleCandidate) &&
+            !GENERIC_NOTIFICATION_TITLES_REGEX.matches(
+                CategoryRegistry.foldCategoryAccents(cleanMerchantName(cleanedTitleCandidate))
+            ) &&
+            isValidExtractedMerchant(cleanedTitleCandidate)
+        ) {
+            return cleanMerchantName(cleanedTitleCandidate)
         }
 
         // Fallback seguro usando NeuralFinanceClassifier sem texto residual
