@@ -1,5 +1,5 @@
 import type { Card } from '@/types'
-import { isVaVrCategory, isVaVrTransaction } from '@/types'
+import { isVaVrCard, isVaVrCategory, isVaVrRecurringBill, isVaVrTransaction } from '@/types'
 import {
   estimateRecurring,
   findMatchingManualBill,
@@ -74,7 +74,7 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
       if (t.type !== tipoFiltro) return false
     } else if (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria) {
       // Por padrão em análises de gastos e faturas, filtra despesas a menos que o usuário peça receitas ou módulo VA/VR
-      if (t.type !== 'expense' && categoria !== 'Receita' && !isVaVrCategory(categoria)) return false
+      if (t.type !== 'expense' && categoria !== 'Receita' && !isVaVrCategory(categoria) && metodoPagamentoFiltro !== 'va_vr') return false
     }
 
     // 2. Mês de competência
@@ -97,7 +97,7 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
     // 5. Categoria e Subcategoria
     if (categoria) {
       if (isVaVrCategory(categoria)) {
-        if (!isVaVrTransaction(t)) return false
+        if (!isVaVrTransaction(t, cards)) return false
       } else if (t.category !== categoria) {
         return false
       }
@@ -115,13 +115,16 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
 
     // 6.5. Meio de Pagamento / Canal (Fatura vs Débito/Pix/Boleto)
     if (metodoPagamentoFiltro) {
-      const isCard = t.paymentMethod === 'credit_card' || Boolean(t.cardId)
+      const isVale = isVaVrTransaction(t, cards)
+      const isCard = !isVale && (t.paymentMethod === 'credit_card' || Boolean(t.cardId))
       if (metodoPagamentoFiltro === 'credit_card') {
         if (!isCard) return false
+      } else if (metodoPagamentoFiltro === 'va_vr') {
+        if (!isVale) return false
       } else if (metodoPagamentoFiltro === 'extrato_conta') {
-        if (isCard) return false
+        if (isCard || isVale) return false
       } else {
-        if (isCard && metodoPagamentoFiltro !== 'credit_card') return false
+        if ((isCard || isVale) && metodoPagamentoFiltro !== 'credit_card') return false
         if (t.paymentMethod !== metodoPagamentoFiltro) return false
       }
     }
@@ -208,10 +211,10 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
 
       const bType = bill.type ?? 'expense'
       if (tipoFiltro && tipoFiltro !== 'all' && bType !== tipoFiltro) continue
-      if (!tipoFiltro && (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria) && bType !== 'expense' && categoria !== 'Receita' && !isVaVrCategory(categoria)) continue
+      if (!tipoFiltro && (somenteMinhas || pessoa || apenasTerceiros || cartaoFiltro || categoria || metodoPagamentoFiltro === 'va_vr') && bType !== 'expense' && categoria !== 'Receita' && !isVaVrCategory(categoria) && metodoPagamentoFiltro !== 'va_vr') continue
       if (categoria) {
         if (isVaVrCategory(categoria)) {
-          if (!isVaVrCategory(bill.category, bill.subcategory)) continue
+          if (!isVaVrRecurringBill(bill, cards)) continue
         } else if (bill.category !== categoria) {
           continue
         }
@@ -221,9 +224,10 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
       if (apenasTerceiros && bill.splitType !== 'split_50') continue
       if (somenteMinhas && bill.splitType === 'split_50') continue
 
-      const effMethod = bill.paymentMethod ?? (bType === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
-      const isCard = effMethod === 'credit_card' || Boolean(bill.cardId)
       const cardObj = bill.cardId ? cardsMap.get(bill.cardId) : undefined
+      const effMethod = bill.paymentMethod ?? (isVaVrCard(cardObj) ? 'va_vr' : bType === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
+      const isVale = effMethod === 'va_vr' || isVaVrRecurringBill(bill, cards)
+      const isCard = !isVale && (effMethod === 'credit_card' || Boolean(bill.cardId))
 
       if (cartaoFiltro) {
         if (matchedCard) {
@@ -234,8 +238,9 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
       }
       if (metodoPagamentoFiltro) {
         if (metodoPagamentoFiltro === 'credit_card' && !isCard) continue
-        if (metodoPagamentoFiltro === 'extrato_conta' && isCard) continue
-        if (metodoPagamentoFiltro !== 'credit_card' && metodoPagamentoFiltro !== 'extrato_conta' && effMethod !== metodoPagamentoFiltro) continue
+        if (metodoPagamentoFiltro === 'extrato_conta' && (isCard || isVale)) continue
+        if (metodoPagamentoFiltro === 'va_vr' && !isVale) continue
+        if (metodoPagamentoFiltro !== 'credit_card' && metodoPagamentoFiltro !== 'extrato_conta' && metodoPagamentoFiltro !== 'va_vr' && effMethod !== metodoPagamentoFiltro) continue
       }
 
       const { amount } = estimateRecurring(bill, all, mes)
@@ -255,8 +260,8 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
         categoria: bill.category,
         subcategoria: bill.subcategory || null,
         cartao: cardObj ? cardObj.cardName : null,
-        metodoPagamento: isCard ? 'credit_card' : effMethod,
-        canal: isCard ? `Fatura Cartão ${cardObj?.cardName || ''}`.trim() : effMethod === 'debit' ? 'Débito' : effMethod === 'bill' ? 'Boleto' : 'PIX',
+        metodoPagamento: isVale ? 'va_vr' : isCard ? 'credit_card' : effMethod,
+        canal: isVale ? (cardObj ? `Vale ${cardObj.cardName}` : 'Vale (VA/VR)') : isCard ? `Fatura Cartão ${cardObj?.cardName || ''}`.trim() : effMethod === 'debit' ? 'Débito' : effMethod === 'bill' ? 'Boleto' : 'PIX',
         status: 'projected_recurring',
         tipo: bType,
         divisao: bill.splitType || 'mine',
@@ -280,7 +285,7 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
   const somaMeuImpacto = somaRealImpacto + somaRecorrentesImpacto
   const somaTerceiros = Math.max(0, somaTotal - somaMeuImpacto)
 
-  // Separação por Canal: Fatura de Cartão vs Extrato Conta Corrente (Pix, Débito, Boleto)
+  // Separação por Canal: Fatura de Cartão vs Extrato Conta Corrente (Pix, Débito, Boleto) vs Vale Pré-Pago (VA/VR)
   let totalFaturasCartao = 0
   let totalExtratoConta = 0
   let totalPix = 0
@@ -289,8 +294,11 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
 
   for (const t of filtered) {
     const imp = impactFor(t, env.me.uid, all)
-    const isCard = t.paymentMethod === 'credit_card' || Boolean(t.cardId)
-    if (isCard) {
+    const isVale = isVaVrTransaction(t, cards)
+    const isCard = !isVale && (t.paymentMethod === 'credit_card' || Boolean(t.cardId))
+    if (isVale) {
+      continue
+    } else if (isCard) {
       totalFaturasCartao += imp
     } else {
       totalExtratoConta += imp
@@ -300,7 +308,9 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
     }
   }
   for (const r of projectedRecurringItems) {
-    if (r.metodoPagamento === 'credit_card') {
+    if (r.metodoPagamento === 'va_vr') {
+      continue
+    } else if (r.metodoPagamento === 'credit_card') {
       totalFaturasCartao += r.meuImpacto
     } else {
       totalExtratoConta += r.meuImpacto
@@ -399,7 +409,8 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
       detalheDivisao = t.allocations.map((a) => `${a.name}: ${money(a.amount)}`).join(' | ')
     }
 
-    const isCard = t.paymentMethod === 'credit_card' || Boolean(t.cardId)
+    const isVale = isVaVrTransaction(t, cards)
+    const isCard = !isVale && (t.paymentMethod === 'credit_card' || Boolean(t.cardId))
     return {
       id: t.id,
       descricao: t.description,
@@ -412,14 +423,16 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
       categoria: t.category,
       subcategoria: t.subcategory || null,
       cartao: cardObj ? cardObj.cardName : null,
-      metodoPagamento: isCard ? 'credit_card' : t.paymentMethod,
-      canal: isCard
-        ? `Fatura Cartão ${cardObj?.cardName || ''}`.trim()
-        : t.paymentMethod === 'debit'
-          ? 'Débito'
-          : t.paymentMethod === 'bill'
-            ? 'Boleto'
-            : 'PIX',
+      metodoPagamento: isVale ? 'va_vr' : isCard ? 'credit_card' : t.paymentMethod,
+      canal: isVale
+        ? (cardObj ? `Vale ${cardObj.cardName}` : 'Vale (VA/VR)')
+        : isCard
+          ? `Fatura Cartão ${cardObj?.cardName || ''}`.trim()
+          : t.paymentMethod === 'debit'
+            ? 'Débito'
+            : t.paymentMethod === 'bill'
+              ? 'Boleto'
+              : 'PIX',
       status: t.status,
       tipo: t.type,
       divisao: t.splitType || 'mine',
@@ -440,11 +453,13 @@ export async function consultar(env: AgentEnv, args: Record<string, unknown>): P
   } else if (apenasTerceiros) {
     reportTitle = `Despesas de Terceiros e Divisões (${filtered.length} itens)`
   } else if (matchedCard) {
-    reportTitle = `Fatura Cartão ${matchedCard.cardName} (${filtered.length} compras)`
+    reportTitle = isVaVrCard(matchedCard)
+      ? `Extrato Vale ${matchedCard.cardName} (${filtered.length} itens)`
+      : `Fatura Cartão ${matchedCard.cardName} (${filtered.length} compras)`
+  } else if (metodoPagamentoFiltro === 'va_vr' || isVaVrCategory(categoria)) {
+    reportTitle = `Extrato Cartão Vale VA/VR (${filtered.length} itens)`
   } else if (categoria) {
-    reportTitle = isVaVrCategory(categoria)
-      ? `Extrato VA/VR${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
-      : `Despesas em ${categoria}${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
+    reportTitle = `Despesas em ${categoria}${subcategoria ? ` › ${subcategoria}` : ''} (${filtered.length} itens)`
   } else if (termo) {
     reportTitle = `${termo} (${filtered.length} itens)`
   }

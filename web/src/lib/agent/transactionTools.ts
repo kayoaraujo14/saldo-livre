@@ -8,7 +8,7 @@ import type {
   Transaction,
   TransactionStatus,
 } from '@/types'
-import { INCOME_CATEGORIES, getCategoryDetail, isVaVrCategory, isVaVrTransaction, resolveStrictCategory } from '@/types'
+import { INCOME_CATEGORIES, getCategoryDetail, isVaVrCard, isVaVrCategory, isVaVrTransaction, resolveStrictCategory } from '@/types'
 import { extractCounterparty } from '../pdfParser'
 import { anticipateInstallments as calcAnticipateInstallments } from '../invoices'
 import {
@@ -118,21 +118,39 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
   let splitType: SplitType = SPLIT_MAP[String(args.tipoDivisao ?? args.splitType ?? 'MEU')] ?? 'mine'
   if (type === 'income') splitType = 'mine'
 
+  const cards = env.getCards()
+  const creditCards = cards.filter((c) => !isVaVrCard(c))
+  const valeCards = cards.filter(isVaVrCard)
+  const cardHint = (args.cartao || args.cardName) as string | undefined
+  const cardHintNorm = cardHint ? normalize(cardHint) : ''
+  const matchedValeCard = cardHintNorm
+    ? valeCards.find((c) => normalize(c.cardName).includes(cardHintNorm) || cardHintNorm.includes(normalize(c.cardName)))
+    : undefined
+  const matchedCreditCard = cardHintNorm
+    ? creditCards.find((c) => normalize(c.cardName).includes(cardHintNorm) || cardHintNorm.includes(normalize(c.cardName)))
+    : undefined
+
   const explicitMethod = args.metodoPagamento ?? args.paymentMethod
   const rawCatStr = typeof args.categoria === 'string' ? args.categoria : null
   const rawSubStr = typeof args.subcategoria === 'string' ? args.subcategoria : null
   const hasVaVrHint =
+    String(explicitMethod) === 'va_vr' ||
     isVaVrCategory(rawCatStr, rawSubStr) ||
-    VA_VR_KW_REGEX.test(description)
+    VA_VR_KW_REGEX.test(description) ||
+    (Boolean(matchedValeCard) && !matchedCreditCard)
+
   let method: PaymentMethod | undefined
-  if (type === 'income') {
-    method = 'pix'
+  if (['pix', 'credit_card', 'debit', 'bill', 'va_vr'].includes(String(explicitMethod))) {
+    method = explicitMethod as PaymentMethod
+  } else if (type === 'income') {
+    method = hasVaVrHint ? 'va_vr' : 'pix'
   } else if (isBankStatementDoc) {
-    if (/pix/i.test(description)) method = 'pix'
+    if (hasVaVrHint) method = 'va_vr'
+    else if (/pix/i.test(description)) method = 'pix'
     else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(description)) method = 'bill'
     else method = 'debit'
-  } else if (['pix', 'credit_card', 'debit', 'bill'].includes(String(explicitMethod))) {
-    method = explicitMethod as PaymentMethod
+  } else if (hasVaVrHint) {
+    method = 'va_vr'
   } else if (/pix/i.test(description)) {
     method = 'pix'
   } else if (/debito|débito/i.test(description)) {
@@ -141,8 +159,10 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     method = 'bill'
   } else if (/cart[aã]o|cr[eé]dito|fatura/i.test(description) || args.cartao || args.cardName) {
     method = 'credit_card'
-  } else if (hasVaVrHint) {
-    method = 'debit'
+  }
+
+  if (method === 'credit_card' && ((matchedValeCard && !matchedCreditCard) || (hasVaVrHint && !cardHint))) {
+    method = 'va_vr'
   }
 
   if (!method) {
@@ -151,17 +171,17 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
         ok: false,
         precisaClarificacao: true,
         campoFaltante: 'metodoPagamento',
-        erro: `Qual foi a forma de pagamento do lançamento de R$ ${total.toFixed(2)} (${description})? (Pix, Débito, Cartão de Crédito ou Boleto?)`,
+        erro: `Qual foi a forma de pagamento do lançamento de R$ ${total.toFixed(2)} (${description})? (Pix, Débito, Cartão de Crédito, Vale VA/VR ou Boleto?)`,
       },
     }
   }
 
-  // Receitas ou transações de extrato bancário NUNCA devem ser vinculadas a cartão de crédito
+  // Receitas ou transações de extrato bancário NUNCA devem ser vinculadas a fatura de cartão de crédito pós-pago
   if (type === 'income' && method === 'credit_card') {
-    method = 'pix'
+    method = hasVaVrHint ? 'va_vr' : 'pix'
   }
   if (isBankStatementDoc && method === 'credit_card') {
-    method = 'debit'
+    method = hasVaVrHint ? 'va_vr' : 'debit'
   }
 
   const strict = resolveStrictCategory(
@@ -188,18 +208,11 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
     subcategory = subcategory || 'Crédito na Fatura'
   }
   if (type === 'income' && (category === 'Outros' || category === 'Receita')) {
-    category = 'Outras Receitas'
+    category = method === 'va_vr' ? 'Benefícios' : 'Outras Receitas'
   }
 
   if (!subcategory && type === 'income' && (category === 'Outras Receitas' || (INCOME_CATEGORIES as readonly string[]).includes(category))) {
     subcategory = getCategoryDetail(category)?.subcategories?.[0] || 'Outras Receitas'
-  }
-
-  // Isolamento VA/VR: nunca vincula a fatura de cartão de crédito
-  if (isVaVrCategory(category, subcategory)) {
-    if (!explicitMethod || method === 'credit_card') {
-      method = type === 'income' ? 'pix' : 'debit'
-    }
   }
 
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args.data)) ? String(args.data) : todayKey()
@@ -209,19 +222,22 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
       ? 'pending'
       : 'paid') as TransactionStatus
 
-  const cards = env.getCards()
-  const cardHint = (args.cartao || args.cardName) as string | undefined
-  if (method === 'credit_card' && !cardHint && cards.length > 1) {
+  if (method === 'credit_card' && !cardHint && creditCards.length > 1) {
     return {
       response: {
         ok: false,
         precisaClarificacao: true,
         campoFaltante: 'cartao',
-        erro: `Você possui múltiplos cartões cadastrados (${cards.map((c) => c.cardName).join(', ')}). Em qual deles foi realizada a compra de R$ ${total.toFixed(2)} (${description})?`,
+        erro: `Você possui múltiplos cartões de crédito cadastrados (${creditCards.map((c) => c.cardName).join(', ')}). Em qual deles foi realizada a compra de R$ ${total.toFixed(2)} (${description})?`,
       },
     }
   }
-  const card = method === 'credit_card' ? pickCard(env.me.uid, cards, splitType, cardHint) : undefined
+  const card =
+    method === 'credit_card'
+      ? (matchedCreditCard ?? pickCard(env.me.uid, creditCards, splitType, cardHint))
+      : method === 'va_vr'
+        ? (matchedValeCard ?? (cardHint ? pickCard(env.me.uid, valeCards, splitType, cardHint) : valeCards[0]))
+        : undefined
   const payerUid = card?.ownerUid ?? env.me.uid
 
   // Identificação e atribuição de amigo na plataforma
@@ -474,8 +490,10 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
   const isPendingConfirmation = args.__confirmed !== true && env.requireConfirmation !== false
 
   // Se ainda não foi confirmado pelo usuário, gera pedido de confirmação sem alterar o banco de dados
+  const isValeTx = method === 'va_vr' || isVaVrCard(card)
+
   if (isPendingConfirmation) {
-    const netDiff = type === 'income' ? currentInstallmentAmt : -myImpact
+    const netDiff = isValeTx ? 0 : type === 'income' ? currentInstallmentAmt : -myImpact
     const estimatedAfter = round2(before.freeBalance + netDiff)
     const actionKind = type === 'income' ? 'Receita' : isRefund ? 'Estorno / Reembolso' : 'Despesa'
     const actionTitle = `${actionKind}: ${finalDescription}`
@@ -486,7 +504,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
         ? [{ label: 'Parcelamento', value: `Parcela ${parcelaAtual} de ${totalParcelas} (${money(Math.abs(currentInstallmentAmt))} cada • Total: ${money(Math.abs(purchaseTotal))})` }]
         : []),
       { label: 'Categoria', value: subcategory ? `${category} › ${subcategory}` : category },
-      { label: 'Mês da Fatura', value: monthLabel(competenceMonth) },
+      { label: 'Mês de Competência', value: monthLabel(competenceMonth) },
       { label: method === 'credit_card' ? 'Data da Compra' : 'Vencimento', value: formatShortDate(finalDueDate) },
       {
         label: 'Divisão',
@@ -500,14 +518,28 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
               ? `🏷️ ${splitForCurrent.allocations[0]?.name || 'Terceiro'}`
               : `${label?.emoji ?? '👤'} ${label?.label ?? 'Meu'}`,
       },
-      ...(card ? [{ label: 'Cartão', value: card.cardName || 'Cartão' }] : []),
+      ...(card
+        ? [{ label: isValeTx ? 'Cartão Vale' : 'Cartão', value: card.cardName || 'Cartão' }]
+        : isValeTx
+          ? [{ label: 'Pagamento', value: '🍽️ Vale Pré-Pago (VA/VR)' }]
+          : []),
       {
-        label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
-        value: type === 'income' ? `+${money(Math.abs(currentInstallmentAmt))}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
-        tone: type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
+        label: isValeTx ? 'Impacto na Conta Corrente' : type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
+        value: isValeTx
+          ? 'R$ 0,00 (Isolado no Vale VA/VR)'
+          : type === 'income'
+            ? `+${money(Math.abs(currentInstallmentAmt))}`
+            : myImpact > 0
+              ? `−${money(myImpact)}`
+              : myImpact < 0
+                ? `+${money(Math.abs(myImpact))}`
+                : 'R$ 0,00 (Neutro)',
+        tone: isValeTx ? ('neutral' as const) : type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
       },
       ...(receivable > 0 ? [{ label: assignedFriend ? `A receber (${assignedFriend.name})` : 'A receber', value: money(receivable), tone: 'positive' as const }] : []),
-      { label: 'Saldo Livre em ' + monthLabel(competenceMonth), value: `${money(before.freeBalance)} → ${money(estimatedAfter)}` },
+      ...(isValeTx
+        ? [{ label: 'Saldo Vale em ' + monthLabel(competenceMonth), value: `${money(before.vaVrAvailableBalance ?? 0)} → ${money(round2((before.vaVrAvailableBalance ?? 0) + (type === 'income' ? currentInstallmentAmt : -Math.abs(currentInstallmentAmt))))}` }]
+        : [{ label: 'Saldo Livre em ' + monthLabel(competenceMonth), value: `${money(before.freeBalance)} → ${money(estimatedAfter)}` }]),
     ]
 
     return {
@@ -606,7 +638,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
         visibleToUids: Array.from(
           new Set([
             ...instSplit.visibleToUids,
-            ...(method === 'credit_card' && card ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean) : []),
+            ...((method === 'credit_card' || method === 'va_vr') && card ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean) : []),
           ]),
         ),
         userImpact: instSplit.userImpact,
@@ -667,7 +699,7 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
       visibleToUids: Array.from(
         new Set([
           ...split.visibleToUids,
-          ...(method === 'credit_card' && card ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean) : []),
+          ...((method === 'credit_card' || method === 'va_vr') && card ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean) : []),
         ]),
       ),
       userImpact: split.userImpact,
@@ -739,14 +771,28 @@ export async function registrar(env: AgentEnv, args: Record<string, unknown>): P
                 ? `🏷️ ${splitForCurrent.allocations[0]?.name || 'Terceiro'}`
                 : `${label?.emoji ?? '👤'} ${label?.label ?? 'Meu'}`,
         },
-        ...(card ? [{ label: 'Cartão', value: card.cardName || 'Cartão' }] : []),
+        ...(card
+          ? [{ label: isValeTx ? 'Cartão Vale' : 'Cartão', value: card.cardName || 'Cartão' }]
+          : isValeTx
+            ? [{ label: 'Pagamento', value: '🍽️ Vale Pré-Pago (VA/VR)' }]
+            : []),
         {
-          label: type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
-          value: type === 'income' ? `+${money(total)}` : myImpact > 0 ? `−${money(myImpact)}` : myImpact < 0 ? `+${money(Math.abs(myImpact))}` : 'R$ 0,00 (Neutro)',
-          tone: type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
+          label: isValeTx ? 'Impacto na Conta Corrente' : type === 'income' ? 'Entrada no Saldo Livre' : 'Impacto no Saldo Livre',
+          value: isValeTx
+            ? 'R$ 0,00 (Isolado no Vale VA/VR)'
+            : type === 'income'
+              ? `+${money(total)}`
+              : myImpact > 0
+                ? `−${money(myImpact)}`
+                : myImpact < 0
+                  ? `+${money(Math.abs(myImpact))}`
+                  : 'R$ 0,00 (Neutro)',
+          tone: isValeTx ? ('neutral' as const) : type === 'income' || myImpact < 0 ? ('positive' as const) : myImpact > 0 ? ('negative' as const) : ('neutral' as const),
         },
         ...(receivable > 0 ? [{ label: assignedFriend ? `A receber (${assignedFriend.name})` : 'A receber', value: money(receivable), tone: 'positive' as const }] : []),
-        { label: 'Saldo Livre em ' + monthLabel(competenceMonth), value: `${money(before.freeBalance)} → ${money(after.freeBalance)}` },
+        ...(isValeTx
+          ? [{ label: 'Saldo Vale em ' + monthLabel(competenceMonth), value: `${money(before.vaVrAvailableBalance ?? 0)} → ${money(after.vaVrAvailableBalance ?? 0)}` }]
+          : [{ label: 'Saldo Livre em ' + monthLabel(competenceMonth), value: `${money(before.freeBalance)} → ${money(after.freeBalance)}` }]),
       ],
     },
   }
@@ -777,23 +823,24 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
         : undefined
 
   const availableCards = env.getCards()
+  const creditCards = availableCards.filter((c) => !isVaVrCard(c))
   const isCardInvoice = origemDoc === 'fatura_cartao' || defaultMetodo === 'credit_card'
   const hasBatchCardItems = isCardInvoice || transacoesRaw.some((t) => t.metodoPagamento === 'credit_card' || t.paymentMethod === 'credit_card')
   const hasBatchExplicitCard = defaultCartao || transacoesRaw.some((t) => t.cartao || t.cardName || t.cardId)
-  if (hasBatchCardItems && !hasBatchExplicitCard && availableCards.length > 1) {
+  if (hasBatchCardItems && !hasBatchExplicitCard && creditCards.length > 1) {
     return {
       response: {
         ok: false,
         precisaClarificacao: true,
         campoFaltante: 'cartao',
-        erro: `Identifiquei compras de cartão de crédito no lote, mas você possui múltiplos cartões cadastrados (${availableCards.map((c) => c.cardName).join(', ')}). Em qual deles essas compras foram realizadas?`,
+        erro: `Identifiquei compras de cartão de crédito no lote, mas você possui múltiplos cartões cadastrados (${creditCards.map((c) => c.cardName).join(', ')}). Em qual deles essas compras foram realizadas?`,
       },
     }
   }
 
   const resolvedDefaultCartao = defaultCartao || (
     isCardInvoice
-      ? (availableCards.find((c) => c.ownerUid === env.me.uid)?.cardName || availableCards[0]?.cardName)
+      ? (creditCards.find((c) => c.ownerUid === env.me.uid)?.cardName || creditCards[0]?.cardName)
       : undefined
   )
 
@@ -881,19 +928,28 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
       cleanDesc = cleanDesc.replace(/[;,]?\s*R\$\s*\d+(?:[.,]\d+)?/gi, '').replace(/[;,]\s*$/, '').trim()
 
       const rawPayMethod = item.metodoPagamento ?? item.paymentMethod
+      const isVaVrHint =
+        rawPayMethod === 'va_vr' ||
+        isVaVrCategory(resolvedCategory, resolvedSubcat) ||
+        isVaVrCategory(rawCat, rawSub) ||
+        VA_VR_KW_REGEX.test(desc) ||
+        isVaVrCard(availableCards.find((c) => c.cardName === item.cartao || c.cardName === item.cardName || c.id === item.cardId))
+      const valeCards = availableCards.filter((c) => isVaVrCard(c))
+      const creditCards = availableCards.filter((c) => !isVaVrCard(c))
+
       let resolvedItemMetodo: PaymentMethod
-      if (resolvedTipo === 'income') {
+      if (isVaVrHint) {
+        resolvedItemMetodo = 'va_vr'
+      } else if (resolvedTipo === 'income') {
         resolvedItemMetodo = 'pix'
-      } else if (isVaVrCategory(resolvedCategory, resolvedSubcat)) {
-        resolvedItemMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
       } else if (isBankStatement) {
         if (/pix/i.test(desc)) resolvedItemMetodo = 'pix'
         else if (/debito|débito/i.test(desc)) resolvedItemMetodo = 'debit'
         else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(desc)) resolvedItemMetodo = 'bill'
         else resolvedItemMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
-      } else if (rawPayMethod && ['pix', 'credit_card', 'debit', 'bill'].includes(rawPayMethod)) {
+      } else if (rawPayMethod && ['pix', 'credit_card', 'debit', 'bill', 'va_vr'].includes(rawPayMethod)) {
         resolvedItemMetodo = rawPayMethod
-      } else if (defaultMetodo && ['pix', 'credit_card', 'debit', 'bill'].includes(defaultMetodo)) {
+      } else if (defaultMetodo && ['pix', 'credit_card', 'debit', 'bill', 'va_vr'].includes(defaultMetodo)) {
         resolvedItemMetodo = defaultMetodo as PaymentMethod
       } else if (resolvedDefaultCartao || item.cartao || item.cardName || item.cardId) {
         resolvedItemMetodo = 'credit_card'
@@ -904,10 +960,13 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
       }
 
       const itemCardParam = item.cartao || item.cardName || item.cardId
-      const fallbackCartao = availableCards.find((c) => c.ownerUid === env.me.uid)?.cardName || availableCards[0]?.cardName
-      const resolvedItemCartao = (!isBankStatement && resolvedItemMetodo === 'credit_card')
-        ? (itemCardParam || resolvedDefaultCartao || fallbackCartao)
-        : undefined
+      const fallbackCreditCartao = creditCards.find((c) => c.ownerUid === env.me.uid)?.cardName || creditCards[0]?.cardName
+      const fallbackValeCartao = valeCards.find((c) => c.ownerUid === env.me.uid)?.cardName || valeCards[0]?.cardName
+      const resolvedItemCartao = resolvedItemMetodo === 'va_vr'
+        ? (itemCardParam || fallbackValeCartao)
+        : (!isBankStatement && resolvedItemMetodo === 'credit_card')
+          ? (itemCardParam || resolvedDefaultCartao || fallbackCreditCartao)
+          : undefined
 
       pendingTransactionsList.push({
         data: txDate,
@@ -1050,26 +1109,33 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
     const resolvedTipo = looksLikeIncome ? 'income' : (item.tipo === 'income' ? 'income' : 'expense')
 
     const isVaVrBatchItem =
+      (typeof item.metodoPagamento === 'string' && item.metodoPagamento === 'va_vr') ||
+      (typeof item.paymentMethod === 'string' && item.paymentMethod === 'va_vr') ||
       isVaVrCategory(
         typeof item.categoria === 'string' ? item.categoria : typeof item.category === 'string' ? item.category : null,
         typeof item.subcategoria === 'string' ? item.subcategoria : typeof item.subcategory === 'string' ? item.subcategory : null,
-      ) || VA_VR_KW_REGEX.test(desc)
+      ) ||
+      VA_VR_KW_REGEX.test(desc)
+
+    const batchCards = env.getCards()
+    const valeCardsBatch = batchCards.filter((c) => isVaVrCard(c))
+    const creditCardsBatch = batchCards.filter((c) => !isVaVrCard(c))
 
     // Detecção de forma de pagamento
     const rawPayMethod = item.metodoPagamento ?? item.paymentMethod
     let resolvedMetodo: PaymentMethod
-    if (resolvedTipo === 'income') {
+    if (isVaVrBatchItem) {
+      resolvedMetodo = 'va_vr'
+    } else if (resolvedTipo === 'income') {
       resolvedMetodo = 'pix'
-    } else if (isVaVrBatchItem) {
-      resolvedMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
     } else if (isBankStatement) {
       if (/pix/i.test(desc)) resolvedMetodo = 'pix'
       else if (/debito|débito/i.test(desc)) resolvedMetodo = 'debit'
       else if (/boleto|energia|luz|agua|água|internet|condominio|tributo|darf/i.test(desc)) resolvedMetodo = 'bill'
       else resolvedMetodo = (rawPayMethod && ['pix', 'debit', 'bill'].includes(rawPayMethod)) ? rawPayMethod : 'debit'
-    } else if (rawPayMethod && ['pix', 'credit_card', 'debit', 'bill'].includes(rawPayMethod)) {
+    } else if (rawPayMethod && ['pix', 'credit_card', 'debit', 'bill', 'va_vr'].includes(rawPayMethod)) {
       resolvedMetodo = rawPayMethod
-    } else if (defaultMetodo && ['pix', 'credit_card', 'debit', 'bill'].includes(defaultMetodo)) {
+    } else if (defaultMetodo && ['pix', 'credit_card', 'debit', 'bill', 'va_vr'].includes(defaultMetodo)) {
       resolvedMetodo = defaultMetodo as PaymentMethod
     } else if (defaultCartao || item.cartao || item.cardName || item.cardId) {
       resolvedMetodo = 'credit_card'
@@ -1088,15 +1154,18 @@ export async function registrarLote(env: AgentEnv, args: Record<string, unknown>
       resolvedMetodo = 'debit'
     }
 
-    // Status: se não for cartão de crédito, status padrão é 'paid' (já debitado/creditado na conta)
+    // Status: se não for cartão de crédito, status padrão é 'paid' (já debitado/creditado no Vale/conta)
     const resolvedStatus = resolvedMetodo === 'credit_card' ? (item.status || 'pending') : 'paid'
 
-    // Cartão só existe se o método for cartão de crédito E não for extrato bancário
+    // Cartão: crédito para faturas; cartão Vale (pré-pago) se método = va_vr e houver Vale cadastrado
     const itemCardParam = item.cartao || item.cardName || item.cardId
-    const fallbackCartao = env.getCards().find((c) => c.ownerUid === env.me.uid)?.cardName || env.getCards()[0]?.cardName
-    const resolvedCartao = (!isBankStatement && resolvedMetodo === 'credit_card')
-      ? (itemCardParam || resolvedDefaultCartao || fallbackCartao)
-      : undefined
+    const fallbackCreditCartao = creditCardsBatch.find((c) => c.ownerUid === env.me.uid)?.cardName || creditCardsBatch[0]?.cardName
+    const fallbackValeCartao = valeCardsBatch.find((c) => c.ownerUid === env.me.uid)?.cardName || valeCardsBatch[0]?.cardName
+    const resolvedCartao = resolvedMetodo === 'va_vr'
+      ? (itemCardParam || fallbackValeCartao)
+      : (!isBankStatement && resolvedMetodo === 'credit_card')
+        ? (itemCardParam || resolvedDefaultCartao || fallbackCreditCartao)
+        : undefined
 
     // Detecção inteligente de rateio / split no item
     let itemFriendName = item.nomeAmigo ?? item.amigo ?? item.friendName
@@ -1704,8 +1773,10 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
   const novoStatus = (['estimated', 'pending', 'paid'].includes(String(args.novoStatus))
     ? args.novoStatus
     : undefined) as TransactionStatus | undefined
+  const cards = env.getCards?.() || []
+  const valeCards = cards.filter(isVaVrCard)
   const novoTipo = args.novoTipo === 'income' ? 'income' : args.novoTipo === 'expense' ? 'expense' : undefined
-  const novoMetodoPagamento = ['pix', 'credit_card', 'debit', 'bill'].includes(String(args.novoMetodoPagamento))
+  const novoMetodoPagamento = ['pix', 'credit_card', 'debit', 'bill', 'va_vr'].includes(String(args.novoMetodoPagamento))
     ? (args.novoMetodoPagamento as PaymentMethod)
     : undefined
 
@@ -1826,16 +1897,30 @@ export async function editar(env: AgentEnv, args: Record<string, unknown>): Prom
     if (novoTipo) {
       patch.type = novoTipo
       if (novoTipo === 'income') {
-        const keepVaVr = (novaCategoria && isVaVrCategory(novaCategoria)) || isVaVrTransaction(tx)
-        patch.category = keepVaVr ? 'VA/VR' : (novaCategoria || 'Outras Receitas')
-        patch.paymentMethod = 'pix'
-        patch.cardId = null
+        const keepVaVr =
+          (novaCategoria && isVaVrCategory(novaCategoria)) ||
+          isVaVrTransaction(tx, cards) ||
+          novoMetodoPagamento === 'va_vr'
+        patch.category = novaCategoria || (keepVaVr ? 'Benefícios' : 'Outras Receitas')
+        if (keepVaVr) {
+          patch.paymentMethod = 'va_vr'
+          patch.cardId = tx.cardId ?? valeCards[0]?.id ?? null
+        } else {
+          patch.paymentMethod = 'pix'
+          patch.cardId = null
+        }
         patch.status = 'paid'
       }
     }
     if (novoMetodoPagamento) {
       patch.paymentMethod = novoMetodoPagamento
-      if (novoMetodoPagamento !== 'credit_card') {
+      if (novoMetodoPagamento === 'va_vr') {
+        const existingCard = tx.cardId ? cards.find((c) => c.id === tx.cardId) : undefined
+        patch.cardId = existingCard && isVaVrCard(existingCard) ? existingCard.id : (valeCards[0]?.id ?? null)
+      } else if (novoMetodoPagamento === 'credit_card') {
+        const existingCard = tx.cardId ? cards.find((c) => c.id === tx.cardId) : undefined
+        patch.cardId = existingCard && !isVaVrCard(existingCard) ? existingCard.id : (cards.find((c) => !isVaVrCard(c))?.id ?? null)
+      } else {
         patch.cardId = null
       }
     }

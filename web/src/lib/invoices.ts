@@ -141,13 +141,16 @@ export function buildCardInvoice(
 ): CardInvoice {
   const { closingDate, dueDate } = invoiceDates(card, monthKey)
 
-  const items = (all || [])
-    .filter(
-      (t) =>
-        t.cardId === card.id &&
-        t.competenceMonth === monthKey &&
-        !t.reserveCardId,
-    )
+  const items = card.cardType === 'va_vr'
+    ? []
+    : (all || [])
+        .filter(
+          (t) =>
+            t.cardId === card.id &&
+            t.competenceMonth === monthKey &&
+            !t.reserveCardId &&
+            t.paymentMethod !== 'va_vr',
+        )
     .sort((a, b) => (b.dueDate || '').localeCompare(a.dueDate || '') || (b.createdAt ?? 0) - (a.createdAt ?? 0))
 
   const expenses = items.filter((t) => t.type === 'expense')
@@ -237,12 +240,15 @@ export function buildCardInvoice(
     expenses.length > 0 ? [...expenses].sort((a, b) => effectiveAmount(b) - effectiveAmount(a))[0] : null
 
   // Comprometimento futuro em parcelas deste cartão
-  const futureItems = (all || []).filter(
-    (t) =>
-      t.cardId === card.id &&
-      t.competenceMonth > monthKey &&
-      !t.reserveCardId,
-  )
+  const futureItems = card.cardType === 'va_vr'
+    ? []
+    : (all || []).filter(
+        (t) =>
+          t.cardId === card.id &&
+          t.competenceMonth > monthKey &&
+          !t.reserveCardId &&
+          t.paymentMethod !== 'va_vr',
+      )
   const futureExpenses = futureItems.filter((t) => t.type === 'expense' && t.status !== 'paid')
   const futureCredits = futureItems.filter((t) => t.type === 'income').reduce((s, t) => s + effectiveAmount(t), 0)
   const futureInstallmentsTotal = round2(Math.max(0, futureExpenses.reduce((s, t) => s + effectiveAmount(t), 0) - futureCredits))
@@ -608,13 +614,21 @@ export function consolidateMonthTransactions(
 
   // Transações não vinculadas a cartão
   const nonCardTxs = (monthTransactions || []).filter(
-    (t) => t.paymentMethod !== 'credit_card' || !t.cardId || Boolean(t.reserveCardId)
+    (t) => {
+      const linkedCard = t.cardId ? (cards || []).find((c) => c.id === t.cardId) : undefined
+      return (
+        t.paymentMethod !== 'credit_card' ||
+        !t.cardId ||
+        Boolean(t.reserveCardId) ||
+        Boolean(linkedCard && linkedCard.cardType === 'va_vr')
+      )
+    }
   )
 
-  // Conjunto de cartões relevantes
+  // Conjunto de cartões relevantes (cartões Vale pré-pago nunca geram fatura de crédito pós-paga)
   const relevantCardMap = new Map<string, Card>()
   for (const c of cards || []) {
-    if (c.ownerUid === uid || (c.sharedWithUids || []).includes(uid)) {
+    if (c.cardType !== 'va_vr' && (c.ownerUid === uid || (c.sharedWithUids || []).includes(uid))) {
       relevantCardMap.set(c.id, c)
     }
   }

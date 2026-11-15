@@ -831,12 +831,12 @@ class FirestoreFinanceRepository(
         val firstNum = firstTx.installmentNumber ?: 1
         val effectivePaymentMethod = input.paymentMethod ?: firstTx.paymentMethod
         val isCardChange = input.cardId != null && input.cardId != firstTx.cardId
-        val targetCardId = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD) {
+        val targetCardId = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD || effectivePaymentMethod == PaymentMethod.VA_VR) {
             input.cardId ?: firstTx.cardId
         } else null
 
         val card = targetCardId?.let { cid -> cards.find { it.id == cid } }
-        val payerUid = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD && card != null) card.ownerUid else user.uid
+        val payerUid = if ((effectivePaymentMethod == PaymentMethod.CREDIT_CARD || effectivePaymentMethod == PaymentMethod.VA_VR) && card != null) card.ownerUid else user.uid
 
         val firstPurchaseDate = input.date ?: firstTx.dueDate.takeIf { it.isNotBlank() } ?: FinanceEngine.todayKey()
         val shouldRecalcCycle = effectivePaymentMethod == PaymentMethod.CREDIT_CARD && card != null && (isCardChange || input.date != null)
@@ -1143,12 +1143,14 @@ class FirestoreFinanceRepository(
         val user = _currentUser.value
         val allTxs = getTransactions().first()
         val bills = getRecurringBills().first()
+        val cards = getCards().first()
         val res = FinanceEngine.generateMonthBills(
             bills = bills,
             all = allTxs,
             monthKey = monthKey,
             me = user,
-            partner = null
+            partner = null,
+            cards = cards
         )
         if (res.created.isNotEmpty()) {
             addTransactions(res.created)
@@ -1723,7 +1725,8 @@ class FirestoreFinanceRepository(
             sharedWithUids = sharedUids,
             frequentThirdParties = rawParties,
             color = doc.getString("color") ?: "violet",
-            limit = doc.getDoubleSafe("limit")
+            limit = doc.getDoubleSafe("limit"),
+            cardType = doc.getString("cardType")?.takeIf { it == "va_vr" } ?: "credit"
         )
     }
 
@@ -1741,7 +1744,8 @@ class FirestoreFinanceRepository(
             "sharedWithUids" to card.sharedWithUids,
             "frequentThirdParties" to card.frequentThirdParties,
             "color" to card.color,
-            "limit" to card.limit
+            "limit" to card.limit,
+            "cardType" to card.cardType
         )
     }
 

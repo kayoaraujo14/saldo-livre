@@ -10,7 +10,9 @@ import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
   getCategoryDetail,
+  isVaVrCard,
   isVaVrCategory,
+  isVaVrRecurringBill,
   type Category,
   type EstimationRule,
   type PaymentMethod,
@@ -141,7 +143,17 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
     setDefaultAmount(bill.defaultAmount)
     setEstimationRule(bill.estimationRule)
     setSplitType(bill.splitType ?? 'mine')
-    setPaymentMethod(bill.paymentMethod ?? (bill.type === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill'))
+    const linkedCard = bill.cardId ? cards.find((c) => c.id === bill.cardId) : null
+    setPaymentMethod(
+      bill.paymentMethod ??
+        (bill.cardId
+          ? isVaVrCard(linkedCard)
+            ? 'va_vr'
+            : 'credit_card'
+          : bill.type === 'income'
+            ? 'pix'
+            : 'bill'),
+    )
     setCardId(bill.cardId || null)
     setLaunchTrigger(bill.launchTrigger || 'day_before')
     setActive(bill.active)
@@ -178,7 +190,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       estimationRule,
       splitType,
       paymentMethod,
-      cardId: paymentMethod === 'credit_card' ? cardId : null,
+      cardId: paymentMethod === 'credit_card' || paymentMethod === 'va_vr' ? cardId : null,
       launchTrigger,
       active,
       type: billType,
@@ -232,12 +244,16 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
     let fixedAccountExpense = 0
 
     for (const b of activeMyBills) {
+      if (isVaVrRecurringBill(b, cards)) continue
       const { amount } = estimateRecurring(b, transactions, month)
       const myShare = b.splitType === 'split_50' ? amount / 2 : amount
       if (b.type === 'income') {
         extraFixedIncome += myShare
       } else {
-        const isCard = b.paymentMethod === 'credit_card' || Boolean(b.cardId)
+        const linked = b.cardId ? cards.find((c) => c.id === b.cardId) : null
+        const isCard =
+          b.paymentMethod === 'credit_card' ||
+          (Boolean(b.cardId) && !isVaVrCard(linked))
         if (isCard) fixedCardExpense += myShare
         else fixedAccountExpense += myShare
       }
@@ -257,7 +273,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
       baseFreeBalance,
       commitmentPct,
     }
-  }, [recurring, me?.uid, month, profile?.monthlyIncome, transactions])
+  }, [recurring, me?.uid, month, profile?.monthlyIncome, transactions, cards])
 
   const get503020Badge = (cat: Category) => {
     const detail = CATEGORY_GROUPS[cat]
@@ -459,9 +475,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   type="button"
                   onClick={() => {
                     setBillType('expense')
-                    if (isVaVrCategory(category)) {
-                      setSubcategory('Supermercado')
-                    } else if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
+                    if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
                       setCategory('Moradia')
                       setSubcategory(getCategoryDetail('Moradia')?.subcategories?.[0] || null)
                     }
@@ -479,8 +493,9 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   type="button"
                   onClick={() => {
                     setBillType('income')
-                    if (isVaVrCategory(category)) {
-                      setSubcategory('Recarga VA/VR')
+                    if (paymentMethod === 'va_vr') {
+                      setCategory('Benefícios')
+                      setSubcategory('Vale Alimentação (VA)')
                     } else {
                       setCategory('Salário & Remuneração')
                       setSubcategory(getCategoryDetail('Salário & Remuneração')?.subcategories?.[0] || null)
@@ -501,12 +516,12 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5 sm:col-span-2">
                 <label className="text-xs font-semibold text-slate-300">
-                  {billType === 'income' ? 'Descrição da Renda (Ex: Freelance Fixo, Aluguel Recebido)' : 'Descrição da Conta / Assinatura (Ex: Netflix, Conta de Luz, Aluguel)'}
+                  {billType === 'income' ? 'Descrição da Renda (Ex: Freelance Fixo, Recarga Alelo/Flash)' : 'Descrição da Conta / Assinatura (Ex: Netflix, Conta de Luz, Aluguel)'}
                 </label>
                 <Input
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder={billType === 'income' ? 'Ex: Consultoria Mensal' : 'Ex: Spotify ou Aluguel'}
+                  placeholder={billType === 'income' ? 'Ex: Recarga VA ou Salário Mensal' : 'Ex: Spotify ou Aluguel'}
                   className="h-10 text-xs sm:text-sm bg-slate-900 border-slate-700/80 rounded-xl"
                 />
               </div>
@@ -522,15 +537,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                     const newCat = v as Category
                     setCategory(newCat)
                     const subs = getCategoryDetail(newCat)?.subcategories || []
-                    if (isVaVrCategory(newCat)) {
-                      setSubcategory(
-                        billType === 'income'
-                          ? (subs.includes('Recarga VA/VR') ? 'Recarga VA/VR' : subs[0] || null)
-                          : (subs.includes('Supermercado') ? 'Supermercado' : subs[0] || null),
-                      )
-                    } else {
-                      setSubcategory(subs[0] || null)
-                    }
+                    setSubcategory(subs[0] || null)
                   }}
                 >
                   <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs sm:text-sm">
@@ -542,8 +549,8 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                         {c}
                       </SelectItem>
                     ))}
-                    {category === 'Receita' && (
-                      <SelectItem value="Receita" className="text-xs">Receita (Legada)</SelectItem>
+                    {(category === 'Receita' || isVaVrCategory(category)) && (
+                      <SelectItem value={category} className="text-xs">{category} (Legada)</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
@@ -641,8 +648,16 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   onValueChange={(v) => {
                     const pm = v as PaymentMethod
                     setPaymentMethod(pm)
-                    if (pm === 'credit_card' && cards.length > 0 && !cardId) {
-                      setCardId(cards[0].id)
+                    if (pm === 'credit_card') {
+                      const creditCards = cards.filter((c) => !isVaVrCard(c))
+                      if (!creditCards.some((c) => c.id === cardId)) {
+                        setCardId(creditCards[0]?.id || null)
+                      }
+                    } else if (pm === 'va_vr') {
+                      const valeCards = cards.filter(isVaVrCard)
+                      if (!valeCards.some((c) => c.id === cardId)) {
+                        setCardId(valeCards[0]?.id || null)
+                      }
                     }
                   }}
                 >
@@ -654,37 +669,44 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                     <SelectItem value="bill">📄 Boleto Bancário</SelectItem>
                     <SelectItem value="debit">🏦 Débito em Conta</SelectItem>
                     <SelectItem value="credit_card">💳 Cartão de Crédito</SelectItem>
+                    <SelectItem value="va_vr">🍽️ Cartão Vale / Pré-Pago (VA/VR)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Seletor de Cartão se Cartão de Crédito estiver selecionado */}
-              {paymentMethod === 'credit_card' && (
-                <div className="space-y-1.5 animate-in fade-in duration-200">
-                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                    <CreditCard className="size-3.5 text-violet-400" />
-                    <span>Vincular ao Cartão de Crédito</span>
-                  </label>
-                  {cards.length === 0 ? (
-                    <p className="text-xs text-amber-400/90 py-2">
-                      Nenhum cartão cadastrado. Cadastre um cartão no menu principal.
-                    </p>
-                  ) : (
-                    <Select value={cardId || ''} onValueChange={(v) => setCardId(v || null)}>
-                      <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs">
-                        <SelectValue placeholder="Selecione o cartão..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {cards.map((c) => (
-                          <SelectItem key={c.id} value={c.id} className="text-xs">
-                            💳 {c.cardName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-              )}
+              {/* Seletor de Cartão (Crédito pós-pago OU Cartão Vale Pré-Pago) */}
+              {(paymentMethod === 'credit_card' || paymentMethod === 'va_vr') && (() => {
+                const isVale = paymentMethod === 'va_vr'
+                const filteredCards = isVale ? cards.filter(isVaVrCard) : cards.filter((c) => !isVaVrCard(c))
+                return (
+                  <div className="space-y-1.5 animate-in fade-in duration-200">
+                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                      <CreditCard className={`size-3.5 ${isVale ? 'text-teal-400' : 'text-violet-400'}`} />
+                      <span>{isVale ? 'Vincular ao Cartão Vale (VA/VR)' : 'Vincular ao Cartão de Crédito'}</span>
+                    </label>
+                    {filteredCards.length === 0 ? (
+                      <p className="text-xs text-amber-400/90 py-2">
+                        {isVale
+                          ? 'Nenhum cartão Vale cadastrado (opcional — ou cadastre na aba Cartões).'
+                          : 'Nenhum cartão de crédito cadastrado. Cadastre um cartão no menu principal.'}
+                      </p>
+                    ) : (
+                      <Select value={cardId || ''} onValueChange={(v) => setCardId(v || null)}>
+                        <SelectTrigger className="h-10 bg-slate-900 border-slate-700/80 rounded-xl text-xs">
+                          <SelectValue placeholder={isVale ? 'Selecione o cartão Vale...' : 'Selecione o cartão...'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {filteredCards.map((c) => (
+                            <SelectItem key={c.id} value={c.id} className="text-xs">
+                              {isVale ? `🍽️ ${c.cardName}` : `💳 ${c.cardName}`}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Configuração de Gatilho de Automação */}
               <div className="sm:col-span-2 p-4 rounded-xl bg-gradient-to-r from-amber-950/20 via-slate-900/80 to-amber-950/10 border border-amber-500/25 space-y-2.5">
@@ -912,7 +934,10 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                   const linkedCard = bill.cardId ? cards.find((c) => c.id === bill.cardId) : null
                   const monthTx = (monthTransactions || []).find((t) => t.recurringBillId === bill.id)
                   const isBusy = busyBillId === bill.id
-                  const isCardMethod = bill.paymentMethod === 'credit_card' || Boolean(bill.cardId)
+                  const isValeMethod = isVaVrRecurringBill(bill, cards)
+                  const isCardMethod =
+                    !isValeMethod &&
+                    (bill.paymentMethod === 'credit_card' || (Boolean(bill.cardId) && !isVaVrCard(linkedCard)))
                   const { amount: estimatedMonthVal } = estimateRecurring(bill, transactions, month)
 
                   return (
@@ -921,14 +946,21 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                       className={`p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
                         !bill.active
                           ? 'opacity-60 border-slate-800 bg-slate-950/40'
-                          : isIncome
-                            ? 'border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50'
-                            : 'border-white/[0.06] bg-slate-950/70 hover:border-slate-700'
+                          : isValeMethod
+                            ? 'border-teal-500/30 bg-teal-950/15 hover:border-teal-500/50'
+                            : isIncome
+                              ? 'border-emerald-500/30 bg-emerald-950/20 hover:border-emerald-500/50'
+                              : 'border-white/[0.06] bg-slate-950/70 hover:border-slate-700'
                       }`}
                     >
                       <div className="space-y-1.5 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-100 text-sm truncate">{bill.description}</span>
+                          {isValeMethod && (
+                            <Badge variant="outline" className="text-[10px] bg-teal-500/15 text-teal-300 border-teal-500/35">
+                              🍽️ {linkedCard ? `Vale ${linkedCard.cardName}` : 'Vale VA/VR'}
+                            </Badge>
+                          )}
                           {isIncome ? (
                             <Badge variant="outline" className="text-[10px] bg-emerald-950/40 text-emerald-300 border-emerald-800">
                               💰 Renda Fixa
@@ -949,7 +981,7 @@ export function RecurringBillsModal({ open, onOpenChange }: RecurringBillsModalP
                                 {isIncome ? 'Recebido em ' : 'Pago em '}
                                 {monthLabel(month)}
                               </Badge>
-                            ) : monthTx.paymentMethod === 'credit_card' || monthTx.cardId ? (
+                            ) : !isValeMethod && (monthTx.paymentMethod === 'credit_card' || monthTx.cardId) ? (
                               <Badge
                                 variant="outline"
                                 className="text-[10px] bg-violet-500/15 text-violet-300 border-violet-500/40 gap-1"

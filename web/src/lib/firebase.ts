@@ -339,6 +339,13 @@ export function normalizeCard(id: string, raw: any): Card {
     sharedWithUsers,
     color: data.color || 'emerald',
     frequentThirdParties: Array.isArray(data.frequentThirdParties) ? data.frequentThirdParties : [],
+    limit:
+      typeof data.limit === 'number' && Number.isFinite(data.limit)
+        ? data.limit
+        : data.limit != null && Number.isFinite(Number(data.limit))
+          ? Number(data.limit)
+          : null,
+    cardType: data.cardType === 'va_vr' ? 'va_vr' : 'credit',
   }
 }
 

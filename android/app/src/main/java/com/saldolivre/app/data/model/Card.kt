@@ -21,5 +21,12 @@ data class Card(
     val sharedWithUids: List<String> = emptyList(),
     val frequentThirdParties: List<String> = emptyList(),
     val color: String = "violet",
-    val limit: Double? = null
-)
+    val limit: Double? = null,
+    val cardType: String = "credit"
+) {
+    val isVaVrCard: Boolean
+        get() = cardType.equals("va_vr", ignoreCase = true)
+
+    val normalizedCardType: String
+        get() = if (isVaVrCard) "va_vr" else "credit"
+}

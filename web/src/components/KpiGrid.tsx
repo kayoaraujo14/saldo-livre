@@ -11,7 +11,7 @@ import {
   resolveEmergencyReserveBalance,
   computeIncomeConsumption,
 } from '@/lib/finance'
-import { isVaVrTransaction } from '@/types'
+import { isVaVrTransaction, isVaVrCard } from '@/types'
 import {
   Wallet,
   TrendingUp,
@@ -71,7 +71,7 @@ export function KpiGrid({
     // Despesas avulsas não vinculadas a fatura de cartão (excluindo módulo VA/VR isolado)
     const nonCardTxs = transactions.filter((tx) => {
       if (tx.type !== 'expense' || tx.status === 'paid') return false
-      if (isVaVrTransaction(tx)) return false
+      if (isVaVrTransaction(tx, cards)) return false
       if (tx.category === 'Estorno' || (tx.subcategory && tx.subcategory.includes('Estorno'))) return false
       if (tx.cardId && tx.reserveCardId == null) return false
       return tx.dueDate >= today && tx.dueDate <= nextWeekStr
@@ -516,10 +516,13 @@ export function KpiGrid({
         </div>
       </div>
 
-      {/* 5.5 Módulo VA/VR Dedicado (100% isolado do Saldo Livre bancário) */}
+      {/* 5.5 Módulo Cartão Vale (VA/VR Pré-Pago, 100% isolado da conta corrente) */}
       {(() => {
+        const valeCards = (cards || []).filter(isVaVrCard)
         const vaVrCarryover = summary.vaVrCarryover ?? 0
+        const vaVrIncomePaid = summary.vaVrIncomePaid ?? 0
         const vaVrIncome = summary.vaVrIncome ?? 0
+        const vaVrSpentPaid = summary.vaVrSpentPaid ?? 0
         const vaVrSpent = summary.vaVrSpent ?? 0
         const vaVrAvailable = summary.vaVrAvailableBalance ?? 0
         const vaVrProjected = summary.vaVrProjectedBalance ?? 0
@@ -535,18 +538,39 @@ export function KpiGrid({
           (acc, item) => acc + (item.count || 0),
           0,
         )
-        const isNegative = vaVrAvailable < 0
         const hasActivity =
           vaVrCarryover !== 0 ||
           vaVrIncome > 0 ||
           vaVrSpent > 0 ||
           vaVrCount > 0
+
+        if (valeCards.length === 0 && !hasActivity) return null
+
+        const isProjectedFallback =
+          vaVrAvailable === 0 &&
+          vaVrIncomePaid === 0 &&
+          vaVrSpentPaid === 0 &&
+          (vaVrIncome !== 0 || vaVrSpent !== 0)
+        const displayBalance = isProjectedFallback ? vaVrProjected : vaVrAvailable
+        const displayDailyLimit =
+          vaVrDailyLimit !== null
+            ? vaVrDailyLimit
+            : isProjectedFallback && summary.daysRemaining > 0 && displayBalance > 0
+              ? round2(displayBalance / summary.daysRemaining)
+              : null
+        const isNegative = displayBalance < 0
         const usageWidth = Math.min(100, Math.max(0, vaVrUsagePct))
         const barColor = isNegative
           ? 'bg-rose-500'
           : vaVrUsagePct >= 90
             ? 'bg-amber-400'
             : 'bg-teal-400'
+        const cardTitle =
+          valeCards.length === 1
+            ? `Vale ${valeCards[0].cardName}`
+            : valeCards.length > 1
+              ? `Cartões Vale (${valeCards.length})`
+              : 'Cartão Vale (VA / VR)'
 
         return (
           <div
@@ -557,7 +581,7 @@ export function KpiGrid({
             }`}
           >
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 min-w-0">
-              {/* Lado Esquerdo: Título, Disponível Agora & Projetado */}
+              {/* Lado Esquerdo: Título do Cartão Pré-Pago, Saldo Disponível & Projetado */}
               <div className="flex items-start sm:items-center gap-3 min-w-0">
                 <div
                   className={`size-9 sm:size-10 rounded-xl flex items-center justify-center shrink-0 border ${
@@ -571,22 +595,22 @@ export function KpiGrid({
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center flex-wrap gap-1.5">
-                    <span className="text-xs sm:text-sm font-bold text-white tracking-tight">
-                      Benefícios VA / VR
+                    <span className="text-xs sm:text-sm font-bold text-white tracking-tight truncate">
+                      {cardTitle}
                     </span>
                     <Badge
                       variant="outline"
-                      className="text-[9px] px-1.5 py-0 border-teal-500/30 bg-teal-500/10 text-teal-300"
+                      className="text-[9px] px-1.5 py-0 border-teal-500/30 bg-teal-500/10 text-teal-300 whitespace-nowrap shrink-0"
                     >
-                      Pote Isolado
+                      Cartão Pré-Pago
                     </Badge>
                     {isNegative && (
                       <Badge
                         variant="outline"
-                        className="text-[9px] px-1.5 py-0 border-rose-500/40 bg-rose-500/15 text-rose-300 inline-flex items-center gap-1"
+                        className="text-[9px] px-1.5 py-0 border-rose-500/40 bg-rose-500/15 text-rose-300 inline-flex items-center gap-1 whitespace-nowrap shrink-0"
                       >
                         <AlertTriangle className="size-2.5" />
-                        Estouro • ajuste necessário
+                        Estouro • recarga necessária
                       </Badge>
                     )}
                   </div>
@@ -594,35 +618,35 @@ export function KpiGrid({
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mt-1">
                     <div className="flex items-baseline gap-1.5">
                       <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">
-                        Disponível Agora:
+                        {isProjectedFallback ? 'Saldo no Vale (Previsto):' : 'Saldo no Vale:'}
                       </span>
                       <span
                         className={`text-base sm:text-lg font-extrabold font-mono tracking-tight ${
                           isNegative ? 'text-rose-400' : 'text-teal-300'
                         }`}
                       >
-                        <NumberTicker value={vaVrAvailable} />
+                        <NumberTicker value={displayBalance} />
                       </span>
                     </div>
 
                     <span className="text-[11px] text-slate-400">
-                      Projetado no mês:{' '}
+                      {isProjectedFallback ? 'Efetivado agora: ' : 'Projetado fim do mês: '}
                       <strong
                         className={`font-semibold font-mono ${
-                          vaVrProjected < 0 ? 'text-rose-300' : 'text-slate-200'
+                          !isProjectedFallback && vaVrProjected < 0 ? 'text-rose-300' : 'text-slate-200'
                         }`}
                       >
-                        {formatBRL(vaVrProjected)}
+                        {formatBRL(isProjectedFallback ? vaVrAvailable : vaVrProjected)}
                       </strong>
                     </span>
                   </div>
                 </div>
               </div>
 
-              {/* Centro: KPIs Detalhados & Barra de Progresso */}
+              {/* Centro: KPIs Detalhados & Barra de Uso */}
               <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 lg:px-4 lg:border-x border-white/[0.06] min-w-0">
                 <div className="min-w-0">
-                  <div className="text-[10px] text-slate-400 truncate">Acumulado Ant.</div>
+                  <div className="text-[10px] text-slate-400 truncate">Saldo Anterior</div>
                   <div className="text-xs font-bold font-mono text-slate-200 truncate">
                     {formatBRL(vaVrCarryover)}
                   </div>
@@ -634,28 +658,28 @@ export function KpiGrid({
                   </div>
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[10px] text-slate-400 truncate">Gasto VA/VR</div>
+                  <div className="text-[10px] text-slate-400 truncate">Gasto no Vale</div>
                   <div className="text-xs font-bold font-mono text-rose-300 truncate">
                     -{formatBRL(vaVrSpent)}
                   </div>
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[10px] text-slate-400 truncate">Limite Diário</div>
+                  <div className="text-[10px] text-slate-400 truncate">Média Diária</div>
                   <div className="text-xs font-bold font-mono text-teal-300 truncate">
-                    {vaVrDailyLimit !== null ? `${formatBRL(vaVrDailyLimit)}/dia` : '—'}
+                    {displayDailyLimit !== null ? `${formatBRL(displayDailyLimit)}/dia` : '—'}
                   </div>
                 </div>
 
-                {/* Barra de uso sobre (carryover + entradas) */}
+                {/* Barra de uso sobre (carryover + recargas) */}
                 <div className="col-span-2 sm:col-span-4 space-y-1">
                   <div className="flex items-center justify-between text-[10px] text-slate-400">
                     <span>
                       {hasActivity
-                        ? `Consumo do pote no mês (${vaVrUsagePct.toFixed(0)}%)`
-                        : 'Lance uma recarga inicial ou despesa para acompanhar seu saldo VA/VR'}
+                        ? `Uso do saldo no mês (${vaVrUsagePct.toFixed(0)}%)`
+                        : 'Lance uma recarga inicial ou despesa no vale para acompanhar o saldo'}
                     </span>
                     <span className="font-mono text-slate-300">
-                      {vaVrCount} {vaVrCount === 1 ? 'gasto' : 'gastos'}
+                      {vaVrCount} {vaVrCount === 1 ? 'lançamento' : 'lançamentos'}
                     </span>
                   </div>
                   <div className="h-1.5 w-full rounded-full bg-slate-800/90 overflow-hidden">
@@ -673,8 +697,8 @@ export function KpiGrid({
                   <button
                     type="button"
                     onClick={() => onLaunchVaVr('income')}
-                    className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold transition-all cursor-pointer inline-flex items-center gap-1"
-                    title="Lançar recarga ou ajuste de saldo no VA/VR"
+                    className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-semibold transition-all cursor-pointer inline-flex items-center gap-1 whitespace-nowrap"
+                    title="Lançar recarga ou ajuste de saldo no Cartão Vale"
                   >
                     <Plus className="size-3.5" />
                     <span>Recarga</span>
@@ -682,11 +706,11 @@ export function KpiGrid({
                   <button
                     type="button"
                     onClick={() => onLaunchVaVr('expense')}
-                    className="px-2.5 py-1.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/35 text-teal-200 text-[11px] font-semibold transition-all cursor-pointer inline-flex items-center gap-1"
-                    title="Lançar gasto rápido na categoria VA/VR"
+                    className="px-2.5 py-1.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/35 text-teal-200 text-[11px] font-semibold transition-all cursor-pointer inline-flex items-center gap-1 whitespace-nowrap"
+                    title="Lançar compra rápida usando o Cartão Vale (VA/VR)"
                   >
                     <Plus className="size-3.5" />
-                    <span>VA/VR</span>
+                    <span>Usar Vale</span>
                   </button>
                 </div>
               )}

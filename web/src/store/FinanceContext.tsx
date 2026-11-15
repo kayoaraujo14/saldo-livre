@@ -623,8 +623,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       carryover,
       deficit,
       recurring,
+      cards,
     )
-  }, [summary?.byCategory, summary?.income, summary?.carryoverAmount, summary?.previousMonthDeficit, currentMonthBudgets, profile?.monthlyIncome, month, currentUid, transactions, recurring])
+  }, [summary?.byCategory, summary?.income, summary?.carryoverAmount, summary?.previousMonthDeficit, currentMonthBudgets, profile?.monthlyIncome, month, currentUid, transactions, recurring, cards])
 
   const [closureModalOpen, setClosureModalOpen] = useState(false)
   const [closureDismissed, setClosureDismissed] = useState(false)
@@ -1251,11 +1252,13 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
       const firstNum = firstTx.installmentNumber ?? 1
       const effectivePaymentMethod = input.paymentMethod ?? firstTx.paymentMethod
       const isCardChange = input.cardId !== undefined && input.cardId !== firstTx.cardId
-      const targetCardId = effectivePaymentMethod === 'credit_card'
+      const targetCardId = (effectivePaymentMethod === 'credit_card' || effectivePaymentMethod === 'va_vr')
         ? (input.cardId !== undefined ? input.cardId : firstTx.cardId)
         : null
       const effectiveCard = targetCardId ? cards.find((c) => c.id === targetCardId) : null
-      const payerUid = effectivePaymentMethod === 'credit_card' && effectiveCard ? effectiveCard.ownerUid : me.uid
+      const payerUid = (effectivePaymentMethod === 'credit_card' || effectivePaymentMethod === 'va_vr') && effectiveCard
+        ? effectiveCard.ownerUid
+        : me.uid
 
       const updates: { id: string; patch: Partial<Transaction> }[] = []
       const newDay = input.date ? parseInt(input.date.slice(8, 10), 10) : null
@@ -1365,7 +1368,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         })
 
         const cardForGroup =
-          effectivePaymentMethod === 'credit_card'
+          effectivePaymentMethod === 'credit_card' || effectivePaymentMethod === 'va_vr'
             ? cards.find((c) => c.id === targetCardId)
             : null
         const effectiveVisible = t.reserveCardId
@@ -1543,14 +1546,17 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         partner: candidate.isSalary ? null : partnerParty,
         payerUid: me.uid,
       })
-      const isCardBill = candidate.paymentMethod === 'credit_card' || Boolean(candidate.cardId)
       const linkedCard = candidate.cardId ? cards.find((c) => c.id === candidate.cardId) : null
+      const isVale = candidate.paymentMethod === 'va_vr' || Boolean(linkedCard && linkedCard.cardType === 'va_vr')
+      const isCardBill = !isVale && (candidate.paymentMethod === 'credit_card' || Boolean(candidate.cardId))
       const dueStr = linkedCard ? dateInMonth(month, linkedCard.dueDay) : candidate.dueDate
       const status: TransactionStatus = options?.asPaid
         ? 'paid'
         : isCardBill
           ? 'pending'
-          : 'estimated'
+          : isVale
+            ? 'paid'
+            : 'estimated'
       const actualAmount = status === 'paid' || status === 'pending' ? finalAmount : null
 
       const newTx: NewTransaction = {
@@ -1561,7 +1567,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         category: candidate.category,
         subcategory: candidate.subcategory || null,
         type: candidate.type,
-        paymentMethod: isCardBill ? 'credit_card' : candidate.paymentMethod,
+        paymentMethod: isVale ? 'va_vr' : isCardBill ? 'credit_card' : candidate.paymentMethod,
         status,
         estimatedAmount: finalAmount,
         actualAmount,
@@ -1598,10 +1604,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           partner: candidate.isSalary ? null : partnerParty,
           payerUid: me.uid,
         })
-        const isCardBill = candidate.paymentMethod === 'credit_card' || Boolean(candidate.cardId)
         const linkedCard = candidate.cardId ? cards.find((c) => c.id === candidate.cardId) : null
+        const isVale = candidate.paymentMethod === 'va_vr' || Boolean(linkedCard && linkedCard.cardType === 'va_vr')
+        const isCardBill = !isVale && (candidate.paymentMethod === 'credit_card' || Boolean(candidate.cardId))
         const dueStr = linkedCard ? dateInMonth(month, linkedCard.dueDay) : candidate.dueDate
-        const status: TransactionStatus = asPaid ? 'paid' : isCardBill ? 'pending' : 'estimated'
+        const status: TransactionStatus = asPaid ? 'paid' : isCardBill ? 'pending' : isVale ? 'paid' : 'estimated'
         const actualAmount = status === 'paid' || status === 'pending' ? candidate.amount : null
 
         txs.push({
@@ -1612,7 +1619,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
           category: candidate.category,
           subcategory: candidate.subcategory || null,
           type: candidate.type,
-          paymentMethod: isCardBill ? 'credit_card' : candidate.paymentMethod,
+          paymentMethod: isVale ? 'va_vr' : isCardBill ? 'credit_card' : candidate.paymentMethod,
           status,
           estimatedAmount: candidate.amount,
           actualAmount,
@@ -1650,11 +1657,12 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         partner: bill.type === 'income' ? null : partnerParty,
         payerUid: me.uid,
       })
-      const effMethod = bill.paymentMethod ?? (bill.type === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
-      const isCardBill = effMethod === 'credit_card' || Boolean(bill.cardId)
       const linkedCard = bill.cardId ? cards.find((c) => c.id === bill.cardId) : null
+      const effMethod = bill.paymentMethod ?? (linkedCard?.cardType === 'va_vr' ? 'va_vr' : bill.type === 'income' ? 'pix' : bill.cardId ? 'credit_card' : 'bill')
+      const isVale = effMethod === 'va_vr' || linkedCard?.cardType === 'va_vr'
+      const isCardBill = !isVale && (effMethod === 'credit_card' || Boolean(bill.cardId))
       const dueStr = linkedCard ? dateInMonth(month, linkedCard.dueDay) : dateInMonth(month, bill.dueDay)
-      const status: TransactionStatus = options?.asPaid ? 'paid' : isCardBill ? 'pending' : 'estimated'
+      const status: TransactionStatus = options?.asPaid ? 'paid' : isCardBill ? 'pending' : isVale ? 'paid' : 'estimated'
       const actualAmount = status === 'paid' || status === 'pending' ? finalAmount : null
 
       await addTransaction({
@@ -1662,10 +1670,10 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         paidByUid: me.uid,
         cardId: bill.cardId || null,
         description: bill.description,
-        category: bill.type === 'income' ? (bill.category || 'Receita') : bill.category,
+        category: bill.type === 'income' ? (bill.category || 'Benefícios') : bill.category,
         subcategory: bill.subcategory || null,
         type: bill.type ?? 'expense',
-        paymentMethod: isCardBill ? 'credit_card' : effMethod,
+        paymentMethod: isVale ? 'va_vr' : isCardBill ? 'credit_card' : effMethod,
         status,
         estimatedAmount: finalAmount,
         actualAmount,
@@ -1886,7 +1894,8 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     async (input: ManualTransactionInput) => {
       if (!me) throw new Error('Sem usuário conectado')
       const card = cards.find((c) => c.id === input.cardId)
-      const payerUid = input.paymentMethod === 'credit_card' && card ? card.ownerUid : me.uid
+      const isCardLinkedMethod = input.paymentMethod === 'credit_card' || input.paymentMethod === 'va_vr'
+      const payerUid = isCardLinkedMethod && card ? card.ownerUid : me.uid
       const isReserve = !!input.reserveCardId
 
       // Feature 3: Compra parcelada
@@ -1969,9 +1978,9 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
         txsToCreate.push({
           createdByUid: me.uid,
           paidByUid: isReserve ? me.uid : payerUid,
-          cardId: input.paymentMethod === 'credit_card' ? (card?.id ?? null) : null,
+          cardId: (input.paymentMethod === 'credit_card' || input.paymentMethod === 'va_vr') ? (card?.id ?? null) : null,
           description: curDesc,
-          category: input.type === 'income' ? 'Receita' : input.category,
+          category: input.type === 'income' ? (input.category || 'Receita') : input.category,
           subcategory: input.subcategory || null,
           type: input.type,
           paymentMethod: input.paymentMethod,
@@ -1986,7 +1995,7 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
             : Array.from(
                 new Set([
                   ...split.visibleToUids,
-                  ...(input.paymentMethod === 'credit_card' && card
+                  ...((input.paymentMethod === 'credit_card' || input.paymentMethod === 'va_vr') && card
                     ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean)
                     : []),
                 ]),

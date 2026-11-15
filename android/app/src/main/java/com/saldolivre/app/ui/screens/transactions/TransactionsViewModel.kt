@@ -99,7 +99,7 @@ class TransactionsViewModel(
                 }
                 val paidCount = rawMonthTxs.count { it.status == TransactionStatus.PAID }
                 val pendingCount = rawMonthTxs.count { it.status != TransactionStatus.PAID }
-                val vaVrCount = rawMonthTxs.count { CategoryRegistry.isVaVrTransaction(it) }
+                val vaVrCount = rawMonthTxs.count { CategoryRegistry.isVaVrTransaction(it, cards) }
 
                 val expenseCats = CategoryRegistry.EXPENSE_CATEGORIES.map { it.name }
                 val incomeCats = CategoryRegistry.INCOME_CATEGORIES.map { it.name }
@@ -510,8 +510,8 @@ class TransactionsViewModel(
 
             val matchesCategory = when {
                 state.selectedCategories.isNotEmpty() -> {
-                    if (tx.category in state.selectedCategories) true
-                    else if (state.selectedCategories.any { CategoryRegistry.isVaVrCategory(it) } && CategoryRegistry.isVaVrTransaction(tx)) true
+                    if (state.selectedCategories.any { CategoryRegistry.isVaVrCategory(it) } && CategoryRegistry.isVaVrTransaction(tx, state.cards)) true
+                    else if (tx.category in state.selectedCategories) true
                     else if (tx.invoiceMeta?.invoice?.items?.any { it.category in state.selectedCategories } == true) true
                     else if (tx.category == "Receita") {
                         // Compatibilidade com transações legadas registradas como "Receita"
@@ -523,8 +523,8 @@ class TransactionsViewModel(
                     } else false
                 }
                 state.selectedCategory != null -> {
+                    (CategoryRegistry.isVaVrCategory(state.selectedCategory) && CategoryRegistry.isVaVrTransaction(tx, state.cards)) ||
                     tx.category == state.selectedCategory ||
-                    (CategoryRegistry.isVaVrCategory(state.selectedCategory) && CategoryRegistry.isVaVrTransaction(tx)) ||
                     tx.invoiceMeta?.invoice?.items?.any { it.category == state.selectedCategory } == true
                 }
                 else -> true

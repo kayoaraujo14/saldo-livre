@@ -700,39 +700,56 @@ fun TransactionFormScreen(
                         label = method.label,
                         selected = state.paymentMethod == method,
                         onClick = { viewModel.onPaymentMethodChange(method) },
-                        accentColor = Emerald400
+                        accentColor = if (method == PaymentMethod.VA_VR) Color(0xFF2DD4BF) else Emerald400
                     )
                 }
             }
 
-            // Card selector if credit card
-            if (state.paymentMethod == PaymentMethod.CREDIT_CARD) {
-                Text(text = "Cartão de Crédito", style = Typography.titleMedium, color = TextPrimary)
-                if (state.availableCards.isEmpty()) {
+            // Card selector: Cartão de Crédito pós-pago OU Cartão Vale Pré-Pago (VA/VR)
+            if (state.paymentMethod == PaymentMethod.CREDIT_CARD || state.paymentMethod == PaymentMethod.VA_VR) {
+                val isValeMethod = state.paymentMethod == PaymentMethod.VA_VR
+                val filteredCards = state.availableCards.filter { c ->
+                    if (isValeMethod) c.isVaVrCard else !c.isVaVrCard
+                }
+                Text(
+                    text = if (isValeMethod) "Cartão Vale (VA/VR)" else "Cartão de Crédito",
+                    style = Typography.titleMedium,
+                    color = TextPrimary
+                )
+                if (filteredCards.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
                             .background(DarkSurface)
-                            .border(1.dp, Amber400.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                            .border(
+                                1.dp,
+                                (if (isValeMethod) Color(0xFF2DD4BF) else Amber400).copy(alpha = 0.3f),
+                                RoundedCornerShape(12.dp)
+                            )
                             .padding(12.dp)
                     ) {
                         Text(
-                            text = "Nenhum cartão cadastrado ainda. Cadastre um cartão no menu 'Cartões de Crédito' para vincular compras e faturas.",
+                            text = if (isValeMethod) {
+                                "Nenhum cartão Vale cadastrado (opcional). O saldo será lançado diretamente no módulo VA/VR, ou cadastre um Vale na aba Cartões."
+                            } else {
+                                "Nenhum cartão de crédito cadastrado ainda. Cadastre um cartão no menu 'Cartões de Crédito' para vincular compras e faturas."
+                            },
                             style = Typography.bodySmall,
-                            color = Amber400
+                            color = if (isValeMethod) Color(0xFF2DD4BF) else Amber400
                         )
                     }
                 } else {
+                    val accentBorder = if (isValeMethod) Color(0xFF2DD4BF) else Cyan400
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        state.availableCards.forEach { card ->
+                        filteredCards.forEach { card ->
                             val isSelected = state.selectedCardId == card.id
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (isSelected) DarkSurfaceVariant else DarkSurface)
-                                    .border(1.dp, if (isSelected) Cyan400 else DarkBorder, RoundedCornerShape(12.dp))
+                                    .border(1.dp, if (isSelected) accentBorder else DarkBorder, RoundedCornerShape(12.dp))
                                     .clickable { viewModel.onCardChange(card.id) }
                                     .padding(12.dp)
                             ) {
@@ -754,7 +771,11 @@ fun TransactionFormScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "Fecha dia ${card.closingDay} • Vence dia ${card.dueDay}",
+                                            text = if (card.isVaVrCard) {
+                                                "Vale Pré-Pago • Recarga dia ${card.dueDay}"
+                                            } else {
+                                                "Fecha dia ${card.closingDay} • Vence dia ${card.dueDay}"
+                                            },
                                             fontSize = 11.sp,
                                             color = TextMuted,
                                             maxLines = 1,
@@ -762,7 +783,7 @@ fun TransactionFormScreen(
                                         )
                                     }
                                     if (isSelected) {
-                                        Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Cyan400)
+                                        Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = accentBorder)
                                     }
                                 }
                             }
@@ -771,8 +792,8 @@ fun TransactionFormScreen(
                 }
             }
 
-            // Seção de Compra Parcelada (idêntica à Web)
-            if (state.type == TransactionType.EXPENSE && !state.isEditing && !state.isEstorno) {
+            // Seção de Compra Parcelada (idêntica à Web — apenas cartão de crédito pós-pago)
+            if (state.type == TransactionType.EXPENSE && state.paymentMethod == PaymentMethod.CREDIT_CARD && !state.isEditing && !state.isEstorno) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()

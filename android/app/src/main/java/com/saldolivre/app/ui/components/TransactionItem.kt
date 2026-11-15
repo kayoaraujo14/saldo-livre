@@ -296,6 +296,29 @@ fun TransactionItem(
                     }
                 }
 
+                if (transaction.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.VA_VR ||
+                    CategoryRegistry.isVaVrCategory(transaction.category, transaction.subcategory)
+                ) {
+                    val tealAccent = Color(0xFF2DD4BF)
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(tealAccent.copy(alpha = 0.14f))
+                            .border(1.dp, tealAccent.copy(alpha = 0.35f), CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            text = "Vale",
+                            fontSize = 9.sp,
+                            color = tealAccent,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+
                 if (!thirdParty.isNullOrBlank()) {
                     Spacer(Modifier.width(6.dp))
                     Box(

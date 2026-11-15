@@ -1,3 +1,4 @@
+import { isVaVrCard } from '@/types'
 import { buildCardInvoice } from '../invoices'
 import {
   computeSummary,
@@ -41,6 +42,7 @@ export async function relatorio(env: AgentEnv, args?: Record<string, unknown>): 
 
   // Detalhamento completo de Faturas por Cartão no targetMonth via buildCardInvoice
   const faturasPorCartao = cards
+    .filter((c) => !isVaVrCard(c))
     .filter((c) => {
       if (!cartaoFiltro) return true
       return normalize(c.cardName).includes(normalize(cartaoFiltro)) || c.id === cartaoFiltro
@@ -258,10 +260,10 @@ export async function relatorio(env: AgentEnv, args?: Record<string, unknown>): 
         { label: 'Faturas de Cartão', value: money(totalFaturasCartao) },
         { label: 'Extrato (Fixas + Pix/Débito)', value: money(totalExtratoConta) },
         { label: 'Total Comprometido', value: money(effectiveExpense) },
-        ...((s.vaVrCarryover ?? 0) > 0 || (s.vaVrIncome ?? 0) > 0 || (s.vaVrSpent ?? 0) > 0
+        ...(cards.some(isVaVrCard) || (s.vaVrCarryover ?? 0) !== 0 || (s.vaVrIncome ?? 0) > 0 || (s.vaVrSpent ?? 0) > 0
           ? [
-              { label: 'Saldo VA/VR Disponível', value: money(s.vaVrAvailableBalance ?? 0), tone: (s.vaVrAvailableBalance ?? 0) >= 0 ? ('positive' as const) : ('negative' as const) },
-              { label: 'VA/VR Projetado Mês', value: money(s.vaVrProjectedBalance ?? 0) },
+              { label: 'Saldo Vale (VA/VR) Disponível', value: money(s.vaVrAvailableBalance ?? 0), tone: (s.vaVrAvailableBalance ?? 0) >= 0 ? ('positive' as const) : ('negative' as const) },
+              { label: 'Vale Projetado no Mês', value: money(s.vaVrProjectedBalance ?? 0) },
             ]
           : []),
       ],

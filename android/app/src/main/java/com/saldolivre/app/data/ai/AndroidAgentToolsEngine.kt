@@ -175,28 +175,43 @@ class AndroidAgentToolsEngine(
         val absAmount = Math.abs(validAmount)
         val totalSigned = if (isEstorno) -absAmount else absAmount
 
-        val isVaVrKeywordOrCat = CategoryRegistry.isVaVrCategory(category, subcategory) ||
-            (cardName.isNullOrBlank() && paymentMethod != PaymentMethod.CREDIT_CARD &&
-                Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(description))
-
         val user = repository.currentUser.value
         val cards = repository.getCards().first()
+        val valeCards = cards.filter { it.isVaVrCard }
+        val creditCards = cards.filter { !it.isVaVrCard }
 
-        val requestedCreditCard = !isVaVrKeywordOrCat && (paymentMethod == PaymentMethod.CREDIT_CARD || !cardName.isNullOrBlank())
-        val rawMatchedCard = if (!isVaVrKeywordOrCat && !cardName.isNullOrBlank()) {
-            val found = cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
-            if (found == null && cards.isNotEmpty()) {
-                return ToolExecutionResult(text = "⚠️ Não encontrei o cartão \"$cardName\". Seus cartões cadastrados são: ${cards.joinToString { it.cardName }}. Em qual deles foi realizada a compra?")
+        val cardMatchesVale = !cardName.isNullOrBlank() && valeCards.any {
+            it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true)
+        }
+        val isVaVrKeywordOrMethod = paymentMethod == PaymentMethod.VA_VR ||
+            cardMatchesVale ||
+            CategoryRegistry.isVaVrCategory(category, subcategory) ||
+            (cardName.isNullOrBlank() && paymentMethod != PaymentMethod.CREDIT_CARD &&
+                Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(description))
+
+        val requestedCreditCard = !isVaVrKeywordOrMethod && (paymentMethod == PaymentMethod.CREDIT_CARD || !cardName.isNullOrBlank())
+        val rawMatchedCard = if (isVaVrKeywordOrMethod) {
+            when {
+                !cardName.isNullOrBlank() -> valeCards.find {
+                    it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true)
+                }
+                valeCards.size == 1 -> valeCards.first()
+                else -> valeCards.firstOrNull { it.ownerUid == user.uid } ?: valeCards.firstOrNull()
+            }
+        } else if (!cardName.isNullOrBlank()) {
+            val found = creditCards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
+            if (found == null && creditCards.isNotEmpty()) {
+                return ToolExecutionResult(text = "⚠️ Não encontrei o cartão \"$cardName\". Seus cartões de crédito cadastrados são: ${creditCards.joinToString { it.cardName }}. Em qual deles foi realizada a compra?")
             }
             found
         } else if (requestedCreditCard) {
-            if (cards.size > 1) {
-                return ToolExecutionResult(text = "⚠️ Você possui múltiplos cartões cadastrados (${cards.joinToString { it.cardName }}). Em qual deles foi realizada a compra de R$ ${FinanceEngine.round2(absAmount)} em $description?")
+            if (creditCards.size > 1) {
+                return ToolExecutionResult(text = "⚠️ Você possui múltiplos cartões cadastrados (${creditCards.joinToString { it.cardName }}). Em qual deles foi realizada a compra de R$ ${FinanceEngine.round2(absAmount)} em $description?")
             }
-            cards.firstOrNull()
+            creditCards.firstOrNull()
         } else null
 
-        // Categorização estrita e resolução canônica (paridade total com Web)
+        // Categorização estrita e resolução canônica (paridade total com Web — VA/VR usa categoria real do gasto/recarga)
         val (finalCat, finalSubcat) = if (isEstorno && (category.isNullOrBlank() || category == "Outros" || category.equals("Estorno", ignoreCase = true))) {
             Pair("Outros", "Crédito na Fatura")
         } else {
@@ -212,11 +227,14 @@ class AndroidAgentToolsEngine(
             )
         }
 
-        val isVaVrFinal = CategoryRegistry.isVaVrCategory(finalCat, finalSubcat)
-        val matchedCard = if (isVaVrFinal) null else rawMatchedCard
-        val isCreditCard = !isVaVrFinal && (requestedCreditCard || matchedCard != null)
+        val isVaVrFinal = isVaVrKeywordOrMethod ||
+            paymentMethod == PaymentMethod.VA_VR ||
+            rawMatchedCard?.isVaVrCard == true ||
+            CategoryRegistry.isVaVrCategory(category, subcategory)
+        val matchedCard = rawMatchedCard
+        val isCreditCard = !isVaVrFinal && (requestedCreditCard || (matchedCard != null && !matchedCard.isVaVrCard))
         val effectiveMethod = when {
-            isVaVrFinal -> if (type == TransactionType.INCOME) PaymentMethod.PIX else PaymentMethod.DEBIT
+            isVaVrFinal -> PaymentMethod.VA_VR
             isCreditCard -> PaymentMethod.CREDIT_CARD
             else -> paymentMethod
         }
@@ -320,10 +338,12 @@ class AndroidAgentToolsEngine(
                         "• **Alívio no Saldo Livre**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
                         "Por favor, confirme se os dados estão corretos para abater este estorno no Saldo Livre."
             } else if (isVaVrFinal) {
-                val typeName = if (type == TransactionType.INCOME) "recarga no módulo VA/VR" else "despesa no módulo VA/VR"
-                "Entendi que você deseja cadastrar uma $typeName: **\"$cleanDesc\"** no valor de **${FinanceEngine.formatCurrency(amount)}** para **${FinanceEngine.monthLabel(finalCompetenceMonth)}** (data: ${FinanceEngine.formatShortDate(finalDueDate)}).\n\n" +
+                val typeName = if (type == TransactionType.INCOME) "recarga no Cartão Vale (VA/VR)" else "compra no Cartão Vale (VA/VR)"
+                val cardNote = matchedCard?.let { " (**${it.cardName}**)" } ?: ""
+                "Entendi que você deseja cadastrar uma $typeName$cardNote: **\"$cleanDesc\"** no valor de **${FinanceEngine.formatCurrency(amount)}** para **${FinanceEngine.monthLabel(finalCompetenceMonth)}** (data: ${FinanceEngine.formatShortDate(finalDueDate)}).\n\n" +
                         "• **Categoria**: $finalCat${if (!finalSubcat.isNullOrBlank()) " › $finalSubcat" else ""}\n" +
-                        "• **Saldo VA/VR Disponível**: ${FinanceEngine.formatCurrency(before.vaVrAvailableBalance)} → **${FinanceEngine.formatCurrency(estimatedVaVrAfter)}** *(isolado do Saldo Livre bancário)*\n\n" +
+                        "• **Método**: Vale (VA/VR Pré-Pago)\n" +
+                        "• **Saldo Vale Disponível**: ${FinanceEngine.formatCurrency(before.vaVrAvailableBalance)} → **${FinanceEngine.formatCurrency(estimatedVaVrAfter)}** *(isolado da conta corrente)*\n\n" +
                         "Por favor, confirme se os dados estão corretos."
             } else if (isInstallment) {
                 "Entendi que você deseja cadastrar uma despesa parcelada: **\"$cleanDesc\"** em **${totalInstallments}x de ${FinanceEngine.formatCurrency(amount)}** (total de ${FinanceEngine.formatCurrency(amount * totalInstallments)})${if (matchedCard != null) " no cartão **${matchedCard.cardName}**" else ""} a partir de **${FinanceEngine.monthLabel(finalCompetenceMonth)}**.\n\n" +
@@ -498,7 +518,7 @@ class AndroidAgentToolsEngine(
                 subcategory = finalSubcat,
                 type = type,
                 paymentMethod = effectiveMethod,
-                status = if (type == TransactionType.INCOME || !isCreditCard) TransactionStatus.PAID else TransactionStatus.PENDING,
+                status = if (type == TransactionType.INCOME || !isCreditCard || effectiveMethod == PaymentMethod.VA_VR) TransactionStatus.PAID else TransactionStatus.PENDING,
                 actualAmount = totalSigned,
                 totalAmount = totalSigned,
                 dueDate = finalDueDate,
@@ -647,7 +667,8 @@ class AndroidAgentToolsEngine(
         }
 
         val hasVaVrSignal = CategoryRegistry.isVaVrCategory(category, subcategory) ||
-            Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc)
+            PaymentMethod.from(rawPayMethod) == PaymentMethod.VA_VR ||
+            Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc)
         val isVaVrRechargeSignal = hasVaVrSignal && explicitTypeStr == null &&
             (subcategory in listOf("Recarga VA/VR", "Vale Alimentação (VA)", "Vale Refeição (VR)", "Saldo Inicial / Ajuste") ||
                 Regex("""\b(recarga|dep[oó]sito|cr[eé]dito|receb|caiu|entrou|saldo inicial|ajuste)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc))
@@ -666,22 +687,21 @@ class AndroidAgentToolsEngine(
         }
 
         val inferredPayMethod = when {
-            !rawPayMethod.isNullOrBlank() -> if (hasVaVrSignal && PaymentMethod.from(rawPayMethod) == PaymentMethod.CREDIT_CARD) {
-                if (txType == TransactionType.INCOME) PaymentMethod.PIX else PaymentMethod.DEBIT
-            } else {
-                PaymentMethod.from(rawPayMethod)
+            !rawPayMethod.isNullOrBlank() -> {
+                val parsed = PaymentMethod.from(rawPayMethod)
+                if (hasVaVrSignal && parsed == PaymentMethod.CREDIT_CARD) PaymentMethod.VA_VR else parsed
             }
+            hasVaVrSignal -> PaymentMethod.VA_VR
             Regex("""\bpix\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.PIX
             Regex("""\bd[eé]bito\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.DEBIT
             Regex("""\b(boleto|darf)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.BILL
-            !hasVaVrSignal && (Regex("""\b(cart[aã]o|cr[eé]dito|fatura)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) || !cardName.isNullOrBlank()) -> PaymentMethod.CREDIT_CARD
+            Regex("""\b(cart[aã]o|cr[eé]dito|fatura)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) || !cardName.isNullOrBlank() -> PaymentMethod.CREDIT_CARD
             txType == TransactionType.INCOME -> PaymentMethod.PIX
-            hasVaVrSignal -> PaymentMethod.DEBIT
             else -> null
         }
 
         if (inferredPayMethod == null) {
-            return ToolExecutionResult(text = "⚠️ Qual foi a forma de pagamento do lançamento de R$ ${FinanceEngine.round2(finalAmount)} em $desc? (Pix, Débito, Cartão de Crédito ou Boleto?)")
+            return ToolExecutionResult(text = "⚠️ Qual foi a forma de pagamento do lançamento de R$ ${FinanceEngine.round2(finalAmount)} em $desc? (Pix, Débito, Cartão de Crédito, Vale VA/VR ou Boleto?)")
         }
         val payMethod = inferredPayMethod
         val splitType = when (splitTypeStr.uppercase()) {
@@ -831,28 +851,43 @@ class AndroidAgentToolsEngine(
                 allCards.find { it.id == itemCardParam || it.cardName.contains(itemCardParam, ignoreCase = true) || itemCardParam.contains(it.cardName, ignoreCase = true) }
             } else defaultCard
 
-            val isVaVrBatch = CategoryRegistry.isVaVrCategory(cat, subcat)
+            val valeCardsBatch = allCards.filter { it.isVaVrCard }
+            val creditCardsBatch = allCards.filter { !it.isVaVrCard }
+            val isVaVrBatch = payMethodStr.equals("va_vr", ignoreCase = true) ||
+                itemCard?.isVaVrCard == true ||
+                CategoryRegistry.isVaVrCategory(cat, subcat) ||
+                Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc)
             val isCardPayment = !isVaVrBatch && (
-                (itemCard != null && !isIncome) ||
+                (itemCard != null && !itemCard.isVaVrCard && !isIncome) ||
                     payMethodStr.equals("credit_card", ignoreCase = true) ||
                     payMethodStr.equals("cartao_credito", ignoreCase = true) ||
                     (isFaturaDoc && !isIncome)
                 )
 
-            val resolvedPayMethod = if (isIncome) {
+            val resolvedPayMethod = if (isVaVrBatch) {
+                PaymentMethod.VA_VR
+            } else if (isIncome) {
                 PaymentMethod.PIX
-            } else if (isVaVrBatch) {
-                val parsed = PaymentMethod.from(payMethodStr)
-                if (parsed == PaymentMethod.CREDIT_CARD) PaymentMethod.DEBIT else parsed
             } else if (isCardPayment) {
                 PaymentMethod.CREDIT_CARD
             } else {
                 PaymentMethod.from(payMethodStr)
             }
 
-            val targetCard = if (!isVaVrBatch && resolvedPayMethod == PaymentMethod.CREDIT_CARD) {
-                itemCard ?: defaultCard ?: allCards.firstOrNull { it.ownerUid == user.uid } ?: allCards.firstOrNull()
-            } else null
+            val targetCard = when {
+                resolvedPayMethod == PaymentMethod.VA_VR -> {
+                    itemCard?.takeIf { it.isVaVrCard }
+                        ?: valeCardsBatch.firstOrNull { it.ownerUid == user.uid }
+                        ?: valeCardsBatch.firstOrNull()
+                }
+                resolvedPayMethod == PaymentMethod.CREDIT_CARD -> {
+                    itemCard?.takeIf { !it.isVaVrCard }
+                        ?: defaultCard?.takeIf { !it.isVaVrCard }
+                        ?: creditCardsBatch.firstOrNull { it.ownerUid == user.uid }
+                        ?: creditCardsBatch.firstOrNull()
+                }
+                else -> null
+            }
             val targetCardId = targetCard?.id
 
             val (resolvedDueDate, resolvedComp) = if (targetCard != null) {
@@ -949,7 +984,7 @@ class AndroidAgentToolsEngine(
                     if (parsedSplitType == SplitType.SPLIT_50) 50.0 else 50.0
                 } else null
 
-            val payerUid = if (resolvedPayMethod == PaymentMethod.CREDIT_CARD && targetCard != null) {
+            val payerUid = if ((resolvedPayMethod == PaymentMethod.CREDIT_CARD || resolvedPayMethod == PaymentMethod.VA_VR) && targetCard != null) {
                 targetCard.ownerUid.ifBlank { user.uid }
             } else {
                 user.uid
@@ -1395,12 +1430,6 @@ class AndroidAgentToolsEngine(
                     description = newDescription ?: tx.description
                 )
                 updated = updated.copy(category = targetCat, subcategory = targetSub)
-                if (CategoryRegistry.isVaVrCategory(targetCat, targetSub) && updated.paymentMethod == PaymentMethod.CREDIT_CARD) {
-                    updated = updated.copy(
-                        paymentMethod = if (updated.type == TransactionType.INCOME) PaymentMethod.PIX else PaymentMethod.DEBIT,
-                        cardId = null
-                    )
-                }
             }
 
             if (newStatus != null) {
@@ -1408,7 +1437,20 @@ class AndroidAgentToolsEngine(
             }
 
             if (newPaymentMethod != null) {
-                updated = updated.copy(paymentMethod = newPaymentMethod)
+                val nextCardId = when {
+                    newPaymentMethod == PaymentMethod.VA_VR -> {
+                        val existingCard = updated.cardId?.let { cid -> allCards.find { it.id == cid } }
+                        if (existingCard?.isVaVrCard == true) existingCard.id
+                        else allCards.firstOrNull { it.isVaVrCard }?.id
+                    }
+                    newPaymentMethod == PaymentMethod.CREDIT_CARD -> {
+                        val existingCard = updated.cardId?.let { cid -> allCards.find { it.id == cid } }
+                        if (existingCard != null && !existingCard.isVaVrCard) existingCard.id
+                        else allCards.firstOrNull { !it.isVaVrCard }?.id
+                    }
+                    else -> null
+                }
+                updated = updated.copy(paymentMethod = newPaymentMethod, cardId = nextCardId)
             }
 
             if (newCompetenceMonth != null && newCompetenceMonth.matches(Regex("""^\d{4}-\d{2}$"""))) {
@@ -2163,13 +2205,17 @@ class AndroidAgentToolsEngine(
             if (!startDate.isNullOrBlank() && t.dueDate < startDate) return@filter false
             if (!endDate.isNullOrBlank() && t.dueDate > endDate) return@filter false
 
-            // Método de pagamento (Fatura Cartão vs Extrato/Pix/Débito/Boleto)
+            // Método de pagamento (Fatura Cartão vs Extrato/Pix/Débito/Boleto vs Vale Pré-Pago VA/VR)
             if (!paymentMethodFilter.isNullOrBlank()) {
                 val pmNorm = paymentMethodFilter.trim().lowercase(Locale.ROOT)
-                val isTxCard = t.paymentMethod == PaymentMethod.CREDIT_CARD || !t.cardId.isNullOrBlank()
+                val isTxVale = CategoryRegistry.isVaVrTransaction(t, cards)
+                val isTxCard = !isTxVale && (t.paymentMethod == PaymentMethod.CREDIT_CARD || !t.cardId.isNullOrBlank())
                 when {
+                    pmNorm == "va_vr" || pmNorm == "vale" || pmNorm == "va/vr" -> {
+                        if (!isTxVale) return@filter false
+                    }
                     pmNorm == "extrato_conta" || pmNorm == "extrato" || pmNorm == "conta" -> {
-                        if (isTxCard) return@filter false
+                        if (isTxCard || isTxVale) return@filter false
                     }
                     pmNorm == "credit_card" || pmNorm == "cartao" || pmNorm == "cartão" || pmNorm == "fatura" -> {
                         if (!isTxCard) return@filter false
@@ -2191,7 +2237,7 @@ class AndroidAgentToolsEngine(
             // Categoria e subcategoria
             if (!category.isNullOrBlank()) {
                 if (CategoryRegistry.isVaVrCategory(category)) {
-                    if (!CategoryRegistry.isVaVrTransaction(t)) return@filter false
+                    if (!CategoryRegistry.isVaVrTransaction(t, cards)) return@filter false
                 } else if (!t.category.equals(category, ignoreCase = true) && !matchesSearch(t.category, category)) {
                     return@filter false
                 }
@@ -2313,9 +2359,9 @@ class AndroidAgentToolsEngine(
         val myRefundsImpact = refundTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
         val myImpactTotal = kotlin.math.max(0.0, myExpensesGrossImpact - myRefundsImpact)
 
-        // Subtotais por Canal de Pagamento (Fatura de Cartão vs Extrato/Pix/Débito/Boleto)
-        val cardExpenseTxs = expenseTxs.filter { it.paymentMethod == PaymentMethod.CREDIT_CARD || !it.cardId.isNullOrBlank() }
-        val accountExpenseTxs = expenseTxs.filter { it.paymentMethod != PaymentMethod.CREDIT_CARD && it.cardId.isNullOrBlank() }
+        // Subtotais por Canal de Pagamento (Fatura de Cartão vs Extrato/Pix/Débito/Boleto vs Vale Pré-Pago VA/VR)
+        val cardExpenseTxs = expenseTxs.filter { !CategoryRegistry.isVaVrTransaction(it, cards) && (it.paymentMethod == PaymentMethod.CREDIT_CARD || !it.cardId.isNullOrBlank()) }
+        val accountExpenseTxs = expenseTxs.filter { !CategoryRegistry.isVaVrTransaction(it, cards) && it.paymentMethod != PaymentMethod.CREDIT_CARD && it.cardId.isNullOrBlank() }
         val cardImpactTotal = cardExpenseTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
         val accountImpactTotal = accountExpenseTxs.sumOf { FinanceEngine.impactFor(it, user.uid, all) }
 
@@ -2335,9 +2381,10 @@ class AndroidAgentToolsEngine(
                 } || FinanceEngine.findMatchingManualBill(monthTransactions, activeMonth, bill) != null
                 if (alreadyInDb) return@filter false
                 if (type != null && bill.type != type) return@filter false
+                val isBillVale = CategoryRegistry.isVaVrRecurringBill(bill, cards)
                 if (!category.isNullOrBlank()) {
                     if (CategoryRegistry.isVaVrCategory(category)) {
-                        if (!CategoryRegistry.isVaVrCategory(bill.category, bill.subcategory)) return@filter false
+                        if (!isBillVale) return@filter false
                     } else if (!bill.category.equals(category, ignoreCase = true) && !matchesSearch(bill.category, category)) {
                         return@filter false
                     }
@@ -2345,9 +2392,10 @@ class AndroidAgentToolsEngine(
                 if (!searchTerm.isNullOrBlank() && !matchesSearch(bill.description, searchTerm) && !matchesSearch(bill.category, searchTerm)) return@filter false
                 if (!paymentMethodFilter.isNullOrBlank()) {
                     val pmNorm = paymentMethodFilter.trim().lowercase(Locale.ROOT)
-                    val isBillCard = bill.paymentMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank()
+                    val isBillCard = !isBillVale && (bill.paymentMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank())
                     when {
-                        pmNorm == "extrato_conta" || pmNorm == "extrato" || pmNorm == "conta" -> if (isBillCard) return@filter false
+                        pmNorm == "va_vr" || pmNorm == "vale" || pmNorm == "va/vr" -> if (!isBillVale) return@filter false
+                        pmNorm == "extrato_conta" || pmNorm == "extrato" || pmNorm == "conta" -> if (isBillCard || isBillVale) return@filter false
                         pmNorm == "credit_card" || pmNorm == "cartao" || pmNorm == "cartão" || pmNorm == "fatura" -> if (!isBillCard) return@filter false
                         else -> if (bill.paymentMethod != PaymentMethod.from(pmNorm)) return@filter false
                     }
@@ -2358,10 +2406,18 @@ class AndroidAgentToolsEngine(
                 val recLines = unlaunched.joinToString("\n") { b ->
                     val est = FinanceEngine.estimateRecurring(b, all, activeMonth).amount
                     val myShare = if (b.splitType == SplitType.SPLIT_50) est * 0.5 else if (b.splitType == SplitType.PARTNER) 0.0 else est
-                    val channelLabel = if (b.paymentMethod == PaymentMethod.CREDIT_CARD || !b.cardId.isNullOrBlank()) {
-                        val cn = b.cardId?.let { cardsMap[it]?.cardName } ?: "Cartão"
-                        "💳 Assinatura Cartão $cn"
-                    } else "🏠 Conta Fixa (${b.paymentMethod?.label ?: "Boleto/Pix"})"
+                    val isBillVale = CategoryRegistry.isVaVrRecurringBill(b, cards)
+                    val channelLabel = when {
+                        isBillVale -> {
+                            val cn = b.cardId?.let { cardsMap[it]?.cardName } ?: "Vale VA/VR"
+                            "🍽️ $cn"
+                        }
+                        b.paymentMethod == PaymentMethod.CREDIT_CARD || !b.cardId.isNullOrBlank() -> {
+                            val cn = b.cardId?.let { cardsMap[it]?.cardName } ?: "Cartão"
+                            "💳 Assinatura Cartão $cn"
+                        }
+                        else -> "🏠 Conta Fixa (${b.paymentMethod?.label ?: "Boleto/Pix"})"
+                    }
                     "  * **${b.description}**: ${FinanceEngine.formatCurrency(myShare)} (Vence dia ${b.dueDay}) • ${b.category} • $channelLabel [Prevista/Não lançada no banco]"
                 }
                 "\n\n🔄 **Contas Fixas / Recorrentes Previstas para $activeMonthLabel (${unlaunched.size} item(ns) ainda não lançados no banco):**\n$recLines"
@@ -2660,7 +2716,8 @@ class AndroidAgentToolsEngine(
         closingDay: Int? = null,
         dueDay: Int? = null,
         cardId: String? = null,
-        month: String? = null
+        month: String? = null,
+        cardType: String? = null
     ): ToolExecutionResult {
         val cards = repository.getCards().first()
         val user = repository.currentUser.value
@@ -2668,19 +2725,24 @@ class AndroidAgentToolsEngine(
         when (operation.lowercase()) {
             "listar" -> {
                 if (cards.isEmpty()) {
-                    return ToolExecutionResult(text = "💳 Você ainda não possui nenhum cartão de crédito cadastrado.")
+                    return ToolExecutionResult(text = "💳 Você ainda não possui nenhum cartão cadastrado.")
                 }
                 val list = cards.joinToString("\n") {
-                    "• **${it.cardName}** (Titular: ${it.ownerName}): Fecha dia ${it.closingDay}, Vence dia ${it.dueDay}"
+                    if (it.isVaVrCard) {
+                        "• 🍽️ **${it.cardName}** (Vale Pré-Pago VA/VR • Titular: ${it.ownerName}): Recarga dia ${it.dueDay}"
+                    } else {
+                        "• 💳 **${it.cardName}** (Crédito • Titular: ${it.ownerName}): Fecha dia ${it.closingDay}, Vence dia ${it.dueDay}"
+                    }
                 }
                 return ToolExecutionResult(
-                    text = "💳 **Seus Cartões de Crédito cadastrados:**\n\n$list",
+                    text = "💳 **Seus Cartões cadastrados:**\n\n$list",
                     actionCard = ActionCardData(title = "Cartões Listados", description = "${cards.size} cartões encontrados")
                 )
             }
             "detalhar_fatura", "fatura" -> {
+                val creditCards = cards.filter { !it.isVaVrCard }
                 if (cards.isEmpty()) {
-                    return ToolExecutionResult(text = "💳 Você ainda não possui nenhum cartão de crédito cadastrado.")
+                    return ToolExecutionResult(text = "💳 Você ainda não possui nenhum cartão cadastrado.")
                 }
                 val all = repository.getTransactions().first()
                 val bills = repository.getRecurringBills().first()
@@ -2688,21 +2750,28 @@ class AndroidAgentToolsEngine(
                 val targetMonth = parseMonthKey(month, defaultMonth) ?: defaultMonth
                 val targetMonthLabel = FinanceEngine.formatMonthLabel(targetMonth)
 
-                val targetCards = if (!cardId.isNullOrBlank() || !cardName.isNullOrBlank()) {
+                val matchedCards = if (!cardId.isNullOrBlank() || !cardName.isNullOrBlank()) {
                     cards.filter {
                         it.id == cardId || (cardName != null && (it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true)))
                     }
-                } else cards
+                } else creditCards
 
-                if (targetCards.isEmpty()) {
+                if (matchedCards.isEmpty()) {
                     return ToolExecutionResult(text = "⚠️ Cartão \"${cardName ?: cardId}\" não encontrado.")
                 }
 
-                val sections = targetCards.map { card ->
+                val sections = matchedCards.map { card ->
+                    if (card.isVaVrCard) {
+                        val monthSummary = FinanceEngine.computeSummary(all, user.uid, targetMonth, cards)
+                        return@map "🍽️ **${card.cardName} (Vale Pré-Pago VA/VR) — $targetMonthLabel**\n" +
+                            "  • Cartões Vale pré-pagos não possuem fatura pós-paga.\n" +
+                            "  • **Saldo Disponível**: ${FinanceEngine.formatCurrency(monthSummary.vaVrAvailableBalance)} | **Projetado no mês**: ${FinanceEngine.formatCurrency(monthSummary.vaVrProjectedBalance)}"
+                    }
                     val inv = InvoiceEngine.buildInvoice(card, targetMonth, all, user.uid)
                     val unlaunchedCardBills = bills.filter { b ->
                         b.active && b.type == TransactionType.EXPENSE &&
-                            (b.cardId == card.id || (b.paymentMethod == PaymentMethod.CREDIT_CARD && b.cardId == null && targetCards.size == 1)) &&
+                            b.paymentMethod != PaymentMethod.VA_VR &&
+                            (b.cardId == card.id || (b.paymentMethod == PaymentMethod.CREDIT_CARD && b.cardId == null && creditCards.size == 1)) &&
                             !inv.items.any { tx -> tx.recurringBillId == b.id || FinanceEngine.findMatchingManualBill(listOf(tx), targetMonth, b) != null }
                     }
                     val unlaunchedSum = unlaunchedCardBills.sumOf { FinanceEngine.estimateRecurring(it, all, targetMonth).amount }
@@ -2734,7 +2803,7 @@ class AndroidAgentToolsEngine(
                     text = sections.joinToString("\n\n"),
                     actionCard = ActionCardData(
                         title = "Fatura(s) — $targetMonthLabel",
-                        description = "${targetCards.size} cartão(ões) detalhado(s)"
+                        description = "${matchedCards.size} cartão(ões) detalhado(s)"
                     )
                 )
             }
@@ -2743,26 +2812,39 @@ class AndroidAgentToolsEngine(
                 if (name.isNullOrBlank()) {
                     return ToolExecutionResult(text = "⚠️ Informe o nome do cartão a cadastrar.")
                 }
-                val f = closingDay ?: 1
-                val v = dueDay ?: 10
+                val rawType = cardType?.trim()?.lowercase(Locale.ROOT) ?: ""
+                val isVale = rawType == "va_vr" || rawType == "vale" || rawType == "pre_pago" ||
+                    neuralClassifier.detectPaymentMethod(name) == PaymentMethod.VA_VR
+                val resolvedType = if (isVale) "va_vr" else "credit"
+                val f = if (isVale) 1 else (closingDay ?: 1)
+                val v = dueDay ?: if (isVale) 1 else 10
                 val newCard = Card(
                     id = "card_" + UUID.randomUUID().toString().take(8),
                     ownerUid = user.uid,
                     ownerName = user.displayName,
                     cardName = name,
                     closingDay = f,
-                    dueDay = v
+                    dueDay = v,
+                    cardType = resolvedType
                 )
                 repository.saveCard(newCard)
                 return ToolExecutionResult(
-                    text = "💳 **Cartão de crédito cadastrado com sucesso!**\n\n" +
+                    text = if (isVale) {
+                        "🍽️ **Cartão Vale (Pré-Pago VA/VR) cadastrado com sucesso!**\n\n" +
+                            "• **Nome**: $name\n" +
+                            "• **Tipo**: Vale / Pré-Pago (VA/VR)\n" +
+                            "• **Dia da Recarga**: Todo dia $v\n\n" +
+                            "O widget de Cartão Pré-Pago / Vale no seu Dashboard já está ativo para acompanhar seus gastos e recargas!"
+                    } else {
+                        "💳 **Cartão de crédito cadastrado com sucesso!**\n\n" +
                             "• **Nome**: $name\n" +
                             "• **Fechamento**: Dia $f\n" +
                             "• **Vencimento**: Dia $v\n\n" +
-                            "A partir de agora, compras neste cartão calcularão automaticamente a fatura correta!",
+                            "A partir de agora, compras neste cartão calcularão automaticamente a fatura correta!"
+                    },
                     actionCard = ActionCardData(
-                        title = "Cartão Adicionado",
-                        description = "$name (Fecha dia $f, Vence dia $v)",
+                        title = if (isVale) "Cartão Vale Adicionado" else "Cartão Adicionado",
+                        description = if (isVale) "$name (Vale Pré-Pago • Recarga dia $v)" else "$name (Fecha dia $f, Vence dia $v)",
                         detail = "Cadastrado no seu perfil"
                     )
                 )
@@ -2789,8 +2871,9 @@ class AndroidAgentToolsEngine(
         val due = jsonObj.getIntOrNull("dueDay") ?: jsonObj.getIntOrNull("vencimento")
         val id = jsonObj.getStringOrNull("cardId") ?: jsonObj.getStringOrNull("id")
         val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
+        val cardType = jsonObj.getStringOrNull("cardType") ?: jsonObj.getStringOrNull("tipo") ?: jsonObj.getStringOrNull("tipoCartao")
 
-        return executeManageCards(operation = op, cardName = name, closingDay = closing, dueDay = due, cardId = id, month = month)
+        return executeManageCards(operation = op, cardName = name, closingDay = closing, dueDay = due, cardId = id, month = month, cardType = cardType)
     }
 
     // -------------------------------------------------------------
@@ -2827,10 +2910,14 @@ class AndroidAgentToolsEngine(
                 val list = bills.joinToString("\n") { b ->
                     val status = if (b.active) "🟢 Ativa" else "⏸️ Pausada"
                     val typeTag = if (b.type == TransactionType.INCOME) "💰 Renda Fixa" else "🏠 Conta Fixa"
-                    val cardLabel = b.cardId?.let { cardsMap[it]?.cardName }
-                    val channel = if (b.paymentMethod == PaymentMethod.CREDIT_CARD || !cardLabel.isNullOrBlank()) {
-                        "💳 Cartão ${cardLabel ?: ""}".trim()
-                    } else "⚡ ${b.paymentMethod?.label ?: "Boleto/Pix"}"
+                    val cardObj = b.cardId?.let { cardsMap[it] }
+                    val isVale = b.paymentMethod == PaymentMethod.VA_VR || cardObj?.isVaVrCard == true
+                    val cardLabel = cardObj?.cardName
+                    val channel = when {
+                        isVale -> "🍽️ Vale ${cardLabel ?: "Pré-Pago"}".trim()
+                        b.paymentMethod == PaymentMethod.CREDIT_CARD || !cardLabel.isNullOrBlank() -> "💳 Cartão ${cardLabel ?: ""}".trim()
+                        else -> "⚡ ${b.paymentMethod?.label ?: "Boleto/Pix"}"
+                    }
                     val matchedTx = monthTxs.find { it.recurringBillId == b.id } ?: FinanceEngine.findMatchingManualBill(monthTxs, curMonth, b)
                     val monthBadge = when {
                         matchedTx?.status == TransactionStatus.PAID -> "✅ Já Pago/Recebido no mês"
@@ -2855,8 +2942,14 @@ class AndroidAgentToolsEngine(
                 val matchedCard = if (!cardName.isNullOrBlank()) {
                     cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
                 } else null
+                val isValeSignal = matchedCard?.isVaVrCard == true ||
+                    paymentMethod == PaymentMethod.VA_VR ||
+                    neuralClassifier.detectPaymentMethod(desc) == PaymentMethod.VA_VR ||
+                    CategoryRegistry.isVaVrCategory(category, subcategory)
+                val resolvedCard = matchedCard ?: if (isValeSignal) cards.firstOrNull { it.isVaVrCard } else null
                 val effectiveMethod = when {
-                    matchedCard != null -> PaymentMethod.CREDIT_CARD
+                    isValeSignal -> PaymentMethod.VA_VR
+                    resolvedCard != null -> PaymentMethod.CREDIT_CARD
                     paymentMethod != null -> paymentMethod
                     else -> PaymentMethod.BILL
                 }
@@ -2865,12 +2958,12 @@ class AndroidAgentToolsEngine(
                     ownerUid = user.uid,
                     description = desc,
                     defaultAmount = amt,
-                    dueDay = dueDay ?: matchedCard?.dueDay ?: 10,
+                    dueDay = dueDay ?: resolvedCard?.dueDay ?: 10,
                     category = category ?: guessed.category,
                     subcategory = subcategory ?: guessed.subcategory,
                     type = type ?: TransactionType.EXPENSE,
                     paymentMethod = effectiveMethod,
-                    cardId = matchedCard?.id,
+                    cardId = resolvedCard?.id,
                     startMonth = FinanceEngine.currentMonthKey(),
                     installmentsCount = monthsLimit,
                     active = true
@@ -2881,7 +2974,7 @@ class AndroidAgentToolsEngine(
                             "• **Descrição**: $desc\n" +
                             "• **Valor Mensal**: ${FinanceEngine.formatCurrency(amt)}\n" +
                             "• **Vencimento**: Todo dia ${newBill.dueDay}\n" +
-                            "• **Canal**: ${if (matchedCard != null) "Cartão ${matchedCard.cardName}" else effectiveMethod.label}\n" +
+                            "• **Canal**: ${if (effectiveMethod == PaymentMethod.VA_VR) "Vale Pré-Pago ${resolvedCard?.cardName ?: "(VA/VR)"}" else if (resolvedCard != null) "Cartão ${resolvedCard.cardName}" else effectiveMethod.label}\n" +
                             "• **Categoria**: ${newBill.category}\n\n" +
                             "Essa conta será projetada automaticamente nos seus próximos 12 meses!",
                     actionCard = ActionCardData(
@@ -2899,14 +2992,27 @@ class AndroidAgentToolsEngine(
                 val matchedCard = if (!cardName.isNullOrBlank()) {
                     cards.find { it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true) }
                 } else null
+                val nextMethod = when {
+                    matchedCard?.isVaVrCard == true -> PaymentMethod.VA_VR
+                    matchedCard != null -> PaymentMethod.CREDIT_CARD
+                    paymentMethod != null -> paymentMethod
+                    else -> target.paymentMethod
+                }
+                val nextCardId = when {
+                    matchedCard != null -> matchedCard.id
+                    nextMethod == PaymentMethod.VA_VR -> target.cardId ?: cards.firstOrNull { it.isVaVrCard }?.id
+                    nextMethod == PaymentMethod.CREDIT_CARD -> target.cardId
+                    nextMethod != null -> null
+                    else -> target.cardId
+                }
                 val updated = target.copy(
                     defaultAmount = amount ?: target.defaultAmount,
                     dueDay = dueDay ?: target.dueDay,
                     category = category ?: target.category,
                     subcategory = subcategory ?: target.subcategory,
                     type = type ?: target.type,
-                    paymentMethod = matchedCard?.let { PaymentMethod.CREDIT_CARD } ?: paymentMethod ?: target.paymentMethod,
-                    cardId = if (matchedCard != null) matchedCard.id else target.cardId,
+                    paymentMethod = nextMethod,
+                    cardId = nextCardId,
                     installmentsCount = monthsLimit ?: target.installmentsCount
                 )
                 repository.saveRecurringBill(updated)
@@ -3228,9 +3334,11 @@ class AndroidAgentToolsEngine(
             "\n\n🗓️ **Projeção de Fluxo para ${projections.size} Meses:**\n$rows"
         } else ""
 
-        val vaVrBlock = if (summary.vaVrCarryover > 0.0 || summary.vaVrIncome > 0.0 || summary.vaVrSpent > 0.0) {
+        val valeCards = cards.filter { it.isVaVrCard }
+        val vaVrBlock = if (valeCards.isNotEmpty() || summary.vaVrCarryover != 0.0 || summary.vaVrIncome > 0.0 || summary.vaVrSpent > 0.0) {
             val dailyVaVrStr = summary.vaVrDailyLimit?.let { "${FinanceEngine.formatCurrency(it)}/dia" } ?: "Sem saldo / encerrado"
-            "\n\n🍽️ **Módulo VA/VR (Isolado da Conta Corrente):**\n" +
+            val valeNames = valeCards.joinToString(", ") { it.cardName }.ifBlank { "Vale VA/VR" }
+            "\n\n🍽️ **Cartão Vale / Pré-Pago ($valeNames — Isolado da Conta):**\n" +
                 "  • **Disponível Agora**: ${FinanceEngine.formatCurrency(summary.vaVrAvailableBalance)} (Carryover: ${FinanceEngine.formatCurrency(summary.vaVrCarryover)} + Recargas pagas: ${FinanceEngine.formatCurrency(summary.vaVrIncomePaid)} - Gastos pagos: ${FinanceEngine.formatCurrency(summary.vaVrSpentPaid)})\n" +
                 "  • **Projetado no Mês**: ${FinanceEngine.formatCurrency(summary.vaVrProjectedBalance)} (Recargas totais: ${FinanceEngine.formatCurrency(summary.vaVrIncome)} | Gastos totais: ${FinanceEngine.formatCurrency(summary.vaVrSpent)})\n" +
                 "  • **Sugestão de Limite Diário VA/VR**: $dailyVaVrStr"
@@ -3478,7 +3586,7 @@ class AndroidAgentToolsEngine(
             }
 
             "sugerir_tetos" -> {
-                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome, summary.carryoverAmount, summary.previousMonthDeficit)
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome, summary.carryoverAmount, summary.previousMonthDeficit, cards)
                 val suggested = suggestedResult.suggestedBudgets
                 if (suggested.isEmpty()) {
                     return ToolExecutionResult(text = "ℹ️ Ainda não há dados suficientes de renda ou despesas para sugerir tetos automaticamente.")
@@ -3504,7 +3612,7 @@ class AndroidAgentToolsEngine(
             }
 
             "aplicar_sugestao_ia" -> {
-                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome, summary.carryoverAmount, summary.previousMonthDeficit)
+                val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, expectedIncome, summary.carryoverAmount, summary.previousMonthDeficit, cards)
                 val suggested = suggestedResult.suggestedBudgets
                 if (suggested.isEmpty()) {
                     return ToolExecutionResult(text = "⚠️ Não foi possível gerar tetos sugeridos sem receita ou histórico no mês.")
@@ -3585,7 +3693,7 @@ class AndroidAgentToolsEngine(
             else -> {
                 // "consultar"
                 if (report.categories.isEmpty()) {
-                    val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income, summary.carryoverAmount, summary.previousMonthDeficit)
+                    val suggestedResult = FinanceEngine.suggestCategoryBudgets(all, user.uid, month, summary.income, summary.carryoverAmount, summary.previousMonthDeficit, cards)
                     val suggested = suggestedResult.suggestedBudgets
                     val sugTotal = suggested.values.sum()
                     return ToolExecutionResult(
@@ -4088,9 +4196,17 @@ class AndroidAgentToolsEngine(
         val intent = neuralClassifier.parseNaturalIntent(trimmed)
         if (intent != null && intent.amount > 0.0) {
             val cards = repository.getCards().first()
-            val card = if (intent.isCreditCard) {
-                cards.find { it.cardName.contains(intent.cardNameHint ?: "", ignoreCase = true) } ?: cards.firstOrNull()
-            } else null
+            val card = when {
+                intent.isCreditCard -> {
+                    val creditCards = cards.filter { !it.isVaVrCard }
+                    creditCards.find { it.cardName.contains(intent.cardNameHint ?: "", ignoreCase = true) } ?: creditCards.firstOrNull()
+                }
+                intent.paymentMethod == PaymentMethod.VA_VR -> {
+                    val valeCards = cards.filter { it.isVaVrCard }
+                    valeCards.find { it.cardName.contains(intent.cardNameHint ?: "", ignoreCase = true) } ?: valeCards.firstOrNull()
+                }
+                else -> null
+            }
 
             return executeCreateTransaction(
                 description = intent.description,

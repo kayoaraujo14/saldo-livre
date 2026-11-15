@@ -51,20 +51,22 @@ class TransactionFormViewModel(
     private val initialPreset: String? = null
 ) : ViewModel() {
 
+    private val neuralClassifier = com.saldolivre.app.data.ai.NeuralFinanceClassifier(context = null)
+
     private val _state = MutableStateFlow(
         when (initialPreset) {
             "va_vr_income" -> TransactionFormState(
                 type = TransactionType.INCOME,
-                category = "VA/VR",
-                subcategory = "Recarga VA/VR",
-                paymentMethod = PaymentMethod.PIX,
+                category = "Benefícios",
+                subcategory = "Vale Alimentação (VA)",
+                paymentMethod = PaymentMethod.VA_VR,
                 status = TransactionStatus.PAID
             )
             "va_vr_expense" -> TransactionFormState(
                 type = TransactionType.EXPENSE,
-                category = "VA/VR",
+                category = "Alimentação",
                 subcategory = "Supermercado",
-                paymentMethod = PaymentMethod.DEBIT,
+                paymentMethod = PaymentMethod.VA_VR,
                 status = TransactionStatus.PAID
             )
             else -> TransactionFormState()
@@ -96,10 +98,27 @@ class TransactionFormViewModel(
                     ownCards
                 }
                 _state.update { current ->
+                    val preferredPool = if (current.paymentMethod == PaymentMethod.VA_VR) {
+                        ownCards.filter { it.isVaVrCard }
+                    } else {
+                        ownCards.filter { !it.isVaVrCard }
+                    }
+                    val currentSelectedMatchesMethod = current.selectedCardId?.let { id ->
+                        launchableOrEditingCards.find { it.id == id }?.let { c ->
+                            current.isEditing ||
+                                (current.paymentMethod == PaymentMethod.VA_VR && c.isVaVrCard) ||
+                                (current.paymentMethod != PaymentMethod.VA_VR && !c.isVaVrCard)
+                        } == true
+                    } == true
                     current.copy(
                         availableCards = launchableOrEditingCards,
-                        selectedCardId = current.selectedCardId?.takeIf { id -> launchableOrEditingCards.any { it.id == id } }
-                            ?: if (cards.isEmpty()) current.selectedCardId else ownCards.firstOrNull()?.id,
+                        selectedCardId = if (currentSelectedMatchesMethod) {
+                            current.selectedCardId
+                        } else if (cards.isEmpty()) {
+                            current.selectedCardId
+                        } else {
+                            preferredPool.firstOrNull()?.id ?: ownCards.firstOrNull()?.id
+                        },
                         friends = activeFriends,
                         partner = partnerUser
                     )
@@ -274,21 +293,23 @@ class TransactionFormViewModel(
 
     fun onTypeChange(type: TransactionType) {
         val current = _state.value
-        val keepVaVr = CategoryRegistry.isVaVrCategory(current.category)
-        val defaultCat = if (keepVaVr) "VA/VR" else when (type) {
-            TransactionType.INCOME -> "Salário & Remuneração"
-            TransactionType.EXPENSE -> "Alimentação"
+        val isVale = current.paymentMethod == PaymentMethod.VA_VR
+        val defaultCat = when {
+            isVale && type == TransactionType.INCOME -> "Benefícios"
+            isVale && type == TransactionType.EXPENSE -> "Alimentação"
+            type == TransactionType.INCOME -> "Salário & Remuneração"
+            else -> "Alimentação"
         }
-        val defaultSubcat = if (keepVaVr) {
-            if (type == TransactionType.INCOME) "Recarga VA/VR" else "Supermercado"
-        } else when (type) {
-            TransactionType.INCOME -> "Salário Principal"
-            TransactionType.EXPENSE -> "Supermercado"
+        val defaultSubcat = when {
+            isVale && type == TransactionType.INCOME -> "Vale Alimentação (VA)"
+            isVale && type == TransactionType.EXPENSE -> "Supermercado"
+            type == TransactionType.INCOME -> "Salário Principal"
+            else -> "Supermercado"
         }
-        val nextPaymentMethod = if (keepVaVr) {
-            if (type == TransactionType.INCOME) PaymentMethod.PIX else PaymentMethod.DEBIT
+        val nextPaymentMethod = if (!isVale && type == TransactionType.INCOME && current.paymentMethod == PaymentMethod.CREDIT_CARD) {
+            PaymentMethod.PIX
         } else current.paymentMethod
-        val nextStatus = if (keepVaVr) TransactionStatus.PAID else current.status
+        val nextStatus = if (type == TransactionType.INCOME || isVale) TransactionStatus.PAID else current.status
         _state.update {
             it.copy(
                 type = type,
@@ -297,14 +318,44 @@ class TransactionFormViewModel(
                 subcategory = defaultSubcat,
                 paymentMethod = nextPaymentMethod,
                 status = nextStatus,
-                isInstallment = if (type == TransactionType.INCOME) false else it.isInstallment,
-                installmentsCount = if (type == TransactionType.INCOME) 1 else it.installmentsCount
+                isInstallment = if (type == TransactionType.INCOME || isVale) false else it.isInstallment,
+                installmentsCount = if (type == TransactionType.INCOME || isVale) 1 else it.installmentsCount
             )
         }
     }
 
     fun onDescriptionChange(desc: String) {
-        _state.update { it.copy(description = desc, errorMessage = null) }
+        _state.update { current ->
+            if (!current.isEditing && desc.trim().length >= 3) {
+                val guess = neuralClassifier.guessCategoryAndSubcategory(desc, type = current.type)
+                val subs = CategoryRegistry.get(guess.category).subcategories
+                val resolvedSubcat = guess.subcategory ?: subs.firstOrNull()
+                val detectedPm = neuralClassifier.detectPaymentMethod(desc)
+                val shouldSwitchToVale = initialPreset != "va_vr_expense" &&
+                    initialPreset != "va_vr_income" &&
+                    detectedPm == PaymentMethod.VA_VR
+                val valeCards = current.availableCards.filter { it.isVaVrCard }
+                val matchedValeId = if (shouldSwitchToVale && valeCards.isNotEmpty()) {
+                    valeCards.find { c ->
+                        desc.lowercase().contains(c.cardName.lowercase())
+                    }?.id ?: valeCards.firstOrNull()?.id
+                } else {
+                    current.selectedCardId
+                }
+                current.copy(
+                    description = desc,
+                    category = guess.category,
+                    subcategory = resolvedSubcat,
+                    paymentMethod = if (shouldSwitchToVale) PaymentMethod.VA_VR else current.paymentMethod,
+                    selectedCardId = if (shouldSwitchToVale) matchedValeId else current.selectedCardId,
+                    status = if (shouldSwitchToVale) TransactionStatus.PAID else current.status,
+                    isInstallment = if (shouldSwitchToVale) false else current.isInstallment,
+                    errorMessage = null
+                )
+            } else {
+                current.copy(description = desc, errorMessage = null)
+            }
+        }
     }
 
     fun onAmountChange(amount: String) {
@@ -329,22 +380,12 @@ class TransactionFormViewModel(
     fun onCategoryChange(cat: String, subcat: String? = null) {
         val current = _state.value
         val isEstorno = cat.equals("Estorno", ignoreCase = true) || current.isEstorno
-        val isVaVr = CategoryRegistry.isVaVrCategory(cat)
         val subs = CategoryRegistry.get(cat).subcategories
-        val resolvedSubcat = subcat ?: if (isVaVr) {
-            if (current.type == TransactionType.INCOME) "Recarga VA/VR"
-            else if (subs.contains("Supermercado")) "Supermercado" else subs.firstOrNull()
-        } else subs.firstOrNull()
-        val nextPaymentMethod = if (isVaVr) {
-            if (current.type == TransactionType.INCOME) PaymentMethod.PIX else PaymentMethod.DEBIT
-        } else current.paymentMethod
-        val nextStatus = if (isVaVr) TransactionStatus.PAID else current.status
+        val resolvedSubcat = subcat ?: subs.firstOrNull()
         _state.update {
             it.copy(
                 category = cat,
                 subcategory = resolvedSubcat,
-                paymentMethod = nextPaymentMethod,
-                status = nextStatus,
                 isEstorno = isEstorno
             )
         }
@@ -355,7 +396,27 @@ class TransactionFormViewModel(
     }
 
     fun onPaymentMethodChange(method: PaymentMethod) {
-        _state.update { it.copy(paymentMethod = method) }
+        _state.update { current ->
+            val nextCardId = when (method) {
+                PaymentMethod.VA_VR -> {
+                    val valeCards = current.availableCards.filter { it.isVaVrCard }
+                    current.selectedCardId?.takeIf { id -> valeCards.any { it.id == id } }
+                        ?: valeCards.firstOrNull()?.id
+                }
+                PaymentMethod.CREDIT_CARD -> {
+                    val creditCards = current.availableCards.filter { !it.isVaVrCard }
+                    current.selectedCardId?.takeIf { id -> creditCards.any { it.id == id } }
+                        ?: creditCards.firstOrNull()?.id
+                }
+                else -> current.selectedCardId
+            }
+            current.copy(
+                paymentMethod = method,
+                selectedCardId = nextCardId,
+                status = if (method == PaymentMethod.VA_VR) TransactionStatus.PAID else current.status,
+                isInstallment = if (method == PaymentMethod.VA_VR) false else current.isInstallment
+            )
+        }
     }
 
     fun onCardChange(cardId: String) {
@@ -830,7 +891,7 @@ class TransactionFormViewModel(
                             category = current.category,
                             subcategory = current.subcategory,
                             paymentMethod = current.paymentMethod,
-                            cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.id else null,
+                            cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD || current.paymentMethod == PaymentMethod.VA_VR) card?.id else null,
                             splitType = current.splitType,
                             externalName = externalName,
                             friend = if (!assignedFriendUid.isNullOrBlank() && !assignedFriendName.isNullOrBlank()) {
@@ -859,12 +920,13 @@ class TransactionFormViewModel(
                         )
                     )
                 } else {
+                    val isPostPaidCredit = current.paymentMethod == PaymentMethod.CREDIT_CARD && card?.isVaVrCard != true
                     val dateChanged = isoInputDate != origTx.dueDate ||
                             current.paymentMethod != origTx.paymentMethod ||
-                            (current.paymentMethod == PaymentMethod.CREDIT_CARD && card?.id != origTx.cardId)
+                            (card?.id != origTx.cardId)
 
                     val (dueDate, competenceMonth) = if (dateChanged) {
-                        if (current.paymentMethod == PaymentMethod.CREDIT_CARD) {
+                        if (isPostPaidCredit) {
                             val cardDates = FinanceEngine.calculateCardInvoiceDates(isoInputDate, card)
                             Pair(isoInputDate, cardDates.second)
                         } else {
@@ -875,7 +937,7 @@ class TransactionFormViewModel(
                         Pair(origTx.dueDate, origTx.competenceMonth)
                     }
 
-                    val payerUid = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+                    val payerUid = if (isPostPaidCredit && card != null) {
                         card.ownerUid
                     } else {
                         origTx.paidByUid.ifBlank { user.uid }
@@ -906,7 +968,7 @@ class TransactionFormViewModel(
                         current.description.trim()
                     }
 
-                    val cardUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+                    val cardUids = if ((current.paymentMethod == PaymentMethod.CREDIT_CARD || current.paymentMethod == PaymentMethod.VA_VR) && card != null) {
                         (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
                     } else emptyList()
                     val customUids = customAllocations?.mapNotNull { it.uid } ?: emptyList()
@@ -923,7 +985,7 @@ class TransactionFormViewModel(
                     val updatedTx = origTx.copy(
                         createdByUid = origTx.createdByUid.ifBlank { user.uid },
                         paidByUid = payerUid,
-                        cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.id else null,
+                        cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD || current.paymentMethod == PaymentMethod.VA_VR) card?.id else null,
                         description = formattedDesc,
                         category = current.category,
                         subcategory = current.subcategory,
@@ -967,13 +1029,14 @@ class TransactionFormViewModel(
                 return@launch
             }
 
-            val payerUid = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+            val isPostPaidCredit = current.paymentMethod == PaymentMethod.CREDIT_CARD && card?.isVaVrCard != true
+            val payerUid = if (isPostPaidCredit && card != null) {
                 card.ownerUid
             } else {
                 user.uid
             }
 
-            val isInstallmentActive = current.type == TransactionType.EXPENSE && current.isInstallment && current.installmentsCount > 1
+            val isInstallmentActive = current.type == TransactionType.EXPENSE && current.isInstallment && current.installmentsCount > 1 && isPostPaidCredit
 
             if (isInstallmentActive) {
                 // Gera parcelas
@@ -988,7 +1051,7 @@ class TransactionFormViewModel(
                     purchaseDate = isoInputDate,
                     card = card,
                     installmentsTotal = current.installmentsCount,
-                    isCreditCard = current.paymentMethod == PaymentMethod.CREDIT_CARD
+                    isCreditCard = isPostPaidCredit
                 )
                 val installmentList = mutableListOf<Transaction>()
 
@@ -1025,7 +1088,7 @@ class TransactionFormViewModel(
                         customAllocations = curCustomAllocs
                     )
 
-                    val cardUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+                    val cardUids = if ((current.paymentMethod == PaymentMethod.CREDIT_CARD || current.paymentMethod == PaymentMethod.VA_VR) && card != null) {
                         (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
                     } else emptyList()
                     val customUids = curCustomAllocs?.mapNotNull { it.uid } ?: emptyList()
@@ -1043,7 +1106,7 @@ class TransactionFormViewModel(
                         id = "tx_" + UUID.randomUUID().toString().take(8),
                         createdByUid = user.uid,
                         paidByUid = payerUid,
-                        cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.id else null,
+                        cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD || current.paymentMethod == PaymentMethod.VA_VR) card?.id else null,
                         description = FinanceEngine.formatInstallmentDesc(current.description, i, current.installmentsCount),
                         category = current.category,
                         subcategory = current.subcategory,
@@ -1086,7 +1149,7 @@ class TransactionFormViewModel(
                 )
             } else {
                 // Transação individual
-                val (dueDate, competenceMonth) = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) {
+                val (dueDate, competenceMonth) = if (isPostPaidCredit) {
                     val cardDates = FinanceEngine.calculateCardInvoiceDates(isoInputDate, card)
                     Pair(isoInputDate, cardDates.second)
                 } else {
@@ -1108,7 +1171,7 @@ class TransactionFormViewModel(
                     customAllocations = customAllocations
                 )
 
-                val cardUids = if (current.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+                val cardUids = if ((current.paymentMethod == PaymentMethod.CREDIT_CARD || current.paymentMethod == PaymentMethod.VA_VR) && card != null) {
                     (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
                 } else emptyList()
                 val customUids = customAllocations?.mapNotNull { it.uid } ?: emptyList()
@@ -1118,7 +1181,7 @@ class TransactionFormViewModel(
                     id = "tx_" + UUID.randomUUID().toString().take(8),
                     createdByUid = user.uid,
                     paidByUid = payerUid,
-                    cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD) card?.id else null,
+                    cardId = if (current.paymentMethod == PaymentMethod.CREDIT_CARD || current.paymentMethod == PaymentMethod.VA_VR) card?.id else null,
                     description = current.description.trim(),
                     category = current.category,
                     subcategory = current.subcategory,

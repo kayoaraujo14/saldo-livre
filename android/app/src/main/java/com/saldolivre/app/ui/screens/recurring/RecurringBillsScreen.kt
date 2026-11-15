@@ -281,6 +281,7 @@ fun RecurringBillsScreen(
 
                 items(filteredBills, key = { it.id }) { bill ->
                     val cardName = bill.cardId?.let { id -> uiState.cards.find { it.id == id }?.cardName }
+                    val isVaVrBill = CategoryRegistry.isVaVrRecurringBill(bill, uiState.cards)
                     val monthStatus = uiState.billStatuses[bill.id] ?: BillMonthStatusUi(
                         state = BillMonthlyState.NOT_LAUNCHED,
                         estimatedAmount = bill.defaultAmount
@@ -289,6 +290,7 @@ fun RecurringBillsScreen(
                     RecurringBillItemCard(
                         bill = bill,
                         cardName = cardName,
+                        isVale = isVaVrBill,
                         monthStatus = monthStatus,
                         onToggleActive = { viewModel.toggleBillActive(bill) },
                         onQuickEffectivate = { viewModel.quickEffectivateBillInMonth(bill) },
@@ -598,6 +600,7 @@ private fun ExecutiveMiniCard(
 private fun RecurringBillItemCard(
     bill: RecurringBill,
     cardName: String?,
+    isVale: Boolean = false,
     monthStatus: BillMonthStatusUi,
     onToggleActive: () -> Unit,
     onQuickEffectivate: () -> Unit,
@@ -605,7 +608,7 @@ private fun RecurringBillItemCard(
     onDelete: () -> Unit
 ) {
     val isIncome = bill.type == TransactionType.INCOME
-    val isCard = !isIncome && (bill.paymentMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank())
+    val isCard = !isIncome && !isVale && (bill.paymentMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank())
     val categoryDetail = remember(bill.category) { CategoryRegistry.get(bill.category) }
     val budgetNature = remember(bill.category, bill.subcategory) {
         CategoryRegistry.getBudgetNature(bill.category, bill.subcategory)
@@ -744,8 +747,16 @@ private fun RecurringBillItemCard(
                 }
 
                 // Badge de Método / Cartão
-                val methodLabel = if (isCard && !cardName.isNullOrBlank()) "Cartão $cardName" else (bill.paymentMethod?.label ?: "Boleto")
-                MiniPillBadge(text = methodLabel, color = TextSecondary)
+                val methodLabel = when {
+                    isVale && !cardName.isNullOrBlank() -> "Vale $cardName"
+                    isVale -> "Vale (VA/VR)"
+                    isCard && !cardName.isNullOrBlank() -> "Cartão $cardName"
+                    else -> bill.paymentMethod?.label ?: "Boleto"
+                }
+                MiniPillBadge(
+                    text = methodLabel,
+                    color = if (isVale) Color(0xFF2DD4BF) else TextSecondary
+                )
 
                 // Badge de Gatilho
                 MiniPillBadge(text = triggerLabel, color = TextMuted)
@@ -799,6 +810,8 @@ private fun RecurringBillItemCard(
                     if (bill.active && (monthStatus.state == BillMonthlyState.NOT_LAUNCHED || monthStatus.state == BillMonthlyState.IN_STATEMENT_PENDING)) {
                         val (quickLabel, quickIcon) = when {
                             monthStatus.state == BillMonthlyState.IN_STATEMENT_PENDING -> "Confirmar" to Icons.Default.Check
+                            isVale && isIncome -> "Recarregar" to Icons.Default.Restaurant
+                            isVale -> "Lançar" to Icons.Default.Restaurant
                             isCard -> "Lançar" to Icons.Default.CreditCard
                             isIncome -> "Receber" to Icons.Default.ArrowDownward
                             else -> "Efetivar" to Icons.Default.Check
@@ -1020,13 +1033,9 @@ private fun RecurringBillFormDialog(
                                     .border(1.dp, if (selected) accent else DarkBorder, RoundedCornerShape(12.dp))
                                     .clickable {
                                         type = t
-                                        if (CategoryRegistry.isVaVrCategory(category)) {
-                                            category = "VA/VR"
-                                            subcategory = if (t == TransactionType.INCOME) "Recarga VA/VR" else "Supermercado"
-                                            if (t == TransactionType.INCOME) {
-                                                paymentMethod = PaymentMethod.PIX
-                                                cardId = null
-                                            }
+                                        if (paymentMethod == PaymentMethod.VA_VR) {
+                                            category = if (t == TransactionType.INCOME) "Benefícios" else "Alimentação"
+                                            subcategory = if (t == TransactionType.INCOME) "Vale Alimentação (VA)" else "Supermercado"
                                         } else if (t == TransactionType.INCOME) {
                                             category = "Salário & Remuneração"
                                             subcategory = "Salário Principal"
@@ -1138,11 +1147,7 @@ private fun RecurringBillFormDialog(
                                         text = { Text(cat.name, color = TextPrimary) },
                                         onClick = {
                                             category = cat.name
-                                            subcategory = if (CategoryRegistry.isVaVrCategory(cat.name)) {
-                                                if (type == TransactionType.INCOME) "Recarga VA/VR" else "Supermercado"
-                                            } else {
-                                                cat.subcategories.firstOrNull()
-                                            }
+                                            subcategory = cat.subcategories.firstOrNull()
                                             catExpanded = false
                                         }
                                     )
@@ -1192,10 +1197,23 @@ private fun RecurringBillFormDialog(
                         }
                     }
 
-                    // Forma de Pagamento e Cartão
-                    if (type == TransactionType.EXPENSE) {
+                    // Forma de Pagamento e Cartão (Despesa e Renda Fixa — suporta Cartão Vale VA/VR)
+                    run {
+                        val tealAccent = Color(0xFF2DD4BF)
+                        val methodOptions = if (type == TransactionType.INCOME) {
+                            listOf(
+                                PaymentMethod.PIX to "Pix / Conta",
+                                PaymentMethod.VA_VR to "Vale (VA/VR)"
+                            )
+                        } else {
+                            listOf(
+                                PaymentMethod.BILL to "Boleto/Pix",
+                                PaymentMethod.CREDIT_CARD to "Crédito",
+                                PaymentMethod.VA_VR to "Vale (VA/VR)"
+                            )
+                        }
                         Text(
-                            text = "MÉTODO DE PAGAMENTO",
+                            text = if (type == TransactionType.INCOME) "CANAL DE RECEBIMENTO" else "MÉTODO DE PAGAMENTO",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextSecondary,
@@ -1205,76 +1223,103 @@ private fun RecurringBillFormDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            listOf(
-                                PaymentMethod.BILL to "Boleto/Pix",
-                                PaymentMethod.CREDIT_CARD to "Cartão de Crédito"
-                            ).forEach { (pm, label) ->
-                                val selected = (pm == PaymentMethod.CREDIT_CARD && paymentMethod == PaymentMethod.CREDIT_CARD) ||
-                                        (pm != PaymentMethod.CREDIT_CARD && paymentMethod != PaymentMethod.CREDIT_CARD)
+                            methodOptions.forEach { (pm, label) ->
+                                val selected = when {
+                                    pm == PaymentMethod.VA_VR -> paymentMethod == PaymentMethod.VA_VR
+                                    pm == PaymentMethod.CREDIT_CARD -> paymentMethod == PaymentMethod.CREDIT_CARD
+                                    else -> paymentMethod != PaymentMethod.CREDIT_CARD && paymentMethod != PaymentMethod.VA_VR
+                                }
+                                val accentColor = if (pm == PaymentMethod.VA_VR) tealAccent else Cyan400
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(if (selected) Cyan500.copy(alpha = 0.16f) else DarkBackground)
-                                        .border(1.dp, if (selected) Cyan400 else DarkBorder, RoundedCornerShape(10.dp))
+                                        .background(if (selected) accentColor.copy(alpha = 0.16f) else DarkBackground)
+                                        .border(1.dp, if (selected) accentColor else DarkBorder, RoundedCornerShape(10.dp))
                                         .clickable {
                                             paymentMethod = pm
-                                            if (pm == PaymentMethod.CREDIT_CARD && cardId.isNullOrBlank()) {
-                                                cardId = cards.firstOrNull()?.id
-                                            } else if (pm != PaymentMethod.CREDIT_CARD) {
+                                            if (pm == PaymentMethod.CREDIT_CARD) {
+                                                val creditPool = cards.filter { !it.isVaVrCard }
+                                                if (!creditPool.any { it.id == cardId }) {
+                                                    cardId = creditPool.firstOrNull()?.id
+                                                }
+                                            } else if (pm == PaymentMethod.VA_VR) {
+                                                val valePool = cards.filter { it.isVaVrCard }
+                                                if (!valePool.any { it.id == cardId }) {
+                                                    cardId = valePool.firstOrNull()?.id
+                                                }
+                                            } else {
                                                 cardId = null
                                             }
                                         }
-                                        .padding(vertical = 10.dp),
+                                        .padding(vertical = 10.dp, horizontal = 4.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = label,
-                                        fontSize = 12.sp,
+                                        fontSize = 11.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (selected) Cyan400 else TextSecondary
+                                        color = if (selected) accentColor else TextSecondary,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
                         }
 
-                        if (paymentMethod == PaymentMethod.CREDIT_CARD && cards.isNotEmpty()) {
-                            var cardExpanded by remember { mutableStateOf(false) }
-                            val selectedCardName = cards.find { it.id == cardId }?.cardName ?: cards.first().cardName
-                            ExposedDropdownMenuBox(
-                                expanded = cardExpanded,
-                                onExpandedChange = { cardExpanded = !cardExpanded }
-                            ) {
-                                OutlinedTextField(
-                                    value = selectedCardName,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("Cartão da Assinatura") },
-                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cardExpanded) },
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = Cyan400,
-                                        unfocusedBorderColor = DarkBorder,
-                                        focusedContainerColor = DarkBackground,
-                                        unfocusedContainerColor = DarkBackground
-                                    ),
-                                    modifier = Modifier
-                                        .menuAnchor()
-                                        .fillMaxWidth()
-                                )
-                                ExposedDropdownMenu(
+                        if (paymentMethod == PaymentMethod.CREDIT_CARD || paymentMethod == PaymentMethod.VA_VR) {
+                            val isValeMethod = paymentMethod == PaymentMethod.VA_VR
+                            val filteredCards = cards.filter { c -> if (isValeMethod) c.isVaVrCard else !c.isVaVrCard }
+                            val accentColor = if (isValeMethod) tealAccent else Cyan400
+                            if (filteredCards.isEmpty()) {
+                                if (isValeMethod) {
+                                    Text(
+                                        text = "Recarga ou conta vinculada direto ao saldo VA/VR (opcional: cadastre um cartão Vale em Cartões).",
+                                        fontSize = 11.sp,
+                                        color = tealAccent.copy(alpha = 0.85f)
+                                    )
+                                }
+                            } else {
+                                var cardExpanded by remember { mutableStateOf(false) }
+                                val selectedCardName = filteredCards.find { it.id == cardId }?.cardName
+                                    ?: filteredCards.first().cardName
+                                ExposedDropdownMenuBox(
                                     expanded = cardExpanded,
-                                    onDismissRequest = { cardExpanded = false },
-                                    modifier = Modifier.background(DarkSurface)
+                                    onExpandedChange = { cardExpanded = !cardExpanded }
                                 ) {
-                                    cards.forEach { c ->
-                                        DropdownMenuItem(
-                                            text = { Text(c.cardName, color = TextPrimary) },
-                                            onClick = {
-                                                cardId = c.id
-                                                cardExpanded = false
-                                            }
-                                        )
+                                    OutlinedTextField(
+                                        value = selectedCardName,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = {
+                                            Text(if (isValeMethod) "Cartão Vale (VA/VR)" else "Cartão da Assinatura")
+                                        },
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cardExpanded) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = accentColor,
+                                            unfocusedBorderColor = DarkBorder,
+                                            focusedContainerColor = DarkBackground,
+                                            unfocusedContainerColor = DarkBackground
+                                        ),
+                                        modifier = Modifier
+                                            .menuAnchor()
+                                            .fillMaxWidth()
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = cardExpanded,
+                                        onDismissRequest = { cardExpanded = false },
+                                        modifier = Modifier.background(DarkSurface)
+                                    ) {
+                                        filteredCards.forEach { c ->
+                                            DropdownMenuItem(
+                                                text = { Text(c.cardName, color = TextPrimary) },
+                                                onClick = {
+                                                    cardId = c.id
+                                                    cardExpanded = false
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1509,11 +1554,11 @@ private fun RecurringBillFormDialog(
                                     description = description.trim(),
                                     defaultAmount = parsedAmount,
                                     dueDay = parsedDueDay,
-                                    category = if (type == TransactionType.INCOME) "Receita" else category,
+                                    category = category,
                                     subcategory = subcategory,
                                     type = type,
                                     paymentMethod = paymentMethod,
-                                    cardId = if (paymentMethod == PaymentMethod.CREDIT_CARD) cardId else null,
+                                    cardId = if (paymentMethod == PaymentMethod.CREDIT_CARD || paymentMethod == PaymentMethod.VA_VR) cardId else null,
                                     estimationRule = estimationRule,
                                     splitType = if (type == TransactionType.INCOME) SplitType.MINE else splitType,
                                     launchTrigger = launchTrigger,

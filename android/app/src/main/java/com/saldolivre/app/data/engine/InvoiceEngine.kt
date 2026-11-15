@@ -166,11 +166,16 @@ object InvoiceEngine {
     ): CardInvoice {
         val (closingDate, dueDate) = invoiceDates(card, monthKey)
 
-        val items = all.filter {
-            it.cardId == card.id &&
-                it.competenceMonth == monthKey &&
-                it.reserveCardId == null
-        }.sortedWith(compareByDescending<Transaction> { it.dueDate }.thenByDescending { it.createdAt })
+        val items = if (card.isVaVrCard) {
+            emptyList()
+        } else {
+            all.filter {
+                it.cardId == card.id &&
+                    it.competenceMonth == monthKey &&
+                    it.reserveCardId == null &&
+                    it.paymentMethod != PaymentMethod.VA_VR
+            }.sortedWith(compareByDescending<Transaction> { it.dueDate }.thenByDescending { it.createdAt })
+        }
 
         val expenses = items.filter { it.type == TransactionType.EXPENSE }
         val creditItems = items.filter { it.type == TransactionType.INCOME }
@@ -259,10 +264,15 @@ object InvoiceEngine {
 
         val topExpense = expenses.maxByOrNull { it.effectiveAmount }
 
-        val futureItems = all.filter {
-            it.cardId == card.id &&
-                it.competenceMonth > monthKey &&
-                it.reserveCardId == null
+        val futureItems = if (card.isVaVrCard) {
+            emptyList()
+        } else {
+            all.filter {
+                it.cardId == card.id &&
+                    it.competenceMonth > monthKey &&
+                    it.reserveCardId == null &&
+                    it.paymentMethod != PaymentMethod.VA_VR
+            }
         }
         val futureExpenses = futureItems.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
         val futureCredits = futureItems.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
@@ -620,12 +630,16 @@ object InvoiceEngine {
         if (!enabled || uid.isBlank()) return monthTransactions
 
         val nonCardTxs = monthTransactions.filter {
-            it.paymentMethod != PaymentMethod.CREDIT_CARD || it.cardId.isNullOrBlank() || it.reserveCardId != null
+            val linkedCard = it.cardId?.let { cid -> cards.find { c -> c.id == cid } }
+            it.paymentMethod != PaymentMethod.CREDIT_CARD ||
+                it.cardId.isNullOrBlank() ||
+                it.reserveCardId != null ||
+                linkedCard?.isVaVrCard == true
         }
 
         val relevantCardMap = LinkedHashMap<String, Card>()
         for (c in cards) {
-            if (c.ownerUid == uid || c.sharedWithUids.contains(uid)) {
+            if (!c.isVaVrCard && (c.ownerUid == uid || c.sharedWithUids.contains(uid))) {
                 relevantCardMap[c.id] = c
             }
         }

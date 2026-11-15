@@ -2,6 +2,7 @@ package com.saldolivre.app.data.notification
 
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.PaymentMethod
+import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.data.model.UserLearnedRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,7 +36,8 @@ class NotificationExpenseParserTest {
         assertEquals(PaymentMethod.CREDIT_CARD, draft.paymentMethod)
         assertEquals("card_nu", draft.cardId)
         assertEquals("Nubank Ultravioleta", draft.cardName)
-        assertTrue(draft.description.contains("IFD*IFOOD", ignoreCase = true))
+        assertEquals("Pedido no iFood", draft.description)
+        assertTrue(draft.rawMerchant.contains("IFD*IFOOD", ignoreCase = true))
         assertEquals("Alimentação", draft.category)
         assertEquals("2026-11-15", draft.date)
     }
@@ -55,7 +57,8 @@ class NotificationExpenseParserTest {
         assertEquals(PaymentMethod.CREDIT_CARD, draft.paymentMethod)
         assertEquals("card_itau", draft.cardId)
         assertEquals("Itaú Click 4821", draft.cardName)
-        assertTrue(draft.description.contains("DROGASIL", ignoreCase = true))
+        assertEquals("Farmácia Drogasil", draft.description)
+        assertTrue(draft.rawMerchant.contains("DROGASIL", ignoreCase = true))
         assertEquals("Saúde", draft.category)
     }
 
@@ -71,6 +74,7 @@ class NotificationExpenseParserTest {
         assertEquals(189.0, sicrediDraft!!.amount, 0.001)
         assertEquals(PaymentMethod.CREDIT_CARD, sicrediDraft.paymentMethod)
         assertEquals("card_sicredi", sicrediDraft.cardId)
+        assertEquals("Combustível Posto Ipiranga", sicrediDraft.description)
         assertEquals("Transporte", sicrediDraft.category)
 
         val interDraft = NotificationExpenseParser.parse(
@@ -83,6 +87,7 @@ class NotificationExpenseParserTest {
         assertEquals(59.90, interDraft!!.amount, 0.001)
         assertEquals(PaymentMethod.CREDIT_CARD, interDraft.paymentMethod)
         assertEquals("card_inter", interDraft.cardId)
+        assertEquals("Assinatura Netflix", interDraft.description)
         assertEquals("Assinaturas & Serviços", interDraft.category)
     }
 
@@ -144,10 +149,67 @@ class NotificationExpenseParserTest {
     }
 
     @Test
-    fun `deve ignorar Pix recebido propagandas limite 2FA e compras negadas`() {
+    fun `deve criar rascunho de entrada INCOME ao receber notificacao de Pix recebido`() {
+        val nuIncome = NotificationExpenseParser.parse(
+            packageName = "com.nu.production",
+            title = "Pix recebido",
+            text = "Você recebeu um Pix de R$ 350,00 de Maria Clara.",
+            cards = sampleCards,
+            date = "2026-11-15"
+        )
+        assertNotNull(nuIncome)
+        nuIncome!!
+        assertEquals(TransactionType.INCOME, nuIncome.type)
+        assertEquals(PaymentMethod.PIX, nuIncome.paymentMethod)
+        assertEquals(350.00, nuIncome.amount, 0.001)
+        assertNull(nuIncome.cardId)
+        assertEquals("Pix recebido de Maria Clara", nuIncome.description)
+        assertEquals("Outras Receitas", nuIncome.category)
+        assertEquals("Pix Recebido", nuIncome.subcategory)
+
+        val genericIncome = NotificationExpenseParser.parse(
+            packageName = "com.itau",
+            title = "Transferência recebida",
+            text = "Recebeu um Pix de R$ 90,00.",
+            cards = sampleCards
+        )
+        assertNotNull(genericIncome)
+        genericIncome!!
+        assertEquals(TransactionType.INCOME, genericIncome.type)
+        assertEquals(PaymentMethod.PIX, genericIncome.paymentMethod)
+        assertEquals(90.00, genericIncome.amount, 0.001)
+        assertEquals("Pix recebido", genericIncome.description)
+        assertEquals("Outras Receitas", genericIncome.category)
+
+        val sicrediIncome = NotificationExpenseParser.parse(
+            packageName = "br.com.sicredi.g2",
+            title = "Sicredi Pix",
+            text = "Você recebeu uma transferência Pix de R$\u00A0420,00 de EMPRESA ABC LTDA.",
+            cards = sampleCards
+        )
+        assertNotNull(sicrediIncome)
+        sicrediIncome!!
+        assertEquals(TransactionType.INCOME, sicrediIncome.type)
+        assertEquals(420.00, sicrediIncome.amount, 0.001)
+        assertFalse(sicrediIncome.description.contains("LTDA", ignoreCase = true))
+        assertEquals("Pix recebido de Empresa Abc", sicrediIncome.description)
+
+        val infinitePayIncome = NotificationExpenseParser.parse(
+            packageName = "io.cloudwalk.infinitepaydash",
+            title = "InfinitePay",
+            text = "Pix recebido no valor de R$ 180,50. Remetente: CARLOS HENRIQUE.",
+            cards = sampleCards
+        )
+        assertNotNull(infinitePayIncome)
+        infinitePayIncome!!
+        assertEquals(TransactionType.INCOME, infinitePayIncome.type)
+        assertEquals(180.50, infinitePayIncome.amount, 0.001)
+        assertEquals("Pix recebido de Carlos Henrique", infinitePayIncome.description)
+    }
+
+    @Test
+    fun `deve ignorar propagandas limite 2FA rendimentos e compras negadas`() {
         val ignoredNotifications = listOf(
-            "Pix recebido" to "Você recebeu um Pix de R$ 350,00 de Maria Clara.",
-            "Transferência recebida" to "Recebeu um Pix de R$ 90,00.",
             "Empréstimo pré-aprovado" to "Peça já seu empréstimo de R$ 10.000,00 com juros baixos!",
             "Seu limite" to "Você tem limite disponível de R$ 8.500,00 no seu cartão.",
             "Código de segurança" to "Seu código de verificação 2FA é 492810. Não compartilhe este código.",
@@ -201,5 +263,145 @@ class NotificationExpenseParserTest {
         assertFalse(cache.isDuplicateAndRecord("com.nu.production", "Compra aprovada", "R$ 99,90 em IFOOD", nowMs = t0 + 50_000L))
         // Após janela de 2 minutos -> permitido novamente
         assertFalse(cache.isDuplicateAndRecord("com.nu.production", "Compra aprovada", "R$ 48,90 em IFOOD", nowMs = t0 + 125_000L))
+    }
+
+    @Test
+    fun `deve reconhecer pacotes do Sicredi com NBSP e multiplos formatos de notificacao`() {
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("br.com.sicredi.g2"))
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("br.com.sicredi.woop"))
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("com.sicredi.x"))
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("br.com.sicredi.cartoes"))
+
+        val cardDraft = NotificationExpenseParser.parse(
+            packageName = "br.com.sicredi.g2",
+            title = "Sicredi",
+            text = "Compra no cartão de crédito de R$\u00A084,50 em AUTO POSTO ESTRELA LTDA",
+            cards = sampleCards
+        )
+        assertNotNull(cardDraft)
+        cardDraft!!
+        assertEquals(84.50, cardDraft.amount, 0.001)
+        assertEquals(PaymentMethod.CREDIT_CARD, cardDraft.paymentMethod)
+        assertEquals("card_sicredi", cardDraft.cardId)
+        assertFalse(cardDraft.description.contains("LTDA", ignoreCase = true))
+        assertTrue(cardDraft.description.contains("Posto Estrela", ignoreCase = true))
+
+        val pixDraft = NotificationExpenseParser.parse(
+            packageName = "br.com.sicredi.g2",
+            title = "Sicredi Pix",
+            text = "Pix realizado com sucesso no valor de R$\u00A0250,00. Favorecido: CLINICA VIDA SAUDE LTDA",
+            cards = sampleCards
+        )
+        assertNotNull(pixDraft)
+        pixDraft!!
+        assertEquals(250.00, pixDraft.amount, 0.001)
+        assertEquals(PaymentMethod.PIX, pixDraft.paymentMethod)
+        assertNull(pixDraft.cardId)
+        assertFalse(pixDraft.description.contains("LTDA", ignoreCase = true))
+        assertTrue(pixDraft.description.contains("Clinica Vida Saude", ignoreCase = true) || pixDraft.description.contains("Clínica", ignoreCase = true))
+    }
+
+    @Test
+    fun `deve reconhecer InfinitePay para compras e Pix e ignorar vendas na maquininha`() {
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("io.cloudwalk.infinitepaydash"))
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("io.cloudwalk.infinitepay"))
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("br.com.infinitepay"))
+        assertTrue(NotificationExpenseParser.isSupportedBankPackage("com.infinitepay.app"))
+
+        val cardsWithInfinite = sampleCards + Card(
+            id = "card_inf",
+            ownerUid = "u1",
+            ownerName = "Kayo",
+            cardName = "Cartão InfinitePay"
+        )
+
+        val purchaseDraft = NotificationExpenseParser.parse(
+            packageName = "io.cloudwalk.infinitepaydash",
+            title = "InfinitePay",
+            text = "Compra aprovada no cartão InfinitePay de R$ 63,40 em PAG*Mercadinho Central",
+            cards = cardsWithInfinite
+        )
+        assertNotNull(purchaseDraft)
+        purchaseDraft!!
+        assertEquals(63.40, purchaseDraft.amount, 0.001)
+        assertEquals(PaymentMethod.CREDIT_CARD, purchaseDraft.paymentMethod)
+        assertEquals("card_inf", purchaseDraft.cardId)
+        assertFalse(purchaseDraft.description.contains("PAG*", ignoreCase = true))
+        assertTrue(purchaseDraft.description.contains("Mercadinho Central", ignoreCase = true))
+        assertTrue(purchaseDraft.rawMerchant.contains("PAG*Mercadinho Central", ignoreCase = true))
+
+        val pixExpense = NotificationExpenseParser.parse(
+            packageName = "br.com.infinitepay",
+            title = "Envio de Pix",
+            text = "Pagamento via Pix de R$ 120,00 para Academia Boa Forma",
+            cards = cardsWithInfinite
+        )
+        assertNotNull(pixExpense)
+        assertEquals(120.00, pixExpense!!.amount, 0.001)
+        assertEquals(PaymentMethod.PIX, pixExpense.paymentMethod)
+        assertTrue(pixExpense.description.contains("Academia Boa Forma", ignoreCase = true))
+
+        val incomingSales = listOf(
+            "Venda aprovada" to "Venda aprovada no crédito de R$ 199,90 na maquininha",
+            "Nova venda" to "Você vendeu R$ 85,00 no Pix",
+            "Recebimento" to "Recebimento aprovado de R$ 300,00"
+        )
+        for ((title, text) in incomingSales) {
+            assertNull(
+                "Vendas recebidas não devem virar despesas pessoais ($title)",
+                NotificationExpenseParser.parse("io.cloudwalk.infinitepaydash", title, text, cardsWithInfinite)
+            )
+        }
+    }
+
+    @Test
+    fun `deve suportar cooperativas fintechs e apps bancarios desconhecidos mas bloquear apps de mensagens`() {
+        val expectedSupported = listOf(
+            "pag.meu.app",
+            "br.com.willbank",
+            "br.com.sicoobnet.pessoal",
+            "br.com.unicred.mobile",
+            "br.com.cresol.mobile",
+            "br.com.stone.ton",
+            "co.cora.app",
+            "com.nomad.app",
+            "com.transferwise.android",
+            "br.com.bancoregional.pay"
+        )
+        for (pkg in expectedSupported) {
+            assertTrue(
+                "Esperava suporte para notificação bancária de $pkg",
+                NotificationExpenseParser.isSupportedBankNotification(
+                    packageName = pkg,
+                    title = "Compra aprovada",
+                    text = "Compra aprovada no cartão de R$ 55,00 em SUPERMERCADO BOM JESUS"
+                )
+            )
+        }
+
+        assertFalse(NotificationExpenseParser.isSupportedBankPackage("com.whatsapp"))
+        assertFalse(
+            NotificationExpenseParser.isSupportedBankNotification(
+                packageName = "com.whatsapp",
+                title = "Contato",
+                text = "Compra aprovada no cartão de R$ 55,00 em IFOOD"
+            )
+        )
+    }
+
+    @Test
+    fun `deve transformar nomes fantasia e razoes sociais em descricoes inteligentes sem perder rawMerchant`() {
+        val foodDraft = NotificationExpenseParser.parse(
+            packageName = "com.nu.production",
+            title = "Compra aprovada",
+            text = "Compra aprovada de R$ 39,90 em EC*UBER EATS BR LTDA",
+            cards = sampleCards
+        )
+        assertNotNull(foodDraft)
+        foodDraft!!
+        assertEquals("Pedido no Uber Eats", foodDraft.description)
+        assertFalse(foodDraft.description.contains("EC*", ignoreCase = true))
+        assertFalse(foodDraft.description.contains("LTDA", ignoreCase = true))
+        assertTrue(foodDraft.rawMerchant.contains("UBER EATS", ignoreCase = true))
     }
 }

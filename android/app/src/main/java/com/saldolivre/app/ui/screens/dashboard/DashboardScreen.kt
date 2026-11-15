@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.CategoryBudgetAlertStatus
 import com.saldolivre.app.data.model.FinancialHealthClassification
 import com.saldolivre.app.data.model.MonthSummary
@@ -572,13 +573,21 @@ fun DashboardScreen(
                 }
             }
 
-            // 3.0 Card Dedicado: Benefícios VA / VR (Pote 100% Isolado)
-            item(key = "va_vr_module", contentType = "va_vr_module") {
-                VaVrModuleCard(
-                    summary = summary,
-                    onLaunchExpense = { onNavigateToAddTransaction("va_vr_expense") },
-                    onLaunchIncome = { onNavigateToAddTransaction("va_vr_income") }
-                )
+            // 3.0 Card Dedicado: Cartão Vale (VA / VR Pré-Pago, 100% isolado da conta)
+            val hasVaVrCardOrActivity = uiState.cards.any { it.isVaVrCard } ||
+                summary.vaVrCarryover != 0.0 ||
+                summary.vaVrIncome > 0.0 ||
+                summary.vaVrSpent > 0.0 ||
+                summary.vaVrBySubcategory.any { it.count > 0 }
+            if (hasVaVrCardOrActivity) {
+                item(key = "va_vr_module", contentType = "va_vr_module") {
+                    VaVrModuleCard(
+                        summary = summary,
+                        cards = uiState.cards,
+                        onLaunchExpense = { onNavigateToAddTransaction("va_vr_expense") },
+                        onLaunchIncome = { onNavigateToAddTransaction("va_vr_income") }
+                    )
+                }
             }
 
             // 3.1 Card Compacto de Saúde Financeira
@@ -1203,10 +1212,29 @@ fun DashboardScreen(
 @Composable
 private fun VaVrModuleCard(
     summary: MonthSummary,
+    cards: List<Card> = emptyList(),
     onLaunchExpense: () -> Unit,
     onLaunchIncome: () -> Unit
 ) {
-    val isNegative = summary.vaVrAvailableBalance < 0.0
+    val valeCards = remember(cards) { cards.filter { it.isVaVrCard } }
+    val vaVrCount = summary.vaVrBySubcategory.sumOf { it.count }
+    val isProjectedFallback = summary.vaVrAvailableBalance == 0.0 &&
+        summary.vaVrIncomePaid == 0.0 &&
+        summary.vaVrSpentPaid == 0.0 &&
+        (summary.vaVrIncome != 0.0 || summary.vaVrSpent != 0.0)
+    val displayBalance = if (isProjectedFallback) {
+        summary.vaVrProjectedBalance
+    } else {
+        summary.vaVrAvailableBalance
+    }
+    val displayDailyLimit = summary.vaVrDailyLimit ?: if (
+        isProjectedFallback && summary.daysRemaining > 0 && displayBalance > 0.0
+    ) {
+        FinanceEngine.round2(displayBalance / summary.daysRemaining.toDouble())
+    } else {
+        null
+    }
+    val isNegative = displayBalance < 0.0
     val vaVrTotalPot = summary.vaVrCarryover + summary.vaVrIncome
     val vaVrUsagePct = if (vaVrTotalPot > 0.0) {
         FinanceEngine.round2((summary.vaVrSpent / vaVrTotalPot) * 100.0)
@@ -1215,11 +1243,15 @@ private fun VaVrModuleCard(
     } else {
         0.0
     }
-    val vaVrCount = summary.vaVrBySubcategory.sumOf { it.count }
     val hasActivity = summary.vaVrCarryover != 0.0 ||
         summary.vaVrIncome > 0.0 ||
         summary.vaVrSpent > 0.0 ||
         vaVrCount > 0
+    val headerTitle = when {
+        valeCards.size == 1 -> "Vale ${valeCards.first().cardName}"
+        valeCards.size > 1 -> "Cartões Vale (${valeCards.size})"
+        else -> "Cartão Vale (VA / VR)"
+    }
     val tealAccent = Color(0xFF2DD4BF)
     val tealBorder = Color(0xFF14B8A6)
     val cardAccent = if (isNegative) Rose400 else tealAccent
@@ -1241,9 +1273,9 @@ private fun VaVrModuleCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header + Badges
+            // Header + Pill "Cartão Pré-Pago" sem quebra de texto
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1256,7 +1288,7 @@ private fun VaVrModuleCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
+                            .size(36.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(cardAccent.copy(alpha = 0.16f))
                             .border(1.dp, cardAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
@@ -1270,119 +1302,92 @@ private fun VaVrModuleCard(
                         )
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "Benefícios VA / VR",
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(tealAccent.copy(alpha = 0.14f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "Isolado",
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = tealAccent
-                                )
-                            }
-                        }
-                        if (isNegative) {
-                            Text(
-                                text = "Saldo negativo — ajuste ou recarga necessária",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Rose400
-                            )
-                        }
+                        Text(
+                            text = headerTitle,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = if (isNegative) {
+                                "Saldo negativo — recarga ou ajuste necessário"
+                            } else {
+                                "Benefício pré-pago separado da conta"
+                            },
+                            fontSize = 10.5.sp,
+                            fontWeight = if (isNegative) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (isNegative) Rose400 else TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
-
-                // Ações rápidas (+ Recarga / + VA/VR)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Emerald500.copy(alpha = 0.15f))
-                            .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                            .clickable { onLaunchIncome() }
-                            .padding(horizontal = 9.dp, vertical = 5.dp)
-                    ) {
-                        Text(
-                            text = "+ Recarga",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Emerald400
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(tealAccent.copy(alpha = 0.18f))
-                            .border(1.dp, tealAccent.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
-                            .clickable { onLaunchExpense() }
-                            .padding(horizontal = 9.dp, vertical = 5.dp)
-                    ) {
-                        Text(
-                            text = "+ VA/VR",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = tealAccent
-                        )
-                    }
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(tealAccent.copy(alpha = 0.14f))
+                        .border(1.dp, tealAccent.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "Cartão Pré-Pago",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = tealAccent,
+                        maxLines = 1,
+                        softWrap = false
+                    )
                 }
             }
 
-            // Hero: Disponível Agora vs Projetado no Mês
+            // Hero: Saldo Disponível no Cartão Vale vs Projetado / Efetivado
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        text = "DISPONÍVEL AGORA",
+                        text = if (isProjectedFallback) "SALDO NO VALE (PREVISTO)" else "SALDO NO VALE",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TextSecondary,
                         letterSpacing = 0.4.sp
                     )
                     Text(
-                        text = FinanceEngine.formatCurrency(summary.vaVrAvailableBalance),
-                        fontSize = 20.sp,
+                        text = FinanceEngine.formatCurrency(displayBalance),
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (isNegative) Rose400 else tealAccent
                     )
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "Projetado no mês",
+                        text = if (isProjectedFallback) "Efetivado agora" else "Projetado fim do mês",
                         fontSize = 10.sp,
                         color = TextSecondary
                     )
                     Text(
-                        text = FinanceEngine.formatCurrency(summary.vaVrProjectedBalance),
+                        text = FinanceEngine.formatCurrency(
+                            if (isProjectedFallback) summary.vaVrAvailableBalance else summary.vaVrProjectedBalance
+                        ),
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (summary.vaVrProjectedBalance < 0.0) Rose400 else TextPrimary
+                        color = if (!isProjectedFallback && summary.vaVrProjectedBalance < 0.0) Rose400 else TextPrimary
                     )
                 }
             }
 
-            // Métricas secundárias (Acumulado | Recargas | Gasto | Limite Diário)
+            // Métricas secundárias (Anterior | Recargas | Gasto | Limite Diário)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 VaVrMiniMetric(
-                    label = "Acumulado",
+                    label = "Anterior",
                     value = FinanceEngine.formatCurrency(summary.vaVrCarryover),
                     valueColor = TextPrimary,
                     modifier = Modifier.weight(1f)
@@ -1400,27 +1405,27 @@ private fun VaVrModuleCard(
                     modifier = Modifier.weight(1f)
                 )
                 VaVrMiniMetric(
-                    label = "Limite/Dia",
-                    value = summary.vaVrDailyLimit?.let { "${FinanceEngine.formatCurrency(it)}/d" } ?: "—",
+                    label = "Média/Dia",
+                    value = displayDailyLimit?.let { "${FinanceEngine.formatCurrency(it)}/d" } ?: "—",
                     valueColor = tealAccent,
                     modifier = Modifier.weight(1f)
                 )
             }
 
-            // Barra de progresso
+            // Barra de uso do saldo mensal do vale
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = if (hasActivity) "Consumo do pote (${vaVrUsagePct.roundToInt()}%)"
-                        else "Lance recarga ou gasto para iniciar",
+                        text = if (hasActivity) "Uso do saldo no mês (${vaVrUsagePct.roundToInt()}%)"
+                        else "Lance recarga ou gasto no vale para iniciar",
                         fontSize = 10.5.sp,
                         color = TextSecondary
                     )
                     Text(
-                        text = "$vaVrCount ${if (vaVrCount == 1) "gasto" else "gastos"}",
+                        text = "$vaVrCount ${if (vaVrCount == 1) "lançamento" else "lançamentos"}",
                         fontSize = 10.5.sp,
                         color = TextMuted
                     )
@@ -1438,6 +1443,51 @@ private fun VaVrModuleCard(
                             .fillMaxHeight()
                             .clip(RoundedCornerShape(3.dp))
                             .background(barColor)
+                    )
+                }
+            }
+
+            // Ações Rápidas dedicadas (evitam aperto no cabeçalho)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Emerald500.copy(alpha = 0.14f))
+                        .border(1.dp, Emerald500.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                        .clickable { onLaunchIncome() }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "+ Recarga",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Emerald400,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(tealAccent.copy(alpha = 0.18f))
+                        .border(1.dp, tealAccent.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                        .clickable { onLaunchExpense() }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "+ Usar Vale",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = tealAccent,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }

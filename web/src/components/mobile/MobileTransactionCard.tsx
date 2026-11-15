@@ -304,7 +304,17 @@ export function MobileTransactionCard({
           {tx.paymentMethod && (
             <div className="flex justify-between text-slate-400">
               <span>Método de pagamento:</span>
-              <span className="text-slate-200 font-medium capitalize">{tx.paymentMethod}</span>
+              <span className="text-slate-200 font-medium">
+                {tx.paymentMethod === 'va_vr'
+                  ? `🍽️ Vale (${card?.cardName || 'VA/VR'})`
+                  : tx.paymentMethod === 'credit_card'
+                    ? `💳 Crédito${card?.cardName ? ` (${card.cardName})` : ''}`
+                    : tx.paymentMethod === 'pix'
+                      ? '⚡ Pix'
+                      : tx.paymentMethod === 'debit'
+                        ? '🏦 Débito'
+                        : '📄 Boleto'}
+              </span>
             </div>
           )}
           {isSharedAndDifferent && (

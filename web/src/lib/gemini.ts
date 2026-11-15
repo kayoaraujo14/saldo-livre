@@ -250,12 +250,12 @@ export const functionDeclarations: FunctionDeclaration[] = [
     parameters: {
       type: Type.OBJECT,
       properties: {
-        descricao: { type: Type.STRING, description: 'Descrição da despesa ou receita. Ex: "Decolar", "Amazon", "Uber".' },
+        descricao: { type: Type.STRING, description: 'Descrição financeira inteligente, limpa e legível do gasto ou receita (ex: "Pedido no iFood", "Farmácia Drogasil", "Uber", "Amazon"). Nunca use código bruto de maquininha/razão social (IFD*, PAG*, LTDA).' },
         valorTotal: { type: Type.NUMBER, description: 'Valor total da compra em reais (ou valor total do parcelamento). Se informado junto com totalParcelas, o sistema divide automaticamente entre as parcelas. Aceita valores negativos para estornos.' },
         valorParcela: { type: Type.NUMBER, description: 'Valor de cada parcela em reais quando a compra for parcelada (ex: R$ 50 para 3x de R$ 50).' },
-        categoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Categoria oficial da despesa ou receita (ex: Alimentação, Moradia, Transporte, Salário & Remuneração, etc.).' },
-        subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Aluguel & Condomínio", "Energia Elétrica", "Presentes", etc.).' },
-        metodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Padrão: credit_card.' },
+        categoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Categoria oficial da despesa ou receita (ex: Alimentação, Moradia, Transporte, Benefícios, Salário & Remuneração, etc.).' },
+        subcategoria: { type: Type.STRING, description: 'Subcategoria detalhada da despesa (ex: "Supermercado", "Restaurante", "Delivery & Lanches", "Combustível", "Farmácia", "Vale Alimentação (VA)", "Vale Refeição (VR)", etc.).' },
+        metodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill', 'va_vr'], description: 'Padrão: credit_card. Use "va_vr" para compras ou recargas no Cartão Vale / Pré-Pago (VA/VR: Alelo, Flash, Caju, Pluxee, Ticket, Sodexo, iFood Benefícios).' },
         status: {
           type: Type.STRING,
           enum: ['estimated', 'pending', 'paid'],
@@ -328,13 +328,13 @@ export const functionDeclarations: FunctionDeclaration[] = [
         },
         metodoPagamentoPadrao: {
           type: Type.STRING,
-          enum: ['pix', 'credit_card', 'debit', 'bill'],
+          enum: ['pix', 'credit_card', 'debit', 'bill', 'va_vr'],
           description:
-            'Método de pagamento padrão para o lote. "pix" ou "debit" para extratos bancários de conta corrente. "credit_card" SOMENTE para faturas de cartão de crédito.',
+            'Método de pagamento padrão para o lote. "pix" ou "debit" para extratos bancários; "va_vr" para extratos de Cartão Vale/Benefícios; "credit_card" SOMENTE para faturas de cartão de crédito.',
         },
         cartaoPadrao: {
           type: Type.STRING,
-          description: 'Nome do cartão de crédito (se for fatura de cartão de crédito). Não preencher para extrato de conta!',
+          description: 'Nome do cartão de crédito (ou do cartão Vale VA/VR, se aplicável). Não preencher para extrato de conta corrente!',
         },
         transacoes: {
           type: Type.ARRAY,
@@ -342,19 +342,19 @@ export const functionDeclarations: FunctionDeclaration[] = [
           items: {
             type: Type.OBJECT,
             properties: {
-              descricao: { type: Type.STRING, description: 'Nome/descrição do lançamento (ex: "Salário Empresa", "iFood", "Supermercado").' },
+              descricao: { type: Type.STRING, description: 'Descrição financeira inteligente, limpa e legível do lançamento (ex: "Salário Empresa", "Pedido no iFood", "Farmácia Drogasil", "Supermercado"). Evite códigos brutos de maquininha/LTDA.' },
               valorTotal: { type: Type.NUMBER, description: 'Valor positivo em reais (se for estorno na fatura, use valor negativo).' },
               tipo: {
                 type: Type.STRING,
                 enum: ['expense', 'income'],
                 description:
-                  'CRÍTICO: "income" para RECEITAS/ENTRADAS/SALÁRIOS/PIX RECEBIDOS/DEPÓSITOS/RENDIMENTOS; "expense" para gastos/saídas/compras.',
+                  'CRÍTICO: "income" para RECEITAS/ENTRADAS/SALÁRIOS/PIX RECEBIDOS/RECARGA VA/VR; "expense" para gastos/saídas/compras.',
               },
               metodoPagamento: {
                 type: Type.STRING,
-                enum: ['pix', 'credit_card', 'debit', 'bill'],
+                enum: ['pix', 'credit_card', 'debit', 'bill', 'va_vr'],
                 description:
-                  '"pix" para Pix enviado ou recebido; "debit" para débito em conta corrente; "bill" para boletos; "credit_card" SOMENTE se for compra no cartão de crédito.',
+                  '"va_vr" para Cartão Vale (VA/VR: Alelo, Flash, Caju, Pluxee, Ticket, Sodexo); "pix" para Pix; "debit" para débito em conta; "bill" para boletos; "credit_card" SOMENTE para cartão de crédito.',
               },
               status: {
                 type: Type.STRING,
@@ -427,7 +427,7 @@ export const functionDeclarations: FunctionDeclaration[] = [
         novaCategoria: { type: Type.STRING, enum: [...ACTIVE_CATEGORIES], description: 'Nova categoria oficial da despesa ou receita.' },
         novaSubcategoria: { type: Type.STRING, description: 'Nova subcategoria específica.' },
         novoTipo: { type: Type.STRING, enum: ['expense', 'income'], description: 'Altera o tipo da transação para receita ("income") ou despesa ("expense").' },
-        novoMetodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill'], description: 'Altera o método de pagamento (ex: para "pix", "debit" ou "credit_card").' },
+        novoMetodoPagamento: { type: Type.STRING, enum: ['pix', 'credit_card', 'debit', 'bill', 'va_vr'], description: 'Altera o método de pagamento (ex: para "pix", "debit", "va_vr" ou "credit_card").' },
         novoStatus: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'] },
         novoTipoDivisao: { type: Type.STRING, enum: ['MEU', 'CASAL_50_50', 'PARCEIRO', 'AMIGO', 'TERCEIRO'] },
         novoAmigoEmail: { type: Type.STRING, description: 'Atribui a despesa a um amigo pelo email na plataforma. Ex: "kayoaraujo2002@gmail.com".' },
@@ -505,9 +505,9 @@ export const functionDeclarations: FunctionDeclaration[] = [
         status: { type: Type.STRING, enum: ['estimated', 'pending', 'paid'], description: 'Filtra por status (pendente na fatura, pago, estimado).' },
         metodoPagamento: {
           type: Type.STRING,
-          enum: ['pix', 'debit', 'bill', 'credit_card', 'extrato_conta'],
+          enum: ['pix', 'debit', 'bill', 'credit_card', 'va_vr', 'extrato_conta'],
           description:
-            'Filtra pelo meio de pagamento ou canal: "credit_card" (Fatura de Cartão de Crédito), "pix" (Pix), "debit" (Débito), "bill" (Boleto) ou "extrato_conta" (todos os lançamentos de conta corrente: Pix + Débito + Boleto, excluindo faturas de cartão).',
+            'Filtra pelo meio de pagamento ou canal: "va_vr" (Cartão Vale / Pré-Pago VA/VR), "credit_card" (Fatura de Cartão de Crédito), "pix" (Pix), "debit" (Débito), "bill" (Boleto) ou "extrato_conta" (todos os lançamentos de conta corrente: Pix + Débito + Boleto, excluindo faturas de cartão e Cartão Vale).',
         },
         incluirRecorrentesProjetadas: {
           type: Type.BOOLEAN,
@@ -574,36 +574,37 @@ export const functionDeclarations: FunctionDeclaration[] = [
   },
   {
     name: 'gerenciarCartoes',
-    description: 'Adiciona, edita, exclui, lista os cartões de crédito do usuário ou detalha a fatura completa de um cartão.',
+    description: 'Adiciona, edita, exclui ou lista os cartões do usuário (crédito ou Cartão Vale / Pré-Pago VA/VR) ou detalha a fatura de crédito.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         acao: { type: Type.STRING, enum: ['listar', 'detalhar_fatura', 'adicionar', 'editar', 'excluir'] },
         id: { type: Type.STRING, description: 'ID do cartão para edição/exclusão/detalhamento.' },
-        nome: { type: Type.STRING, description: 'Nome do novo cartão ou novo nome na edição.' },
+        nome: { type: Type.STRING, description: 'Nome do novo cartão ou novo nome na edição (ex: "Nubank", "Flash Vale", "Alelo Alimentação").' },
+        tipo: { type: Type.STRING, enum: ['credit', 'va_vr'], description: '"credit" para cartão de crédito pós-pago; "va_vr" para Cartão Vale / Pré-Pago (VA/VR).' },
         mes: { type: Type.STRING, description: 'Mês da fatura (YYYY-MM) para detalhar_fatura.' },
-        fechamento: { type: Type.NUMBER, description: 'Dia de fechamento do cartão.' },
-        vencimento: { type: Type.NUMBER, description: 'Dia de vencimento da fatura do cartão.' },
+        fechamento: { type: Type.NUMBER, description: 'Dia de fechamento do cartão de crédito.' },
+        vencimento: { type: Type.NUMBER, description: 'Dia de vencimento da fatura (ou dia da recarga mensal para cartão VA/VR).' },
       },
       required: ['acao'],
     },
   },
   {
     name: 'gerenciarContasRecorrentes',
-    description: 'Adiciona, edita, pausa, ativa, exclui ou lista contas recorrentes (assinaturas, despesas fixas e rendas recorrentes) do usuário.',
+    description: 'Adiciona, edita, pausa, ativa, exclui ou lista contas recorrentes (assinaturas, despesas fixas, rendas e recargas fixas VA/VR) do usuário.',
     parameters: {
       type: Type.OBJECT,
       properties: {
         acao: { type: Type.STRING, enum: ['listar', 'adicionar', 'editar', 'pausar', 'ativar', 'excluir'] },
         id: { type: Type.STRING, description: 'ID da conta recorrente.' },
-        descricao: { type: Type.STRING, description: 'Nome da assinatura/conta (ex: "Netflix").' },
+        descricao: { type: Type.STRING, description: 'Nome da assinatura/conta (ex: "Netflix", "Recarga Flash VA").' },
         valor: { type: Type.NUMBER, description: 'Valor base da assinatura.' },
-        diaVencimento: { type: Type.NUMBER, description: 'Dia de vencimento.' },
+        diaVencimento: { type: Type.NUMBER, description: 'Dia de vencimento ou dia da recarga.' },
         categoria: { type: Type.STRING, enum: [...CATEGORIES] },
         subcategoria: { type: Type.STRING, description: 'Subcategoria específica.' },
-        tipo: { type: Type.STRING, enum: ['expense', 'income'], description: '"expense" para conta fixa/assinatura; "income" para renda recorrente.' },
-        metodoPagamento: { type: Type.STRING, enum: ['pix', 'debit', 'bill', 'credit_card'], description: 'Forma de pagamento da conta fixa.' },
-        cartao: { type: Type.STRING, description: 'Nome ou ID do cartão de crédito (se metodoPagamento = credit_card).' },
+        tipo: { type: Type.STRING, enum: ['expense', 'income'], description: '"expense" para conta fixa/assinatura; "income" para renda recorrente ou recarga mensal VA/VR.' },
+        metodoPagamento: { type: Type.STRING, enum: ['pix', 'debit', 'bill', 'credit_card', 'va_vr'], description: 'Forma de pagamento da conta fixa (use "va_vr" para recargas/assinaturas no Cartão Vale).' },
+        cartao: { type: Type.STRING, description: 'Nome ou ID do cartão de crédito ou Cartão Vale vinculado.' },
         regraEstimativa: { type: Type.STRING, enum: ['fixed', 'last_month', 'avg_3_months'], description: 'Regra de cálculo: valor fixo, último mês ou média de 3 meses.' },
         mesesLimite: { type: Type.NUMBER, description: 'Se for um plano temporário, quantos meses vai durar.' },
         mesInicio: { type: Type.STRING, description: 'Mês inicial YYYY-MM (quando mesesLimite for informado).' },
@@ -883,16 +884,16 @@ ${ctx.summary.bySubcategory && ctx.summary.bySubcategory.length > 0 ? `- Gastos 
 - Total Investido no Mês: R$ ${ctx.summary.totalInvested != null ? ctx.summary.totalInvested.toFixed(2) : '0.00'}
 - Patrimônio Total Investido Acumulado: R$ ${ctx.summary.totalInvestedAccumulated != null ? ctx.summary.totalInvestedAccumulated.toFixed(2) : '0.00'}
 ${ctx.summary.byInvestmentSubcategory && ctx.summary.byInvestmentSubcategory.length > 0 ? `- Alocação de Investimentos por Subcategoria:\n  ${ctx.summary.byInvestmentSubcategory.map((i) => `* ${i.subcategory}: R$ ${i.amount.toFixed(2)} (${i.percentage.toFixed(1)}%)`).join('\n  ')}` : ''}
-MÓDULO VA/VR (VALE-ALIMENTAÇÃO / REFEIÇÃO — 100% ISOLADO DA CONTA CORRENTE):
-- Saldo VA/VR Disponível Agora: R$ ${(ctx.summary.vaVrAvailableBalance ?? 0).toFixed(2)} (Carryover anterior: R$ ${(ctx.summary.vaVrCarryover ?? 0).toFixed(2)} + Recargas pagas: R$ ${(ctx.summary.vaVrIncomePaid ?? 0).toFixed(2)} - Gastos pagos: R$ ${(ctx.summary.vaVrSpentPaid ?? 0).toFixed(2)})
-- Saldo VA/VR Projetado no Mês: R$ ${(ctx.summary.vaVrProjectedBalance ?? 0).toFixed(2)} (Recargas totais/previstas: R$ ${(ctx.summary.vaVrIncome ?? 0).toFixed(2)} | Gastos totais: R$ ${(ctx.summary.vaVrSpent ?? 0).toFixed(2)})
-- Limite Diário VA/VR Sugerido: ${ctx.summary.vaVrDailyLimit != null ? `R$ ${ctx.summary.vaVrDailyLimit.toFixed(2)}/dia` : 'Sem saldo positivo ou mês encerrado'}${ctx.summary.vaVrBySubcategory && ctx.summary.vaVrBySubcategory.length > 0 ? `\n- Gastos VA/VR por Subcategoria:\n  ${ctx.summary.vaVrBySubcategory.map((s) => `* ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count}x)`).join('\n  ')}` : ''}${healthAndBudgetsDesc}`
+CARTÃO VALE / PRÉ-PAGO (VA/VR — 100% ISOLADO DA CONTA CORRENTE):
+- Saldo Vale Disponível Agora: R$ ${(ctx.summary.vaVrAvailableBalance ?? 0).toFixed(2)} (Carryover anterior: R$ ${(ctx.summary.vaVrCarryover ?? 0).toFixed(2)} + Recargas pagas: R$ ${(ctx.summary.vaVrIncomePaid ?? 0).toFixed(2)} - Gastos pagos: R$ ${(ctx.summary.vaVrSpentPaid ?? 0).toFixed(2)})
+- Saldo Vale Projetado no Mês: R$ ${(ctx.summary.vaVrProjectedBalance ?? 0).toFixed(2)} (Recargas totais/previstas: R$ ${(ctx.summary.vaVrIncome ?? 0).toFixed(2)} | Gastos totais: R$ ${(ctx.summary.vaVrSpent ?? 0).toFixed(2)})
+- Sugestão de Limite Diário no Vale: ${ctx.summary.vaVrDailyLimit != null ? `R$ ${ctx.summary.vaVrDailyLimit.toFixed(2)}/dia` : 'Sem saldo positivo ou mês encerrado'}${ctx.summary.vaVrBySubcategory && ctx.summary.vaVrBySubcategory.length > 0 ? `\n- Gastos Vale por Subcategoria:\n  ${ctx.summary.vaVrBySubcategory.map((s) => `* ${s.subcategory}: R$ ${s.amount.toFixed(2)} (${s.count}x)`).join('\n  ')}` : ''}${healthAndBudgetsDesc}`
     : `DADOS FINANCEIROS: Mês ${ctx.monthLabel} (${ctx.monthKey})${healthAndBudgetsDesc}`
 
   const recentTxsDesc =
     ctx.recentTransactions && ctx.recentTransactions.length > 0
       ? `LANÇAMENTOS REAIS REGISTRADOS NESTE MÊS (${ctx.recentTransactions.length} itens):
-${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.subcategory ? `${t.category} › ${t.subcategory}` : t.category} | Canal: ${t.cardName ? `Cartão ${t.cardName} (Fatura)` : t.paymentMethod === 'debit' ? 'Débito' : t.paymentMethod === 'bill' ? 'Boleto' : 'PIX'} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
+${ctx.recentTransactions.map((t) => `• [ID: ${t.id || '—'}] ${t.date} | ${t.description} | R$ ${t.amount.toFixed(2)} | ${t.subcategory ? `${t.category} › ${t.subcategory}` : t.category} | Canal: ${t.paymentMethod === 'va_vr' ? (t.cardName ? `Vale ${t.cardName} (Pré-pago)` : 'Vale (VA/VR)') : t.cardName ? `Cartão ${t.cardName} (Fatura)` : t.paymentMethod === 'debit' ? 'Débito' : t.paymentMethod === 'bill' ? 'Boleto' : 'PIX'} | ${t.status}${t.split ? ` | ${t.split}` : ''}`).join('\n')}`
       : 'LANÇAMENTOS REGISTRADOS: Nenhum lançamento registrado no mês atual até o momento.'
 
   const validPending = (ctx.pendingTransactions || []).filter((t) => t.categoria_filtro === 'valida')
@@ -1062,9 +1063,9 @@ REGRAS DE FUNCIONAMENTO:
   * Responda educadamente explicando que o Saldo Livre utiliza uma taxonomia fixa e padronizada para manter a consistência dos envelopes orçamentários, gráficos e diagnósticos de saúde financeira.
   * Oriente e sugira a categoria e subcategoria oficial mais apropriada do sistema (ex: para "Bichos" ou "Pets" -> categoria "Pets", subcategoria "Acessórios & Brinquedos" ou "Veterinário & Medicamentos"; para "Viagem" -> categoria "Lazer & Entretenimento", subcategoria "Viagens & Hospedagem"; para "Farmácia" -> categoria "Saúde", subcategoria "Farmácia & Remédios").
 - No campo "categoria" das chamadas de ferramentas ("registrarTransacao", "registrarTransacoesLote", "editarTransacoes"), utilize SEMPRE e EXCLUSIVAMENTE uma das categorias oficiais ativas:
-  * Despesas (17 categorias): VA/VR, Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
-  * Receitas (8 categorias): VA/VR, Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
-  * REGRA DO MÓDULO VA/VR: Lançamentos com marcas Alelo, Flash, Caju, Ticket, Pluxee, Sodexo, iFood Benefícios, VA ou VR devem usar categoria: "VA/VR", metodoPagamento: "debit" (saída) ou "pix" (entrada) — NUNCA credit_card — e NÃO impactam o Saldo Livre da conta corrente nem os envelopes de Alimentação. Subcategorias VA/VR: Recarga VA/VR, Vale Alimentação (VA), Vale Refeição (VR), Saldo Inicial / Ajuste, Supermercado, Restaurante, Delivery & Lanches, Padaria, Outros VA/VR.
+  * Despesas (16 categorias): Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
+  * Receitas (7 categorias): Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
+  * REGRA DO CARTÃO VALE / PRÉ-PAGO (VA/VR): Lançamentos com marcas Alelo, Flash, Caju, Ticket, Pluxee, Sodexo, iFood Benefícios, VA ou VR NÃO usam categoria "VA/VR" — mantêm a categoria real do gasto/entrada (ex: "Alimentação" > "Supermercado" / "Restaurante", "Transporte", "Assinaturas & Serviços", ou "Benefícios" para recarga/crédito), usam obrigatoriamente metodoPagamento: "va_vr" e vinculam o cartão do tipo Vale/Pré-Pago (campo cartao), NÃO gerando fatura de crédito nem afetando o Saldo Livre ou envelopes da conta corrente.
 - Subcategorias oficiais por grupo:
   * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
   * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
@@ -1207,6 +1208,7 @@ F) APRESENTAÇÃO DESCRITIVA SUPERIOR ("MOSTRAR DESCRITIVAMENTE MELHOR"):
 - SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores prováveis ou inventados. O fluxo deve parar e aguardar a resposta dele.
 - CITE OS IDs DE REFERÊNCIA, categorias e números de comprovantes (se houver) sempre que confirmar a preparação de uma tarefa de CRUD/Lançamento.
 - APLIQUE RIGOROSAMENTE a formatação da moeda corrente nas respostas visuais (ex: R$ 45,00 em vez de 45 ou $45).
+- Na descrição das transações ("descricao"), PENSE e gere uma descrição financeira CLARA, INTELIGENTE e LEGÍVEL sobre o que foi gasto (ex: "Pedido no iFood", "Farmácia Drogasil", "Combustível Posto Ipiranga", "Assinatura Netflix"). NUNCA use códigos brutos de maquininha, nomes fantasia técnicos ou razões sociais (como "IFD*IFOOD", "PAG*Lanchonete", "SENDAS DISTRIBUIDORA S/A", "DROGASIL FILIAL 12", "LTDA") e NUNCA inclua frases faladas ("eu comprei", "gastei"), valores ou datas.
 - NÃO faça cálculos matemáticos soltos por conta própria para dar saldos. Você deve sempre consultar os dados fornecidos no CONTEXTO ATUAL acima (soma no backend) ou chamar "obterRelatorioEProjecaoMensal".
 - NUNCA afirme que o usuário comprou algo ou gastou determinado valor a menos que conste nos LANÇAMENTOS REAIS acima ou seja retornado pela ferramenta "consultarTransacoes".
 - Se o usuário perguntar algo sobre seu extrato, compras passadas ou se um pagamento foi feito, consulte os LANÇAMENTOS REAIS acima ou chame "consultarTransacoes". Se não encontrar, diga com sinceridade e exatidão: "Não encontrei nenhum lançamento de [X] registrado no mês de ${ctx.monthLabel}."

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useFinance } from '@/store/FinanceContext'
-import type { Card, SharedUser } from '@/types'
+import { isVaVrCard, type Card, type SharedUser } from '@/types'
 import { formatBRL } from '@/lib/utils'
 import {
   CreditCard,
@@ -21,6 +21,7 @@ import {
   Search,
   AlertCircle,
   Check,
+  Utensils,
 } from 'lucide-react'
 
 interface SharedCardsModalProps {
@@ -31,6 +32,7 @@ interface SharedCardsModalProps {
 export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) {
   const { cards, saveCard, deleteCard, me, partner, friends, lookupUserByEmail } = useFinance()
   const [editingCard, setEditingCard] = useState<Card | null>(null)
+  const [cardType, setCardType] = useState<'credit' | 'va_vr'>('credit')
   const [cardName, setCardName] = useState('')
   const [closingDay, setClosingDay] = useState(3)
   const [dueDay, setDueDay] = useState(10)
@@ -43,45 +45,50 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
   const [thirdPartiesInput, setThirdPartiesInput] = useState('Mãe, Irmão')
   const [color, setColor] = useState('violet')
 
-  const handleOpenNew = () => {
+  const handleOpenNew = (initialType: 'credit' | 'va_vr' = 'credit') => {
     if (!me) return
+    const isVale = initialType === 'va_vr'
     setEditingCard({
       id: `new_${Date.now()}`,
       ownerUid: me.uid,
       ownerName: me.name,
       cardName: '',
-      closingDay: 5,
-      dueDay: 12,
+      cardType: initialType,
+      closingDay: isVale ? 1 : 5,
+      dueDay: isVale ? 1 : 12,
       sharedWithUsers: [],
       sharedWithUids: [],
-      frequentThirdParties: ['Mãe'],
-      color: 'violet',
+      frequentThirdParties: isVale ? [] : ['Mãe'],
+      color: isVale ? 'emerald' : 'violet',
     })
+    setCardType(initialType)
     setCardName('')
-    setClosingDay(5)
-    setDueDay(12)
-    setLimit(5000)
+    setClosingDay(isVale ? 1 : 5)
+    setDueDay(isVale ? 1 : 12)
+    setLimit(isVale ? 800 : 5000)
     setSharedUsers([])
     setSelectedFriendUid('')
     setInviteEmailInput('')
     setLookupFeedback(null)
-    setThirdPartiesInput('Mãe')
-    setColor('violet')
+    setThirdPartiesInput(isVale ? '' : 'Mãe')
+    setColor(isVale ? 'emerald' : 'violet')
   }
 
   const handleEdit = (card: Card) => {
     if (card.ownerUid !== me?.uid) return
+    const isVale = isVaVrCard(card)
     setEditingCard(card)
+    setCardType(isVale ? 'va_vr' : 'credit')
     setCardName(card.cardName)
     setClosingDay(card.closingDay)
     setDueDay(card.dueDay)
-    setLimit(card.limit ?? 5000)
+    setLimit(card.limit ?? (isVale ? 800 : 5000))
     setSharedUsers(card.sharedWithUsers || [])
     setSelectedFriendUid('')
     setInviteEmailInput('')
     setLookupFeedback(null)
     setThirdPartiesInput((card.frequentThirdParties || []).join(', '))
-    setColor(card.color || 'violet')
+    setColor(card.color || (isVale ? 'emerald' : 'violet'))
   }
 
   const handleAddFriend = () => {
@@ -165,12 +172,14 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
       .filter(Boolean)
 
     const parsedLimit = Number(limit) > 0 ? Number(limit) : null
+    const isVale = cardType === 'va_vr'
 
     const toSave: Card = {
       ...editingCard,
       cardName: cardName.trim(),
-      closingDay: Number(closingDay),
-      dueDay: Number(dueDay),
+      cardType,
+      closingDay: isVale ? 1 : Number(closingDay),
+      dueDay: Number(dueDay) || 1,
       limit: parsedLimit,
       sharedWithUsers: sharedUsers,
       sharedWithUids: sharedUsers.map((u) => u.uid),
@@ -203,23 +212,33 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
               </div>
               <div className="min-w-0 flex-1">
                 <DialogTitle className="text-base sm:text-lg font-bold text-white truncate">
-                  Cartões de Crédito
+                  Cartões &amp; Vales (VA/VR)
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-400 truncate">
-                  Gerencie faturas, limites e convide amigos para dividir o cartão
+                  Gerencie cartões de crédito, faturas, compartilhamentos e cartões pré-pagos VA/VR
                 </DialogDescription>
               </div>
             </div>
 
             {!editingCard && (
-              <Button
-                size="sm"
-                onClick={handleOpenNew}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm shrink-0"
-              >
-                <Plus className="size-3.5" />
-                <span>Novo Cartão</span>
-              </Button>
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <Button
+                  size="sm"
+                  onClick={() => handleOpenNew('va_vr')}
+                  className="bg-teal-600/20 hover:bg-teal-600/35 text-teal-200 border border-teal-500/40 font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm"
+                >
+                  <Utensils className="size-3.5" />
+                  <span>+ Novo Vale (VA/VR)</span>
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleOpenNew('credit')}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs h-8 px-3 gap-1.5 rounded-xl cursor-pointer shadow-sm"
+                >
+                  <Plus className="size-3.5" />
+                  <span>Novo Cartão</span>
+                </Button>
+              </div>
             )}
           </div>
         </DialogHeader>
@@ -230,39 +249,90 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
                 <Sparkles className="size-4 text-emerald-400" />
-                <span>{editingCard.id.startsWith('new_') ? 'Cadastrar Novo Cartão' : `Editar ${editingCard.cardName}`}</span>
+                <span>
+                  {editingCard.id.startsWith('new_')
+                    ? cardType === 'va_vr'
+                      ? 'Cadastrar Vale Pré-Pago (VA/VR)'
+                      : 'Cadastrar Novo Cartão de Crédito'
+                    : `Editar ${editingCard.cardName}`}
+                </span>
               </h4>
               <Badge variant="outline" className="text-[10px] bg-slate-800 text-slate-300">
                 Titular: {editingCard.ownerName}
               </Badge>
             </div>
 
+            {/* Seletor do Tipo do Cartão */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300">Modalidade do Cartão</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCardType('credit')}
+                  className={`flex items-center justify-center gap-2 h-10 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                    cardType === 'credit'
+                      ? 'bg-sky-500/15 border-sky-400/50 text-sky-200 shadow-sm'
+                      : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <CreditCard className="size-3.5" />
+                  <span>Cartão de Crédito</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCardType('va_vr')
+                    setColor('emerald')
+                  }}
+                  className={`flex items-center justify-center gap-2 h-10 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                    cardType === 'va_vr'
+                      ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-200 shadow-sm'
+                      : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Utensils className="size-3.5" />
+                  <span>Vale / Pré-Pago (VA/VR)</span>
+                </button>
+              </div>
+              {cardType === 'va_vr' && (
+                <p className="text-[11px] text-emerald-300/80">
+                  🍽️ Cartão pré-pago isolado: não gera fatura no crédito, mantém Saldo VA/VR próprio e libera o widget de Vale no Dashboard.
+                </p>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               <div className="space-y-1.5 sm:col-span-2">
-                <label className="text-xs font-semibold text-slate-300">Nome do Cartão (Ex: Nubank Ultravioleta)</label>
+                <label className="text-xs font-semibold text-slate-300">
+                  {cardType === 'va_vr' ? 'Nome do Cartão Vale (Ex: Alelo VA, Flash VR, Caju)' : 'Nome do Cartão (Ex: Nubank Ultravioleta)'}
+                </label>
                 <Input
                   value={cardName}
                   onChange={(e) => setCardName(e.target.value)}
-                  placeholder="Nome do cartão"
+                  placeholder={cardType === 'va_vr' ? 'Ex: Alelo Alimentação, Caju Benefícios' : 'Nome do cartão'}
                   className="h-10 text-xs sm:text-sm bg-slate-900 border-slate-700/80 rounded-xl"
                   required
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Dia de Fechamento da Fatura</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={closingDay}
-                  onChange={(e) => setClosingDay(Number(e.target.value))}
-                  className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl font-mono"
-                />
-              </div>
+              {cardType === 'credit' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-300">Dia de Fechamento da Fatura</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={closingDay}
+                    onChange={(e) => setClosingDay(Number(e.target.value))}
+                    className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl font-mono"
+                  />
+                </div>
+              )}
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-300">Dia de Vencimento da Fatura</label>
+              <div className={`space-y-1.5 ${cardType === 'va_vr' ? 'sm:col-span-2' : ''}`}>
+                <label className="text-xs font-semibold text-slate-300">
+                  {cardType === 'va_vr' ? 'Dia da Recarga Mensal (opcional)' : 'Dia de Vencimento da Fatura'}
+                </label>
                 <Input
                   type="number"
                   min={1}
@@ -274,14 +344,16 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">
-                <label className="text-xs font-semibold text-slate-300">Limite de Crédito do Cartão (R$)</label>
+                <label className="text-xs font-semibold text-slate-300">
+                  {cardType === 'va_vr' ? 'Recarga Padrão / Teto Mensal (R$ opcional)' : 'Limite de Crédito do Cartão (R$)'}
+                </label>
                 <Input
                   type="number"
                   min={0}
                   step={100}
                   value={limit}
                   onChange={(e) => setLimit(e.target.value)}
-                  placeholder="Ex: 5000"
+                  placeholder={cardType === 'va_vr' ? 'Ex: 800' : 'Ex: 5000'}
                   className="h-10 text-xs bg-slate-900 border-slate-700/80 rounded-xl font-mono"
                 />
               </div>
@@ -516,18 +588,32 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
               cards.map((card) => {
                 const isOwner = card.ownerUid === me?.uid
                 const sharedCount = card.sharedWithUsers?.length ?? 0
+                const isVale = isVaVrCard(card)
                 return (
                   <div
                     key={card.id}
-                    className="relative overflow-hidden p-4 rounded-2xl border border-white/[0.06] bg-slate-950/70 hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md"
+                    className={`relative overflow-hidden p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+                      isVale
+                        ? 'border-emerald-500/25 bg-emerald-950/20 hover:border-emerald-500/45'
+                        : 'border-white/[0.06] bg-slate-950/70 hover:border-slate-700'
+                    }`}
                   >
-                    <CreditCard className="absolute -right-4 -bottom-4 size-28 text-white/[0.03] pointer-events-none rotate-12" />
+                    {isVale ? (
+                      <Utensils className="absolute -right-4 -bottom-4 size-28 text-emerald-400/[0.05] pointer-events-none rotate-12" />
+                    ) : (
+                      <CreditCard className="absolute -right-4 -bottom-4 size-28 text-white/[0.03] pointer-events-none rotate-12" />
+                    )}
                     <div className="space-y-2 relative z-10">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-slate-100 text-sm">{card.cardName}</span>
+                        {isVale && (
+                          <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-300 border-emerald-500/35 gap-1">
+                            <Utensils className="size-2.5" /> VALE PRÉ-PAGO (VA/VR)
+                          </Badge>
+                        )}
                         {isOwner ? (
                           <Badge variant="outline" className="text-[10px] bg-slate-800 text-slate-300 border-slate-700">
-                            Meu Cartão
+                            {isVale ? 'Meu Vale' : 'Meu Cartão'}
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="text-[10px] bg-indigo-950/60 text-indigo-300 border-indigo-800 gap-1">
@@ -544,12 +630,21 @@ export function SharedCardsModal({ open, onOpenChange }: SharedCardsModalProps) 
                       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
                         <span className="flex items-center gap-1.5">
                           <Calendar className="size-3.5 text-slate-500" />
-                          Fecha dia <strong className="text-slate-200">{card.closingDay}</strong> · Vence dia <strong className="text-slate-200">{card.dueDay}</strong>
+                          {isVale ? (
+                            <>
+                              Recarga dia <strong className="text-slate-200">{card.dueDay}</strong> · Pré-pago (não gera fatura)
+                            </>
+                          ) : (
+                            <>
+                              Fecha dia <strong className="text-slate-200">{card.closingDay}</strong> · Vence dia <strong className="text-slate-200">{card.dueDay}</strong>
+                            </>
+                          )}
                         </span>
                         {card.limit != null && card.limit > 0 && (
                           <span className="flex items-center gap-1.5">
                             <ShieldCheck className="size-3.5 text-emerald-400" />
-                            Limite: <strong className="text-slate-200">{formatBRL(card.limit)}</strong>
+                            {isVale ? 'Recarga padrão: ' : 'Limite: '}
+                            <strong className="text-slate-200">{formatBRL(card.limit)}</strong>
                           </span>
                         )}
                         {card.sharedWithUsers?.length > 0 && isOwner && (

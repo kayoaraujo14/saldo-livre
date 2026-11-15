@@ -7,224 +7,263 @@ import org.junit.Test
 
 class FinanceEngineVaVrTest {
 
-    private val myUid = "u1"
-    private val partnerUid = "u2"
+    companion object {
+        private const val MY_UID = "user_me"
+        private const val PARTNER_UID = "user_partner"
 
-    private val me = UserProfile(
-        uid = myUid,
-        displayName = "Kayo",
-        email = "kayo@test.com",
-        monthlyIncome = 5000.0
-    )
+        private val VALE_CARD = Card(
+            id = "card_vale_1",
+            ownerUid = MY_UID,
+            ownerName = "Titular",
+            cardName = "Caju Multi",
+            cardType = "va_vr",
+            color = "teal"
+        )
+
+        private val CREDIT_CARD = Card(
+            id = "card_cred_1",
+            ownerUid = MY_UID,
+            ownerName = "Titular",
+            cardName = "Nubank Violet",
+            cardType = "credit",
+            color = "violet"
+        )
+    }
 
     private fun makeTx(
-        id: String = "tx_${System.nanoTime()}",
-        description: String = "Lançamento Teste",
-        category: String = "Alimentação",
-        subcategory: String? = "Supermercado",
+        id: String = "tx_1",
+        description: String = "Lançamento",
+        category: String = "Outros",
+        subcategory: String? = null,
         type: TransactionType = TransactionType.EXPENSE,
         paymentMethod: PaymentMethod = PaymentMethod.PIX,
+        cardId: String? = null,
         status: TransactionStatus = TransactionStatus.PAID,
-        totalAmount: Double = 100.0,
-        dueDate: String = "2099-01-10",
+        amount: Double = 100.0,
         competenceMonth: String = "2099-01",
-        paidByUid: String = myUid,
-        splitType: SplitType? = SplitType.MINE,
-        allocations: List<Allocation> = listOf(
-            Allocation(type = "PLATFORM_USER", uid = myUid, name = "Kayo", amount = totalAmount, reimbursed = true)
-        ),
-        userImpact: Map<String, Double> = mapOf(myUid to totalAmount),
-        visibleToUids: List<String> = listOf(myUid)
-    ) = Transaction(
-        id = id,
-        createdByUid = myUid,
-        paidByUid = paidByUid,
-        description = description,
-        category = category,
-        subcategory = subcategory,
-        type = type,
-        paymentMethod = paymentMethod,
-        status = status,
-        estimatedAmount = null,
-        actualAmount = totalAmount,
-        totalAmount = totalAmount,
-        dueDate = dueDate,
-        competenceMonth = competenceMonth,
-        visibleToUids = visibleToUids,
-        userImpact = userImpact,
-        allocations = allocations,
-        splitType = splitType,
-        createdAt = 1L
-    )
+        dueDate: String = "2099-01-15",
+        paidByUid: String = MY_UID,
+        visibleToUids: List<String> = listOf(MY_UID),
+        splitType: SplitType? = null,
+        userImpact: Map<String, Double> = mapOf(MY_UID to amount),
+        allocations: List<Allocation> = emptyList()
+    ): Transaction {
+        return Transaction(
+            id = id,
+            createdByUid = paidByUid,
+            paidByUid = paidByUid,
+            cardId = cardId,
+            description = description,
+            category = category,
+            subcategory = subcategory,
+            type = type,
+            paymentMethod = paymentMethod,
+            status = status,
+            estimatedAmount = amount,
+            actualAmount = amount,
+            totalAmount = amount,
+            dueDate = dueDate,
+            competenceMonth = competenceMonth,
+            visibleToUids = visibleToUids,
+            splitType = splitType,
+            userImpact = userImpact,
+            allocations = allocations
+        )
+    }
 
     @Test
-    fun `1 - isolates 100pct of VA VR inflows outflows and recurring bills from checking freeBalance and projections`() {
+    fun `1 isola 100 pct entradas saidas com categorias reais e recorrentes do Vale do Saldo Livre e projecoes`() {
+        val cards = listOf(VALE_CARD, CREDIT_CARD)
         val txs = listOf(
+            // Conta bancária principal: +5.000 salário, -1.500 aluguel -> Saldo Livre = 3.500
             makeTx(
                 id = "sal",
-                description = "Salário CLT",
+                description = "Salário",
                 category = "Salário & Remuneração",
-                subcategory = "Salário Principal",
-                type = TransactionType.INCOME,
-                totalAmount = 5000.0
-            ),
-            makeTx(
-                id = "rent",
-                description = "Aluguel",
-                category = "Moradia",
-                subcategory = "Aluguel",
-                type = TransactionType.EXPENSE,
-                totalAmount = 1500.0
-            ),
-            makeTx(
-                id = "vr_recarga",
-                description = "Recarga Alelo VA/VR",
-                category = "VA/VR",
-                subcategory = "Recarga VA/VR",
                 type = TransactionType.INCOME,
                 paymentMethod = PaymentMethod.PIX,
-                totalAmount = 1200.0
+                amount = 5000.0
             ),
             makeTx(
-                id = "vr_mercado",
-                description = "Supermercado Pão de Açúcar",
-                category = "VA/VR",
+                id = "aluguel",
+                description = "Aluguel",
+                category = "Moradia",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.PIX,
+                amount = 1500.0
+            ),
+            // Recarga no Vale via PaymentMethod.VA_VR usando categoria real 'Benefícios'
+            makeTx(
+                id = "va_in",
+                description = "Recarga Caju Benefícios",
+                category = "Benefícios",
+                subcategory = "Vale Alimentação (VA)",
+                type = TransactionType.INCOME,
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                amount = 1200.0
+            ),
+            // Gasto no Vale com categoria real 'Alimentação'
+            makeTx(
+                id = "va_out_food",
+                description = "Supermercado Extra",
+                category = "Alimentação",
                 subcategory = "Supermercado",
                 type = TransactionType.EXPENSE,
-                paymentMethod = PaymentMethod.DEBIT,
-                totalAmount = 450.0
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                amount = 350.0
             ),
+            // Gasto no Vale com categoria real 'Transporte' (multi-benefícios no cartão pré-pago)
             makeTx(
-                id = "vr_legado",
-                description = "Lanche VR",
-                category = "Benefícios",
-                subcategory = "Vale Refeição (VR)",
+                id = "va_out_transp",
+                description = "Uber Mobilidade Flash",
+                category = "Transporte",
+                subcategory = "Apps (Uber / 99)",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                amount = 50.0
+            ),
+            // Transação legada sob categoria 'VA/VR' continua compatível
+            makeTx(
+                id = "va_legacy",
+                description = "Padaria Central Legado",
+                category = "VA/VR",
+                subcategory = "Padaria & Café",
                 type = TransactionType.EXPENSE,
                 paymentMethod = PaymentMethod.DEBIT,
-                status = TransactionStatus.PENDING,
-                totalAmount = 50.0
+                amount = 40.0
             )
         )
 
         val vaVrBill = RecurringBill(
-            id = "rec_vr",
-            ownerUid = myUid,
+            id = "bill_vavr",
+            ownerUid = MY_UID,
             description = "Recarga Mensal Flash VA/VR",
-            category = "VA/VR",
-            subcategory = "Recarga VA/VR",
+            category = "Benefícios",
+            subcategory = "Vale Alimentação (VA)",
             dueDay = 1,
             defaultAmount = 1100.0,
             estimationRule = EstimationRule.FIXED,
             active = true,
-            paymentMethod = PaymentMethod.PIX,
             type = TransactionType.INCOME,
+            paymentMethod = PaymentMethod.VA_VR,
+            cardId = VALE_CARD.id,
             startMonth = "2099-02"
         )
 
         val summary = FinanceEngine.computeSummary(
             all = txs,
-            uid = myUid,
+            uid = MY_UID,
             monthKey = "2099-01",
-            cards = emptyList(),
+            cards = cards,
             closures = emptyList(),
             recurringBills = listOf(vaVrBill)
         )
+
+        // Fluxo bancário blindado
         assertEquals(5000.0, summary.income, 0.01)
         assertEquals(1500.0, summary.paid, 0.01)
         assertEquals(0.0, summary.committed, 0.01)
         assertEquals(3500.0, summary.freeBalance, 0.01)
 
-        val cashFlow = FinanceEngine.computeAccountCashFlow(
-            all = txs,
-            uid = myUid,
-            monthKey = "2099-01",
-            summary = summary,
-            cards = emptyList(),
-            today = "2099-01-15"
-        )
-        assertEquals(5000.0, cashFlow.accountIncomesReceived, 0.01)
-        assertEquals(1500.0, cashFlow.accountExpensesPaid, 0.01)
-        assertEquals(3500.0, cashFlow.currentBankBalance, 0.01)
+        // Módulo Vale isolado (1200 - 350 - 50 - 40 = 760)
+        assertEquals(1200.0, summary.vaVrIncome, 0.01)
+        assertEquals(440.0, summary.vaVrSpent, 0.01)
+        assertEquals(760.0, summary.vaVrAvailableBalance, 0.01)
+        assertEquals(760.0, summary.vaVrProjectedBalance, 0.01)
 
-        val proj = FinanceEngine.projectFutureMonths(
+        // Projeção futura da conta corrente ignora recorrente do Vale
+        val projections = FinanceEngine.projectFutureMonths(
             all = txs,
             bills = listOf(vaVrBill),
-            profile = me.copy(monthlyIncome = 0.0),
-            uid = myUid,
-            startMonthKey = "2099-01",
-            count = 3,
-            cards = emptyList()
+            profile = UserProfile(uid = MY_UID, monthlyIncome = 5000.0),
+            uid = MY_UID,
+            startMonthKey = "2099-02",
+            count = 2,
+            cards = cards
         )
-        assertEquals(5000.0, proj[0].projectedIncome, 0.01)
-        assertEquals(1500.0, proj[0].projectedExpense, 0.01)
-        assertEquals(3500.0, proj[0].projectedFreeBalance, 0.01)
-        assertEquals(0.0, proj[1].projectedIncome, 0.01)
+        val feb = projections.find { it.monthKey == "2099-02" }
+        assertNotNull(feb)
+        assertEquals(5000.0, feb!!.projectedIncome, 0.01)
+        assertEquals(0, feb.expenseCount)
     }
 
     @Test
-    fun `2 and 3 - separates Available Now vs Projected Balance and computes Daily Limit VA VR`() {
+    fun `2 e 3 separam Disponivel Agora paid de Projetado no Mes pending e calcula Limite Diario`() {
+        val cards = listOf(VALE_CARD)
         val txs = listOf(
             makeTx(
-                id = "vr_in_paid",
-                description = "Recarga Pluxee Paga",
-                category = "VA/VR",
-                subcategory = "Recarga VA/VR",
-                type = TransactionType.INCOME,
-                status = TransactionStatus.PAID,
-                totalAmount = 1000.0
-            ),
-            makeTx(
-                id = "vr_in_pending",
-                description = "Bônus Alimentação Previsto",
-                category = "VA/VR",
+                id = "va_in_paid",
+                description = "Recarga VA Confirmada",
+                category = "Benefícios",
                 subcategory = "Vale Alimentação (VA)",
                 type = TransactionType.INCOME,
-                status = TransactionStatus.PENDING,
-                totalAmount = 200.0
-            ),
-            makeTx(
-                id = "vr_out_paid",
-                description = "Almoço Restaurante",
-                category = "VA/VR",
-                subcategory = "Restaurante",
-                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
                 status = TransactionStatus.PAID,
-                totalAmount = 380.0
+                amount = 1000.0
             ),
             makeTx(
-                id = "vr_out_pending",
-                description = "Mercado Fim de Semana",
-                category = "VA/VR",
+                id = "va_in_pending",
+                description = "Recarga VR Programada",
+                category = "Benefícios",
+                subcategory = "Vale Refeição (VR)",
+                type = TransactionType.INCOME,
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                status = TransactionStatus.PENDING,
+                amount = 200.0
+            ),
+            makeTx(
+                id = "va_out_paid",
+                description = "Mercado",
+                category = "Alimentação",
                 subcategory = "Supermercado",
                 type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                status = TransactionStatus.PAID,
+                amount = 380.0
+            ),
+            makeTx(
+                id = "va_out_pending",
+                description = "Almoço Agendado",
+                category = "Alimentação",
+                subcategory = "Restaurante",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
                 status = TransactionStatus.PENDING,
-                totalAmount = 120.0
+                amount = 120.0
             )
         )
 
-        val unlaunchedBill = RecurringBill(
-            id = "rec_vr_in",
-            ownerUid = myUid,
-            description = "Complemento VR Mensal",
-            category = "VA/VR",
+        val pendingBill = RecurringBill(
+            id = "bill_va_extra",
+            ownerUid = MY_UID,
+            description = "Complemento VR",
+            category = "Benefícios",
             subcategory = "Vale Refeição (VR)",
-            dueDay = 20,
+            dueDay = 10,
             defaultAmount = 100.0,
             estimationRule = EstimationRule.FIXED,
             active = true,
-            paymentMethod = PaymentMethod.PIX,
             type = TransactionType.INCOME,
-            startMonth = "2099-01"
+            paymentMethod = PaymentMethod.VA_VR,
+            cardId = VALE_CARD.id
         )
 
         val summary = FinanceEngine.computeSummary(
             all = txs,
-            uid = myUid,
+            uid = MY_UID,
             monthKey = "2099-01",
-            cards = emptyList(),
+            cards = cards,
             closures = emptyList(),
-            recurringBills = listOf(unlaunchedBill)
+            recurringBills = listOf(pendingBill)
         )
+
         assertEquals(0.0, summary.vaVrCarryover, 0.01)
         assertEquals(1000.0, summary.vaVrIncomePaid, 0.01)
         assertEquals(300.0, summary.vaVrIncomePending, 0.01)
@@ -234,245 +273,258 @@ class FinanceEngineVaVrTest {
         assertEquals(500.0, summary.vaVrSpent, 0.01)
         assertEquals(620.0, summary.vaVrAvailableBalance, 0.01)
         assertEquals(800.0, summary.vaVrProjectedBalance, 0.01)
-        assertEquals(31, summary.daysRemaining)
+        assertNotNull(summary.vaVrDailyLimit)
         assertEquals(20.0, summary.vaVrDailyLimit!!, 0.01)
         assertEquals(2, summary.vaVrBySubcategory.sumOf { it.count })
     }
 
     @Test
-    fun `4 - performs automatic chronological rollover and allows negative VA VR without touching checking balance`() {
+    fun `4 faz rollover cronologico automatico e permite saldo Vale negativo sem tocar na conta principal`() {
+        val cards = listOf(VALE_CARD)
+        val closure = MonthClosure(
+            id = "cls_2098-12",
+            uid = MY_UID,
+            closedMonth = "2098-12",
+            targetMonth = "2099-01",
+            totalSurplus = 900.0,
+            carryoverToNextMonth = 900.0
+        )
+
         val txs = listOf(
             makeTx(
-                id = "m0_in",
-                category = "VA/VR",
-                subcategory = "Recarga VA/VR",
+                id = "dec_in",
+                category = "Benefícios",
+                subcategory = "Vale Alimentação (VA)",
                 type = TransactionType.INCOME,
-                dueDate = "2098-11-05",
-                competenceMonth = "2098-11",
-                totalAmount = 800.0
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                status = TransactionStatus.PAID,
+                competenceMonth = "2098-12",
+                dueDate = "2098-12-02",
+                amount = 800.0
             ),
             makeTx(
-                id = "m0_out",
-                category = "VA/VR",
+                id = "dec_out",
+                category = "Alimentação",
                 subcategory = "Supermercado",
                 type = TransactionType.EXPENSE,
-                dueDate = "2098-11-20",
-                competenceMonth = "2098-11",
-                totalAmount = 500.0
-            ),
-            makeTx(
-                id = "m1_in",
-                category = "VA/VR",
-                subcategory = "Recarga VA/VR",
-                type = TransactionType.INCOME,
-                dueDate = "2098-12-05",
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                status = TransactionStatus.PAID,
                 competenceMonth = "2098-12",
-                totalAmount = 400.0
+                dueDate = "2098-12-10",
+                amount = 350.0
             ),
             makeTx(
-                id = "m1_out",
-                category = "VA/VR",
-                subcategory = "Restaurante",
-                type = TransactionType.EXPENSE,
-                dueDate = "2098-12-18",
-                competenceMonth = "2098-12",
-                totalAmount = 250.0
-            ),
-            makeTx(
-                id = "m2_sal",
+                id = "jan_sal",
                 category = "Salário & Remuneração",
-                subcategory = "Salário Principal",
                 type = TransactionType.INCOME,
+                paymentMethod = PaymentMethod.PIX,
+                status = TransactionStatus.PAID,
+                competenceMonth = "2099-01",
                 dueDate = "2099-01-05",
-                competenceMonth = "2099-01",
-                totalAmount = 5000.0
+                amount = 4000.0
             ),
             makeTx(
-                id = "m2_conta",
-                category = "Moradia",
-                subcategory = "Aluguel",
-                type = TransactionType.EXPENSE,
-                dueDate = "2099-01-10",
-                competenceMonth = "2099-01",
-                totalAmount = 1000.0
-            ),
-            makeTx(
-                id = "m2_vr_estouro",
-                category = "VA/VR",
+                id = "jan_va_out",
+                category = "Alimentação",
                 subcategory = "Supermercado",
                 type = TransactionType.EXPENSE,
-                dueDate = "2099-01-12",
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                status = TransactionStatus.PAID,
                 competenceMonth = "2099-01",
-                totalAmount = 600.0
+                dueDate = "2099-01-12",
+                amount = 600.0
             )
         )
 
-        val janSummary = FinanceEngine.computeSummary(
-            all = txs,
-            uid = myUid,
-            monthKey = "2099-01",
-            cards = emptyList(),
-            closures = emptyList()
-        )
+        val janSummary = FinanceEngine.computeSummary(txs, MY_UID, "2099-01", cards, listOf(closure))
         assertEquals(450.0, janSummary.vaVrCarryover, 0.01)
         assertEquals(-150.0, janSummary.vaVrAvailableBalance, 0.01)
         assertEquals(0.0, janSummary.vaVrDailyLimit!!, 0.01)
-        assertEquals(4000.0, janSummary.freeBalance, 0.01)
+        // Conta corrente recebe +900 do fechamento anterior e segue 100% blindada do -150 do Vale (4000 + 900 = 4900)
+        assertEquals(4900.0, janSummary.freeBalance, 0.01)
 
-        val febSummary = FinanceEngine.computeSummary(
-            all = txs,
-            uid = myUid,
-            monthKey = "2099-02",
-            cards = emptyList(),
-            closures = emptyList()
-        )
+        val febSummary = FinanceEngine.computeSummary(txs, MY_UID, "2099-02", cards, listOf(closure))
         assertEquals(0.0, febSummary.vaVrCarryover, 0.01)
     }
 
     @Test
-    fun `5 - split VA VR purchase deducts full purchase from payer pot while generating checking receivable`() {
-        val splitPurchase = makeTx(
-            id = "vr_split_200",
-            paidByUid = myUid,
-            description = "Compras do Mês Carrefour (VA)",
-            category = "VA/VR",
-            subcategory = "Supermercado",
+    fun `5 rateio no Vale desconta 100 pct do saldo pre-pago do pagador e gera receivable pro terceiro`() {
+        val cards = listOf(VALE_CARD)
+        val sharedTx = makeTx(
+            id = "va_split",
+            description = "Jantar Compartilhado no Vale",
+            category = "Alimentação",
+            subcategory = "Restaurante",
             type = TransactionType.EXPENSE,
-            paymentMethod = PaymentMethod.DEBIT,
+            paymentMethod = PaymentMethod.VA_VR,
+            cardId = VALE_CARD.id,
             status = TransactionStatus.PAID,
-            totalAmount = 200.0,
+            paidByUid = MY_UID,
+            visibleToUids = listOf(MY_UID, PARTNER_UID),
             splitType = SplitType.SPLIT_50,
+            amount = 200.0,
+            userImpact = mapOf(MY_UID to 100.0, PARTNER_UID to 100.0),
             allocations = listOf(
-                Allocation(type = "PLATFORM_USER", uid = myUid, name = "Kayo", amount = 100.0, reimbursed = true),
-                Allocation(type = "PLATFORM_USER", uid = partnerUid, name = "Ana", amount = 100.0, reimbursed = false)
-            ),
-            userImpact = mapOf(myUid to 100.0, partnerUid to 100.0),
-            visibleToUids = listOf(myUid, partnerUid)
+                Allocation(uid = MY_UID, type = "PLATFORM_USER", name = "Eu", amount = 100.0, reimbursed = false),
+                Allocation(uid = PARTNER_UID, type = "PLATFORM_USER", name = "Parceiro", amount = 100.0, reimbursed = false)
+            )
         )
 
-        val payerSummary = FinanceEngine.computeSummary(
-            all = listOf(splitPurchase),
-            uid = myUid,
-            monthKey = "2099-01"
-        )
+        val payerSummary = FinanceEngine.computeSummary(listOf(sharedTx), MY_UID, "2099-01", cards)
         assertEquals(200.0, payerSummary.vaVrSpent, 0.01)
         assertEquals(-200.0, payerSummary.vaVrAvailableBalance, 0.01)
         assertEquals(100.0, payerSummary.receivableFromPartner, 0.01)
-        assertEquals(100.0, payerSummary.receivableTotal, 0.01)
+        assertEquals(0.0, payerSummary.paid, 0.01)
 
-        val partnerSummary = FinanceEngine.computeSummary(
-            all = listOf(splitPurchase),
-            uid = partnerUid,
-            monthKey = "2099-01"
-        )
+        val partnerSummary = FinanceEngine.computeSummary(listOf(sharedTx), PARTNER_UID, "2099-01", cards)
         assertEquals(0.0, partnerSummary.vaVrSpent, 0.01)
         assertEquals(100.0, partnerSummary.payableToOthers, 0.01)
     }
 
     @Test
-    fun `6 - VA VR is self-budgeted and excluded from traditional envelopes suggestions and health living cost`() {
+    fun `6 remove VA VR de categorias ativas e isola gastos Vale de envelopes tradicionais, score e faturas`() {
+        assertFalse(CategoryRegistry.EXPENSE_CATEGORIES.any { it.name == "VA/VR" })
+        assertFalse(CategoryRegistry.INCOME_CATEGORIES.any { it.name == "VA/VR" })
+        assertFalse(CategoryRegistry.ACTIVE_CATEGORIES.contains("VA/VR"))
+        assertTrue(CategoryRegistry.LEGACY_CATEGORIES.any { it.name == "VA/VR" })
         assertTrue(FinanceEngine.NON_ENVELOPE_CATEGORIES.contains("VA/VR"))
         assertEquals(BudgetNature.NEED, CategoryRegistry.getBudgetNature("VA/VR"))
         assertEquals(BudgetNature.INCOME, CategoryRegistry.getBudgetNature("VA/VR", "Recarga VA/VR"))
-        assertTrue(CategoryRegistry.EXPENSE_CATEGORIES.any { it.name == "VA/VR" })
-        assertTrue(CategoryRegistry.INCOME_CATEGORIES.any { it.name == "VA/VR" })
+        assertTrue(VALE_CARD.isVaVrCard)
+        assertFalse(CREDIT_CARD.isVaVrCard)
 
+        val cards = listOf(VALE_CARD, CREDIT_CARD)
         val txs = listOf(
             makeTx(
                 id = "s_sal",
                 category = "Salário & Remuneração",
-                subcategory = "Salário Principal",
                 type = TransactionType.INCOME,
-                dueDate = "2026-10-05",
-                competenceMonth = "2026-10",
-                totalAmount = 5000.0
+                paymentMethod = PaymentMethod.PIX,
+                amount = 6000.0
             ),
             makeTx(
-                id = "s_alim",
+                id = "s_va_food",
+                description = "Supermercado no Vale",
                 category = "Alimentação",
                 subcategory = "Supermercado",
                 type = TransactionType.EXPENSE,
-                dueDate = "2026-10-12",
-                competenceMonth = "2026-10",
-                totalAmount = 600.0
+                paymentMethod = PaymentMethod.VA_VR,
+                cardId = VALE_CARD.id,
+                amount = 2000.0
             ),
             makeTx(
-                id = "s_vavr_huge",
-                category = "VA/VR",
-                subcategory = "Supermercado",
+                id = "s_pix_food",
+                description = "Jantar no PIX",
+                category = "Alimentação",
+                subcategory = "Restaurante",
                 type = TransactionType.EXPENSE,
-                dueDate = "2026-10-15",
-                competenceMonth = "2026-10",
-                totalAmount = 4000.0
+                paymentMethod = PaymentMethod.PIX,
+                amount = 500.0
             )
         )
 
+        val summary = FinanceEngine.computeSummary(txs, MY_UID, "2099-01", cards)
         val report = FinanceEngine.computeCategoryBudgetsFromTransactions(
             transactions = txs,
             categoryBudgets = mapOf("Alimentação" to 1000.0),
-            monthKey = "2026-10",
-            referenceDate = "2026-10-20",
-            uid = myUid,
+            monthKey = "2099-01",
+            referenceDate = "2099-01-15",
+            uid = MY_UID,
             allTransactions = txs,
-            expectedIncome = 5000.0
+            expectedIncome = 6000.0,
+            cards = cards
         )
-        assertFalse(report.items.any { it.category == "VA/VR" })
-        assertEquals(600.0, report.totalSpent, 0.01)
 
+        val foodItem = report.items.find { it.category == "Alimentação" }
+        assertNotNull(foodItem)
+        assertEquals(500.0, foodItem!!.spent, 0.01)
+        assertFalse(report.items.any { it.category == "VA/VR" })
+
+        val health = FinanceEngine.calculateFinancialHealthScore(summary, 0.0, report)
+        assertEquals(500.0, health.monthlyLivingCost, 0.01)
+        assertEquals(30, health.spendingLimitScore)
+        assertEquals(15, health.envelopeScore)
+        assertEquals(45, health.score)
+
+        val pastTxs = txs.map { it.copy(competenceMonth = "2098-12", dueDate = "2098-12-10") }
         val suggested = FinanceEngine.suggestCategoryBudgets(
-            allTransactions = txs,
-            uid = myUid,
-            referenceMonth = "2026-11",
-            monthlyIncome = 5000.0
+            allTransactions = pastTxs,
+            uid = MY_UID,
+            referenceMonth = "2099-01",
+            monthlyIncome = 6000.0,
+            cards = cards
         )
         assertNull(suggested.suggestedBudgets["VA/VR"])
+        assertEquals(500.0, suggested.categoryAverages["Alimentação"] ?: 0.0, 0.01)
+        assertEquals(600.0, suggested.suggestedBudgets["Alimentação"] ?: 0.0, 0.01)
 
-        val janSummary = FinanceEngine.computeSummary(
-            all = txs.map { it.copy(competenceMonth = "2099-01", dueDate = "2099-01-15") },
-            uid = myUid,
-            monthKey = "2099-01"
-        )
-        val health = FinanceEngine.calculateFinancialHealthScore(janSummary, 3000.0, report)
-        assertEquals(600.0, health.monthlyLivingCost, 0.01)
-        assertEquals(12, health.spendingRatioPercentage)
+        // Cartão tipo 'va_vr' nunca gera fatura pós-paga
+        val valeInvoice = InvoiceEngine.buildInvoice(VALE_CARD, "2099-01", txs, MY_UID, "2099-01-15")
+        assertTrue(valeInvoice.items.isEmpty())
+        assertEquals(0.0, valeInvoice.total, 0.01)
+        assertEquals(0.0, valeInvoice.grossExpenses, 0.01)
     }
 
     @Test
-    fun `7 - NeuralFinanceClassifier and CategoryRegistry recognize VA VR brands and dual categories`() {
+    fun `7 classificadores detectam metodo VA_VR, preservam categorias reais e migram VA VR legado`() {
         assertTrue(CategoryRegistry.isVaVrCategory("VA/VR"))
         assertTrue(CategoryRegistry.isVaVrCategory("Benefícios", "Vale Refeição (VR)"))
-        assertTrue(CategoryRegistry.isVaVrTransaction(makeTx(category = "VA/VR", subcategory = "Padaria")))
-
-        val classifier = NeuralFinanceClassifier(null)
-        val samples = listOf(
-            Triple("Recarga Benefícios Pluxee mensal", TransactionType.INCOME, "Recarga VA/VR"),
-            Triple("Recarga Alelo VA mensal", TransactionType.INCOME, "Vale Alimentação (VA)"),
-            Triple("Crédito Caju Vale Refeição", TransactionType.INCOME, "Vale Refeição (VR)"),
-            Triple("Restaurante Pluxee almoço", TransactionType.EXPENSE, "Restaurante"),
-            Triple("Supermercado iFood Benefícios", TransactionType.EXPENSE, "Supermercado"),
-            Triple("Ticket Padaria café", TransactionType.EXPENSE, "Padaria"),
-            Triple("Compra Flash Benefícios", TransactionType.EXPENSE, null),
-            Triple("Almoço Sodexo Express", TransactionType.EXPENSE, null)
+        assertTrue(
+            CategoryRegistry.isVaVrTransaction(
+                makeTx(paymentMethod = PaymentMethod.VA_VR, category = "Saúde"),
+                listOf(VALE_CARD)
+            )
+        )
+        assertTrue(
+            CategoryRegistry.isVaVrTransaction(
+                makeTx(paymentMethod = PaymentMethod.CREDIT_CARD, cardId = VALE_CARD.id, category = "Transporte"),
+                listOf(VALE_CARD)
+            )
+        )
+        assertTrue(
+            CategoryRegistry.isVaVrRecurringBill(
+                RecurringBill(
+                    id = "b_vavr",
+                    ownerUid = MY_UID,
+                    description = "Vale",
+                    category = "Benefícios",
+                    paymentMethod = PaymentMethod.VA_VR
+                ),
+                listOf(VALE_CARD)
+            )
         )
 
-        for ((text, txType, expectedSub) in samples) {
-            val guess = classifier.guessCategoryAndSubcategory(text, type = txType)
-            assertEquals("Expected VA/VR for '$text'", "VA/VR", guess.category)
-            if (expectedSub != null) {
-                assertEquals("Expected subcat for '$text'", expectedSub, guess.subcategory)
-            }
-        }
+        val classifier = NeuralFinanceClassifier(context = null)
+        assertEquals(PaymentMethod.VA_VR, classifier.detectPaymentMethod("Recarga Pluxee VA"))
+        assertEquals(PaymentMethod.VA_VR, classifier.detectPaymentMethod("Uber com VR Flash"))
+        assertEquals(PaymentMethod.VA_VR, classifier.detectPaymentMethod("Supermercado iFood Benefícios"))
+        assertNotEquals(PaymentMethod.VA_VR, classifier.detectPaymentMethod("Ticket show rock"))
+        assertNotEquals(PaymentMethod.VA_VR, classifier.detectPaymentMethod("Flash drive USB 64gb"))
+
+        val recarga = classifier.guessCategoryAndSubcategory("Recarga Benefícios Pluxee mensal", type = TransactionType.INCOME)
+        assertEquals("Benefícios", recarga.category)
+        assertEquals("Vale Alimentação (VA)", recarga.subcategory)
+
+        val supermercado = classifier.guessCategoryAndSubcategory("Supermercado iFood Benefícios", type = TransactionType.EXPENSE)
+        assertEquals("Alimentação", supermercado.category)
+        assertEquals("Supermercado", supermercado.subcategory)
+
+        val uberFlash = classifier.guessCategoryAndSubcategory("Uber com VR Flash", type = TransactionType.EXPENSE)
+        assertEquals("Transporte", uberFlash.category)
+
+        val almocoAlelo = classifier.guessCategoryAndSubcategory("Almoço Alelo Restaurante", type = TransactionType.EXPENSE)
+        assertEquals("Alimentação", almocoAlelo.category)
+        assertEquals("Restaurante", almocoAlelo.subcategory)
 
         val strictExp = CategoryRegistry.resolveStrictCategory("VA/VR", "Supermercado", TransactionType.EXPENSE)
-        assertEquals("VA/VR", strictExp.first)
+        assertEquals("Alimentação", strictExp.first)
         assertEquals("Supermercado", strictExp.second)
 
         val strictInc = CategoryRegistry.resolveStrictCategory("VA/VR", "Recarga VA/VR", TransactionType.INCOME)
-        assertEquals("VA/VR", strictInc.first)
-        assertEquals("Recarga VA/VR", strictInc.second)
-
-        val strictAlias = CategoryRegistry.resolveStrictCategory("Vale Alimentação", "Vale Alimentação (VA)", TransactionType.INCOME)
-        assertEquals("VA/VR", strictAlias.first)
-        assertEquals("Vale Alimentação (VA)", strictAlias.second)
+        assertEquals("Benefícios", strictInc.first)
+        assertEquals("Vale Alimentação (VA)", strictInc.second)
     }
 }

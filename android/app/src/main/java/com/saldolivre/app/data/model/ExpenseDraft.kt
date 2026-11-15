@@ -13,6 +13,7 @@ data class ExpenseDraft(
     val id: String = "draft_${System.currentTimeMillis()}_${UUID.randomUUID().toString().replace("-", "").take(4)}",
     val amount: Double = 0.0,
     val description: String = "",
+    val type: TransactionType = TransactionType.EXPENSE,
     val category: String = "Outros",
     val subcategory: String? = null,
     val paymentMethod: PaymentMethod = PaymentMethod.CREDIT_CARD,
@@ -21,6 +22,8 @@ data class ExpenseDraft(
     val date: String = FinanceEngine.todayKey(),
     val rawNotificationText: String = "",
     val packageName: String = "",
+    val rawMerchant: String = "",
+    val aiEnriched: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 ) {
     fun paymentMethodShortLabel(): String = when (paymentMethod) {
@@ -28,6 +31,7 @@ data class ExpenseDraft(
         PaymentMethod.DEBIT -> "Débito"
         PaymentMethod.PIX -> "Pix"
         PaymentMethod.BILL -> "Boleto"
+        PaymentMethod.VA_VR -> "Vale (VA/VR)"
     }
 
     fun paymentMethodChatLabel(resolvedCardName: String? = cardName): String = when (paymentMethod) {
@@ -38,5 +42,9 @@ data class ExpenseDraft(
         PaymentMethod.DEBIT -> "Débito"
         PaymentMethod.PIX -> "Pix"
         PaymentMethod.BILL -> "Boleto"
+        PaymentMethod.VA_VR -> {
+            val cardLabel = resolvedCardName?.takeIf { it.isNotBlank() }
+            if (cardLabel != null) "Vale Pré-Pago ($cardLabel)" else "Vale (VA/VR Pré-Pago)"
+        }
     }
 }

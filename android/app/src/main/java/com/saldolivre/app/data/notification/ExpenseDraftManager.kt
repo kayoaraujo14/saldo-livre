@@ -17,6 +17,7 @@ import com.google.gson.reflect.TypeToken
 import com.saldolivre.app.MainActivity
 import com.saldolivre.app.R
 import com.saldolivre.app.data.ai.AgentSecuritySanitizer
+import com.saldolivre.app.data.ai.GeminiLoadBalancer
 import com.saldolivre.app.data.ai.LearnedRulesManager
 import com.saldolivre.app.data.ai.NeuralFinanceClassifier
 import com.saldolivre.app.data.engine.FinanceEngine
@@ -30,7 +31,9 @@ import com.saldolivre.app.data.model.Transaction
 import com.saldolivre.app.data.model.TransactionStatus
 import com.saldolivre.app.data.model.TransactionType
 import com.saldolivre.app.data.repository.FinanceRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -219,8 +222,16 @@ class ExpenseDraftManager private constructor(context: Context) {
             pendingFlags
         )
 
-        val title = "💸 Nova despesa detectada: $formattedAmount"
-        val body = "${draft.description} • ${draft.paymentMethodShortLabel()} (${draft.category}) — Toque para revisar no Chat"
+        val title = if (draft.type == TransactionType.INCOME) {
+            "💰 Novo Pix recebido: $formattedAmount"
+        } else {
+            "💸 Nova despesa detectada: $formattedAmount"
+        }
+        val body = if (draft.type == TransactionType.INCOME) {
+            "${draft.description} • Entrada (${draft.category}) — Toque para revisar no Chat"
+        } else {
+            "${draft.description} • ${draft.paymentMethodShortLabel()} (${draft.category}) — Toque para revisar no Chat"
+        }
 
         val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
@@ -262,7 +273,9 @@ class ExpenseDraftManager private constructor(context: Context) {
     ): Transaction {
         val user = repository.currentUser.value
         val cards = runCatching { repository.getCards().first() }.getOrDefault(emptyList())
-        val card = if (draft.paymentMethod == PaymentMethod.CREDIT_CARD) {
+        val isCreditExpense = draft.type == TransactionType.EXPENSE &&
+            draft.paymentMethod == PaymentMethod.CREDIT_CARD
+        val card = if (isCreditExpense) {
             cards.find { it.id == draft.cardId }
                 ?: draft.cardName?.let { targetName ->
                     cards.find { it.cardName.equals(targetName, ignoreCase = true) }
@@ -280,7 +293,7 @@ class ExpenseDraftManager private constructor(context: Context) {
             payerUid = user.uid
         )
 
-        val (dueDate, competenceMonth) = if (draft.paymentMethod == PaymentMethod.CREDIT_CARD) {
+        val (dueDate, competenceMonth) = if (isCreditExpense) {
             val cardDates = FinanceEngine.calculateCardInvoiceDates(draft.date, card)
             Pair(draft.date, cardDates.second)
         } else {
@@ -290,32 +303,33 @@ class ExpenseDraftManager private constructor(context: Context) {
         val (strictCategory, strictSubcategory) = CategoryRegistry.resolveStrictCategory(
             rawCategory = draft.category,
             rawSubcategory = draft.subcategory,
-            type = TransactionType.EXPENSE,
+            type = draft.type,
             description = draft.description
         )
 
-        val cardUids = if (draft.paymentMethod == PaymentMethod.CREDIT_CARD && card != null) {
+        val cardUids = if (isCreditExpense && card != null) {
             (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
         } else emptyList()
 
-        val status = if (draft.paymentMethod == PaymentMethod.CREDIT_CARD) {
+        val status = if (isCreditExpense) {
             TransactionStatus.PENDING
         } else {
             TransactionStatus.PAID
         }
 
+        val fallbackDesc = if (draft.type == TransactionType.INCOME) "Pix recebido" else "Compra detectada"
         val safeDescription = AgentSecuritySanitizer.sanitizeText(draft.description, maxLength = 120)
-            .ifBlank { "Compra detectada" }
+            .ifBlank { fallbackDesc }
 
         val tx = Transaction(
             id = "tx_${UUID.randomUUID().toString().replace("-", "").take(8)}",
             createdByUid = user.uid,
             paidByUid = user.uid,
-            cardId = if (draft.paymentMethod == PaymentMethod.CREDIT_CARD) card?.id else null,
+            cardId = if (isCreditExpense) card?.id else null,
             description = safeDescription,
             category = strictCategory,
             subcategory = strictSubcategory,
-            type = TransactionType.EXPENSE,
+            type = draft.type,
             paymentMethod = draft.paymentMethod,
             status = status,
             estimatedAmount = null,
@@ -330,11 +344,12 @@ class ExpenseDraftManager private constructor(context: Context) {
         )
 
         repository.addTransaction(tx)
+        val typeTag = if (draft.type == TransactionType.INCOME) "Entrada" else "Despesa"
         repository.logActivity(
             ActivityLog(
                 actionType = ActivityActionType.TRANSACTION_CREATED,
                 title = safeDescription,
-                description = "Aprovado via notificação • $strictCategory (${FinanceEngine.formatCurrency(draft.amount)})",
+                description = "Aprovado via notificação ($typeTag) • $strictCategory (${FinanceEngine.formatCurrency(draft.amount)})",
                 amount = draft.amount,
                 category = strictCategory,
                 competenceMonth = competenceMonth,
@@ -370,6 +385,50 @@ class ExpenseDraftManager private constructor(context: Context) {
         neuralClassifier.saveLearnedRule(ruleText)
     }
 
+    /**
+     * Pensa com a IA Gemini sobre a notificação bancária para substituir nomes fantasia/POS
+     * por uma descrição financeira inteligente e refinar categoria/subcategoria (mantendo
+     * regras aprendidas pelo usuário quando aplicáveis).
+     */
+    suspend fun enrichDraftWithGemini(
+        draft: ExpenseDraft,
+        uid: String = "",
+        rulesManager: LearnedRulesManager = LearnedRulesManager(appContext)
+    ): ExpenseDraft = withContext(Dispatchers.IO) {
+        if (draft.aiEnriched) return@withContext draft
+
+        val hasLearnedRule = if (uid.isNotBlank()) {
+            val rules = rulesManager.getLocalRules(uid)
+            NotificationExpenseParser.hasLearnedRuleMatch(
+                description = draft.rawMerchant.ifBlank { draft.description },
+                sanitizedCombined = draft.rawNotificationText,
+                learnedRules = rules,
+                transactionType = draft.type
+            )
+        } else {
+            false
+        }
+
+        val refined = GeminiLoadBalancer(appContext).refineNotificationExpenseWithAi(
+            rawNotificationText = draft.rawNotificationText,
+            rawMerchant = draft.rawMerchant.ifBlank { draft.description },
+            currentDescription = draft.description,
+            amount = draft.amount,
+            paymentMethod = draft.paymentMethod,
+            currentCategory = draft.category,
+            currentSubcategory = draft.subcategory,
+            packageName = draft.packageName,
+            transactionType = draft.type
+        ) ?: return@withContext draft
+
+        draft.copy(
+            description = refined.description,
+            category = if (hasLearnedRule) draft.category else refined.category,
+            subcategory = if (hasLearnedRule) draft.subcategory else refined.subcategory,
+            aiEnriched = true
+        )
+    }
+
     suspend fun simulateTestNotification(
         repository: FinanceRepository,
         rawText: String = SAMPLE_TEST_NOTIFICATION_TEXT,
@@ -381,7 +440,7 @@ class ExpenseDraftManager private constructor(context: Context) {
         val rulesManager = LearnedRulesManager(appContext)
         val neuralClassifier = NeuralFinanceClassifier(appContext)
 
-        val draft = NotificationExpenseParser.parseWithManagers(
+        val parsedDraft = NotificationExpenseParser.parseWithManagers(
             packageName = packageName,
             title = title,
             text = rawText,
@@ -391,9 +450,15 @@ class ExpenseDraftManager private constructor(context: Context) {
             neuralClassifier = neuralClassifier
         ) ?: return null
 
-        saveDraft(draft)
-        showDraftNotification(draft)
-        return draft
+        val enrichedDraft = enrichDraftWithGemini(
+            draft = parsedDraft,
+            uid = user.uid,
+            rulesManager = rulesManager
+        )
+
+        saveDraft(enrichedDraft)
+        showDraftNotification(enrichedDraft)
+        return enrichedDraft
     }
 
     private fun readDraftsInternal(): List<ExpenseDraft> {

@@ -121,22 +121,53 @@ fun CardsScreen(
 
             // Cards Section Title
             item(key = "cards_section_title", contentType = "cards_section_title") {
+                val tealAccent = Color(0xFF2DD4BF)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Seus Cartões Cadastrados",
-                        style = Typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = "${uiState.cardsWithInvoices.size} cartões",
-                        style = Typography.bodySmall,
-                        color = TextSecondary
-                    )
+                    Column {
+                        Text(
+                            text = "Seus Cartões Cadastrados",
+                            style = Typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "${uiState.cardsWithInvoices.size} ${if (uiState.cardsWithInvoices.size == 1) "cartão" else "cartões"}",
+                            style = Typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(tealAccent.copy(alpha = 0.14f))
+                            .border(1.dp, tealAccent.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                            .clickable { viewModel.openNewCard("va_vr") }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Restaurant,
+                                contentDescription = null,
+                                tint = tealAccent,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "+ Vale (VA/VR)",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = tealAccent,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
             }
 
@@ -413,7 +444,7 @@ private fun CardItemView(
         ) {
             // Marca d'água sutil ao fundo
             Icon(
-                imageVector = Icons.Default.CreditCard,
+                imageVector = if (card.isVaVrCard) Icons.Default.Restaurant else Icons.Default.CreditCard,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.05f),
                 modifier = Modifier
@@ -449,7 +480,7 @@ private fun CardItemView(
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.Default.CreditCard,
+                                    imageVector = if (card.isVaVrCard) Icons.Default.Restaurant else Icons.Default.CreditCard,
                                     contentDescription = null,
                                     tint = Color.White.copy(alpha = 0.95f),
                                     modifier = Modifier.size(18.dp)
@@ -466,17 +497,30 @@ private fun CardItemView(
                         )
                     }
 
-                    // Invoice Status Badge (Formato pílula translúcido sem bordas pesadas)
+                    // Status Badge (Vale Pré-Pago vs Fatura Aberta/Fechada)
                     Surface(
-                        color = if (item.isClosed) Amber400.copy(alpha = 0.15f) else Emerald400.copy(alpha = 0.15f),
+                        color = when {
+                            card.isVaVrCard -> Cyan400.copy(alpha = 0.18f)
+                            item.isClosed -> Amber400.copy(alpha = 0.15f)
+                            else -> Emerald400.copy(alpha = 0.15f)
+                        },
                         shape = CircleShape
                     ) {
                         Text(
-                            text = if (item.isClosed) "Fatura Fechada" else "Fatura Aberta",
-                            color = if (item.isClosed) Amber400 else Emerald400,
+                            text = when {
+                                card.isVaVrCard -> "Vale Pré-Pago"
+                                item.isClosed -> "Fatura Fechada"
+                                else -> "Fatura Aberta"
+                            },
+                            color = when {
+                                card.isVaVrCard -> Cyan400
+                                item.isClosed -> Amber400
+                                else -> Emerald400
+                            },
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
@@ -488,34 +532,67 @@ private fun CardItemView(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Column {
-                            Text(
-                                text = "FECHA",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White.copy(alpha = 0.7f)
-                            )
-                            Text(
-                                text = "Dia ${card.closingDay}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
+                    if (card.isVaVrCard) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Column {
+                                Text(
+                                    text = "RECARGA",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                                Text(
+                                    text = "Dia ${card.dueDay}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "MODALIDADE",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                                Text(
+                                    text = "VA/VR (Pré-pago)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
                         }
-                        Column {
-                            Text(
-                                text = "VENCE",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White.copy(alpha = 0.7f)
-                            )
-                            Text(
-                                text = "Dia ${card.dueDay}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Column {
+                                Text(
+                                    text = "FECHA",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                                Text(
+                                    text = "Dia ${card.closingDay}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "VENCE",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                                Text(
+                                    text = "Dia ${card.dueDay}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
 
@@ -547,7 +624,7 @@ private fun CardItemView(
                     }
                 }
 
-                // Bottom: Invoice Amount
+                // Bottom: Invoice / Vale Spend Amount
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -559,7 +636,7 @@ private fun CardItemView(
                             .padding(end = 8.dp)
                     ) {
                         Text(
-                            text = "FATURA ATUAL",
+                            text = if (card.isVaVrCard) "GASTO NO VALE (MÊS)" else "FATURA ATUAL",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White.copy(alpha = 0.8f),
@@ -608,7 +685,7 @@ private fun CardItemView(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "Limite: $formattedLimit",
+                            text = "${if (card.isVaVrCard) "Teto/Recarga:" else "Limite:"} $formattedLimit",
                             fontSize = 12.sp,
                             color = TextSecondary,
                             maxLines = 1,

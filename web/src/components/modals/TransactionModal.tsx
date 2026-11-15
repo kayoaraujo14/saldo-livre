@@ -17,6 +17,7 @@ import {
   INCOME_CATEGORIES,
   LEGACY_CATEGORIES,
   getCategoryDetail,
+  isVaVrCard,
   isVaVrCategory,
   type Allocation,
   type Category,
@@ -25,7 +26,7 @@ import {
   type Transaction,
   type TransactionStatus,
 } from '@/types'
-import { buildSplit, calculateCardInvoiceDates, canUserEditTransaction, clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory, resolveNextAcceptanceStatus } from '@/lib/finance'
+import { buildSplit, calculateCardInvoiceDates, canUserEditTransaction, clampPct, effectiveAmount, friendPctOf, guessCategoryAndSubcategory, resolveNextAcceptanceStatus, suggestPaymentMethod } from '@/lib/finance'
 import { todayKey, formatBRL, stripInstallmentSuffix, round2 } from '@/lib/utils'
 import {
   CreditCard,
@@ -75,6 +76,7 @@ interface TransactionModalProps {
     subcategory: string
     paymentMethod: PaymentMethod
     status: TransactionStatus
+    cardId?: string
   } | null
 }
 
@@ -208,18 +210,24 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
 
       setInstallmentsCount(editingTx.installmentsTotal || 3)
     } else {
+      const creditCards = cards.filter((c) => !isVaVrCard(c))
+      const valeCards = cards.filter(isVaVrCard)
+      const initialPm = initialPreset?.paymentMethod ?? 'credit_card'
+      const initialCardId =
+        initialPreset?.cardId ??
+        (initialPm === 'va_vr' ? (valeCards[0]?.id || '') : (creditCards[0]?.id || ''))
       setDescription('')
       setAmount('')
       setCategory(initialPreset?.category ?? 'Alimentação')
       setSubcategory(initialPreset?.subcategory ?? 'Supermercado')
       setDate(todayKey())
       setType(initialPreset?.type ?? 'expense')
-      setStatus(initialPreset?.status ?? 'pending')
+      setStatus(initialPreset?.status ?? (initialPm === 'va_vr' ? 'paid' : 'pending'))
       setSplitType('mine')
       setExternalName('Mãe')
       setCustomParticipants([])
-      setPaymentMethod(initialPreset?.paymentMethod ?? 'credit_card')
-      setCardId(cards[0]?.id || '')
+      setPaymentMethod(initialPm)
+      setCardId(initialCardId)
       setIsReserve(false)
       setIsInstallment(false)
       setInstallmentsCount(3)
@@ -543,7 +551,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
             date: date !== editingTx.dueDate ? date : undefined,
             status,
             paymentMethod,
-            cardId: paymentMethod === 'credit_card' ? (cardId || null) : null,
+            cardId: paymentMethod === 'credit_card' || paymentMethod === 'va_vr' ? (cardId || null) : null,
             splitType: isCustom ? 'custom' : splitType,
             externalName: splitType === 'external' ? externalName : undefined,
             friend:
@@ -554,7 +562,8 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
           })
         } else {
           const card = cards.find((c) => c.id === cardId)
-          const newCompetenceMonth = paymentMethod === 'credit_card' && card
+          const isPostPaidCredit = paymentMethod === 'credit_card' && card && !isVaVrCard(card)
+          const newCompetenceMonth = isPostPaidCredit
             ? calculateCardInvoiceDates(date, card).competenceMonth
             : date.slice(0, 7)
 
@@ -562,7 +571,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
             ? { uid: resolvedFriendUid, name: resolvedFriendName }
             : null
 
-          const payerUid = paymentMethod === 'credit_card' && card ? card.ownerUid : (me?.uid || editingTx.paidByUid)
+          const payerUid = isPostPaidCredit && card ? card.ownerUid : (me?.uid || editingTx.paidByUid)
 
           const split = buildSplit({
             splitType: isCustom ? 'custom' : splitType,
@@ -586,7 +595,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
             friendSharePct: assignedFriend ? resolvedFriendPct : null,
           })
 
-          const cardUids = paymentMethod === 'credit_card' && card
+          const cardUids = (paymentMethod === 'credit_card' || paymentMethod === 'va_vr') && card
             ? [card.ownerUid, ...(card.sharedWithUids || [])].filter(Boolean)
             : []
 
@@ -597,7 +606,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
             dueDate: date,
             competenceMonth: newCompetenceMonth,
             paymentMethod,
-            cardId: paymentMethod === 'credit_card' ? (cardId || null) : null,
+            cardId: paymentMethod === 'credit_card' || paymentMethod === 'va_vr' ? (cardId || null) : null,
             splitType: isCustom ? 'custom' : splitType,
             estimatedAmount: status === 'estimated' ? numericAmount : null,
             actualAmount: status === 'estimated' ? null : numericAmount,
@@ -630,8 +639,8 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
           splitType: isCustom ? 'custom' : splitType,
           externalName: splitType === 'external' ? externalName : undefined,
           paymentMethod,
-          cardId: paymentMethod === 'credit_card' ? (cardId || null) : null,
-          reserveCardId: isReserve && cardId ? cardId : null,
+          cardId: paymentMethod === 'credit_card' || paymentMethod === 'va_vr' ? (cardId || null) : null,
+          reserveCardId: isReserve && paymentMethod === 'credit_card' && cardId ? cardId : null,
           assignedFriendUid,
           assignedFriendName,
           friendSharePct: friendSharePctNum,
@@ -772,13 +781,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                 onClick={() => {
                   setType('expense')
                   if (status === 'estimated') setStatus('pending')
-                  if (isVaVrCategory(category)) {
-                    const expenseSubs = ['Supermercado', 'Restaurante', 'Delivery & Lanches', 'Padaria', 'Outros VA/VR']
-                    if (!expenseSubs.includes(subcategory)) {
-                      setSubcategory('Supermercado')
-                    }
-                    setPaymentMethod('debit')
-                  } else if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
+                  if ((INCOME_CATEGORIES as readonly string[]).includes(category) || category === 'Receita') {
                     setCategory('Alimentação')
                     setSubcategory('Supermercado')
                   }
@@ -795,15 +798,15 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                 type="button"
                 onClick={() => {
                   setType('income')
-                  if (isVaVrCategory(category)) {
-                    const incomeSubs = ['Recarga VA/VR', 'Vale Alimentação (VA)', 'Vale Refeição (VR)', 'Saldo Inicial / Ajuste']
-                    if (!incomeSubs.includes(subcategory)) {
-                      setSubcategory('Recarga VA/VR')
-                    }
-                    setPaymentMethod('pix')
+                  if (paymentMethod === 'va_vr') {
+                    setCategory('Benefícios')
+                    setSubcategory('Vale Alimentação (VA)')
                   } else {
                     setCategory('Salário & Remuneração')
                     setSubcategory('Salário Principal')
+                    if (paymentMethod === 'credit_card') {
+                      setPaymentMethod('pix')
+                    }
                   }
                   setSplitType('mine')
                   setIsInstallment(false)
@@ -869,24 +872,29 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                   setDescription(val)
                   if (!editingTx && val.trim().length >= 3) {
                     const guess = guessCategoryAndSubcategory(val, undefined, type)
-                    if (initialPreset && isVaVrCategory(initialPreset.category)) {
-                      setCategory('VA/VR')
-                      const vaSubs = getCategoryDetail('VA/VR')?.subcategories || []
-                      if (guess.subcategory && vaSubs.includes(guess.subcategory)) {
-                        setSubcategory(guess.subcategory)
-                      }
-                    } else {
-                      setCategory(guess.category)
-                      const subs = getCategoryDetail(guess.category)?.subcategories || []
-                      setSubcategory(guess.subcategory || subs[0] || '')
-                      if (isVaVrCategory(guess.category)) {
-                        setPaymentMethod(type === 'income' ? 'pix' : 'debit')
+                    setCategory(guess.category)
+                    const subs = getCategoryDetail(guess.category)?.subcategories || []
+                    setSubcategory(guess.subcategory || subs[0] || '')
+
+                    if (initialPreset?.paymentMethod !== 'va_vr') {
+                      const suggestedPm = suggestPaymentMethod(val)
+                      if (suggestedPm === 'va_vr') {
+                        setPaymentMethod('va_vr')
                         setStatus('paid')
+                        setIsInstallment(false)
+                        const valeCards = cards.filter(isVaVrCard)
+                        if (valeCards.length > 0 && !valeCards.some((c) => c.id === cardId)) {
+                          const normalized = val.toLowerCase()
+                          const matched = valeCards.find((c) =>
+                            normalized.includes(c.cardName.toLowerCase()),
+                          )
+                          setCardId((matched || valeCards[0]).id)
+                        }
                       }
                     }
                   }
                 }}
-                placeholder={isIncomeType ? 'Ex: Salário, Rendimentos, Pix de Amigo...' : 'Ex: Supermercado, Aluguel, Amazon Prime, Uber...'}
+                placeholder={isIncomeType ? 'Ex: Salário, Recarga Alelo/Flash, Pix...' : 'Ex: Supermercado, Aluguel, Restaurante, Uber...'}
                 className="h-10 text-xs sm:text-sm bg-slate-900/90 border-slate-700/80 rounded-xl focus-visible:ring-emerald-500/30"
                 required
               />
@@ -918,13 +926,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                       const newCat = v as Category
                       setCategory(newCat)
                       const subs = getCategoryDetail(newCat)?.subcategories || []
-                      if (isVaVrCategory(newCat)) {
-                        setSubcategory(subs.includes('Recarga VA/VR') ? 'Recarga VA/VR' : (subs[0] || ''))
-                        setPaymentMethod('pix')
-                        setStatus('paid')
-                      } else {
-                        setSubcategory(subs[0] || '')
-                      }
+                      setSubcategory(subs[0] || '')
                     }}
                   >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
@@ -936,8 +938,8 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                           {cat}
                         </SelectItem>
                       ))}
-                      {category === 'Receita' && (
-                        <SelectItem value="Receita">Receita (Legada)</SelectItem>
+                      {(category === 'Receita' || isVaVrCategory(category)) && (
+                        <SelectItem value={category}>{category} (Legada)</SelectItem>
                       )}
                     </SelectContent>
                   </Select>
@@ -964,7 +966,20 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
 
                 <div className="space-y-1.5 sm:col-span-2">
                   <label className="text-xs font-semibold text-slate-300">Forma de Recebimento</label>
-                  <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
+                  <Select
+                    value={paymentMethod}
+                    onValueChange={(v) => {
+                      const pm = v as PaymentMethod
+                      setPaymentMethod(pm)
+                      if (pm === 'va_vr') {
+                        setStatus('paid')
+                        const valeCards = cards.filter(isVaVrCard)
+                        if (valeCards.length > 0 && !valeCards.some((c) => c.id === cardId)) {
+                          setCardId(valeCards[0].id)
+                        }
+                      }
+                    }}
+                  >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
                       <SelectValue />
                     </SelectTrigger>
@@ -972,9 +987,28 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                       <SelectItem value="pix">⚡ Pix</SelectItem>
                       <SelectItem value="debit">🏦 Conta Corrente / TED</SelectItem>
                       <SelectItem value="bill">📄 Boleto / Outro</SelectItem>
+                      <SelectItem value="va_vr">🍽️ Cartão Vale / Pré-Pago (VA/VR)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
+
+                {paymentMethod === 'va_vr' && cards.some(isVaVrCard) && (
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <label className="text-xs font-semibold text-teal-300">Cartão Vale / Pré-Pago (Recarga)</label>
+                    <Select value={cardId} onValueChange={setCardId}>
+                      <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-teal-500/35 rounded-xl">
+                        <SelectValue placeholder="Selecione o cartão Vale" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {cards.filter(isVaVrCard).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            🍽️ {c.cardName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -986,13 +1020,7 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                       const newCat = v as Category
                       setCategory(newCat)
                       const subs = getCategoryDetail(newCat)?.subcategories || []
-                      if (isVaVrCategory(newCat)) {
-                        setSubcategory(subs.includes('Supermercado') ? 'Supermercado' : (subs[0] || ''))
-                        setPaymentMethod('debit')
-                        setStatus('paid')
-                      } else {
-                        setSubcategory(subs[0] || '')
-                      }
+                      setSubcategory(subs[0] || '')
                     }}
                   >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
@@ -1086,12 +1114,34 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-slate-300">Método de Pagamento</label>
-                  <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethod)}>
+                  <Select
+                    value={paymentMethod}
+                    onValueChange={(v) => {
+                      const pm = v as PaymentMethod
+                      setPaymentMethod(pm)
+                      if (pm === 'credit_card') {
+                        const creditCards = cards.filter((c) => c.ownerUid === me?.uid && !isVaVrCard(c))
+                        if (!creditCards.some((c) => c.id === cardId)) {
+                          setCardId(creditCards[0]?.id || '')
+                        }
+                      } else if (pm === 'va_vr') {
+                        setStatus('paid')
+                        setIsInstallment(false)
+                        const valeCards = cards.filter(
+                          (c) => (c.ownerUid === me?.uid || (c.sharedWithUids || []).includes(me?.uid || '')) && isVaVrCard(c),
+                        )
+                        if (!valeCards.some((c) => c.id === cardId)) {
+                          setCardId(valeCards[0]?.id || '')
+                        }
+                      }
+                    }}
+                  >
                     <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-slate-700/80 rounded-xl">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="credit_card">💳 Cartão de Crédito</SelectItem>
+                      <SelectItem value="va_vr">🍽️ Cartão Vale (VA/VR Pré-Pago)</SelectItem>
                       <SelectItem value="pix">⚡ Pix</SelectItem>
                       <SelectItem value="debit">🏦 Débito em Conta</SelectItem>
                       <SelectItem value="bill">📄 Boleto Bancário</SelectItem>
@@ -1103,11 +1153,11 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                   <div className="space-y-1.5">
                     <label className="text-xs font-semibold text-slate-300">Cartão Utilizado</label>
                     {(() => {
-                      const launchableCards = cards.filter((c) => c.ownerUid === me?.uid)
+                      const launchableCards = cards.filter((c) => c.ownerUid === me?.uid && !isVaVrCard(c))
                       if (launchableCards.length === 0) {
                         return (
                           <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-300 text-xs flex items-center gap-2">
-                            <span>Nenhum cartão próprio disponível para lançar despesas. Cartões compartilhados com você são somente para visualização da fatura.</span>
+                            <span>Nenhum cartão de crédito próprio disponível para lançar despesas. Cartões compartilhados com você são somente para visualização da fatura.</span>
                           </div>
                         )
                       }
@@ -1120,6 +1170,38 @@ export function TransactionModal({ open, onOpenChange, editingTx, initialPreset 
                             {launchableCards.map((c) => (
                               <SelectItem key={c.id} value={c.id}>
                                 {c.cardName} {c.sharedWithUsers?.length > 0 ? `(Dividido com ${c.sharedWithUsers.map((u) => u.name).join(', ')})` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )
+                    })()}
+                  </div>
+                )}
+
+                {paymentMethod === 'va_vr' && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-teal-300">Cartão Vale Utilizado</label>
+                    {(() => {
+                      const valeCards = cards.filter(
+                        (c) => (c.ownerUid === me?.uid || (c.sharedWithUids || []).includes(me?.uid || '')) && isVaVrCard(c),
+                      )
+                      if (valeCards.length === 0) {
+                        return (
+                          <div className="p-2.5 rounded-xl bg-teal-500/10 border border-teal-500/25 text-teal-200/90 text-xs">
+                            Débito direto no saldo VA/VR (cadastre um cartão Vale em Cartões para vincular o nome).
+                          </div>
+                        )
+                      }
+                      return (
+                        <Select value={cardId} onValueChange={setCardId}>
+                          <SelectTrigger className="h-10 text-xs bg-slate-900/90 border-teal-500/35 rounded-xl">
+                            <SelectValue placeholder="Selecione o cartão Vale" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {valeCards.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                🍽️ {c.cardName}
                               </SelectItem>
                             ))}
                           </SelectContent>

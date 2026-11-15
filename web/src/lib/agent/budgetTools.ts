@@ -42,7 +42,8 @@ export async function gerenciarEnvelopesOrcamentarios(
       expectedMonthIncome,
       carryoverAmount,
       previousMonthDeficit,
-      recurringBills
+      recurringBills,
+      cards
     )
     const rebalance = suggestBudgetRebalance(report)
 
@@ -153,7 +154,8 @@ export async function gerenciarEnvelopesOrcamentarios(
       expectedMonthIncome,
       carryoverAmount,
       previousMonthDeficit,
-      recurringBills
+      recurringBills,
+      cards
     )
     const item = updatedReport.items.find((i) => i.category === categoria)
 
@@ -251,7 +253,8 @@ export async function gerenciarEnvelopesOrcamentarios(
       expectedMonthIncome,
       carryoverAmount,
       previousMonthDeficit,
-      recurringBills
+      recurringBills,
+      cards
     )
     const rebalance = suggestBudgetRebalance(report)
 
@@ -302,7 +305,7 @@ export async function gerenciarEnvelopesOrcamentarios(
 
   if (acao === 'sugerir_tetos') {
     const monthlyIncome = expectedMonthIncome
-    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome, carryoverAmount, previousMonthDeficit)
+    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome, carryoverAmount, previousMonthDeficit, cards)
 
     return {
       response: {
@@ -338,7 +341,7 @@ export async function gerenciarEnvelopesOrcamentarios(
 
   if (acao === 'aplicar_sugestao_ia') {
     const monthlyIncome = expectedMonthIncome
-    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome, carryoverAmount, previousMonthDeficit)
+    const suggestion = suggestCategoryBudgets(txs, uid, monthKey, monthlyIncome, carryoverAmount, previousMonthDeficit, cards)
     const entries = Object.entries(suggestion.suggestedBudgets)
 
     if (entries.length === 0) {
@@ -402,7 +405,8 @@ export async function gerenciarEnvelopesOrcamentarios(
       expectedMonthIncome,
       carryoverAmount,
       previousMonthDeficit,
-      recurringBills
+      recurringBills,
+      cards
     )
     const envelope = report.items.find((i) => i.category === categoria)
 
@@ -490,7 +494,8 @@ export async function gerenciarEnvelopesOrcamentarios(
       summary.income,
       summary.carryoverAmount,
       summary.previousMonthDeficit,
-      recurringBills
+      recurringBills,
+      cards
     )
     const rebalance = suggestBudgetRebalance(report)
     const reserveBalance = resolveEmergencyReserveBalance(profile, summary)

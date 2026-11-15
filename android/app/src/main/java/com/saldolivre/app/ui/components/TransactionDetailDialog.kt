@@ -373,7 +373,11 @@ fun TransactionDetailDialog(
 
                     val paymentLabel = buildString {
                         append(transaction.paymentMethod.label)
-                        if (!cardName.isNullOrBlank() && transaction.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD) {
+                        if (!cardName.isNullOrBlank() && (
+                                transaction.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD ||
+                                    transaction.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.VA_VR
+                            )
+                        ) {
                             append(" ($cardName)")
                         }
                     }

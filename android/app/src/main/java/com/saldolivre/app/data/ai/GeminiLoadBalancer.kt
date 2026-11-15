@@ -14,9 +14,13 @@ import com.saldolivre.app.data.model.MessageSender
 import com.saldolivre.app.data.model.SmartBudgetAllocation
 import com.saldolivre.app.data.model.SmartBudgetPlan
 import com.saldolivre.app.data.engine.FinanceEngine
+import com.saldolivre.app.data.model.CategoryRegistry
 import com.saldolivre.app.data.model.FinancialHealthAiDiagnosis
 import com.saldolivre.app.data.model.FinancialHealthScore
+import com.saldolivre.app.data.model.PaymentMethod
+import com.saldolivre.app.data.model.TransactionType
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -25,6 +29,12 @@ data class GeminiExecutionResult(
     val responseText: String,
     val modelUsed: String,
     val keyUsedMasked: String
+)
+
+data class NotificationAiRefinement(
+    val description: String,
+    val category: String,
+    val subcategory: String?
 )
 
 class GeminiLoadBalancer(
@@ -681,5 +691,158 @@ class GeminiLoadBalancer(
             overallAssessment = "Diagnóstico estruturado: seu score é ${healthScore.score}/100 com classificação ${healthScore.label}.",
             actionPlan = tips.take(3)
         )
+    }
+
+    /**
+     * Pensa sobre a notificação bancária bruta + nome do estabelecimento/remetente de maquininha
+     * e gera uma descrição financeira inteligente e humana (evitando nome fantasia/razão social),
+     * além de refinar categoria e subcategoria oficiais para despesa ou entrada.
+     */
+    suspend fun refineNotificationExpenseWithAi(
+        rawNotificationText: String,
+        rawMerchant: String,
+        currentDescription: String,
+        amount: Double,
+        paymentMethod: PaymentMethod,
+        currentCategory: String,
+        currentSubcategory: String?,
+        packageName: String,
+        transactionType: TransactionType = TransactionType.EXPENSE
+    ): NotificationAiRefinement? {
+        val keys = getApiKeys()
+        if (keys.isEmpty()) return null
+
+        val safeNotif = AgentSecuritySanitizer.sanitizeText(rawNotificationText, maxLength = 350)
+        val safeRawMerchant = AgentSecuritySanitizer.sanitizeText(rawMerchant, maxLength = 100)
+        val safeFallbackDesc = AgentSecuritySanitizer.sanitizeText(currentDescription, maxLength = 100)
+        if (safeNotif.isBlank() && safeRawMerchant.isBlank()) return null
+
+        val sourceCategories = if (transactionType == TransactionType.INCOME) {
+            CategoryRegistry.INCOME_CATEGORIES
+        } else {
+            CategoryRegistry.EXPENSE_CATEGORIES
+        }
+        val validTaxonomy = sourceCategories.joinToString("\n") { cat ->
+            val subs = if (cat.subcategories.isEmpty()) "Geral" else cat.subcategories.joinToString(", ")
+            "- ${cat.name}: [$subs]"
+        }
+        val tipoLabel = if (transactionType == TransactionType.INCOME) {
+            "ENTRADA / RECEITA (Pix recebido)"
+        } else {
+            "DESPESA / SAÍDA"
+        }
+        val rulesBlock = if (transactionType == TransactionType.INCOME) {
+            """
+            1. NÃO use razão social pesada, CNPJ ou tudo em MAIÚSCULAS (nunca retorne "LTDA", "S/A", "ME", "EIRELI").
+            2. Pense na natureza real dessa entrada recebida e gere uma descrição curta, natural e clara (2 a 5 palavras) em português.
+            3. Exemplos:
+               - "MARIA CLARA SILVA" -> "Pix recebido de Maria Clara"
+               - "EMPRESA XPTO TECNOLOGIA LTDA" -> "Recebimento Empresa XPTO"
+               - "JOAO PEDRO" (acerto/reembolso) -> "Pix recebido de João Pedro"
+               - Sem remetente claro -> "Pix recebido"
+            """.trimIndent()
+        } else {
+            """
+            1. NÃO use o nome fantasia técnico, razão social ou código de maquininha literal (nunca retorne "IFD*...", "PAG*...", "EC*...", "LTDA", "S/A", "ME", "FILIAL 12", "COMERCIO DE ALIMENTOS" ou tudo em MAIÚSCULAS).
+            2. Pense no tipo de gasto real e gere um nome curto, natural e inteligente (2 a 5 palavras) em português.
+            3. Exemplos:
+               - "IFD*IFOOD" -> "Pedido no iFood"
+               - "DROGASIL FILIAL 12" -> "Farmácia Drogasil"
+               - "SENDAS DISTRIBUIDORA S/A" -> "Compras no Assaí Atacadista"
+               - "AUTO POSTO ESTRELA LTDA" -> "Combustível Posto Estrela"
+               - "NETFLIX.COM" -> "Assinatura Netflix"
+               - "JOAO PEDRO SILVA" (Pix) -> "Pix para João Pedro Silva"
+               - "BARBEARIA DOM PEDRO ME" -> "Corte na Barbearia Dom Pedro"
+               - "SUPERMERCADO ALVORADA 04" -> "Compras Supermercado Alvorada"
+            4. Se a notificação tiver apenas o código obscuro sem pistas suficientes, torne-o o mais limpo e legível possível com o contexto do método/categoria.
+            """.trimIndent()
+        }
+
+        val prompt = """
+            Você é o motor de inteligência financeira do app Saldo Livre.
+            Analise esta notificação bancária brasileira capturada no celular e PENSE sobre qual é a melhor descrição financeira para o usuário ver no extrato e no orçamento.
+
+            DADOS DA NOTIFICAÇÃO (JÁ SANITIZADOS):
+            - Tipo de movimentação: $tipoLabel
+            - Notificação: "$safeNotif"
+            - Nome bruto / remetente / maquininha extraído: "$safeRawMerchant"
+            - Sugestão local inicial: "$safeFallbackDesc"
+            - Valor: R$ ${String.format(Locale.US, "%.2f", amount)}
+            - Método: ${paymentMethod.name}
+            - App emissor: $packageName
+            - Categoria inicial: $currentCategory (${currentSubcategory ?: "sem subcategoria"})
+
+            REGRAS ESTRITAS PARA A DESCRIÇÃO ("description"):
+            $rulesBlock
+
+            TAXONOMIA OFICIAL DE CATEGORIAS E SUBCATEGORIAS:
+            $validTaxonomy
+
+            Responda ESTRITAMENTE em JSON válido (sem markdown nem explicações):
+            {
+              "description": "Descrição inteligente (2 a 5 palavras)",
+              "category": "Nome exato de uma categoria oficial acima",
+              "subcategory": "Subcategoria correspondente ou string vazia"
+            }
+        """.trimIndent()
+
+        val orderedModels = (listOf(getSelectedModel()) + DEFAULT_MODELS_POOL)
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(3)
+
+        return withTimeoutOrNull(6500L) {
+            for (key in keys.take(2)) {
+                for (model in orderedModels) {
+                    try {
+                        val generativeModel = GenerativeModel(
+                            modelName = model,
+                            apiKey = key,
+                            generationConfig = generationConfig {
+                                temperature = 0.15f
+                            }
+                        )
+                        val text = generativeModel.generateContent(prompt).text?.trim()
+                        if (!text.isNullOrBlank()) {
+                            val cleanJson = text
+                                .replace(Regex("""^```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
+                                .replace(Regex("""\s*```$"""), "")
+                                .trim()
+                            val jsonStart = cleanJson.indexOf('{')
+                            val jsonEnd = cleanJson.lastIndexOf('}')
+                            if (jsonStart >= 0 && jsonEnd > jsonStart) {
+                                val json = org.json.JSONObject(cleanJson.substring(jsonStart, jsonEnd + 1))
+                                val rawAiDesc = json.optString("description", "").trim()
+                                val rawAiCat = json.optString("category", currentCategory).trim()
+                                val rawAiSub = json.optString("subcategory", "").trim().takeIf { it.isNotBlank() }
+
+                                val safeAiDesc = AgentSecuritySanitizer.sanitizeText(rawAiDesc, maxLength = 80)
+                                val hasPosCode = Regex("""^(?:ifd|pag|pg|mp|ec|ebw|ston|ton|sumup)\*""", RegexOption.IGNORE_CASE)
+                                    .containsMatchIn(safeAiDesc)
+                                if (safeAiDesc.length >= 2 &&
+                                    !safeAiDesc.contains("[neutralizado]", ignoreCase = true) &&
+                                    !hasPosCode
+                                ) {
+                                    val (strictCat, strictSub) = CategoryRegistry.resolveStrictCategory(
+                                        rawCategory = rawAiCat.ifBlank { currentCategory },
+                                        rawSubcategory = rawAiSub ?: currentSubcategory,
+                                        type = transactionType,
+                                        description = safeAiDesc
+                                    )
+                                    return@withTimeoutOrNull NotificationAiRefinement(
+                                        description = safeAiDesc,
+                                        category = strictCat,
+                                        subcategory = strictSub
+                                    )
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("GeminiLB", "Falha refinamento IA de notificação ($model): ${e.message}")
+                    }
+                }
+            }
+            null
+        }
     }
 }

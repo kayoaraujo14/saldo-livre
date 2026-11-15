@@ -341,7 +341,7 @@ export function TransactionTable({
         const isRef = tx.category === 'Estorno' || tx.totalAmount < 0 || effectiveAmount(tx) < 0
         if (!isRef) return false
       } else if (activeTab === 'va_vr') {
-        if (!isVaVrTransaction(tx)) return false
+        if (!isVaVrTransaction(tx, cards)) return false
       } else if (activeTab === 'pending_estimated') {
         if (tx.status === 'paid') return false
       } else if (activeTab === 'paid') {
@@ -733,7 +733,7 @@ export function TransactionTable({
       expense: txs.filter((t: Transaction) => t && t.type !== 'income').length,
       myExpenses: txs.filter((t: Transaction) => t && isMyExpenseTx(t, currentUid, txs)).length,
       refund: txs.filter((t: Transaction) => t && (t.category === 'Estorno' || t.totalAmount < 0 || effectiveAmount(t) < 0)).length,
-      va_vr: txs.filter((t: Transaction) => t && isVaVrTransaction(t)).length,
+      va_vr: txs.filter((t: Transaction) => t && isVaVrTransaction(t, cards)).length,
       pending: txs.filter((t: Transaction) => t && t.status !== 'paid').length,
       paid: txs.filter((t: Transaction) => t && t.status === 'paid').length,
       shared: txs.filter((t: Transaction) => {
@@ -1015,7 +1015,7 @@ export function TransactionTable({
                   : 'text-slate-400 hover:text-teal-300 hover:bg-slate-800/50'
               }`}
             >
-              <span>🍽️ VA/VR</span>
+              <span>🍽️ Vale (VA/VR)</span>
               <span className="text-[10px] opacity-70">({counts.va_vr})</span>
             </button>
           )}
@@ -2645,13 +2645,18 @@ export function TransactionTable({
                             <Badge variant="outline" className="text-[10px] py-0.5 px-2 rounded-full bg-emerald-950/40 text-emerald-300 border-emerald-800/60 font-medium">
                               💰 {tx.category ? `${tx.category}${tx.subcategory ? ` › ${tx.subcategory}` : ''}` : (tx.subcategory ? `Entrada › ${tx.subcategory}` : 'Receita Pessoal')}
                             </Badge>
+                            {isVaVrTransaction(tx, cards) && (
+                              <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 rounded-full bg-teal-500/15 text-teal-300 border-teal-500/35 font-semibold">
+                                🍽️ {card?.cardName ? `Vale ${card.cardName}` : 'Vale VA/VR'}
+                              </Badge>
+                            )}
                             {thirdParty && (
                               <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 bg-sky-500/15 text-sky-300 border-sky-500/35 font-medium">
                                 De: {thirdParty.name}
                               </Badge>
                             )}
                           </div>
-                          {card && (
+                          {card && !isVaVrTransaction(tx, cards) && (
                             <span
                               className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-2 py-0.5 rounded-full bg-slate-900/60 border border-white/[0.06] w-fit shadow-2xs"
                               title={`Cartão vinculado: ${card.cardName}`}
@@ -2775,17 +2780,27 @@ export function TransactionTable({
                             </SelectContent>
                           </Select>
 
-                          {/* Subtle Card Name Badge when paymentMethod === 'CARD' or cardId is linked */}
-                          {card && (
-                            <div className="flex items-center gap-1 px-1 mt-0.5">
-                              <span
-                                className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-2 py-0.5 rounded-full bg-slate-900/80 border border-white/[0.06] hover:border-slate-700 transition-colors shadow-2xs"
-                                title={`Cartão vinculado: ${card.cardName} (${card.ownerName})`}
-                              >
-                                <CreditCard className="size-2.5 text-slate-400" />
-                                <span className="truncate max-w-[120px]">{card.cardName}</span>
-                              </span>
-                              {tx.paidByUid !== currentUid && (
+                          {/* Subtle Card / Vale Badge */}
+                          {(isVaVrTransaction(tx, cards) || card) && (
+                            <div className="flex items-center gap-1 px-1 mt-0.5 flex-wrap">
+                              {isVaVrTransaction(tx, cards) ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] text-teal-300 font-semibold px-2 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/35 shadow-2xs"
+                                  title={card ? `Cartão Vale: ${card.cardName}` : 'Pagamento via Cartão Vale (VA/VR)'}
+                                >
+                                  <span>🍽️</span>
+                                  <span className="truncate max-w-[130px]">{card ? `Vale ${card.cardName}` : 'Vale (VA/VR)'}</span>
+                                </span>
+                              ) : card ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] text-slate-400 font-medium px-2 py-0.5 rounded-full bg-slate-900/80 border border-white/[0.06] hover:border-slate-700 transition-colors shadow-2xs"
+                                  title={`Cartão vinculado: ${card.cardName} (${card.ownerName})`}
+                                >
+                                  <CreditCard className="size-2.5 text-slate-400" />
+                                  <span className="truncate max-w-[120px]">{card.cardName}</span>
+                                </span>
+                              ) : null}
+                              {card && tx.paidByUid !== currentUid && (
                                 <span className="text-[9px] text-amber-400/90 font-medium truncate max-w-[110px]" title={`Fatura de ${card.ownerName}`}>
                                   ({card.ownerName})
                                 </span>

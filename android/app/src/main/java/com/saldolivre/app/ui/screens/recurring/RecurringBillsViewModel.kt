@@ -91,7 +91,10 @@ class RecurringBillsViewModel(
                         it.competenceMonth == month && it.recurringBillId == bill.id
                     } ?: FinanceEngine.findMatchingManualBill(transactions, month, bill)
 
-                    val isCard = bill.paymentMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank()
+                    val isVaVrBill = CategoryRegistry.isVaVrRecurringBill(bill, cards)
+                    val linkedCard = bill.cardId?.let { cid -> cards.find { it.id == cid } }
+                    val isCard = !isVaVrBill && (bill.paymentMethod == PaymentMethod.CREDIT_CARD ||
+                        (!bill.cardId.isNullOrBlank() && linkedCard?.isVaVrCard != true))
                     val monthState = when {
                         matchedTx == null -> BillMonthlyState.NOT_LAUNCHED
                         matchedTx.status == TransactionStatus.PAID -> BillMonthlyState.PAID_OR_RECEIVED
@@ -106,7 +109,7 @@ class RecurringBillsViewModel(
                         estimationBasis = est.basis
                     )
 
-                    if (bill.active) {
+                    if (bill.active && !isVaVrBill) {
                         val inRange = (bill.startMonth.isNullOrBlank() || month >= bill.startMonth) &&
                                 (bill.endMonth.isNullOrBlank() || month <= bill.endMonth)
                         if (inRange) {
@@ -211,8 +214,19 @@ class RecurringBillsViewModel(
             // Caso ainda não tenha sido lançado no mês, cria e efetiva agora
             val amount = statusUi?.estimatedAmount ?: bill.defaultAmount
             val isIncome = bill.type == TransactionType.INCOME
-            val isCard = !isIncome && (bill.paymentMethod == PaymentMethod.CREDIT_CARD || !bill.cardId.isNullOrBlank())
-            val pm = bill.paymentMethod ?: if (isIncome) PaymentMethod.PIX else if (isCard) PaymentMethod.CREDIT_CARD else PaymentMethod.BILL
+            val cards = repository.getCards().firstOrNull() ?: emptyList()
+            val isVaVrBill = CategoryRegistry.isVaVrRecurringBill(bill, cards)
+            val rawLinkedCard = bill.cardId?.let { cid -> cards.find { it.id == cid } }
+            val isCard = !isIncome && !isVaVrBill &&
+                (bill.paymentMethod == PaymentMethod.CREDIT_CARD ||
+                    (!bill.cardId.isNullOrBlank() && rawLinkedCard?.isVaVrCard != true))
+            val pm = when {
+                isVaVrBill -> PaymentMethod.VA_VR
+                bill.paymentMethod != null -> bill.paymentMethod
+                isIncome -> PaymentMethod.PIX
+                isCard -> PaymentMethod.CREDIT_CARD
+                else -> PaymentMethod.BILL
+            }
 
             val split = FinanceEngine.buildSplit(
                 splitType = if (isIncome) SplitType.MINE else (bill.splitType ?: SplitType.MINE),
@@ -224,20 +238,25 @@ class RecurringBillsViewModel(
                 payerUid = user.uid
             )
 
-            val cards = repository.getCards().firstOrNull() ?: emptyList()
-            val linkedCard = if (isCard) cards.find { it.id == bill.cardId } else null
+            val linkedCard = if (isCard || isVaVrBill) rawLinkedCard else null
             val cardUids = linkedCard?.let {
                 (listOfNotNull(it.ownerUid.takeIf { o -> o.isNotBlank() }) + it.sharedWithUids).distinct()
             } ?: emptyList()
             val effectiveVisible = (split.visibleToUids + cardUids).distinct()
 
+            val resolvedCategory = when {
+                isVaVrBill -> if (isIncome && bill.category == "VA/VR") "Benefícios" else bill.category
+                isIncome -> bill.category.takeIf { it.isNotBlank() } ?: "Receita"
+                else -> bill.category
+            }
+
             val tx = Transaction(
                 id = "tx_rec_${UUID.randomUUID().toString().take(8)}",
                 createdByUid = user.uid,
                 paidByUid = user.uid,
-                cardId = if (isCard) bill.cardId else null,
+                cardId = if (isCard || isVaVrBill) bill.cardId else null,
                 description = bill.description,
-                category = if (isIncome) "Receita" else bill.category,
+                category = resolvedCategory,
                 subcategory = bill.subcategory,
                 type = bill.type,
                 paymentMethod = pm,

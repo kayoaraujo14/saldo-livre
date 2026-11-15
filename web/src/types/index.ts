@@ -3,7 +3,8 @@
 // ============================================================
 
 export type TransactionType = 'income' | 'expense'
-export type PaymentMethod = 'pix' | 'credit_card' | 'debit' | 'bill'
+export type PaymentMethod = 'pix' | 'credit_card' | 'debit' | 'bill' | 'va_vr'
+export type CardType = 'credit' | 'va_vr'
 export type TransactionStatus = 'estimated' | 'pending' | 'paid'
 export type EstimationRule = 'fixed' | 'last_month' | 'avg_3_months'
 
@@ -11,7 +12,6 @@ export type SplitType = 'mine' | 'split_50' | 'partner' | 'friend' | 'external' 
 
 export const EXPENSE_CATEGORIES = [
   'Alimentação',
-  'VA/VR',
   'Moradia',
   'Transporte',
   'Saúde',
@@ -32,7 +32,6 @@ export const EXPENSE_CATEGORIES = [
 export const INCOME_CATEGORIES = [
   'Salário & Remuneração',
   'Benefícios',
-  'VA/VR',
   'Freelance & Serviços',
   'Rendimentos & Investimentos',
   'Reembolsos & Acertos',
@@ -41,6 +40,7 @@ export const INCOME_CATEGORIES = [
 ] as const
 
 export const LEGACY_CATEGORIES = [
+  'VA/VR',
   'Lazer',
   'Assinaturas',
   'Compras',
@@ -121,14 +121,14 @@ const CATEGORY_CANONICAL_MAP: Record<string, Category> = {
   'pets': 'Pets',
   'pet': 'Pets',
   'alimentacao': 'Alimentação',
-  'va/vr': 'VA/VR',
-  'va vr': 'VA/VR',
-  'vavr': 'VA/VR',
-  'vale alimentacao': 'VA/VR',
-  'vale refeicao': 'VA/VR',
-  'vale alimentacao / refeicao': 'VA/VR',
-  'beneficios va/vr': 'VA/VR',
-  'cartao de beneficios': 'VA/VR',
+  'va/vr': 'Alimentação',
+  'va vr': 'Alimentação',
+  'vavr': 'Alimentação',
+  'vale alimentacao': 'Alimentação',
+  'vale refeicao': 'Alimentação',
+  'vale alimentacao / refeicao': 'Alimentação',
+  'beneficios va/vr': 'Alimentação',
+  'cartao de beneficios': 'Alimentação',
   'moradia': 'Moradia',
   'manutencao & servicos': 'Moradia',
   'manutencao e servicos': 'Moradia',
@@ -792,7 +792,25 @@ export function getCategoryDetail(name: string): CategoryDetail {
   }
 }
 
+const LEGACY_VAVR_FOLDED_TERMS = new Set([
+  'va/vr',
+  'va vr',
+  'vavr',
+  'vale alimentacao',
+  'vale refeicao',
+  'vale alimentacao / refeicao',
+  'beneficios va/vr',
+  'cartao de beneficios',
+  'cartao vale',
+])
+
+export function isVaVrCard(card?: Pick<Card, 'cardType'> | null): boolean {
+  return card?.cardType === 'va_vr'
+}
+
 export function isVaVrCategory(category?: string | null, subcategory?: string | null): boolean {
+  const foldedCat = foldCategoryAccents(category ?? '')
+  if (LEGACY_VAVR_FOLDED_TERMS.has(foldedCat)) return true
   const normCat = normalizeCategory(category ?? '')
   if (normCat === 'VA/VR') return true
   if (normCat === 'Benefícios' && subcategory) {
@@ -810,9 +828,30 @@ export function isVaVrCategory(category?: string | null, subcategory?: string | 
   return false
 }
 
-export function isVaVrTransaction(tx?: Pick<Transaction, 'category' | 'subcategory'> | null): boolean {
+export function isVaVrTransaction(
+  tx?: Pick<Transaction, 'paymentMethod' | 'cardId' | 'category' | 'subcategory'> | null,
+  cards?: readonly Pick<Card, 'id' | 'cardType'>[] | null,
+): boolean {
   if (!tx) return false
+  if (tx.paymentMethod === 'va_vr') return true
+  if (tx.cardId && cards?.length) {
+    const linked = cards.find((c) => c.id === tx.cardId)
+    if (linked && isVaVrCard(linked)) return true
+  }
   return isVaVrCategory(tx.category, tx.subcategory)
+}
+
+export function isVaVrRecurringBill(
+  bill?: Pick<RecurringBill, 'paymentMethod' | 'cardId' | 'category' | 'subcategory'> | null,
+  cards?: readonly Pick<Card, 'id' | 'cardType'>[] | null,
+): boolean {
+  if (!bill) return false
+  if (bill.paymentMethod === 'va_vr') return true
+  if (bill.cardId && cards?.length) {
+    const linked = cards.find((c) => c.id === bill.cardId)
+    if (linked && isVaVrCard(linked)) return true
+  }
+  return isVaVrCategory(bill.category, bill.subcategory)
 }
 
 export function getBudgetNature(category: string, subcategory?: string | null): BudgetNature {
@@ -1100,17 +1139,17 @@ const SUBCATEGORY_ALIASES: Record<string, { category: Category; officialSubcateg
   'salario': { category: 'Salário & Remuneração', officialSubcategory: 'Salário Principal' },
   'adiantamento': { category: 'Salário & Remuneração', officialSubcategory: 'Adiantamento / Quinzenal' },
   'ferias': { category: 'Salário & Remuneração', officialSubcategory: 'Férias' },
-  'va': { category: 'VA/VR', officialSubcategory: 'Vale Alimentação (VA)' },
-  'vr': { category: 'VA/VR', officialSubcategory: 'Vale Refeição (VR)' },
-  'recarga va': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'recarga vr': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'recarga va/vr': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'alelo': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'flash': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'caju': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'ticket': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'pluxee': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
-  'ifood beneficios': { category: 'VA/VR', officialSubcategory: 'Recarga VA/VR' },
+  'va': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'vr': { category: 'Benefícios', officialSubcategory: 'Vale Refeição (VR)' },
+  'recarga va': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'recarga vr': { category: 'Benefícios', officialSubcategory: 'Vale Refeição (VR)' },
+  'recarga va/vr': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'alelo': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'flash': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'caju': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'ticket': { category: 'Benefícios', officialSubcategory: 'Vale Refeição (VR)' },
+  'pluxee': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
+  'ifood beneficios': { category: 'Benefícios', officialSubcategory: 'Vale Alimentação (VA)' },
   'freelance': { category: 'Freelance & Serviços', officialSubcategory: 'Projetos Freelance' },
   'dividendos': { category: 'Rendimentos & Investimentos', officialSubcategory: 'Dividendos & JCP' },
   'reembolso': { category: 'Reembolsos & Acertos', officialSubcategory: 'Reembolso de Empresa' },
@@ -1149,7 +1188,12 @@ export function resolveStrictCategory(
   let resolvedSub: string | null = trimmedSub
 
   // 1. Tentar mapeamento canônico de categoria direta (inclusive legadas para ativas)
-  if (foldedCat && CATEGORY_CANONICAL_MAP[foldedCat]) {
+  if (type === 'income' && foldedCat && LEGACY_VAVR_FOLDED_TERMS.has(foldedCat)) {
+    resolvedCat = 'Benefícios'
+    if (!resolvedSub || foldCategoryAccents(resolvedSub) === 'recarga va/vr') {
+      resolvedSub = foldedCat.includes('refei') || foldedCat === 'vr' ? 'Vale Refeição (VR)' : 'Vale Alimentação (VA)'
+    }
+  } else if (foldedCat && CATEGORY_CANONICAL_MAP[foldedCat]) {
     resolvedCat = CATEGORY_CANONICAL_MAP[foldedCat]
   }
 
@@ -1420,6 +1464,8 @@ export interface Card {
   color?: string
   /** Limite de crédito (opcional; compartilhado com o app Android) */
   limit?: number | null
+  /** 'credit' (padrão pós-pago) ou 'va_vr' (cartão Vale/Pré-pago de benefícios) */
+  cardType?: CardType
 }
 
 export type LaunchTrigger = 'day_before' | 'on_due_date' | 'day_after' | 'first_day_of_month'
@@ -1772,7 +1818,7 @@ export interface PendingBatchTransaction {
   categoria_filtro: 'valida' | 'ignorada'
   categoria?: string
   subcategoria?: string
-  metodoPagamento?: 'pix' | 'credit_card' | 'debit' | 'bill'
+  metodoPagamento?: PaymentMethod | 'debit'
   cartao?: string
   tipoDivisao?: SplitType | string
   nomeAmigo?: string

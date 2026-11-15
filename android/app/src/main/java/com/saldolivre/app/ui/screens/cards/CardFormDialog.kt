@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,8 +44,10 @@ fun CardFormDialog(
     onDismiss: () -> Unit,
     onSave: (Card) -> Unit
 ) {
+    var cardType by remember { mutableStateOf(card.normalizedCardType) }
+    val isVale = cardType == "va_vr"
     var cardName by remember { mutableStateOf(card.cardName) }
-    var limitInput by remember { mutableStateOf(card.limit?.toString() ?: "5000.0") }
+    var limitInput by remember { mutableStateOf(card.limit?.toString() ?: if (card.isVaVrCard) "800.0" else "5000.0") }
     var closingDay by remember { mutableStateOf(card.closingDay.toString()) }
     var dueDay by remember { mutableStateOf(card.dueDay.toString()) }
     var thirdPartiesInput by remember { mutableStateOf(card.frequentThirdParties.joinToString(", ")) }
@@ -56,7 +59,7 @@ fun CardFormDialog(
         mutableStateOf(initial)
     }
     var emailInput by remember { mutableStateOf("") }
-    var selectedColor by remember { mutableStateOf(card.color.ifBlank { "violet" }) }
+    var selectedColor by remember { mutableStateOf(card.color.ifBlank { if (card.isVaVrCard) "emerald" else "violet" }) }
 
     val isNew = card.id.startsWith("new_")
 
@@ -98,13 +101,18 @@ fun CardFormDialog(
                             .padding(end = 8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.CreditCard,
+                            imageVector = if (isVale) Icons.Default.Restaurant else Icons.Default.CreditCard,
                             contentDescription = null,
                             tint = Emerald400,
                             modifier = Modifier.size(24.dp)
                         )
                         Text(
-                            text = if (isNew) "Novo Cartão" else "Editar Cartão",
+                            text = when {
+                                isVale && isNew -> "Novo Vale (VA/VR)"
+                                isVale -> "Editar Vale"
+                                isNew -> "Novo Cartão"
+                                else -> "Editar Cartão"
+                            },
                             style = Typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
@@ -132,12 +140,79 @@ fun CardFormDialog(
 
                 HorizontalDivider(color = DarkBorder)
 
+                // Seletor de Modalidade (Crédito vs Vale Pré-Pago VA/VR)
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Modalidade do Cartão",
+                        style = Typography.labelMedium,
+                        color = TextSecondary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val isCredit = !isVale
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { cardType = "credit" },
+                            color = if (isCredit) Emerald500.copy(alpha = 0.14f) else DarkBackground,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (isCredit) Emerald400 else DarkBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.CreditCard, contentDescription = null, tint = if (isCredit) Emerald400 else TextMuted, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Crédito", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (isCredit) Emerald400 else TextSecondary, maxLines = 1)
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    cardType = "va_vr"
+                                    if (selectedColor == "violet") selectedColor = "emerald"
+                                    if (closingDay.isBlank() || closingDay == "5") closingDay = "1"
+                                    if (dueDay.isBlank() || dueDay == "12") dueDay = "1"
+                                },
+                            color = if (isVale) Emerald500.copy(alpha = 0.14f) else DarkBackground,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, if (isVale) Emerald400 else DarkBorder)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(Icons.Default.Restaurant, contentDescription = null, tint = if (isVale) Emerald400 else TextMuted, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Vale (VA/VR)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (isVale) Emerald400 else TextSecondary, maxLines = 1)
+                            }
+                        }
+                    }
+                    if (isVale) {
+                        Text(
+                            text = "Pré-pago isolado: não gera fatura de crédito e ativa o painel VA/VR no Início.",
+                            style = Typography.bodySmall,
+                            fontSize = 11.sp,
+                            color = Emerald400.copy(alpha = 0.85f)
+                        )
+                    }
+                }
+
                 // Card Name
                 OutlinedTextField(
                     value = cardName,
                     onValueChange = { cardName = it },
-                    label = { Text("Nome do Cartão (ex: Nubank, Inter)") },
-                    placeholder = { Text("Ex: Nubank Ultravioleta") },
+                    label = { Text(if (isVale) "Nome do Vale (ex: Alelo, Flash, Caju)" else "Nome do Cartão (ex: Nubank, Inter)") },
+                    placeholder = { Text(if (isVale) "Ex: Alelo Alimentação" else "Ex: Nubank Ultravioleta") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -154,7 +229,7 @@ fun CardFormDialog(
                 OutlinedTextField(
                     value = limitInput,
                     onValueChange = { limitInput = it },
-                    label = { Text("Limite Total do Cartão") },
+                    label = { Text(if (isVale) "Recarga Padrão / Teto Mensal (Opcional)" else "Limite Total do Cartão") },
                     prefix = { Text("R$ ", color = TextSecondary) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -174,29 +249,31 @@ fun CardFormDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedTextField(
-                        value = closingDay,
-                        onValueChange = { closingDay = it },
-                        label = { Text("Fechamento") },
-                        placeholder = { Text("Dia (ex: 5)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Emerald400,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedLabelColor = Emerald400,
-                            unfocusedLabelColor = TextSecondary,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
+                    if (!isVale) {
+                        OutlinedTextField(
+                            value = closingDay,
+                            onValueChange = { closingDay = it },
+                            label = { Text("Fechamento") },
+                            placeholder = { Text("Dia (ex: 5)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Emerald400,
+                                unfocusedBorderColor = DarkBorder,
+                                focusedLabelColor = Emerald400,
+                                unfocusedLabelColor = TextSecondary,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            )
                         )
-                    )
+                    }
 
                     OutlinedTextField(
                         value = dueDay,
                         onValueChange = { dueDay = it },
-                        label = { Text("Vencimento") },
-                        placeholder = { Text("Dia (ex: 12)") },
+                        label = { Text(if (isVale) "Dia da Recarga Mensal" else "Vencimento") },
+                        placeholder = { Text(if (isVale) "Dia (ex: 1)" else "Dia (ex: 12)") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f),
@@ -486,9 +563,9 @@ fun CardFormDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            val parsedClosing = closingDay.toIntOrNull()?.coerceIn(1, 31) ?: 5
-                            val parsedDue = dueDay.toIntOrNull()?.coerceIn(1, 31) ?: 12
-                            val parsedLimit = limitInput.replace(",", ".").toDoubleOrNull() ?: 5000.0
+                            val parsedClosing = if (isVale) 1 else (closingDay.toIntOrNull()?.coerceIn(1, 31) ?: 5)
+                            val parsedDue = dueDay.toIntOrNull()?.coerceIn(1, 31) ?: if (isVale) 1 else 12
+                            val parsedLimit = limitInput.replace(",", ".").toDoubleOrNull() ?: if (isVale) 0.0 else 5000.0
                             val parties = thirdPartiesInput
                                 .split(",")
                                 .map { it.trim() }
@@ -496,9 +573,10 @@ fun CardFormDialog(
 
                             val updated = card.copy(
                                 cardName = cardName.trim(),
+                                cardType = cardType,
                                 closingDay = parsedClosing,
                                 dueDay = parsedDue,
-                                limit = parsedLimit,
+                                limit = if (parsedLimit > 0.0) parsedLimit else null,
                                 frequentThirdParties = parties,
                                 sharedWithUsers = sharedUsers,
                                 sharedWithUids = sharedUsers.map { it.uid }.filter { it.isNotBlank() },

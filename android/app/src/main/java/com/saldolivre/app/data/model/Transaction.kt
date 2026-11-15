@@ -27,7 +27,10 @@ enum class PaymentMethod(val value: String, val label: String) {
     DEBIT("debit", "Débito"),
 
     @SerializedName("bill")
-    BILL("bill", "Boleto");
+    BILL("bill", "Boleto"),
+
+    @SerializedName("va_vr")
+    VA_VR("va_vr", "Vale (VA/VR)");
 
     companion object {
         val CREDIT: PaymentMethod
@@ -40,6 +43,7 @@ enum class PaymentMethod(val value: String, val label: String) {
                 "debit", "debito", "débito" -> DEBIT
                 "pix" -> PIX
                 "bill", "boleto" -> BILL
+                "va_vr", "vavr", "va/vr", "vale", "va", "vr", "vale alimentacao", "vale alimentação", "vale refeicao", "vale refeição", "cartao vale", "cartão vale" -> VA_VR
                 else -> entries.find { it.value.equals(value.trim(), ignoreCase = true) || it.name.equals(value.trim(), ignoreCase = true) } ?: PIX
             }
         }

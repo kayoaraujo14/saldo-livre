@@ -25,6 +25,7 @@ import com.saldolivre.app.data.ai.ToolExecutionResult
 import com.saldolivre.app.data.engine.FinanceEngine
 import com.saldolivre.app.data.model.*
 import com.saldolivre.app.data.notification.ExpenseDraftManager
+import com.saldolivre.app.data.notification.NotificationExpenseParser
 import com.saldolivre.app.data.parser.ParsedStatementItem
 import com.saldolivre.app.data.parser.StatementParser
 import com.saldolivre.app.data.repository.FinanceRepository
@@ -734,11 +735,13 @@ class GeminiChatViewModel(
                 val defaultMonth = repository.selectedMonth.value
 
                 val transactions = selectedItems.map { item ->
-                    val isCard = item.paymentMethod == PaymentMethod.CREDIT_CARD && targetCard != null
-                    val (dueDate, compMonth) = if (isCard && targetCard != null) {
+                    val resolvedTargetCard = targetCard
+                    val isVale = item.paymentMethod == PaymentMethod.VA_VR || resolvedTargetCard?.isVaVrCard == true
+                    val isCard = !isVale && item.paymentMethod == PaymentMethod.CREDIT_CARD && resolvedTargetCard != null
+                    val (dueDate, compMonth) = if (isCard && resolvedTargetCard != null) {
                         val cardDates = FinanceEngine.calculateCardInvoiceDates(
                             purchaseDate = item.date,
-                            card = targetCard
+                            card = resolvedTargetCard
                         )
                         Pair(item.date, cardDates.second)
                     } else {
@@ -752,17 +755,22 @@ class GeminiChatViewModel(
                         } else item.description
                     } else item.description
 
+                    val valeCardId = if (isVale) {
+                        (resolvedTargetCard?.takeIf { it.isVaVrCard } ?: state.availableCards.firstOrNull { it.isVaVrCard })?.id
+                    } else null
+                    val finalMethod = if (isVale) PaymentMethod.VA_VR else item.paymentMethod
+
                     Transaction(
                         id = "imp_" + UUID.randomUUID().toString().take(8),
                         createdByUid = currentUser.uid,
                         paidByUid = currentUser.uid,
-                        cardId = if (isCard) targetCard?.id else null,
+                        cardId = if (isCard) resolvedTargetCard?.id else valeCardId,
                         description = descWithInstallment,
                         category = item.category,
                         subcategory = item.subcategory,
                         type = item.type,
-                        paymentMethod = item.paymentMethod,
-                        status = if (item.type == TransactionType.INCOME || item.paymentMethod == PaymentMethod.PIX || item.paymentMethod == PaymentMethod.DEBIT) {
+                        paymentMethod = finalMethod,
+                        status = if (item.type == TransactionType.INCOME || finalMethod == PaymentMethod.PIX || finalMethod == PaymentMethod.DEBIT || finalMethod == PaymentMethod.VA_VR) {
                             TransactionStatus.PAID
                         } else {
                             TransactionStatus.PENDING
@@ -1121,26 +1129,59 @@ class GeminiChatViewModel(
             )
         }
 
-        if (effectiveDraft.paymentMethod == PaymentMethod.CREDIT_CARD &&
-            effectiveDraft.cardName.isNullOrBlank() &&
-            cards.isEmpty()
+        if (((effectiveDraft.paymentMethod == PaymentMethod.CREDIT_CARD || effectiveDraft.paymentMethod == PaymentMethod.VA_VR) &&
+                effectiveDraft.cardName.isNullOrBlank()) ||
+            (!effectiveDraft.aiEnriched && appContext != null)
         ) {
             viewModelScope.launch {
-                val fetchedCards = runCatching { repository.getCards().first() }.getOrDefault(emptyList())
-                val matched = effectiveDraft.cardId?.let { cid -> fetchedCards.find { it.id == cid } }
-                    ?: fetchedCards.firstOrNull {
-                        effectiveDraft.rawNotificationText.contains(it.cardName, ignoreCase = true)
+                var latestDraft = effectiveDraft
+                if ((latestDraft.paymentMethod == PaymentMethod.CREDIT_CARD || latestDraft.paymentMethod == PaymentMethod.VA_VR) &&
+                    latestDraft.cardName.isNullOrBlank()
+                ) {
+                    val fetchedCards = if (cards.isNotEmpty()) cards else runCatching { repository.getCards().first() }.getOrDefault(emptyList())
+                    val pool = if (latestDraft.paymentMethod == PaymentMethod.VA_VR) {
+                        fetchedCards.filter { it.isVaVrCard }
+                    } else {
+                        fetchedCards.filter { !it.isVaVrCard }
                     }
-                if (matched != null && _uiState.value.activeExpenseDraft?.id == effectiveDraft.id) {
-                    val refreshedDraft = effectiveDraft.copy(cardId = matched.id, cardName = matched.cardName)
-                    val refreshedMsg = buildDraftGreetingMessage(refreshedDraft)
+                    val matched = latestDraft.cardId?.let { cid -> pool.find { it.id == cid } }
+                        ?: NotificationExpenseParser.resolveCard(
+                            packageName = latestDraft.packageName,
+                            sanitizedCombined = latestDraft.rawNotificationText,
+                            cards = pool
+                        )
+                        ?: if (latestDraft.paymentMethod == PaymentMethod.VA_VR && pool.size == 1) pool.firstOrNull() else null
+                    if (matched != null) {
+                        latestDraft = latestDraft.copy(cardId = matched.id, cardName = matched.cardName)
+                    }
+                }
+
+                if (!latestDraft.aiEnriched && appContext != null) {
+                    val draftManager = ExpenseDraftManager.getInstance(appContext)
+                    val enriched = draftManager.enrichDraftWithGemini(
+                        draft = latestDraft,
+                        uid = userUid,
+                        rulesManager = rulesManager
+                    )
+                    if (enriched.aiEnriched) {
+                        latestDraft = enriched
+                        draftManager.saveDraft(latestDraft)
+                    }
+                }
+
+                if (_uiState.value.activeExpenseDraft?.id == effectiveDraft.id && latestDraft != effectiveDraft) {
+                    val refreshedMsg = buildDraftGreetingMessage(latestDraft)
                     _uiState.update { state ->
                         val updatedMsgs = state.messages.map { m ->
                             if (m.id == refreshedMsg.id) refreshedMsg else m
                         }
                         val updatedSessList = state.sessions.map { s ->
                             if (s.id == newSession.id) {
-                                val patched = s.copy(messages = updatedMsgs, activeExpenseDraft = refreshedDraft)
+                                val patched = s.copy(
+                                    title = "Revisão: ${latestDraft.description.take(24)}",
+                                    messages = updatedMsgs,
+                                    activeExpenseDraft = latestDraft
+                                )
                                 sessionManager.saveSession(userUid, patched, syncToCloud = false)
                                 patched
                             } else s
@@ -1148,7 +1189,7 @@ class GeminiChatViewModel(
                         state.copy(
                             sessions = updatedSessList,
                             messages = updatedMsgs,
-                            activeExpenseDraft = refreshedDraft
+                            activeExpenseDraft = latestDraft
                         )
                     }
                 }
@@ -1158,28 +1199,52 @@ class GeminiChatViewModel(
 
     private fun buildExpenseDraftGreeting(draft: ExpenseDraft): String {
         val formattedValue = FinanceEngine.formatCurrency(draft.amount).replace('\u00A0', ' ')
-        return buildString {
-            appendLine("Detectei uma nova despesa pela notificação do seu celular:")
-            appendLine("• **Estabelecimento:** ${draft.description}")
-            appendLine("• **Valor:** $formattedValue")
-            appendLine("• **Forma:** ${draft.paymentMethodChatLabel()}")
-            appendLine("• **Categoria sugerida:** ${draft.category}")
-            append("Deseja confirmar o lançamento assim ou quer ajustar algum detalhe?")
+        return if (draft.type == TransactionType.INCOME) {
+            buildString {
+                appendLine("Detectei uma nova entrada (Pix recebido) pela notificação do seu celular:")
+                appendLine("• **Descrição inteligente:** ${draft.description}")
+                if (draft.rawMerchant.isNotBlank() &&
+                    !draft.rawMerchant.equals(draft.description, ignoreCase = true) &&
+                    !draft.rawMerchant.equals("Pix Recebido", ignoreCase = true)
+                ) {
+                    appendLine("• **Origem na notificação:** ${draft.rawMerchant}")
+                }
+                appendLine("• **Valor:** $formattedValue")
+                appendLine("• **Forma:** Pix (Entrada)")
+                appendLine("• **Categoria sugerida:** ${draft.category}")
+                append("Deseja confirmar o lançamento dessa entrada assim ou quer ajustar algum detalhe?")
+            }
+        } else {
+            buildString {
+                appendLine("Detectei uma nova despesa pela notificação do seu celular:")
+                appendLine("• **Descrição inteligente:** ${draft.description}")
+                if (draft.rawMerchant.isNotBlank() && !draft.rawMerchant.equals(draft.description, ignoreCase = true)) {
+                    appendLine("• **Estabelecimento na notificação:** ${draft.rawMerchant}")
+                }
+                appendLine("• **Valor:** $formattedValue")
+                appendLine("• **Forma:** ${draft.paymentMethodChatLabel()}")
+                appendLine("• **Categoria sugerida:** ${draft.category}")
+                append("Deseja confirmar o lançamento assim ou quer ajustar algum detalhe?")
+            }
         }
     }
 
     private fun buildDraftPendingAction(draft: ExpenseDraft): PendingAction {
         val formattedValue = FinanceEngine.formatCurrency(draft.amount).replace('\u00A0', ' ')
+        val isIncome = draft.type == TransactionType.INCOME
+        val typeString = if (isIncome) "income" else "expense"
+        val actionTitle = if (isIncome) "Confirmar Entrada Detectada" else "Confirmar Despesa Detectada"
+        val channelDetail = if (isIncome) "Pix (Entrada)" else draft.paymentMethodChatLabel()
         return PendingAction(
             id = "act_draft_${draft.id}",
             toolName = "CREATE_TRANSACTION",
-            title = "Confirmar Despesa Detectada",
+            title = actionTitle,
             description = "${draft.description} — $formattedValue",
-            detail = "${draft.category} • ${draft.paymentMethodChatLabel()}",
+            detail = "${draft.category} • $channelDetail",
             args = buildMap<String, Any?> {
                 put("description", draft.description)
                 put("amount", draft.amount)
-                put("type", "expense")
+                put("type", typeString)
                 put("category", draft.category)
                 draft.subcategory?.let { put("subcategory", it) }
                 put("paymentMethod", draft.paymentMethod.name)
@@ -1194,15 +1259,18 @@ class GeminiChatViewModel(
 
     private fun buildDraftGreetingMessage(draft: ExpenseDraft): ChatMessage {
         val formattedValue = FinanceEngine.formatCurrency(draft.amount).replace('\u00A0', ' ')
+        val isIncome = draft.type == TransactionType.INCOME
+        val actionTitle = if (isIncome) "Confirmar Entrada Detectada" else "Confirmar Despesa Detectada"
+        val channelDetail = if (isIncome) "Pix (Entrada)" else draft.paymentMethodChatLabel()
         val pendingAction = buildDraftPendingAction(draft)
         return ChatMessage(
             id = "draft_greeting_${draft.id}",
             sender = MessageSender.ASSISTANT,
             text = buildExpenseDraftGreeting(draft),
             actionCard = ActionCardData(
-                title = "Confirmar Despesa Detectada",
+                title = actionTitle,
                 description = "${draft.description} — $formattedValue",
-                detail = "${draft.category} • ${draft.paymentMethodChatLabel()}",
+                detail = "${draft.category} • $channelDetail",
                 isSuccess = true,
                 pendingAction = pendingAction
             )
@@ -1330,11 +1398,14 @@ class GeminiChatViewModel(
         // 3. Método de pagamento
         val explicitPix = Regex("""\bpix\b""").containsMatchIn(folded)
         val explicitDebit = Regex("""\bd[eé]bito\b""").containsMatchIn(folded)
+        val explicitVaVr = Regex("""\b(vale|va|vr|va/vr|alelo|flash|caju|pluxee|sodexo|ticket|swile)\b""").containsMatchIn(folded) ||
+            matchedCard?.isVaVrCard == true
         val explicitBill = Regex("""\bboleto\b""").containsMatchIn(folded)
-        val explicitCredit = matchedCard != null || mentionedCardPhrase != null || totalInstallments > 1 ||
-            Regex("""\b(cr[eé]dito|cart[aã]o)\b""").containsMatchIn(folded)
+        val explicitCredit = !explicitVaVr && (matchedCard != null || mentionedCardPhrase != null || totalInstallments > 1 ||
+            Regex("""\b(cr[eé]dito|cart[aã]o)\b""").containsMatchIn(folded))
 
         val finalMethod = when {
+            explicitVaVr -> PaymentMethod.VA_VR
             explicitPix -> PaymentMethod.PIX
             explicitDebit -> PaymentMethod.DEBIT
             explicitBill -> PaymentMethod.BILL
@@ -1346,12 +1417,12 @@ class GeminiChatViewModel(
         }
 
         val finalCardId = when {
-            finalMethod != PaymentMethod.CREDIT_CARD -> null
+            finalMethod != PaymentMethod.CREDIT_CARD && finalMethod != PaymentMethod.VA_VR -> null
             matchedCard != null -> matchedCard.id
             else -> draft.cardId
         }
         val finalCardName = when {
-            finalMethod != PaymentMethod.CREDIT_CARD -> null
+            finalMethod != PaymentMethod.CREDIT_CARD && finalMethod != PaymentMethod.VA_VR -> null
             matchedCard != null -> matchedCard.cardName
             mentionedCardPhrase != null -> mentionedCardPhrase
             else -> draft.cardName
@@ -1368,7 +1439,14 @@ class GeminiChatViewModel(
                 .replace(Regex("""\s+(?:e\s+(?:confirma|aprova|salva|lanca|registra))$"""), "")
                 .trim()
             if (cleanedPhrase.isNotBlank()) {
-                val candidateKeys = (CategoryRegistry.EXPENSE_CATEGORIES.map { it.name } +
+                val primaryCategories = if (draft.type == TransactionType.INCOME) {
+                    CategoryRegistry.INCOME_CATEGORIES
+                } else {
+                    CategoryRegistry.EXPENSE_CATEGORIES
+                }
+                val candidateKeys = (primaryCategories.map { it.name } +
+                    CategoryRegistry.EXPENSE_CATEGORIES.map { it.name } +
+                    CategoryRegistry.INCOME_CATEGORIES.map { it.name } +
                     CategoryRegistry.CATEGORY_CANONICAL_MAP.keys)
                     .distinct()
                     .sortedByDescending { it.length }
@@ -1379,7 +1457,7 @@ class GeminiChatViewModel(
                 if (matchedKey != null) {
                     matchedCat = CategoryRegistry.resolveStrictCategory(
                         rawCategory = matchedKey,
-                        type = TransactionType.EXPENSE,
+                        type = draft.type,
                         description = draft.description
                     )
                 } else {
@@ -1387,21 +1465,26 @@ class GeminiChatViewModel(
                     matchedCat = CategoryRegistry.resolveStrictCategory(
                         rawCategory = cleanedPhrase,
                         rawSubcategory = directGuess.subcategory,
-                        type = TransactionType.EXPENSE,
+                        type = draft.type,
                         description = cleanedPhrase
                     )
                 }
             }
         }
         if (matchedCat == null) {
-            val officialCat = CategoryRegistry.EXPENSE_CATEGORIES.firstOrNull { catDef ->
+            val orderedCategories = if (draft.type == TransactionType.INCOME) {
+                CategoryRegistry.INCOME_CATEGORIES + CategoryRegistry.EXPENSE_CATEGORIES
+            } else {
+                CategoryRegistry.EXPENSE_CATEGORIES
+            }
+            val officialCat = orderedCategories.firstOrNull { catDef ->
                 val fk = CategoryRegistry.foldCategoryAccents(catDef.name)
                 Regex("""\b${Regex.escape(fk)}\b""").containsMatchIn(folded)
             }
             if (officialCat != null) {
                 matchedCat = CategoryRegistry.resolveStrictCategory(
                     rawCategory = officialCat.name,
-                    type = TransactionType.EXPENSE,
+                    type = draft.type,
                     description = draft.description
                 )
             }
@@ -1560,7 +1643,7 @@ class GeminiChatViewModel(
                 val toolResult = toolsEngine.executeCreateTransaction(
                     description = finalAdjusted.description,
                     amount = txAmount,
-                    type = TransactionType.EXPENSE,
+                    type = draft.type,
                     category = finalAdjusted.category,
                     subcategory = finalAdjusted.subcategory,
                     paymentMethod = finalAdjusted.paymentMethod,
@@ -1578,10 +1661,15 @@ class GeminiChatViewModel(
                     finalizeActiveExpenseDraft(draft, finalAdjusted.description, finalAdjusted.category)
                 }
 
+                val defaultSuccessText = if (draft.type == TransactionType.INCOME) {
+                    "✅ **Entrada confirmada e lançada com sucesso!**"
+                } else {
+                    "✅ **Despesa confirmada e lançada com sucesso!**"
+                }
                 val resultCards = toolResult.actions ?: toolResult.actionCard?.let { listOf(it) }
                 val botMsg = ChatMessage(
                     sender = MessageSender.ASSISTANT,
-                    text = toolResult.text.ifBlank { "✅ **Despesa confirmada e lançada com sucesso!**" },
+                    text = toolResult.text.ifBlank { defaultSuccessText },
                     actions = resultCards,
                     actionCard = resultCards?.firstOrNull(),
                     chartPayload = toolResult.chartPayload
@@ -1989,10 +2077,10 @@ PLANEJAMENTO DO MÊS INTEIRO (SALDO LIVRE PROJETADO):
 - Assinaturas e Contas Fixas Cadastradas [ATENÇÃO: PREVISÕES TEÓRICAS - NÃO SÃO TRANSAÇÕES EFETIVADAS ATÉ SEREM LANÇADAS]:
   $recurringDesc
 
-MÓDULO VA/VR (VALE-ALIMENTAÇÃO / REFEIÇÃO — 100% ISOLADO DA CONTA CORRENTE):
-- Saldo VA/VR Disponível Agora: R$ ${FinanceEngine.round2(summary.vaVrAvailableBalance)} (Carryover anterior: R$ ${FinanceEngine.round2(summary.vaVrCarryover)} + Recargas pagas: R$ ${FinanceEngine.round2(summary.vaVrIncomePaid)} - Gastos pagos: R$ ${FinanceEngine.round2(summary.vaVrSpentPaid)})
-- Saldo VA/VR Projetado no Mês: R$ ${FinanceEngine.round2(summary.vaVrProjectedBalance)} (Recargas totais/previstas: R$ ${FinanceEngine.round2(summary.vaVrIncome)} | Gastos totais: R$ ${FinanceEngine.round2(summary.vaVrSpent)})
-- Limite Diário VA/VR Sugerido: $vaVrDailyDesc$vaVrSubcatDesc
+CARTÃO VALE / PRÉ-PAGO (VA/VR — 100% ISOLADO DA CONTA CORRENTE):
+- Saldo Vale Disponível Agora: R$ ${FinanceEngine.round2(summary.vaVrAvailableBalance)} (Carryover anterior: R$ ${FinanceEngine.round2(summary.vaVrCarryover)} + Recargas pagas: R$ ${FinanceEngine.round2(summary.vaVrIncomePaid)} - Gastos pagos: R$ ${FinanceEngine.round2(summary.vaVrSpentPaid)})
+- Saldo Vale Projetado no Mês: R$ ${FinanceEngine.round2(summary.vaVrProjectedBalance)} (Recargas totais/previstas: R$ ${FinanceEngine.round2(summary.vaVrIncome)} | Gastos totais: R$ ${FinanceEngine.round2(summary.vaVrSpent)})
+- Sugestão de Limite Diário no Vale: $vaVrDailyDesc$vaVrSubcatDesc
 
 TERMÔMETRO DE SAÚDE FINANCEIRA (4 PILARES EM TEMPO REAL):
 - Score Geral: ${healthScore.score}/100 (${healthScore.label}) — ${healthScore.description}
@@ -2071,11 +2159,17 @@ ATENÇÃO: Se o usuário pedir para corrigir ou alterar itens de um LOTE PENDENT
         val activeDraft = _uiState.value.activeExpenseDraft
         val draftContextDesc = if (activeDraft != null) {
             val safeDraftDesc = AgentSecuritySanitizer.sanitizeText(activeDraft.description, maxLength = 120)
+            val safeRawMerchant = AgentSecuritySanitizer.sanitizeText(activeDraft.rawMerchant, maxLength = 100)
+            val safeRawNotif = AgentSecuritySanitizer.sanitizeText(activeDraft.rawNotificationText, maxLength = 250)
+            val draftTypeStr = if (activeDraft.type == TransactionType.INCOME) "income" else "expense"
             """
             
-            ESBOÇO DE DESPESA DETECTADA VIA NOTIFICAÇÃO (EM REVISÃO ATIVA):
+            ESBOÇO DE TRANSAÇÃO DETECTADA VIA NOTIFICAÇÃO (EM REVISÃO ATIVA):
             - draftId: ${activeDraft.id}
+            - type: $draftTypeStr
             - description: $safeDraftDesc
+            - rawMerchant: $safeRawMerchant
+            - rawNotificationText: $safeRawNotif
             - amount: ${activeDraft.amount}
             - paymentMethod: ${activeDraft.paymentMethod.name}
             - cardId: ${activeDraft.cardId ?: "nenhum"}
@@ -2084,7 +2178,7 @@ ATENÇÃO: Se o usuário pedir para corrigir ou alterar itens de um LOTE PENDENT
             - subcategory: ${activeDraft.subcategory ?: ""}
             - date: ${activeDraft.date}
             - INSTRUÇÃO CRÍTICA PARA ESTE ESBOÇO:
-              O usuário está revisando este rascunho. Se ele confirmar ou solicitar ajustes (como trocar categoria, definir cartão, dividir ou parcelar em Nx), execute CREATE_TRANSACTION aplicando todos os dados deste rascunho somados aos ajustes pedidos e envie "confirmed": true (não peça confirmação duplicada).
+              O usuário está revisando este rascunho. Mantenha "type": "$draftTypeStr" (entrada = "income", despesa = "expense") salvo solicitação explícita em contrário. PENSE sempre em qual descrição financeira humana e clara representa melhor o lançamento real (NÃO copie nome fantasia técnico, razão social ou código de maquininha como IFD*, PAG*, LTDA ou FILIAL em "description" — prefira nomes claros como "Pedido no iFood", "Farmácia Drogasil", "Combustível Posto Ipiranga", "Pix recebido de Maria Clara", ou respeite a descrição exata informada pelo usuário). Se o usuário confirmar ou solicitar ajustes (como trocar descrição, categoria, definir cartão, dividir ou parcelar em Nx), execute CREATE_TRANSACTION aplicando todos os dados deste rascunho somados aos ajustes pedidos e envie "confirmed": true (não peça confirmação duplicada).
             """.trimIndent()
         } else ""
 
@@ -2412,7 +2506,7 @@ Exemplo de Lote de Fatura de Cartão:
 }
 ```
 *(OBRIGATÓRIO: Use SEMPRE que o usuário perguntar sobre despesas reais, valores pagos, análises por categoria, período, método de pagamento, cartão cadastrado ou divisões com terceiros. Parâmetros inteligentes:
-- "metodoPagamento": filtre por `"credit_card"` (apenas fatura de cartão), `"extrato_conta"` (tudo fora do cartão: Pix, Débito e Boleto), `"pix"`, `"debit"` ou `"bill"`.
+- "metodoPagamento": filtre por `"va_vr"` (apenas Cartão Vale pré-pago), `"credit_card"` (apenas fatura de cartão), `"extrato_conta"` (tudo fora do cartão e do Vale: Pix, Débito e Boleto), `"pix"`, `"debit"` ou `"bill"`.
 - "incluirRecorrentesProjetadas": defina como true ao consultar um mês atual/futuro para listar também contas fixas ativas ainda não lançadas no banco.
 - "todosMeusGastos": defina como true quando o usuário pedir para ver "todos os meus gastos" ou "meus gastos" (inclui gastos 100% pessoais E rateados onde o usuário participa). NÃO exclui lançamentos rateados!
 - "somenteMinhas": defina como true APENAS quando o usuário pedir para ver despesas 100% exclusivas dele ("100% a mim", "só minhas exclusivas", "sem divisão"). Exclui divisões e terceiros!
@@ -2561,9 +2655,9 @@ REGRAS DE FUNCIONAMENTO:
   * Responda educadamente explicando que o Saldo Livre utiliza uma taxonomia fixa e padronizada para manter a consistência dos envelopes orçamentários, gráficos e diagnósticos de saúde financeira.
   * Oriente e sugira a categoria e subcategoria oficial mais apropriada do sistema (ex: para "Bichos" ou "Pets" -> categoria "Pets", subcategoria "Acessórios & Brinquedos" ou "Veterinário & Medicamentos"; para "Viagem" -> categoria "Lazer & Entretenimento", subcategoria "Viagens & Hospedagem"; para "Farmácia" -> categoria "Saúde", subcategoria "Farmácia & Remédios").
 - No campo "category" das chamadas de ferramentas ("CREATE_TRANSACTION", "BATCH_TRANSACTIONS", "EDIT_TRANSACTION"), utilize SEMPRE e EXCLUSIVAMENTE uma das categorias oficiais ativas:
-  * Despesas (17 categorias): VA/VR, Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
-  * Receitas (8 categorias): VA/VR, Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
-  * REGRA DO MÓDULO VA/VR: Lançamentos com marcas Alelo, Flash, Caju, Ticket, Pluxee, Sodexo, iFood Benefícios, VA ou VR devem usar category: "VA/VR", paymentMethod: "debit" (saída) ou "pix" (entrada) — NUNCA credit_card — e NÃO impactam o Saldo Livre bancário nem os envelopes de Alimentação. Subcategorias VA/VR: Recarga VA/VR, Vale Alimentação (VA), Vale Refeição (VR), Saldo Inicial / Ajuste, Supermercado, Restaurante, Delivery & Lanches, Padaria, Outros VA/VR.
+  * Despesas (16 categorias): Alimentação, Moradia, Transporte, Saúde, Cuidados Pessoais & Estética, Lazer & Entretenimento, Assinaturas & Serviços, Compras & Estilo de Vida, Educação & Desenvolvimento, Família & Dependentes, Pets, Investimentos, Financiamentos & Dívidas, Impostos & Tributos, Trabalho / PJ / Carreira, Outros.
+  * Receitas (7 categorias): Salário & Remuneração, Benefícios, Freelance & Serviços, Rendimentos & Investimentos, Reembolsos & Acertos, Vendas & Desapegos, Outras Receitas.
+  * REGRA DO CARTÃO VALE / PRÉ-PAGO (VA/VR): O que define VA/VR é o **método de pagamento `paymentMethod: "va_vr"`** (e nunca uma categoria VA/VR). Use sempre a **categoria real** do gasto ou da recarga (ex: Supermercado -> `category: "Alimentação"`, `subcategory: "Supermercado"`; Uber/Vale Transporte -> `category: "Transporte"`; iFood -> `category: "Alimentação"`; Farmácia/Gympass -> `category: "Saúde"`; Recarga Alelo/Flash/Caju/Pluxee/Ticket -> `type: "income"`, `category: "Benefícios"`, `subcategory: "Vale Alimentação (VA)"` ou `"Vale Refeição (VR)"`). Lançamentos com `paymentMethod: "va_vr"` são descontados apenas do Cartão Vale (Pré-Pago), sem faturas pós-pagas e 100% isolados do Saldo Livre bancário.
 - Subcategorias oficiais por grupo:
   * Alimentação: Supermercado, Restaurante, Delivery & Lanches, Padaria & Café, Feira & Hortifruti, Açougue & Peixaria, Bares & Bebidas.
   * Moradia: Aluguel & Condomínio, Energia Elétrica, Água & Saneamento, Gás, Internet & TV a Cabo, Manutenção & Reparos, Móveis & Eletrodomésticos, IPTU & Taxas.
@@ -2697,7 +2791,7 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
   * NUNCA invente, deduza ou presuma números, parâmetros faltantes, lançamentos, dívidas, faturas ou saldos que não constem nos dados reais acima.
   * NUNCA misture a soma de despesas com receitas ou estornos em um único total genérico sem discriminar explicitamente. A soma das categorias de despesas deve fechar com exatidão com o Total Bruto de Despesas.
   * SE FALTAR UM PARÂMETRO OBRIGATÓRIO (como valor, data de competência ou divisão), PERGUNTE AO USUÁRIO em vez de preencher valores inventados.
-- Na descrição das transações ("description"), extraia ESTRITAMENTE o nome do produto, serviço ou estabelecimento (ex: "Two Brothers", "Subway", "Uber"). NUNCA inclua frases faladas como "eu comprei", "almoço no", "gastei", valores ou datas.
+- Na descrição das transações ("description"), PENSE e crie uma descrição financeira CLARA, INTELIGENTE e LEGÍVEL do produto, serviço ou gasto real (ex: "Pedido no iFood", "Farmácia Drogasil", "Combustível Posto Shell", "Two Brothers", "Uber Corrida"). NUNCA utilize nomes fantasia técnicos, razões sociais ou códigos brutos de maquininha/fatura (como "IFD*IFOOD", "PAG*Lanchonete", "SENDAS DISTRIBUIDORA S/A", "DROGASIL FILIAL 12", "LTDA") e NUNCA inclua frases faladas ("eu comprei", "almoço no", "gastei"), valores ou datas.
 - CORREÇÃO FONÉTICA INTELIGENTE: corrija termos falados ou erros de transcrição para os nomes corretos de marcas (ex: "two brothers", "ifood", "starbucks", "mercado livre").
 - Calcule datas relativas com precisão: se hoje é ${FinanceEngine.todayKey()}, "ontem" refere-se ao dia anterior.
 - APLIQUE a formatação da moeda brasileira (ex: R$ 45,00).
@@ -2718,8 +2812,8 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
      - IGNORE movimentações internas de reserva (Aplicações RDB, Resgates RDB, Guardar Dinheiro) e pagamentos de fatura de cartão já existentes.
   2. IDENTIFIQUE O TIPO DE DOCUMENTO:
      A) EXTRATO DE CONTA BANCÁRIA (Conta Corrente / Poupança / NuConta / Inter / Itaú / Bradesco):
-        - ENTRADAS / CRÉDITOS (+, C, Pix Recebido, Salário, Depósito, TED Recebida, Rendimento): type "income", category específica de receita (ex: "Salário & Remuneração", "VA/VR", "Benefícios", "Investimentos & Rendimentos", "Outras Receitas"), paymentMethod "pix" ou "debit". Entradas normais AUMENTAM o Saldo Livre; entradas "VA/VR" somam exclusivamente no Módulo VA/VR.
-        - SAÍDAS / DÉBITOS (-, D, Pix Enviado, Compra Débito, Pagamento de Boleto): type "expense", paymentMethod "pix", "debit" ou "bill". NUNCA marque como credit_card a menos que a linha diga "Compra Cartão de Crédito"!
+        - ENTRADAS / CRÉDITOS (+, C, Pix Recebido, Salário, Depósito, TED Recebida, Rendimento): type "income", category específica de receita (ex: "Salário & Remuneração", "Benefícios", "Investimentos & Rendimentos", "Outras Receitas"), paymentMethod "pix" ou "debit" (ou "va_vr" para recargas/créditos em Vale Alimentação/Refeição). Entradas normais AUMENTAM o Saldo Livre; entradas com paymentMethod "va_vr" somam exclusivamente no Cartão Vale (VA/VR).
+        - SAÍDAS / DÉBITOS (-, D, Pix Enviado, Compra Débito, Pagamento de Boleto): type "expense", paymentMethod "pix", "debit" ou "bill" (ou "va_vr" para gastos no Vale). NUNCA marque como credit_card a menos que a linha diga "Compra Cartão de Crédito"!
         - competenceMonth: mês em que as transações ocorreram; date: a data de cada movimentação.
      B) FATURA DE CARTÃO DE CRÉDITO (Nubank, Itaú, C6, Santander, Bradesco, etc.):
         - Compras: type "expense", paymentMethod "credit_card".

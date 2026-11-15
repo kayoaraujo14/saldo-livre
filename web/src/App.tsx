@@ -92,6 +92,7 @@ function MainDashboard() {
     subcategory: string
     paymentMethod: PaymentMethod
     status: TransactionStatus
+    cardId?: string
   } | null>(null)
 
   // Mobile navigation tab state: 'home' | 'transactions' | 'chat' | 'menu'
@@ -141,22 +142,25 @@ function MainDashboard() {
   }
 
   const handleLaunchVaVr = (txType: 'expense' | 'income') => {
+    const defaultValeCardId = cards.find((c) => c.cardType === 'va_vr')?.id
     setEditingTx(null)
     setTxInitialPreset(
       txType === 'income'
         ? {
             type: 'income',
-            category: 'VA/VR',
-            subcategory: 'Recarga VA/VR',
-            paymentMethod: 'pix',
+            category: 'Benefícios',
+            subcategory: 'Vale Alimentação (VA)',
+            paymentMethod: 'va_vr',
             status: 'paid',
+            cardId: defaultValeCardId,
           }
         : {
             type: 'expense',
-            category: 'VA/VR',
+            category: 'Alimentação',
             subcategory: 'Supermercado',
-            paymentMethod: 'debit',
+            paymentMethod: 'va_vr',
             status: 'paid',
+            cardId: defaultValeCardId,
           },
     )
     setTxModalOpen(true)

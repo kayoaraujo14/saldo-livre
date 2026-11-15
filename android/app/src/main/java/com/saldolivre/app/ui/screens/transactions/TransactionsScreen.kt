@@ -286,10 +286,12 @@ fun TransactionsScreen(
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = "VA/VR (${uiState.vaVrCount})",
+                            text = "Vale VA/VR (${uiState.vaVrCount})",
                             fontSize = 11.5.sp,
                             fontWeight = if (isVaVrFilterActive) FontWeight.Bold else FontWeight.SemiBold,
-                            color = if (isVaVrFilterActive) tealAccent else TextPrimary
+                            color = if (isVaVrFilterActive) tealAccent else TextPrimary,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }

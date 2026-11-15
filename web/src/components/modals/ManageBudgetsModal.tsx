@@ -52,6 +52,7 @@ export function ManageBudgetsModal({
     summary,
     month,
     transactions,
+    cards,
     me,
     categoryBudgetReport,
     setCategoryBudgets,
@@ -140,8 +141,9 @@ export function ManageBudgetsModal({
       expectedIncome,
       carryoverAmount,
       previousMonthDeficit,
+      cards,
     )
-  }, [open, transactions, me?.uid, month, expectedIncome, carryoverAmount, previousMonthDeficit])
+  }, [open, transactions, me?.uid, month, expectedIncome, carryoverAmount, previousMonthDeficit, cards])
 
   // Mapa de gastos reais do mês por categoria canônica
   const currentMonthSpentMap = useMemo(() => {

@@ -53,8 +53,8 @@ object AgentSecuritySanitizer {
             str = str.replace(Regex("""\bexfiltrate\s+(data|database|keys)\b""", RegexOption.IGNORE_CASE), "[neutralizado]")
         }
 
-        // 4. Normaliza espaços múltiplos
-        str = Regex("""\s+""").replace(str, " ").trim()
+        // 4. Normaliza espaços múltiplos (inclui NBSP / thin space de NumberFormat pt-BR)
+        str = Regex("""[\s\u00A0\u2007\u202F]+""").replace(str, " ").trim()
 
         // 5. Trunca para limite seguro de caracteres
         if (str.length > maxLength) {

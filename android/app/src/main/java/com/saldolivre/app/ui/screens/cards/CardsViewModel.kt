@@ -93,66 +93,105 @@ class CardsViewModel(
                 val partner = repository.allUsers.find { it.uid != user.uid }
                 val currentDay = LocalDate.now().dayOfMonth
 
-                val cardsInvoices = cards.map { card ->
+                val sortedCards = cards.sortedWith(
+                    compareByDescending<Card> { it.ownerUid == user.uid }
+                        .thenBy { it.isVaVrCard }
+                        .thenBy { it.cardName.lowercase() }
+                )
+
+                val cardsInvoices = sortedCards.map { card ->
                     val isOwner = card.ownerUid == user.uid
                     val isShared = card.sharedWithUsers.isNotEmpty() || card.sharedWithUids.isNotEmpty()
 
-                    // Transactions on this card for selected competence month
-                    val cardTxs = transactions.filter { tx ->
-                        tx.competenceMonth == month &&
-                        tx.cardId == card.id &&
-                        tx.reserveCardId == null
-                    }.sortedByDescending { it.dueDate }
+                    if (card.isVaVrCard) {
+                        val cardTxs = transactions.filter { tx ->
+                            tx.competenceMonth == month &&
+                            tx.reserveCardId == null &&
+                            (tx.cardId == card.id || (tx.cardId.isNullOrBlank() && com.saldolivre.app.data.model.CategoryRegistry.isVaVrTransaction(tx, cards)))
+                        }.sortedByDescending { it.dueDate }
 
-                    val invoiceTotal = FinanceEngine.round2(
-                        cardTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.effectiveAmount } -
-                        cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
-                    ).coerceAtLeast(0.0)
+                        val monthSpent = FinanceEngine.round2(
+                            cardTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.effectiveAmount }
+                        )
+                        val monthRecharged = FinanceEngine.round2(
+                            cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+                        )
+                        val cardLimit = card.limit?.takeIf { it > 0.0 } ?: monthRecharged.coerceAtLeast(0.0)
+                        val available = max(0.0, FinanceEngine.round2(cardLimit - monthSpent))
+                        val usagePct = if (cardLimit > 0.0) ((monthSpent / cardLimit) * 100.0).toInt().coerceIn(0, 100) else 0
 
-                    // Futuras faturas (despesas em meses posteriores a vencer)
-                    val futureTxs = transactions.filter { tx ->
-                        tx.competenceMonth > month &&
-                        tx.cardId == card.id &&
-                        tx.reserveCardId == null
+                        CardWithInvoice(
+                            card = card,
+                            isOwner = isOwner,
+                            isShared = isShared,
+                            invoiceAmount = monthSpent,
+                            limit = cardLimit,
+                            availableLimit = available,
+                            usagePercentage = usagePct,
+                            isClosed = false,
+                            transactions = cardTxs,
+                            futureInvoicesAmount = 0.0,
+                            totalCommitted = monthSpent
+                        )
+                    } else {
+                        // Transactions on this card for selected competence month
+                        val cardTxs = transactions.filter { tx ->
+                            tx.competenceMonth == month &&
+                            tx.cardId == card.id &&
+                            tx.reserveCardId == null
+                        }.sortedByDescending { it.dueDate }
+
+                        val invoiceTotal = FinanceEngine.round2(
+                            cardTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.effectiveAmount } -
+                            cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+                        ).coerceAtLeast(0.0)
+
+                        // Futuras faturas (despesas em meses posteriores a vencer)
+                        val futureTxs = transactions.filter { tx ->
+                            tx.competenceMonth > month &&
+                            tx.cardId == card.id &&
+                            tx.reserveCardId == null
+                        }
+                        val futureExpenses = futureTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
+                        val futureCredits = futureTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+                        val futureTotal = FinanceEngine.round2(max(0.0, futureExpenses.sumOf { it.effectiveAmount } - futureCredits))
+
+                        // Lançamentos pendentes na fatura atual
+                        val currentUnpaidExpenses = cardTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }.sumOf { it.effectiveAmount }
+                        val currentCredits = cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
+                        val currentCommitted = FinanceEngine.round2(max(0.0, currentUnpaidExpenses - currentCredits))
+
+                        // Total comprometido = fatura atual em aberto + faturas futuras
+                        val totalCommitted = FinanceEngine.round2(currentCommitted + futureTotal)
+
+                        val cardLimit = card.limit?.takeIf { it > 0.0 } ?: 5000.0
+                        val available = max(0.0, cardLimit - totalCommitted)
+                        val usagePct = if (cardLimit > 0) ((totalCommitted / cardLimit) * 100).toInt().coerceIn(0, 100) else 0
+
+                        val isClosed = if (month == FinanceEngine.currentMonthKey()) {
+                            currentDay >= card.closingDay
+                        } else month < FinanceEngine.currentMonthKey()
+
+                        CardWithInvoice(
+                            card = card,
+                            isOwner = isOwner,
+                            isShared = isShared,
+                            invoiceAmount = invoiceTotal,
+                            limit = cardLimit,
+                            availableLimit = available,
+                            usagePercentage = usagePct,
+                            isClosed = isClosed,
+                            transactions = cardTxs,
+                            futureInvoicesAmount = futureTotal,
+                            totalCommitted = totalCommitted
+                        )
                     }
-                    val futureExpenses = futureTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }
-                    val futureCredits = futureTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
-                    val futureTotal = FinanceEngine.round2(max(0.0, futureExpenses.sumOf { it.effectiveAmount } - futureCredits))
-
-                    // Lançamentos pendentes na fatura atual
-                    val currentUnpaidExpenses = cardTxs.filter { it.type == TransactionType.EXPENSE && it.status != TransactionStatus.PAID }.sumOf { it.effectiveAmount }
-                    val currentCredits = cardTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.effectiveAmount }
-                    val currentCommitted = FinanceEngine.round2(max(0.0, currentUnpaidExpenses - currentCredits))
-
-                    // Total comprometido = fatura atual em aberto + faturas futuras
-                    val totalCommitted = FinanceEngine.round2(currentCommitted + futureTotal)
-
-                    val cardLimit = card.limit?.takeIf { it > 0.0 } ?: 5000.0
-                    val available = max(0.0, cardLimit - totalCommitted)
-                    val usagePct = if (cardLimit > 0) ((totalCommitted / cardLimit) * 100).toInt().coerceIn(0, 100) else 0
-
-                    val isClosed = if (month == FinanceEngine.currentMonthKey()) {
-                        currentDay >= card.closingDay
-                    } else month < FinanceEngine.currentMonthKey()
-
-                    CardWithInvoice(
-                        card = card,
-                        isOwner = isOwner,
-                        isShared = isShared,
-                        invoiceAmount = invoiceTotal,
-                        limit = cardLimit,
-                        availableLimit = available,
-                        usagePercentage = usagePct,
-                        isClosed = isClosed,
-                        transactions = cardTxs,
-                        futureInvoicesAmount = futureTotal,
-                        totalCommitted = totalCommitted
-                    )
                 }
 
-                val totalInvoices = FinanceEngine.round2(cardsInvoices.sumOf { it.invoiceAmount })
-                val totalCommittedAll = FinanceEngine.round2(cardsInvoices.sumOf { it.totalCommitted })
-                val totalLimits = FinanceEngine.round2(cardsInvoices.sumOf { it.limit })
+                val creditInvoices = cardsInvoices.filter { !it.card.isVaVrCard }
+                val totalInvoices = FinanceEngine.round2(creditInvoices.sumOf { it.invoiceAmount })
+                val totalCommittedAll = FinanceEngine.round2(creditInvoices.sumOf { it.totalCommitted })
+                val totalLimits = FinanceEngine.round2(creditInvoices.sumOf { it.limit })
 
                 CardsUiState(
                     currentUser = user,
@@ -174,20 +213,22 @@ class CardsViewModel(
         }
     }
 
-    fun openNewCard() {
+    fun openNewCard(initialType: String = "credit") {
         val user = _uiState.value.currentUser
+        val isVale = initialType == "va_vr"
         val newCard = Card(
             id = "new_${System.currentTimeMillis()}",
             ownerUid = user.uid,
             ownerName = user.displayName,
             cardName = "",
-            closingDay = 5,
-            dueDay = 12,
+            cardType = if (isVale) "va_vr" else "credit",
+            closingDay = if (isVale) 1 else 5,
+            dueDay = if (isVale) 1 else 12,
             sharedWithUsers = emptyList(),
             sharedWithUids = emptyList(),
-            frequentThirdParties = listOf("Mãe", "Irmão"),
-            color = "violet",
-            limit = 5000.0
+            frequentThirdParties = if (isVale) emptyList() else listOf("Mãe", "Irmão"),
+            color = if (isVale) "emerald" else "violet",
+            limit = if (isVale) 800.0 else 5000.0
         )
         _uiState.update { it.copy(editingCard = newCard, isFormOpen = true) }
     }

@@ -77,15 +77,20 @@ object NotificationExpenseParser {
     val SUPPORTED_BANK_PACKAGES: Set<String> = setOf(
         // Nubank
         "com.nu.production",
-        // Itaú & Iti
+        // Itaú, Iti, Credicard, Hipercard
         "com.itau",
         "com.itaucard.activity",
         "br.com.itau.iti",
+        "br.com.itau.personnalite",
+        "com.itau.credicard",
+        "com.itau.hipercard",
         // Bradesco & Next
         "com.bradesco",
         "com.bradesco.cartoes",
         "br.com.bradesco.cartoes",
+        "br.com.bradesco.cartoesapp",
         "br.com.next",
+        "br.com.bradesco.next",
         // Inter
         "br.com.intermedium",
         // Santander & Way
@@ -98,10 +103,21 @@ object NotificationExpenseParser {
         "br.com.gabba.Caixa",
         "br.gov.caixa.tem",
         "br.com.caixa.cartoes",
-        // Sicredi
+        // Sicredi (G2, App principal, X, Mobile, Woop, Cartões)
+        "br.com.sicredi.g2",
         "br.com.sicredi.app",
         "com.sicredi.x",
         "br.com.sicredi.mobile",
+        "br.com.sicredi.woop",
+        "br.com.sicredi.cartoes",
+        "com.sicredi.app",
+        // InfinitePay (CloudWalk)
+        "io.cloudwalk.infinitepaydash",
+        "io.cloudwalk.infinitepay",
+        "br.com.infinitepay",
+        "com.infinitepay.app",
+        "io.cloudwalk.pos",
+        "io.cloudwalk.infinitecash",
         // C6 Bank
         "com.c6bank.app",
         // PicPay & Mercado Pago
@@ -110,18 +126,91 @@ object NotificationExpenseParser {
         // iFood & iFood Benefícios
         "br.com.brainweb.ifood",
         "br.com.ifood.benefits",
-        // Outros bancos/carteiras e benefícios populares
+        // Cooperativas, bancos digitais, fintechs e carteiras
         "com.btg.pactual.digital.mobile",
         "com.btgpactual.banking",
         "br.com.xp.carteira",
         "br.com.neon",
         "br.com.uol.ps.myaccount",
         "br.com.sicoob.sisbr.mobile",
+        "br.com.sicoobnet.pessoal",
+        "br.com.unicred.mobile",
+        "br.com.cresol.mobile",
+        "br.com.banrisul",
+        "br.com.brb.mobile",
+        "br.com.brb.brbcard",
+        "br.com.brb.fla",
+        "pag.meu.app",
+        "br.com.willbank",
+        "br.com.digio.app",
+        "br.com.bancopan.app",
+        "com.bancopan.cartoes",
+        "com.bv.app",
+        "br.com.bancobmg.meu_bmg",
+        "br.com.sofisadireto",
+        "br.com.agibank.app",
+        "br.com.original.bank",
+        "com.safra.wallet",
+        "br.com.stone.ton",
+        "br.com.stone.app",
+        "co.cora.app",
+        "br.com.asaas.mobile",
+        "br.com.gerencianet.app",
+        "com.recargapay.wallet",
+        "com.b2w.amedigital",
+        "com.sumup.merchant",
+        "com.nomad.app",
+        "com.transferwise.android",
+        "com.revolut.revolut",
+        "us.avenue.app",
+        // Benefícios VA / VR
         "com.caju.beneficios",
         "br.com.flashapp",
         "br.com.alelo.meualelo",
+        "br.com.sodexo.sodexobr.sodexoclub",
+        "com.pluxee.br",
+        "br.com.ticket.app",
+        "com.swile.app",
+        // Carteiras NFC
         "com.google.android.apps.walletnfcrel",
         "com.samsung.android.spay"
+    )
+
+    private val SUPPORTED_BANK_PACKAGES_LOWER: Set<String> =
+        SUPPORTED_BANK_PACKAGES.map { it.lowercase(Locale.ROOT) }.toSet()
+
+    private val EXCLUDED_NON_BANK_PACKAGES: Set<String> = setOf(
+        "com.whatsapp",
+        "com.whatsapp.w4b",
+        "org.telegram.messenger",
+        "org.telegram.messenger.web",
+        "com.instagram.android",
+        "com.facebook.orca",
+        "com.facebook.katana",
+        "com.discord",
+        "com.slack",
+        "com.twitter.android",
+        "com.google.android.gm",
+        "com.google.android.apps.messaging",
+        "com.samsung.android.messaging",
+        "com.android.mms",
+        "com.android.chrome",
+        "com.google.android.youtube",
+        "com.zhiliaoapp.musically",
+        "com.android.systemui",
+        "com.android.settings"
+    )
+
+    private val BANK_PACKAGE_KEYWORDS = listOf(
+        "nubank", "nu.production", "itau", "credicard", "hipercard",
+        "bradesco", "intermedium", "santander", "ourocard", "sicredi",
+        "sicoob", "unicred", "cresol", "infinitepay", "cloudwalk",
+        "c6bank", "picpay", "mercadopago", "pagbank", "pagseguro",
+        "btg", "xp.carteira", "neon", "banrisul", "digio", "willbank",
+        "bancopan", "bancobmg", "sofisa", "agibank", "safra",
+        "cora", "stone", "asaas", "gerencianet", "recargapay",
+        "nomad", "transferwise", "revolut", "pluxee", "sodexo",
+        "alelo", "caju", "flashapp", "swile"
     )
 
     private val PACKAGE_BANK_HINTS: Map<String, List<String>> = mapOf(
@@ -129,21 +218,36 @@ object NotificationExpenseParser {
         "com.itau" to listOf("itau", "itaú", "itaucard"),
         "com.itaucard.activity" to listOf("itaucard", "itau", "itaú"),
         "br.com.itau.iti" to listOf("iti", "itau", "itaú"),
+        "br.com.itau.personnalite" to listOf("personnalite", "itau", "itaú"),
+        "com.itau.credicard" to listOf("credicard", "itau", "itaú"),
+        "com.itau.hipercard" to listOf("hipercard", "itau", "itaú"),
         "com.bradesco" to listOf("bradesco"),
         "com.bradesco.cartoes" to listOf("bradesco"),
         "br.com.bradesco.cartoes" to listOf("bradesco"),
+        "br.com.bradesco.cartoesapp" to listOf("bradesco"),
         "br.com.next" to listOf("next", "bradesco"),
+        "br.com.bradesco.next" to listOf("next", "bradesco"),
         "br.com.intermedium" to listOf("inter"),
         "com.santander.app" to listOf("santander"),
         "br.com.santander.way" to listOf("santander", "way"),
         "br.com.bb.android" to listOf("banco do brasil", "ourocard", "bb"),
         "br.com.bb.ourocard" to listOf("ourocard", "banco do brasil", "bb"),
-        "br.com.gabba.Caixa" to listOf("caixa"),
+        "br.com.gabba.caixa" to listOf("caixa"),
         "br.gov.caixa.tem" to listOf("caixa", "caixa tem"),
         "br.com.caixa.cartoes" to listOf("caixa"),
+        "br.com.sicredi.g2" to listOf("sicredi"),
         "br.com.sicredi.app" to listOf("sicredi"),
         "com.sicredi.x" to listOf("sicredi"),
         "br.com.sicredi.mobile" to listOf("sicredi"),
+        "br.com.sicredi.woop" to listOf("sicredi", "woop"),
+        "br.com.sicredi.cartoes" to listOf("sicredi"),
+        "com.sicredi.app" to listOf("sicredi"),
+        "io.cloudwalk.infinitepaydash" to listOf("infinitepay", "infinite pay", "cloudwalk"),
+        "io.cloudwalk.infinitepay" to listOf("infinitepay", "infinite pay", "cloudwalk"),
+        "br.com.infinitepay" to listOf("infinitepay", "infinite pay", "cloudwalk"),
+        "com.infinitepay.app" to listOf("infinitepay", "infinite pay", "cloudwalk"),
+        "io.cloudwalk.pos" to listOf("infinitepay", "infinite pay", "cloudwalk"),
+        "io.cloudwalk.infinitecash" to listOf("infinitepay", "infinite pay", "cloudwalk"),
         "com.c6bank.app" to listOf("c6", "c6 bank", "carbon"),
         "com.picpay" to listOf("picpay"),
         "com.mercadopago.wallet" to listOf("mercado pago", "mercadopago"),
@@ -155,30 +259,65 @@ object NotificationExpenseParser {
         "br.com.neon" to listOf("neon"),
         "br.com.uol.ps.myaccount" to listOf("pagbank", "pagseguro"),
         "br.com.sicoob.sisbr.mobile" to listOf("sicoob"),
+        "br.com.sicoobnet.pessoal" to listOf("sicoob"),
+        "br.com.unicred.mobile" to listOf("unicred"),
+        "br.com.cresol.mobile" to listOf("cresol"),
+        "br.com.banrisul" to listOf("banrisul"),
+        "br.com.brb.mobile" to listOf("brb"),
+        "br.com.brb.brbcard" to listOf("brb"),
+        "br.com.brb.fla" to listOf("brb"),
+        "pag.meu.app" to listOf("will", "will bank"),
+        "br.com.willbank" to listOf("will", "will bank"),
+        "br.com.digio.app" to listOf("digio"),
+        "br.com.bancopan.app" to listOf("pan", "banco pan"),
+        "com.bancopan.cartoes" to listOf("pan", "banco pan"),
+        "com.bv.app" to listOf("bv"),
+        "br.com.bancobmg.meu_bmg" to listOf("bmg"),
+        "br.com.sofisadireto" to listOf("sofisa"),
+        "br.com.agibank.app" to listOf("agibank"),
+        "br.com.original.bank" to listOf("original"),
+        "com.safra.wallet" to listOf("safra"),
+        "br.com.stone.ton" to listOf("ton", "stone"),
+        "br.com.stone.app" to listOf("stone"),
+        "co.cora.app" to listOf("cora"),
+        "br.com.asaas.mobile" to listOf("asaas"),
+        "br.com.gerencianet.app" to listOf("efi", "gerencianet"),
+        "com.recargapay.wallet" to listOf("recargapay"),
+        "com.b2w.amedigital" to listOf("ame"),
+        "com.sumup.merchant" to listOf("sumup"),
+        "com.nomad.app" to listOf("nomad"),
+        "com.transferwise.android" to listOf("wise"),
+        "com.revolut.revolut" to listOf("revolut"),
+        "us.avenue.app" to listOf("avenue"),
         "com.caju.beneficios" to listOf("caju"),
         "br.com.flashapp" to listOf("flash"),
-        "br.com.alelo.meualelo" to listOf("alelo")
+        "br.com.alelo.meualelo" to listOf("alelo"),
+        "br.com.sodexo.sodexobr.sodexoclub" to listOf("sodexo", "pluxee"),
+        "com.pluxee.br" to listOf("pluxee", "sodexo"),
+        "br.com.ticket.app" to listOf("ticket"),
+        "com.swile.app" to listOf("swile")
     )
 
     private val KNOWN_BANK_KEYWORDS = listOf(
-        "nubank", "itaú", "itau", "itaucard", "iti", "bradesco", "next",
-        "inter", "santander", "way", "banco do brasil", "ourocard", "caixa",
-        "sicredi", "c6 bank", "c6", "picpay", "mercado pago", "btg", "xp",
-        "neon", "pagbank", "sicoob", "ifood", "caju", "flash", "alelo",
+        "nubank", "itaú", "itau", "itaucard", "iti", "credicard", "hipercard",
+        "bradesco", "next", "inter", "santander", "way", "banco do brasil",
+        "ourocard", "caixa", "sicredi", "woop", "sicoob", "unicred", "cresol",
+        "infinitepay", "infinite pay", "cloudwalk", "c6 bank", "c6", "picpay",
+        "mercado pago", "btg", "xp", "neon", "pagbank", "banrisul", "brb",
+        "will", "will bank", "digio", "banco pan", "bv", "bmg", "sofisa",
+        "agibank", "original", "safra", "stone", "ton", "cora", "asaas", "efi",
+        "recargapay", "nomad", "wise", "revolut", "avenue", "ifood", "caju",
+        "flash", "alelo", "pluxee", "sodexo", "ticket", "swile",
         "black", "platinum", "ultravioleta", "infinite"
     )
 
     private val IGNORE_PATTERNS = listOf(
-        // Recebimentos e rendimentos (não são despesas)
-        Regex("""\bpix\s+recebido\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bvoc[eê]\s+recebeu\b""", RegexOption.IGNORE_CASE),
-        Regex("""\brecebeu\s+(?:um\s+)?pix\b""", RegexOption.IGNORE_CASE),
-        Regex("""\btransfer[eê]ncia\s+recebida\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bted\s+recebid[ao]\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bdoc\s+recebid[ao]\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bdep[oó]sito\s+recebido\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bpagamento\s+recebido\b""", RegexOption.IGNORE_CASE),
-        Regex("""\brecebimento\s+de\s+pix\b""", RegexOption.IGNORE_CASE),
+        // Vendas recebidas na maquininha/POS de lojistas (não confundir com movimentação pessoal) e promoções de rendimento/cashback
+        Regex("""\bvenda\s+(?:aprovada|realizada|conclu[ií]da|no\s+(?:cr[eé]dito|d[eé]bito|pix))\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bvoc[eê]\s+vendeu\b""", RegexOption.IGNORE_CASE),
+        Regex("""\brecebimento\s+aprovad[ao]\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bvalor\s+a\s+receber\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:pix|ted|valor)\s+(?:devolvido|estornado)\b""", RegexOption.IGNORE_CASE),
         Regex("""\brendeu\s+r\$""", RegexOption.IGNORE_CASE),
         Regex("""\bcashback\s+(?:recebido|dispon[ií]vel|creditado)\b""", RegexOption.IGNORE_CASE),
         // Promocionais, limites e avisos de fatura
@@ -206,18 +345,28 @@ object NotificationExpenseParser {
         Regex("""\bcompra\s+estornada\b""", RegexOption.IGNORE_CASE)
     )
 
+    private val INCOME_TRIGGER_REGEX = Regex(
+        """\b(pix\s+recebido|recebimento\s+de\s+pix|voc[eê]\s+recebeu\s+(?:uma?\s+)?(?:pix|transfer[eê]ncia|pagamento|valor|cr[eé]dito|r\$)|voc[eê]\s+recebeu\b.*\bpix\b|recebeu\s+(?:uma?\s+)?pix|transfer[eê]ncia\s+(?:pix\s+)?recebida|dep[oó]sito\s+recebido|pagamento\s+recebido|ted\s+recebid[ao]|doc\s+recebid[ao]|pix\b.*\b(?:recebido|creditado|caiu\s+na\s+conta))\b""",
+        RegexOption.IGNORE_CASE
+    )
+
     private val EXPENSE_TRIGGER_REGEX = Regex(
-        """\b(compra|aprovad[ao]|d[eé]bito|cr[eé]dito|pix\s+enviado|voc[eê]\s+enviou|enviou\s+um\s+pix|transfer[eê]ncia\s+enviada|voc[eê]\s+transferiu|voc[eê]\s+pagou|pagamento\s+(?:efetuado|aprovado|realizado)|transa[çc][aã]o\s+aprovada|pagou\s+com\s+pix|pagou\s+r\$)\b""",
+        """\b(compra|aprovad[ao]|d[eé]bito|cr[eé]dito|pix\s+(?:enviado|realizado|efetuado|conclu[ií]do|pago|para)|envio\s+de\s+pix|voc[eê]\s+(?:enviou|transferiu|pagou|realizou\s+(?:um\s+)?pix|fez\s+(?:um\s+)?(?:pix|pagamento|compra))|enviou\s+(?:um\s+)?pix|transfer[eê]ncia\s+(?:enviada|realizada|conclu[ií]da)|pagamento\s+(?:efetuado|aprovado|realizado|conclu[ií]do|via\s+pix|com\s+pix|de\s+boleto)|transa[çc][aã]o\s+(?:aprovada|realizada|efetuada|no\s+valor|de\s+r\$)|pagou\s+(?:com\s+pix|via\s+pix|r\$)|pix\b.*\b(?:enviado|realizado|efetuado|conclu[ií]do|pago))\b""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val STRONG_FALLBACK_BANK_REGEX = Regex(
+        """\b(cart[aã]o|cr[eé]dito|d[eé]bito|pix|compra\s+aprovada|pagamento\s+(?:aprovado|realizado|efetuado)|transa[çc][aã]o\s+(?:aprovada|realizada))\b""",
         RegexOption.IGNORE_CASE
     )
 
     private val BRL_CURRENCY_REGEX = Regex(
-        """r\$\s*([\d.]+(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)""",
+        """r\$[\s\u00A0\u2007\u202F]*([\d.]+(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)""",
         RegexOption.IGNORE_CASE
     )
 
     private val FALLBACK_VALUE_REGEX = Regex(
-        """\b(?:no\s+)?valor\s+(?:de\s+)?([\d.]+,\d{2})\b""",
+        """\bvalor(?:\s+da\s+(?:compra|transa[çc][aã]o|pagamento))?(?:\s+de)?[\s:]+r?\$?[\s\u00A0\u2007\u202F]*([\d.]+,\d{2})\b""",
         RegexOption.IGNORE_CASE
     )
 
@@ -226,14 +375,50 @@ object NotificationExpenseParser {
         RegexOption.IGNORE_CASE
     )
 
+    fun isExcludedNonBankPackage(packageName: String?): Boolean {
+        val norm = packageName?.trim()?.lowercase(Locale.ROOT) ?: return true
+        if (norm in SUPPORTED_BANK_PACKAGES_LOWER) return false
+        return norm in EXCLUDED_NON_BANK_PACKAGES ||
+            norm.startsWith("com.whatsapp") ||
+            norm.startsWith("org.telegram")
+    }
+
     fun isSupportedBankPackage(packageName: String?): Boolean {
-        if (packageName.isNullOrBlank()) return false
-        return SUPPORTED_BANK_PACKAGES.contains(packageName.trim())
+        val norm = packageName?.trim()?.lowercase(Locale.ROOT) ?: return false
+        if (norm.isBlank()) return false
+        if (norm in SUPPORTED_BANK_PACKAGES_LOWER) return true
+        if (isExcludedNonBankPackage(norm)) return false
+        return BANK_PACKAGE_KEYWORDS.any { norm.contains(it) }
+    }
+
+    fun containsCurrencyAmount(text: String?): Boolean {
+        if (text.isNullOrBlank()) return false
+        return parseBrlAmount(text) != null
     }
 
     /**
-     * Analisa uma notificação bancária e gera um [ExpenseDraft] se for uma despesa válida.
-     * Retorna `null` para notificações promocionais, recebimentos, códigos 2FA, compras negadas ou sem valor válido.
+     * Valida se a notificação vem de um app bancário conhecido OU de um pacote financeiro
+     * não listado que apresente assinatura inequívoca de compra/Pix com valor em BRL.
+     */
+    fun isSupportedBankNotification(packageName: String?, title: String?, text: String?): Boolean {
+        if (isSupportedBankPackage(packageName)) return true
+        if (isExcludedNonBankPackage(packageName)) return false
+
+        val sanitized = AgentSecuritySanitizer.sanitizeText(
+            listOfNotNull(title, text).joinToString(" - "),
+            maxLength = 600
+        )
+        if (sanitized.isBlank()) return false
+        if (IGNORE_PATTERNS.any { it.containsMatchIn(sanitized) }) return false
+        if (!containsCurrencyAmount(sanitized)) return false
+        return INCOME_TRIGGER_REGEX.containsMatchIn(sanitized) ||
+            (EXPENSE_TRIGGER_REGEX.containsMatchIn(sanitized) &&
+                STRONG_FALLBACK_BANK_REGEX.containsMatchIn(sanitized))
+    }
+
+    /**
+     * Analisa uma notificação bancária e gera um [ExpenseDraft] para despesa ou entrada (Pix recebido).
+     * Retorna `null` para notificações promocionais, vendas POS de lojista, códigos 2FA, compras negadas ou sem valor válido.
      */
     fun parse(
         packageName: String,
@@ -253,46 +438,79 @@ object NotificationExpenseParser {
 
         if (combinedRaw.isBlank()) return null
 
-        // 2. Descarta notificações ignoráveis (Pix recebido, propaganda, limite, 2FA, compra negada)
+        // 2. Descarta notificações ignoráveis (vendas POS lojista, propaganda, limite, 2FA, compra negada)
         if (IGNORE_PATTERNS.any { it.containsMatchIn(combinedRaw) }) {
             return null
         }
 
-        // 3. Exige um gatilho claro de despesa realizada
-        if (!EXPENSE_TRIGGER_REGEX.containsMatchIn(combinedRaw)) {
-            return null
+        // 3. Detecta se a notificação representa uma entrada (Pix/transferência recebida) ou despesa
+        val transactionType = when {
+            INCOME_TRIGGER_REGEX.containsMatchIn(combinedRaw) -> TransactionType.INCOME
+            EXPENSE_TRIGGER_REGEX.containsMatchIn(combinedRaw) -> TransactionType.EXPENSE
+            else -> return null
         }
 
         // 4. Extrai e valida o valor monetário em BRL
         val amount = parseBrlAmount(combinedRaw) ?: return null
 
-        // 5. Identifica o método de pagamento (Crédito, Débito ou Pix)
-        val paymentMethod = detectPaymentMethod(combinedRaw)
+        // 5. Identifica o método de pagamento (Vale VA/VR, Pix, Crédito, Débito ou Boleto)
+        val pkgLower = packageName.trim().lowercase(Locale.ROOT)
+        val isValeApp = pkgLower.contains("alelo") ||
+            pkgLower.contains("caju") ||
+            pkgLower.contains("flash") ||
+            pkgLower.contains("swile") ||
+            pkgLower.contains("pluxee") ||
+            pkgLower.contains("sodexo") ||
+            pkgLower.contains("ticket")
+        val detectedMethod = detectPaymentMethod(combinedRaw)
+        val paymentMethod = when {
+            isValeApp || detectedMethod == PaymentMethod.VA_VR -> PaymentMethod.VA_VR
+            transactionType == TransactionType.INCOME -> PaymentMethod.PIX
+            else -> detectedMethod
+        }
 
-        // 6. Associa o cartão cadastrado se for crédito
-        val matchedCard = if (paymentMethod == PaymentMethod.CREDIT_CARD) {
-            resolveCard(packageName, combinedRaw, cards)
-        } else null
+        // 6. Associa o cartão cadastrado se for compra no crédito ou no cartão Vale (VA/VR)
+        val matchedCard = when {
+            paymentMethod == PaymentMethod.VA_VR ->
+                resolveCard(packageName, combinedRaw, cards.filter { it.isVaVrCard })
+                    ?: cards.firstOrNull { it.isVaVrCard }
+            transactionType == TransactionType.EXPENSE && paymentMethod == PaymentMethod.CREDIT_CARD ->
+                resolveCard(packageName, combinedRaw, cards.filter { !it.isVaVrCard })
+            else -> null
+        }
 
-        // 7. Extrai descrição limpa do estabelecimento / destinatário
-        val description = extractMerchantOrRecipient(
+        // 7. Extrai o estabelecimento / destinatário / remetente bruto e infere categoria em cascata
+        val rawMerchant = extractMerchantOrRecipient(
             sanitizedTitle = sanitizedTitle,
             sanitizedText = sanitizedText,
-            paymentMethod = paymentMethod
+            paymentMethod = paymentMethod,
+            transactionType = transactionType
         )
 
         // 8. Infere categoria em cascata (LearnedRulesManager -> NeuralFinanceClassifier -> CategoryRegistry)
         val (category, subcategory) = inferCategoryCascade(
-            description = description,
+            description = rawMerchant,
             sanitizedCombined = combinedRaw,
             amount = amount,
             learnedRules = learnedRules,
-            neuralClassifier = neuralClassifier
+            neuralClassifier = neuralClassifier,
+            transactionType = transactionType
+        )
+
+        // 9. Converte nome fantasia / código de maquininha em descrição financeira legível
+        val smartDescription = humanizeTransactionDescription(
+            rawMerchant = rawMerchant,
+            sanitizedCombined = combinedRaw,
+            paymentMethod = paymentMethod,
+            category = category,
+            subcategory = subcategory,
+            transactionType = transactionType
         )
 
         return ExpenseDraft(
             amount = amount,
-            description = description,
+            description = smartDescription,
+            type = transactionType,
             category = category,
             subcategory = subcategory,
             paymentMethod = paymentMethod,
@@ -300,7 +518,9 @@ object NotificationExpenseParser {
             cardName = matchedCard?.cardName,
             date = date,
             rawNotificationText = combinedRaw,
-            packageName = packageName.trim()
+            packageName = packageName.trim(),
+            rawMerchant = rawMerchant,
+            aiEnriched = false
         )
     }
 
@@ -330,7 +550,10 @@ object NotificationExpenseParser {
     }
 
     fun parseBrlAmount(text: String): Double? {
-        val match = BRL_CURRENCY_REGEX.find(text) ?: FALLBACK_VALUE_REGEX.find(text) ?: return null
+        val normalizedSpace = text.replace(Regex("""[\u00A0\u2007\u202F]+"""), " ")
+        val match = BRL_CURRENCY_REGEX.find(normalizedSpace)
+            ?: FALLBACK_VALUE_REGEX.find(normalizedSpace)
+            ?: return null
         val raw = match.groupValues[1].trim()
         if (raw.isBlank()) return null
 
@@ -346,6 +569,8 @@ object NotificationExpenseParser {
     fun detectPaymentMethod(text: String): PaymentMethod {
         val folded = CategoryRegistry.foldCategoryAccents(text)
         return when {
+            Regex("""\b(va|vr|va/vr|vale[- ]?alimentacao|vale[- ]?refeicao|ifood[- ]?beneficios|alelo|flash|caju|ticket|pluxee|sodexo|swile)\b""")
+                .containsMatchIn(folded) -> PaymentMethod.VA_VR
             folded.contains("debito") -> PaymentMethod.DEBIT
             folded.contains("pix no credito") || folded.contains("pix parcelado") -> PaymentMethod.CREDIT_CARD
             folded.contains("pix") ||
@@ -397,7 +622,8 @@ object NotificationExpenseParser {
         if (directCardMatch != null) return directCardMatch
 
         // 4. Tenta associar pelo pacote de origem da notificação (ex: com.nu.production -> Nubank)
-        val pkgHints = PACKAGE_BANK_HINTS[packageName.trim()] ?: emptyList()
+        val normPkg = packageName.trim().lowercase(Locale.ROOT)
+        val pkgHints = PACKAGE_BANK_HINTS[normPkg] ?: emptyList()
         if (pkgHints.isNotEmpty()) {
             val matchedByPkg = cards.find { card ->
                 val foldedCard = CategoryRegistry.foldCategoryAccents(card.cardName)
@@ -415,18 +641,68 @@ object NotificationExpenseParser {
     fun extractMerchantOrRecipient(
         sanitizedTitle: String,
         sanitizedText: String,
-        paymentMethod: PaymentMethod
+        paymentMethod: PaymentMethod,
+        transactionType: TransactionType = TransactionType.EXPENSE
     ): String {
         val candidates = listOf(sanitizedText, sanitizedTitle, "$sanitizedTitle $sanitizedText")
-            .map { it.trim() }
+            .map { it.replace(Regex("""[\u00A0\u2007\u202F]+"""), " ").trim() }
             .filter { it.isNotBlank() }
+
+        if (transactionType == TransactionType.INCOME) {
+            for (candidate in candidates) {
+                val incomeSurface = candidate
+                    .replace(
+                        Regex("""\b(?:(?:no\s+)?valor\s+(?:de\s+)?|de\s+)?r\$[\s\u00A0\u2007\u202F]*[\d.,]+""", RegexOption.IGNORE_CASE),
+                        " "
+                    )
+                    .replace(Regex("""\s+"""), " ")
+                    .trim()
+
+                // Padrão 0 (Entrada): Rótulo explícito ("Remetente: ...", "Pagador: ...", "Origem: ...", "De: ...")
+                val labeledSenderRegex = Regex(
+                    """\b(?:remetente|pagador|origem|enviado\s+por|de)\s*:\s*(.+?)(?=\s+(?:no\s+valor|valor\s+de|com\s+sucesso|em\s+\d{1,2}/\d{1,2}|[àa]s\s+\d{1,2}[:h]|via\s+pix|na\s+sua\s+conta|em\s+sua\s+conta|pelo\s+app)\b|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
+                    RegexOption.IGNORE_CASE
+                )
+                for (match in labeledSenderRegex.findAll(incomeSurface)) {
+                    val rawSender = match.groupValues[1].trim()
+                    if (isValidIncomeSender(rawSender)) {
+                        return cleanMerchantName(rawSender)
+                    }
+                }
+
+                // Padrão 1 (Entrada): "de <Remetente>" (após neutralizar trechos de valor monetário "de R$ ...")
+                val senderRegex = Regex(
+                    """\bde\s+(.+?)(?=\s+(?:no\s+valor|valor\s+de|com\s+sucesso|em\s+\d{1,2}/\d{1,2}|[àa]s\s+\d{1,2}[:h]|via\s+pix|na\s+sua\s+conta|em\s+sua\s+conta|pelo\s+app|foi\s+recebido)\b|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
+                    RegexOption.IGNORE_CASE
+                )
+                for (match in senderRegex.findAll(incomeSurface)) {
+                    val rawSender = match.groupValues[1].trim()
+                    if (isValidIncomeSender(rawSender)) {
+                        return cleanMerchantName(rawSender)
+                    }
+                }
+            }
+            return "Pix Recebido"
+        }
 
         for (candidate in candidates) {
             val safeText = candidate.trim()
 
+            // Padrão 0: Rótulo explícito (Sicredi / InfinitePay / bancos tradicionais)
+            val labeledRegex = Regex(
+                """\b(?:estabelecimento|local|favorecido|destinat[áa]rio|benefici[áa]rio|recebedor|loja)\s*:\s*(.+?)(?=\s+(?:para\s+o\s+cart[aã]o|no\s+cart[aã]o|cart[aã]o(?:\s+final)?|final\s+\d{4}|no\s+valor|valor\s+de|com\s+sucesso|em\s+\d{1,2}/\d{1,2}|[àa]s\s+\d{1,2}[:h]|via\s+pix|com\s+pix|aprovad[ao]|realizada|efetuada|pelo\s+app)\b|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
+                RegexOption.IGNORE_CASE
+            )
+            for (match in labeledRegex.findAll(safeText)) {
+                val rawLabeled = match.groupValues[1].trim()
+                if (isValidExtractedMerchant(rawLabeled)) {
+                    return cleanMerchantName(rawLabeled)
+                }
+            }
+
             // Padrão 1: "em <Estabelecimento>" ou "no estabelecimento <Estabelecimento>"
             val merchantRegex = Regex(
-                """\b(?:no\s+estabelecimento|estabelecimento|em)\s+(.+?)(?=\s+(?:para\s+o\s+cart[aã]o|no\s+cart[aã]o|com\s+o\s+cart[aã]o|no\s+seu\s+cart[aã]o|cart[aã]o(?:\s+final)?|final\s+\d{4}|no\s+valor|valor\s+de|em\s+\d{1,2}/\d{1,2}|em\s+\d{4}|[àa]s\s+\d{1,2}[:h]|via\s+pix|com\s+pix|aprovad[ao]|realizada|efetuada|pelo\s+app)\b|\s*\[neutralizado\]|[.!?\n]|$)""",
+                """\b(?:no\s+estabelecimento|estabelecimento|em)\s+(.+?)(?=\s+(?:para\s+o\s+cart[aã]o|no\s+cart[aã]o|com\s+o\s+cart[aã]o|no\s+seu\s+cart[aã]o|cart[aã]o(?:\s+final)?|final\s+\d{4}|no\s+valor|valor\s+de|com\s+sucesso|em\s+\d{1,2}/\d{1,2}|em\s+\d{4}|[àa]s\s+\d{1,2}[:h]|via\s+pix|com\s+pix|aprovad[ao]|realizada|efetuada|pelo\s+app|pela\s+maquininha)\b|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
                 RegexOption.IGNORE_CASE
             )
             for (match in merchantRegex.findAll(safeText)) {
@@ -436,10 +712,15 @@ object NotificationExpenseParser {
                 }
             }
 
-            // Padrão 2 (Pix / Transferência): "para <Destinatário>"
-            if (paymentMethod == PaymentMethod.PIX) {
+            // Padrão 2 (Pix / Pagamento / Transferência): "para <Destinatário>"
+            val foldedCandidate = CategoryRegistry.foldCategoryAccents(safeText)
+            if (paymentMethod == PaymentMethod.PIX ||
+                paymentMethod == PaymentMethod.BILL ||
+                foldedCandidate.contains("pagamento") ||
+                foldedCandidate.contains("pagou")
+            ) {
                 val pixRecipientRegex = Regex(
-                    """\bpara\s+(.+?)(?=\s+(?:via\s+pix|com\s+pix|no\s+valor|valor\s+de|em\s+\d{1,2}/\d{1,2}|[àa]s\s+\d{1,2}[:h]|chave\s+pix|pelo\s+app)\b|\s*\[neutralizado\]|[.!?\n]|$)""",
+                    """\bpara\s+(.+?)(?=\s+(?:via\s+pix|com\s+pix|no\s+valor|valor\s+de|com\s+sucesso|em\s+\d{1,2}/\d{1,2}|[àa]s\s+\d{1,2}[:h]|chave\s+pix|pelo\s+app|pela\s+conta|na\s+conta|no\s+cart[aã]o|cart[aã]o(?:\s+final)?)\b|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
                     RegexOption.IGNORE_CASE
                 )
                 for (match in pixRecipientRegex.findAll(safeText)) {
@@ -447,7 +728,8 @@ object NotificationExpenseParser {
                     if (isValidExtractedMerchant(rawRecipient) &&
                         !rawRecipient.startsWith("o cartão", ignoreCase = true) &&
                         !rawRecipient.startsWith("o cartao", ignoreCase = true) &&
-                        !rawRecipient.startsWith("sua segurança", ignoreCase = true)
+                        !rawRecipient.startsWith("sua segurança", ignoreCase = true) &&
+                        !rawRecipient.startsWith("sua seguranca", ignoreCase = true)
                     ) {
                         return cleanMerchantName(rawRecipient)
                     }
@@ -456,7 +738,7 @@ object NotificationExpenseParser {
 
             // Padrão 3: Separador com hífen após valor (ex: "Débito em conta de R$ 75,00 - Farmácia São Paulo")
             val dashMerchantRegex = Regex(
-                """r\$\s*[\d.,]+\s*[-–—]\s*(.+?)(?=\s+(?:no\s+cart[aã]o|final\s+\d{4}|[àa]s\s+\d{1,2}[:h]|em\s+\d{1,2}/\d{1,2})|\s*\[neutralizado\]|[.!?\n]|$)""",
+                """r\$\s*[\d.,]+\s*[-–—]\s*(.+?)(?=\s+(?:no\s+cart[aã]o|final\s+\d{4}|com\s+sucesso|[àa]s\s+\d{1,2}[:h]|em\s+\d{1,2}/\d{1,2})|\s*\[neutralizado\]|\.(?=\s|$)|[!?\n]|$)""",
                 RegexOption.IGNORE_CASE
             )
             val dashMatch = dashMerchantRegex.find(safeText)
@@ -476,20 +758,164 @@ object NotificationExpenseParser {
         return cleanMerchantName(guessed).ifBlank { "Compra detectada" }
     }
 
+    /**
+     * Transforma nomes fantasia técnicos, razões sociais ou códigos de maquininha
+     * em uma descrição financeira inteligente e legível para exibição imediata
+     * (complementada e aprofundada pelo Gemini quando houver conectividade).
+     */
+    fun humanizeTransactionDescription(
+        rawMerchant: String,
+        sanitizedCombined: String,
+        paymentMethod: PaymentMethod,
+        category: String,
+        subcategory: String? = null,
+        transactionType: TransactionType = TransactionType.EXPENSE
+    ): String {
+        val normalizedRaw = stripPosAndCorporateNoise(rawMerchant)
+        val folded = CategoryRegistry.foldCategoryAccents("$rawMerchant $normalizedRaw $sanitizedCombined")
+        val foldedMerchant = CategoryRegistry.foldCategoryAccents(normalizedRaw.ifBlank { rawMerchant })
+
+        if (transactionType == TransactionType.INCOME) {
+            val cleanedIncomeSource = toSmartTitleCase(normalizedRaw.ifBlank { rawMerchant })
+            if (foldedMerchant.isBlank() ||
+                foldedMerchant == "pix recebido" ||
+                foldedMerchant == "compra detectada" ||
+                foldedMerchant == "recebimento" ||
+                foldedMerchant == "recebimento de pix"
+            ) {
+                return "Pix recebido"
+            }
+            if (cleanedIncomeSource.startsWith("Pix ", ignoreCase = true)) {
+                return AgentSecuritySanitizer.sanitizeText(cleanedIncomeSource, maxLength = 100)
+            }
+            return AgentSecuritySanitizer.sanitizeText("Pix recebido de $cleanedIncomeSource", maxLength = 100)
+        }
+
+        // Mapeamento inteligente de marcas com nomes técnicos/maquininha comuns
+        val brandRule = when {
+            foldedMerchant.contains("ifood") -> "Pedido no iFood"
+            foldedMerchant.contains("99food") -> "Pedido no 99Food"
+            foldedMerchant.contains("uber eats") -> "Pedido no Uber Eats"
+            Regex("""\buber\b""").containsMatchIn(foldedMerchant) -> "Corrida Uber"
+            Regex("""\b(99app|99pop|99\s*taxi)\b""").containsMatchIn(foldedMerchant) -> "Corrida 99"
+            foldedMerchant.contains("rappi") -> "Pedido no Rappi"
+            foldedMerchant.contains("ze delivery") -> "Pedido Zé Delivery"
+            foldedMerchant.contains("mcdonald") -> "Lanche McDonald's"
+            foldedMerchant.contains("burger king") -> "Lanche Burger King"
+            foldedMerchant.contains("starbucks") -> "Café Starbucks"
+            foldedMerchant.contains("drogasil") -> "Farmácia Drogasil"
+            foldedMerchant.contains("droga raia") || foldedMerchant.contains("drogaraia") -> "Farmácia Droga Raia"
+            foldedMerchant.contains("pague menos") -> "Farmácia Pague Menos"
+            foldedMerchant.contains("panvel") -> "Farmácia Panvel"
+            foldedMerchant.contains("ultrafarma") -> "Farmácia Ultrafarma"
+            foldedMerchant.contains("netflix") -> "Assinatura Netflix"
+            foldedMerchant.contains("spotify") -> "Assinatura Spotify"
+            foldedMerchant.contains("disney") -> "Assinatura Disney+"
+            foldedMerchant.contains("amazon prime") || foldedMerchant.contains("prime video") -> "Assinatura Amazon Prime"
+            foldedMerchant.contains("amazon") -> "Compra na Amazon"
+            foldedMerchant.contains("mercado livre") || foldedMerchant.contains("mercadolivre") -> "Compra no Mercado Livre"
+            foldedMerchant.contains("shopee") -> "Compra na Shopee"
+            foldedMerchant.contains("shein") -> "Compra na Shein"
+            foldedMerchant.contains("magazine luiza") || foldedMerchant.contains("magalu") -> "Compra no Magazine Luiza"
+            foldedMerchant.contains("carrefour") -> "Supermercado Carrefour"
+            foldedMerchant.contains("assai") -> "Supermercado Assaí"
+            foldedMerchant.contains("atacadao") -> "Supermercado Atacadão"
+            foldedMerchant.contains("pao de acucar") -> "Supermercado Pão de Açúcar"
+            foldedMerchant.contains("shell") -> "Combustível Posto Shell"
+            foldedMerchant.contains("ipiranga") -> "Combustível Posto Ipiranga"
+            foldedMerchant.contains("petrobras") || Regex("""\bposto\s+br\b""").containsMatchIn(foldedMerchant) ->
+                "Combustível Posto BR"
+            folded.contains("infinitepay") && foldedMerchant.isBlank() -> "Compra via InfinitePay"
+            else -> null
+        }
+
+        if (brandRule != null) {
+            return AgentSecuritySanitizer.sanitizeText(brandRule, maxLength = 100)
+        }
+
+        val cleanedTitleCase = toSmartTitleCase(normalizedRaw.ifBlank { rawMerchant })
+            .ifBlank { "Compra detectada" }
+
+        if (paymentMethod == PaymentMethod.PIX && !cleanedTitleCase.startsWith("Pix ", ignoreCase = true)) {
+            return AgentSecuritySanitizer.sanitizeText("Pix para $cleanedTitleCase", maxLength = 100)
+        }
+
+        if (Regex("""\bposto\b""").containsMatchIn(foldedMerchant) &&
+            !cleanedTitleCase.startsWith("Combustível", ignoreCase = true)
+        ) {
+            return AgentSecuritySanitizer.sanitizeText("Combustível $cleanedTitleCase", maxLength = 100)
+        }
+
+        if ((category == "Saúde" && subcategory == "Farmácia & Remédios") &&
+            !foldedMerchant.contains("farmacia") &&
+            !foldedMerchant.contains("drogaria")
+        ) {
+            return AgentSecuritySanitizer.sanitizeText("Farmácia $cleanedTitleCase", maxLength = 100)
+        }
+
+        return AgentSecuritySanitizer.sanitizeText(cleanedTitleCase, maxLength = 100)
+    }
+
+    private fun stripPosAndCorporateNoise(raw: String): String {
+        return raw
+            .replace(Regex("""^(?:ifd|pag|pg|mp|mercadopago|ec|ebw|sumup|ston|ton|infinitepay|infinite|cloudwalk|cielo|rede|getnet|zet|iz|pay|uol|google)\s*[*•\-]\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\*+"""), " ")
+            .replace(Regex("""\.(?:com(?:\.br)?|net|org|store|shop)\b""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\b(?:filial|loja|unid(?:ade)?|lj)\s*(?:n?[°º]?\s*\d+)?\b""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\b(?:ltda|s/?a|eireli|mei?|epp|cia)\b\.?""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""#\d+"""), "")
+            .replace(Regex("""\s+\d{1,4}$"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+    }
+
+    private fun toSmartTitleCase(input: String): String {
+        val minorWords = setOf("de", "da", "do", "das", "dos", "e", "em", "no", "na", "nos", "nas", "para", "com")
+        val upperAcronyms = setOf("br", "pix", "bb", "gn", "rj", "sp", "mg", "rs", "pr")
+        return input.trim()
+            .split(Regex("""\s+"""))
+            .filter { it.isNotBlank() }
+            .mapIndexed { idx, word ->
+                val lower = word.lowercase(Locale.ROOT)
+                when {
+                    idx > 0 && lower in minorWords -> lower
+                    lower in upperAcronyms -> lower.uppercase(Locale.ROOT)
+                    lower.length <= 1 -> lower.uppercase(Locale.ROOT)
+                    else -> lower.replaceFirstChar { ch ->
+                        if (ch.isLowerCase()) ch.titlecase(Locale.forLanguageTag("pt-BR")) else ch.toString()
+                    }
+                }
+            }
+            .joinToString(" ")
+    }
+
+    private fun isValidIncomeSender(candidate: String): Boolean {
+        val trimmed = candidate.trim()
+        if (!isValidExtractedMerchant(trimmed)) return false
+        if (Regex("""^(?:r\$\s*)?[\d.,]+(?:[.,]\d{1,2})?$""", RegexOption.IGNORE_CASE).matches(trimmed)) {
+            return false
+        }
+        val folded = CategoryRegistry.foldCategoryAccents(trimmed)
+        if (Regex("""^(?:pix|transferencia|pagamento|valor|dinheiro|sua\s+conta|banco|reais|uma|um)$""").matches(folded)) {
+            return false
+        }
+        return true
+    }
+
     private fun isValidExtractedMerchant(candidate: String): Boolean {
         if (candidate.length < 2) return false
         val lower = CategoryRegistry.foldCategoryAccents(candidate)
         if (Regex("""^\d{1,2}/\d{1,2}(?:/\d{2,4})?$""").matches(lower)) return false
         if (Regex("""^\d+\s*x$""").matches(lower)) return false
-        if (Regex("""^(seu\s+cartao|sua\s+conta|processamento|analise|breve|reais|real|credito|debito)$""").matches(lower)) return false
-        if (lower.startsWith("seu cartao") || lower.startsWith("sua conta")) return false
+        if (Regex("""^(seu\s+cartao|sua\s+conta|processamento|analise|breve|reais|real|credito|debito|sucesso)$""").matches(lower)) return false
+        if (lower.startsWith("seu cartao") || lower.startsWith("sua conta") || lower.startsWith("com sucesso")) return false
         return true
     }
 
     private fun cleanMerchantName(raw: String): String {
         var cleaned = raw
             .replace(Regex("""\[neutralizado\]""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\s+(?:aprovad[ao]|realizada|efetuada|no\s+cr[eé]dito|no\s+d[eé]bito)$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+(?:aprovad[ao]|realizada|efetuada|com\s+sucesso|no\s+cr[eé]dito|no\s+d[eé]bito)$""", RegexOption.IGNORE_CASE), "")
             .replace(Regex("""^[-–—:\s]+|[-–—.,;:!?\s]+$"""), "")
             .replace(Regex("""\s+"""), " ")
             .trim()
@@ -497,18 +923,77 @@ object NotificationExpenseParser {
         return cleaned.ifBlank { "Compra detectada" }
     }
 
+    fun hasLearnedRuleMatch(
+        description: String,
+        sanitizedCombined: String,
+        learnedRules: List<UserLearnedRule>,
+        transactionType: TransactionType = TransactionType.EXPENSE
+    ): Boolean {
+        val searchSurface = CategoryRegistry.foldCategoryAccents("$description $sanitizedCombined")
+        val targetCategories = if (transactionType == TransactionType.INCOME) {
+            CategoryRegistry.INCOME_CATEGORIES
+        } else {
+            CategoryRegistry.EXPENSE_CATEGORIES
+        }
+        val candidateCategoryKeys = (targetCategories.map { it.name } +
+            CategoryRegistry.CATEGORY_CANONICAL_MAP.keys)
+            .distinct()
+            .sortedByDescending { it.length }
+
+        for (ruleObj in learnedRules.filter { it.active }) {
+            val foldedRule = CategoryRegistry.foldCategoryAccents(ruleObj.rule)
+            val explicitCategory = ruleObj.category.takeIf {
+                it.isNotBlank() && !it.equals("Geral", ignoreCase = true)
+            }
+            val matchedCatKey = explicitCategory?.let { CategoryRegistry.foldCategoryAccents(it) }
+                ?: candidateCategoryKeys.firstOrNull { catKey ->
+                    Regex("""\b${Regex.escape(CategoryRegistry.foldCategoryAccents(catKey))}\b""")
+                        .containsMatchIn(foldedRule)
+                }
+
+            if (!matchedCatKey.isNullOrBlank()) {
+                val (strictCat, _) = CategoryRegistry.resolveStrictCategory(
+                    rawCategory = matchedCatKey,
+                    type = transactionType,
+                    description = description
+                )
+                if (transactionType == TransactionType.INCOME &&
+                    CategoryRegistry.INCOME_CATEGORIES.none { it.name == strictCat }
+                ) {
+                    continue
+                }
+                val keywords = foldedRule
+                    .replace(CategoryRegistry.foldCategoryAccents(matchedCatKey), " ")
+                    .split(Regex("""[\s,;.=:\->]+"""))
+                    .map { it.trim() }
+                    .filter { kw -> kw.length >= 2 && kw !in RULE_STOPWORDS }
+
+                if (keywords.any { kw -> searchSurface.contains(kw) }) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     fun inferCategoryCascade(
         description: String,
         sanitizedCombined: String,
         amount: Double,
         learnedRules: List<UserLearnedRule>,
-        neuralClassifier: NeuralFinanceClassifier
+        neuralClassifier: NeuralFinanceClassifier,
+        transactionType: TransactionType = TransactionType.EXPENSE
     ): Pair<String, String?> {
         val searchSurface = CategoryRegistry.foldCategoryAccents("$description $sanitizedCombined")
 
         // 1º estágio da cascata: LearnedRulesManager (regras aprendidas ativas do usuário)
         val activeRules = learnedRules.filter { it.active }
-        val candidateCategoryKeys = (CategoryRegistry.EXPENSE_CATEGORIES.map { it.name } +
+        val targetCategories = if (transactionType == TransactionType.INCOME) {
+            CategoryRegistry.INCOME_CATEGORIES
+        } else {
+            CategoryRegistry.EXPENSE_CATEGORIES
+        }
+        val candidateCategoryKeys = (targetCategories.map { it.name } +
             CategoryRegistry.CATEGORY_CANONICAL_MAP.keys)
             .distinct()
             .sortedByDescending { it.length }
@@ -527,8 +1012,14 @@ object NotificationExpenseParser {
             if (!matchedCatKey.isNullOrBlank()) {
                 val (strictCat, strictSub) = CategoryRegistry.resolveStrictCategory(
                     rawCategory = matchedCatKey,
-                    type = TransactionType.EXPENSE
+                    type = transactionType,
+                    description = description
                 )
+                if (transactionType == TransactionType.INCOME &&
+                    CategoryRegistry.INCOME_CATEGORIES.none { it.name == strictCat }
+                ) {
+                    continue
+                }
 
                 val keywords = foldedRule
                     .replace(CategoryRegistry.foldCategoryAccents(matchedCatKey), " ")
@@ -548,6 +1039,24 @@ object NotificationExpenseParser {
         val guess = neuralClassifier.guessCategoryAndSubcategory("$description $sanitizedCombined", amount)
 
         // 3º estágio: Garantia estrita contra taxonomia oficial de Category.kt
+        if (transactionType == TransactionType.INCOME) {
+            val isOfficialIncome = CategoryRegistry.INCOME_CATEGORIES.any {
+                it.name.equals(guess.category, ignoreCase = true)
+            }
+            val rawIncomeCat = if (isOfficialIncome) guess.category else "Outras Receitas"
+            val rawIncomeSub = if (rawIncomeCat == "Outras Receitas" && guess.subcategory.isNullOrBlank()) {
+                "Pix Recebido"
+            } else {
+                guess.subcategory
+            }
+            return CategoryRegistry.resolveStrictCategory(
+                rawCategory = rawIncomeCat,
+                rawSubcategory = rawIncomeSub,
+                type = TransactionType.INCOME,
+                description = description
+            )
+        }
+
         return CategoryRegistry.resolveStrictCategory(
             rawCategory = guess.category,
             rawSubcategory = guess.subcategory,

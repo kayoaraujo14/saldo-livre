@@ -478,12 +478,12 @@ class MockFinanceRepository(
         val firstNum = firstTx.installmentNumber ?: 1
         val effectivePaymentMethod = input.paymentMethod ?: firstTx.paymentMethod
         val isCardChange = input.cardId != null && input.cardId != firstTx.cardId
-        val targetCardId = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD) {
+        val targetCardId = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD || effectivePaymentMethod == PaymentMethod.VA_VR) {
             input.cardId ?: firstTx.cardId
         } else null
 
         val card = targetCardId?.let { cid -> cards.find { it.id == cid } }
-        val payerUid = if (effectivePaymentMethod == PaymentMethod.CREDIT_CARD && card != null) card.ownerUid else user.uid
+        val payerUid = if ((effectivePaymentMethod == PaymentMethod.CREDIT_CARD || effectivePaymentMethod == PaymentMethod.VA_VR) && card != null) card.ownerUid else user.uid
 
         val firstPurchaseDate = input.date ?: firstTx.dueDate.takeIf { it.isNotBlank() } ?: FinanceEngine.todayKey()
         val shouldRecalcCycle = effectivePaymentMethod == PaymentMethod.CREDIT_CARD && card != null && (isCardChange || input.date != null)
@@ -922,7 +922,8 @@ class MockFinanceRepository(
             all = _transactions.value,
             monthKey = monthKey,
             me = user,
-            partner = partner
+            partner = partner,
+            cards = _cards.value
         )
         if (res.created.isNotEmpty()) {
             addTransactions(res.created)

@@ -87,6 +87,7 @@ data class DashboardUiState(
     val allUsers: List<UserProfile> = emptyList(),
     val selectedMonth: String = FinanceEngine.currentMonthKey(),
     val summary: MonthSummary = MonthSummary(),
+    val cards: List<com.saldolivre.app.data.model.Card> = emptyList(),
     val recentTransactions: List<Transaction> = emptyList(),
     val allTransactions: List<Transaction> = emptyList(),
     val recurringBills: List<RecurringBill> = emptyList(),
@@ -204,7 +205,7 @@ class DashboardViewModel(
 
                 val upcomingNonCardTxs = allTxs.filter { tx ->
                     tx.type == TransactionType.EXPENSE &&
-                    !CategoryRegistry.isVaVrTransaction(tx) &&
+                    !CategoryRegistry.isVaVrTransaction(tx, cards) &&
                     !tx.isRefund &&
                     tx.status != TransactionStatus.PAID &&
                     (tx.cardId.isNullOrBlank() || tx.reserveCardId != null) &&
@@ -332,7 +333,8 @@ class DashboardViewModel(
                     expectedIncome = expectedMonthIncome,
                     carryoverAmount = summary.carryoverAmount,
                     previousMonthDeficit = summary.previousMonthDeficit,
-                    recurringBills = bills
+                    recurringBills = bills,
+                    cards = cards
                 )
                 val budgetRebalance = FinanceEngine.suggestBudgetRebalance(categoryBudgetReport)
                 val suggestedBudgets = FinanceEngine.suggestCategoryBudgets(
@@ -341,7 +343,8 @@ class DashboardViewModel(
                     referenceMonth = month,
                     monthlyIncome = expectedMonthIncome,
                     carryoverAmount = summary.carryoverAmount,
-                    previousMonthDeficit = summary.previousMonthDeficit
+                    previousMonthDeficit = summary.previousMonthDeficit,
+                    cards = cards
                 )
 
                 val reserveBalance = FinanceEngine.resolveEmergencyReserveBalance(user, summary)
@@ -356,6 +359,7 @@ class DashboardViewModel(
                     allUsers = repository.allUsers,
                     selectedMonth = month,
                     summary = summary,
+                    cards = cards,
                     recentTransactions = recent,
                     allTransactions = allTxs.filter { it.visibleToUids.contains(user.uid) },
                     recurringBills = bills,
@@ -393,10 +397,13 @@ class DashboardViewModel(
             val user = _uiState.value.currentUser
             val month = _uiState.value.selectedMonth
             val cards = repository.getCards().firstOrNull() ?: emptyList()
-            val isCardBill = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank()
+            val card = candidate.cardId?.let { cid -> cards.find { it.id == cid } }
+            val isVale = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.VA_VR || card?.isVaVrCard == true
+            val isCardBill = !isVale && (candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank())
             val txStatus = when {
                 isCardBill -> com.saldolivre.app.data.model.TransactionStatus.PENDING
                 asPaid -> com.saldolivre.app.data.model.TransactionStatus.PAID
+                isVale -> com.saldolivre.app.data.model.TransactionStatus.PAID
                 else -> com.saldolivre.app.data.model.TransactionStatus.ESTIMATED
             }
             val split = FinanceEngine.buildSplit(
@@ -408,11 +415,15 @@ class DashboardViewModel(
                 partnerName = null,
                 payerUid = user.uid
             )
-            val card = candidate.cardId?.let { cid -> cards.find { it.id == cid } }
-            val cardUids = if (isCardBill && card != null) {
+            val cardUids = if ((isCardBill || isVale) && card != null) {
                 (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
             } else emptyList()
             val effectiveVisible = (split.visibleToUids + cardUids).distinct()
+            val effectiveMethod = when {
+                isVale -> com.saldolivre.app.data.model.PaymentMethod.VA_VR
+                isCardBill -> com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD
+                else -> candidate.paymentMethod
+            }
 
             val tx = Transaction(
                 id = "tx_gen_${java.util.UUID.randomUUID().toString().take(8)}",
@@ -423,10 +434,10 @@ class DashboardViewModel(
                 category = candidate.category,
                 subcategory = candidate.subcategory,
                 type = candidate.type,
-                paymentMethod = if (isCardBill) com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD else candidate.paymentMethod,
+                paymentMethod = effectiveMethod,
                 status = txStatus,
                 estimatedAmount = candidate.amount,
-                actualAmount = if (isCardBill || asPaid) candidate.amount else null,
+                actualAmount = if (isCardBill || asPaid || isVale) candidate.amount else null,
                 totalAmount = candidate.amount,
                 dueDate = candidate.dueDate,
                 competenceMonth = month,
@@ -454,10 +465,13 @@ class DashboardViewModel(
             val cards = repository.getCards().firstOrNull() ?: emptyList()
             val candidates = _uiState.value.pendingRecurringLaunches.filter { it.matchedManualTx == null }
             val txs = candidates.map { candidate ->
-                val isCardBill = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank()
+                val card = candidate.cardId?.let { cid -> cards.find { it.id == cid } }
+                val isVale = candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.VA_VR || card?.isVaVrCard == true
+                val isCardBill = !isVale && (candidate.paymentMethod == com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD || !candidate.cardId.isNullOrBlank())
                 val txStatus = when {
                     isCardBill -> com.saldolivre.app.data.model.TransactionStatus.PENDING
                     asPaid -> com.saldolivre.app.data.model.TransactionStatus.PAID
+                    isVale -> com.saldolivre.app.data.model.TransactionStatus.PAID
                     else -> com.saldolivre.app.data.model.TransactionStatus.ESTIMATED
                 }
                 val split = FinanceEngine.buildSplit(
@@ -469,11 +483,15 @@ class DashboardViewModel(
                     partnerName = null,
                     payerUid = user.uid
                 )
-                val card = candidate.cardId?.let { cid -> cards.find { it.id == cid } }
-                val cardUids = if (isCardBill && card != null) {
+                val cardUids = if ((isCardBill || isVale) && card != null) {
                     (listOfNotNull(card.ownerUid.takeIf { it.isNotBlank() }) + card.sharedWithUids).distinct()
                 } else emptyList()
                 val effectiveVisible = (split.visibleToUids + cardUids).distinct()
+                val effectiveMethod = when {
+                    isVale -> com.saldolivre.app.data.model.PaymentMethod.VA_VR
+                    isCardBill -> com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD
+                    else -> candidate.paymentMethod
+                }
 
                 Transaction(
                     id = "tx_gen_${java.util.UUID.randomUUID().toString().take(8)}",
@@ -484,10 +502,10 @@ class DashboardViewModel(
                     category = candidate.category,
                     subcategory = candidate.subcategory,
                     type = candidate.type,
-                    paymentMethod = if (isCardBill) com.saldolivre.app.data.model.PaymentMethod.CREDIT_CARD else candidate.paymentMethod,
+                    paymentMethod = effectiveMethod,
                     status = txStatus,
                     estimatedAmount = candidate.amount,
-                    actualAmount = if (isCardBill || asPaid) candidate.amount else null,
+                    actualAmount = if (isCardBill || asPaid || isVale) candidate.amount else null,
                     totalAmount = candidate.amount,
                     dueDate = candidate.dueDate,
                     competenceMonth = month,

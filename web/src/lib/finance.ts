@@ -11,6 +11,7 @@ import type {
   MonthClosure,
   MonthSummary,
   NewTransaction,
+  PaymentMethod,
   ReceivableItem,
   RecurringBill,
   SplitType,
@@ -33,11 +34,11 @@ import type {
   SmartBudgetPlan,
   SmartBudgetAllocation,
 } from '@/types'
-import { INCOME_CATEGORIES, isVaVrCategory, isVaVrTransaction, normalizeCategory } from '@/types'
+import { INCOME_CATEGORIES, isVaVrCard, isVaVrCategory, isVaVrRecurringBill, isVaVrTransaction, normalizeCategory } from '@/types'
 import { currentMonthKey, dateInMonth, daysInMonth, formatBRL, monthLabel, normalize, round2, shiftDateMonth, shiftMonth, stripInstallmentSuffix, todayKey } from './utils'
 import { buildCardInvoice } from './invoices'
 
-export { isVaVrCategory, isVaVrTransaction }
+export { isVaVrCard, isVaVrCategory, isVaVrRecurringBill, isVaVrTransaction }
 
 export interface Party {
   uid: string
@@ -1102,8 +1103,13 @@ export function isTxVisibleToUser(tx: Transaction, uid: string): boolean {
   return false
 }
 
-export function vaVrAmountForUser(tx: Transaction, uid: string, all: Transaction[]): number {
-  if (!tx || !uid || !isVaVrTransaction(tx)) return 0
+export function vaVrAmountForUser(
+  tx: Transaction,
+  uid: string,
+  all: Transaction[],
+  cards: Card[] = [],
+): number {
+  if (!tx || !uid || !isVaVrTransaction(tx, cards)) return 0
   if (tx.reserveCardId) return 0
   if (tx.type === 'income') {
     return round2(Math.max(0, Math.abs(impactFor(tx, uid, all))))
@@ -1114,9 +1120,14 @@ export function vaVrAmountForUser(tx: Transaction, uid: string, all: Transaction
   return 0
 }
 
-export function computeVaVrCarryover(all: Transaction[], uid: string, targetMonthKey: string): number {
+export function computeVaVrCarryover(
+  all: Transaction[],
+  uid: string,
+  targetMonthKey: string,
+  cards: Card[] = [],
+): number {
   const pastVaVrTxs = (all || []).filter(
-    (t) => Boolean(t.competenceMonth) && t.competenceMonth < targetMonthKey && isTxVisibleToUser(t, uid) && isVaVrTransaction(t),
+    (t) => Boolean(t.competenceMonth) && t.competenceMonth < targetMonthKey && isTxVisibleToUser(t, uid) && isVaVrTransaction(t, cards),
   )
   if (pastVaVrTxs.length === 0) return 0
   const months = Array.from(new Set(pastVaVrTxs.map((t) => t.competenceMonth))).sort()
@@ -1126,7 +1137,7 @@ export function computeVaVrCarryover(all: Transaction[], uid: string, targetMont
     let mExp = 0
     for (const tx of pastVaVrTxs) {
       if (tx.competenceMonth !== m) continue
-      const amt = vaVrAmountForUser(tx, uid, all)
+      const amt = vaVrAmountForUser(tx, uid, all, cards)
       if (amt <= 0) continue
       if (tx.type === 'income') mInc += amt
       else mExp += amt
@@ -1136,12 +1147,17 @@ export function computeVaVrCarryover(all: Transaction[], uid: string, targetMont
   return running
 }
 
-export function computeMonthRawBalance(all: Transaction[], uid: string, monthKey: string): number {
+export function computeMonthRawBalance(
+  all: Transaction[],
+  uid: string,
+  monthKey: string,
+  cards: Card[] = [],
+): number {
   const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && isTxVisibleToUser(t, uid))
   let inc = 0
   let exp = 0
   for (const tx of monthTxs) {
-    if (isVaVrTransaction(tx)) continue
+    if (isVaVrTransaction(tx, cards)) continue
     const impact = impactFor(tx, uid, all)
     if (tx.type === 'income') {
       inc += Math.abs(impact)
@@ -1189,7 +1205,7 @@ export function computeSummary(
 
   // 1. Não-cartões (Pix, Boleto, Salário, etc.) — transações VA/VR são 100% isoladas do fluxo principal
   for (const tx of nonCardTxs) {
-    if (isVaVrTransaction(tx)) continue
+    if (isVaVrTransaction(tx, cards)) continue
     const impact = impactFor(tx, uid, all)
     if (tx.type === 'income') {
       income += Math.abs(impact)
@@ -1228,7 +1244,7 @@ export function computeSummary(
 
   // 3. Categorias, Investimentos, Módulo VA/VR e A Receber / A Pagar (processa todas as transações do mês)
   for (const tx of monthTxs) {
-    if (isVaVrTransaction(tx)) {
+    if (isVaVrTransaction(tx, cards)) {
       const vaAmt = vaVrAmountForUser(tx, uid, all)
       if (tx.type === 'income') {
         if (vaAmt > 0) {
@@ -1238,7 +1254,7 @@ export function computeSummary(
       } else if (vaAmt > 0) {
         if (tx.status === 'paid') vaVrSpentPaid += vaAmt
         else vaVrSpentPending += vaAmt
-        const subName = tx.subcategory || 'Outros VA/VR'
+        const subName = tx.subcategory || tx.category || 'Outros VA/VR'
         const cur = vaVrSubcat.get(subName)
         if (cur) {
           cur.amount += vaAmt
@@ -1322,7 +1338,7 @@ export function computeSummary(
 
   // Contas/recargas fixas de VA/VR ainda não lançadas compõem a projeção do mês de VA/VR
   const activeVaVrBills = (recurringBills || []).filter(
-    (b) => b.active && b.ownerUid === uid && isVaVrCategory(b.category, b.subcategory),
+    (b) => b.active && b.ownerUid === uid && isVaVrRecurringBill(b, cards),
   )
   for (const bill of activeVaVrBills) {
     if (bill.startMonth && monthKey < bill.startMonth) continue
@@ -1394,7 +1410,7 @@ export function computeSummary(
 
         while (currentIter <= endMonth) {
           const closure = (closures || []).find((c) => c.closedMonth === currentIter && c.uid === uid)
-          const raw = computeMonthRawBalance(all, uid, currentIter)
+          const raw = computeMonthRawBalance(all, uid, currentIter, cards)
           const finalBalance = runningBalance + raw
 
           if (closure) {
@@ -1556,7 +1572,7 @@ export function computeAccountCashFlow(
     ? (summary.carryoverAmount ?? 0)
     : round2((summary.pendingClosureSurplus ?? 0) - (summary.previousMonthDeficit ?? 0))
 
-  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && isTxVisibleToUser(t, uid) && !isVaVrTransaction(t))
+  const monthTxs = (all || []).filter((t) => t.competenceMonth === monthKey && isTxVisibleToUser(t, uid) && !isVaVrTransaction(t, cards))
 
   // Apenas transações da conta bancária / extrato (exclui compras feitas em cartão de crédito e módulo VA/VR)
   const accountTxs = monthTxs.filter((t) => !t.cardId && t.paymentMethod !== 'credit_card')
@@ -2113,7 +2129,7 @@ export function projectFutureMonths(args: {
           const closure = closures.find(
             (c) => (c.closedMonth === currentIter || c.targetMonth === shiftMonth(currentIter, 1)) && c.uid === uid,
           )
-          const raw = computeMonthRawBalance(all, uid, currentIter)
+          const raw = computeMonthRawBalance(all, uid, currentIter, cards)
           if (closure) {
             runningBalance = closure.carryoverToNextMonth
           } else {
@@ -2131,7 +2147,7 @@ export function projectFutureMonths(args: {
 
     // Check existing transactions for that month visible to uid (exclui transações VA/VR, isoladas do fluxo principal)
     const monthTxs = (all || []).filter(
-      (t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid) && !t.reserveCardId && !isVaVrTransaction(t),
+      (t) => t.competenceMonth === monthKey && (t.visibleToUids || []).includes(uid) && !t.reserveCardId && !isVaVrTransaction(t, cards),
     )
 
     let projectedIncome = 0
@@ -2267,7 +2283,7 @@ export function projectFutureMonths(args: {
     }
 
     let ungeneratedCount = 0
-    const activeBills = (bills || []).filter((b) => b.active && b.ownerUid === uid && !isVaVrCategory(b.category, b.subcategory))
+    const activeBills = (bills || []).filter((b) => b.active && b.ownerUid === uid && !isVaVrRecurringBill(b, cards))
 
     for (const bill of activeBills) {
       if (monthTxs.some((t) => t.recurringBillId === bill.id)) continue
@@ -2480,9 +2496,9 @@ const INCOME_SUBCATEGORY_HINTS: [Category, string, RegExp][] = [
   ['Salário & Remuneração', '13º Salário', /13o|13º|decimo terceiro|décimo terceiro/i],
   ['Salário & Remuneração', 'Férias', /ferias|férias/i],
   ['Salário & Remuneração', 'Bônus & PLR', /plr|bonus|bônus|participacao nos lucros|participação nos lucros/i],
-  ['VA/VR', 'Vale Alimentação (VA)', /vale[\s-]?alimentacao|vale[\s-]?alimentação|\bva\b|alelo alimentacao|sodexo alimentacao|ticket alimentacao/i],
-  ['VA/VR', 'Vale Refeição (VR)', /vale[\s-]?refeicao|vale[\s-]?refeição|\bvr\b|alelo refeicao|sodexo refeicao|ticket refeicao/i],
-  ['VA/VR', 'Recarga VA/VR', /va\/vr|ifood\s*beneficios|alelo|flash(\s*beneficios)?|caju|pluxee|sodexo/i],
+  ['Benefícios', 'Vale Alimentação (VA)', /vale[\s-]?alimentacao|vale[\s-]?alimentação|\bva\b|alelo alimentacao|sodexo alimentacao|ticket alimentacao/i],
+  ['Benefícios', 'Vale Refeição (VR)', /vale[\s-]?refeicao|vale[\s-]?refeição|\bvr\b|alelo refeicao|sodexo refeicao|ticket refeicao/i],
+  ['Benefícios', 'Vale Alimentação (VA)', /va\/vr|ifood\s*beneficios|alelo|flash(\s*beneficios)?|caju|pluxee|sodexo|swile/i],
   ['Benefícios', 'Auxílio Mobilidade / Combustível', /mobilidade|auxilio combustivel|auxílio combustível|vale transporte/i],
   ['Freelance & Serviços', 'Projetos Freelance', /freela|freelance|projeto|prestacao de servico|prestação de serviço|servico prestado/i],
   ['Freelance & Serviços', 'Faturamento MEI / PJ', /faturamento mei|nota fiscal emitida|nf-e emitida|cliente pj|honorarios|honorários/i],
@@ -2624,12 +2640,27 @@ const CATEGORY_HINTS: [Category, RegExp][] = [
 ]
 
 const VA_VR_KEYWORD_RE =
-  /\b(va|vr|va\/vr|vale[\s-]?alimenta[cç][aã]o|vale[\s-]?refei[cç][aã]o|ifood\s*benef[ií]cios|alelo|flash(?:\s*benef[ií]cios)?|caju(?:\s*benef[ií]cios)?|ticket(?:\s*(?:alimenta[cç][aã]o|refei[cç][aã]o|restaurante|benef[ií]cios))?|pluxee|sodexo)\b/i
+  /\b(va|vr|va\/vr|vale[\s-]?alimenta[cç][aã]o|vale[\s-]?refei[cç][aã]o|ifood\s*benef[ií]cios|alelo|flash(?:\s*benef[ií]cios)?|caju(?:\s*benef[ií]cios)?|ticket(?:\s*(?:alimenta[cç][aã]o|refei[cç][aã]o|restaurante|benef[ií]cios))?|pluxee|sodexo|swile)\b/i
 
 const VA_VR_TICKET_NON_BENEFIT_RE = /\b(cinema|ingresso|show|teatro|evento|passagem|voo|estacionamento|multa)\b/i
 
 const VA_VR_INCOME_HINT_RE =
   /\b(recarga|credito|deposito|caiu|entrou|recebi|saldo\s*inicial|ajuste|beneficio)\b/i
+
+function isVaVrKeywordText(n: string): boolean {
+  return (
+    VA_VR_KEYWORD_RE.test(n) &&
+    !(/\bticket\b/.test(n) && !/ticket\s*(?:alimenta|refei|restaurante|benef)/.test(n) && VA_VR_TICKET_NON_BENEFIT_RE.test(n)) &&
+    !(/\bflash\b/.test(n) && /\b(drive|usb|light|led|camera)\b/.test(n))
+  )
+}
+
+export function suggestPaymentMethod(text: string): PaymentMethod | null {
+  const n = normalize(text)
+  if (!n) return null
+  if (isVaVrKeywordText(n)) return 'va_vr'
+  return null
+}
 
 function inferVaVrExpenseSubcategory(cleanNormalizedText: string): string {
   if (/supermercado|mercado|assai|carrefour|pao de acucar|extra|atacadao|dia%/.test(cleanNormalizedText)) {
@@ -2642,7 +2673,7 @@ function inferVaVrExpenseSubcategory(cleanNormalizedText: string): string {
     return 'Delivery & Lanches'
   }
   if (/padaria|panificadora|cafe|starbucks|confeitaria|doceria|doce|pao de queijo/.test(cleanNormalizedText)) {
-    return 'Padaria'
+    return 'Padaria & Café'
   }
   if (/feira|hortifruti|sacolao|verduras|frutas|legumes/.test(cleanNormalizedText)) {
     return 'Feira & Hortifruti'
@@ -2650,7 +2681,7 @@ function inferVaVrExpenseSubcategory(cleanNormalizedText: string): string {
   if (/acougue|peixaria|carnes|swift/.test(cleanNormalizedText)) {
     return 'Açougue & Peixaria'
   }
-  return 'Outros VA/VR'
+  return ''
 }
 
 export function guessCategoryAndSubcategory(text: string, amount?: number, type?: 'income' | 'expense'): CategoryGuess {
@@ -2658,36 +2689,40 @@ export function guessCategoryAndSubcategory(text: string, amount?: number, type?
     return { category: 'Estorno', subcategory: 'Crédito na Fatura' }
   }
   const n = normalize(text)
-
-  const hasVaVrKeyword =
-    VA_VR_KEYWORD_RE.test(n) &&
-    !(/\bticket\b/.test(n) && !/ticket\s*(?:alimenta|refei|restaurante)/.test(n) && VA_VR_TICKET_NON_BENEFIT_RE.test(n)) &&
-    !(/\bflash\b/.test(n) && /\b(drive|usb|light|led|camera)\b/.test(n))
+  const hasVaVrKeyword = isVaVrKeywordText(n)
 
   if (hasVaVrKeyword) {
-    const cleanForFood = n.replace(/ifood\s*beneficios/g, ' ').replace(/\bflash\b/g, ' ')
+    const cleanForFood = n
+      .replace(/ifood\s*beneficios/g, ' ')
+      .replace(/\bflash\b/g, ' ')
+      .replace(/\b(va|vr|va\/vr|alelo|caju|pluxee|sodexo|swile)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+
     const isRecharge =
       type === 'income' ||
-      (type !== 'expense' &&
-        (VA_VR_INCOME_HINT_RE.test(n) || inferVaVrExpenseSubcategory(cleanForFood) === 'Outros VA/VR') &&
-        type === undefined &&
-        VA_VR_INCOME_HINT_RE.test(n))
+      (type !== 'expense' && type === undefined && VA_VR_INCOME_HINT_RE.test(n))
 
     if (isRecharge) {
-      if (/saldo\s*inicial|ajuste/.test(n)) return { category: 'VA/VR', subcategory: 'Saldo Inicial / Ajuste' }
-      if (/vale[\s-]?alimenta|\bva\b/.test(n) && !/\bvr\b|vale[\s-]?refei/.test(n)) {
-        return { category: 'VA/VR', subcategory: 'Vale Alimentação (VA)' }
-      }
       if (/vale[\s-]?refei|\bvr\b/.test(n) && !/\bva\b|vale[\s-]?alimenta/.test(n)) {
-        return { category: 'VA/VR', subcategory: 'Vale Refeição (VR)' }
+        return { category: 'Benefícios', subcategory: 'Vale Refeição (VR)' }
       }
-      return { category: 'VA/VR', subcategory: 'Recarga VA/VR' }
+      if (/saldo\s*inicial|ajuste/.test(n)) {
+        return { category: 'Benefícios', subcategory: 'Outros Benefícios' }
+      }
+      return { category: 'Benefícios', subcategory: 'Vale Alimentação (VA)' }
     }
 
-    return {
-      category: 'VA/VR',
-      subcategory: inferVaVrExpenseSubcategory(cleanForFood),
+    // Despesa paga no cartão Vale: tenta classificar pela categoria real (Transporte, Saúde, Compras, etc.)
+    for (const [cat, sub, re] of SUBCATEGORY_HINTS) {
+      if (re.test(cleanForFood)) return { category: cat, subcategory: sub }
     }
+    for (const [cat, re] of CATEGORY_HINTS) {
+      if (re.test(cleanForFood)) return { category: cat }
+    }
+    const foodSub = inferVaVrExpenseSubcategory(cleanForFood)
+    if (foodSub) return { category: 'Alimentação', subcategory: foodSub }
+    return { category: 'Alimentação' }
   }
 
   // Se o contexto for expressamente receita, priorizar hints de receita
@@ -3073,6 +3108,7 @@ export function computeCategoryBudgets(
   carryoverAmount: number = 0,
   previousMonthDeficit: number = 0,
   recurringBills?: RecurringBill[],
+  cards: Card[] = [],
 ): CategoryBudgetReport {
   const rawBudgetsInput = categoryBudgets || {}
   const resolveKey = (rawCat: string): string => {
@@ -3105,7 +3141,7 @@ export function computeCategoryBudgets(
 
   if (txList.length > 0 && uid) {
     for (const tx of txList) {
-      if (isVaVrTransaction(tx)) continue
+      if (isVaVrTransaction(tx, cards)) continue
       const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
       if (m === monthKey && (tx.visibleToUids || []).includes(uid)) {
         if (tx.type === 'expense') {
@@ -3134,7 +3170,7 @@ export function computeCategoryBudgets(
   // Contas fixas e recorrentes ativas a vencer no mês que ainda não geraram lançamento
   if (uid && Array.isArray(recurringBills) && recurringBills.length > 0) {
     const activeBills = recurringBills.filter(
-      (b) => b.active && b.ownerUid === uid && b.type !== 'income' && !isVaVrCategory(b.category, b.subcategory),
+      (b) => b.active && b.ownerUid === uid && b.type !== 'income' && !isVaVrRecurringBill(b, cards),
     )
     for (const bill of activeBills) {
       if (bill.startMonth && monthKey < bill.startMonth) continue
@@ -3611,6 +3647,7 @@ export function suggestCategoryBudgets(
   monthlyIncome: number = 0,
   carryoverAmount: number = 0,
   previousMonthDeficit: number = 0,
+  cards: Card[] = [],
 ): {
   suggestedBudgets: Record<string, number>
   totalSuggested: number
@@ -3637,7 +3674,7 @@ export function suggestCategoryBudgets(
   const curMonthExpenseMap = new Map<string, number>()
 
   for (const tx of all) {
-    if (isVaVrTransaction(tx)) continue
+    if (isVaVrTransaction(tx, cards)) continue
     const m = tx.competenceMonth || (tx.dueDate || '').slice(0, 7)
     const impact = impactFor(tx, uid, all)
 

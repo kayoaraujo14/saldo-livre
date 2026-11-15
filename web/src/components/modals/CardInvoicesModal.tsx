@@ -21,7 +21,7 @@ import {
   type CardInvoice,
 } from '@/lib/invoices'
 import { formatBRL, formatNubankDateHeader, formatShortDate, monthLabel, shiftMonth, shortMonthLabel, todayKey } from '@/lib/utils'
-import { CATEGORY_GROUPS, type Category, type Transaction } from '@/types'
+import { CATEGORY_GROUPS, isVaVrCard, type Category, type Transaction } from '@/types'
 import {
   Calendar,
   CalendarClock,
@@ -169,6 +169,7 @@ export function CardInvoicesModal({
 }: CardInvoicesModalProps) {
   const { cards, transactions, me, month, payCardInvoice, isLoading } = useFinance()
   const uid = me?.uid ?? ''
+  const creditCards = useMemo(() => cards.filter((c) => !isVaVrCard(c)), [cards])
 
   const [viewMonth, setViewMonth] = useState(initialMonth || month)
   const [selectedCardId, setSelectedCardId] = useState<string | null>(initialCardId || null)
@@ -194,8 +195,8 @@ export function CardInvoicesModal({
     hasInitializedOpenRef.current = true
 
     let targetMonth = initialMonth || month
-      const cardId = initialCardId || selectedCardId || cards[0]?.id
-      const currentCard = cards.find((c) => c.id === cardId) || cards[0]
+      const cardId = initialCardId || selectedCardId || creditCards[0]?.id
+      const currentCard = creditCards.find((c) => c.id === cardId) || creditCards[0]
 
       // Roteamento inteligente: se a competência atual estiver quitada, avança para a próxima aberta
       if (currentCard && !initialMonth) {
@@ -218,11 +219,11 @@ export function CardInvoicesModal({
       setSearchQuery('')
       setSelectedParticipantName(null)
       setSelectedCategory(null)
-  }, [open, month, initialCardId, initialMonth, selectedCardId, cards, transactions, uid])
+  }, [open, month, initialCardId, initialMonth, selectedCardId, creditCards, transactions, uid])
 
   const invoices = useMemo(
-    () => cards.map((c) => buildCardInvoice(c, viewMonth, transactions, uid)),
-    [cards, viewMonth, transactions, uid],
+    () => creditCards.map((c) => buildCardInvoice(c, viewMonth, transactions, uid)),
+    [creditCards, viewMonth, transactions, uid],
   )
 
   const effectiveCardId = useMemo(() => {
@@ -412,11 +413,15 @@ export function CardInvoicesModal({
 
         {isLoading ? (
           <CardInvoicesSkeleton />
-        ) : cards.length === 0 ? (
+        ) : creditCards.length === 0 ? (
           <EmptyState
             icon={CreditCard}
-            title="Nenhum cartão cadastrado"
-            description="Cadastre seus cartões de crédito para acompanhar faturas abertas, datas de fechamento e limites disponíveis com inteligência."
+            title={cards.length > 0 ? 'Nenhum cartão de crédito cadastrado' : 'Nenhum cartão cadastrado'}
+            description={
+              cards.length > 0
+                ? 'Seus cartões do tipo Vale Pré-Pago (VA/VR) não geram faturas pós-pagas e são acompanhados diretamente no card Vale (VA/VR) do Dashboard.'
+                : 'Cadastre seus cartões de crédito para acompanhar faturas abertas, datas de fechamento e limites disponíveis com inteligência.'
+            }
           />
         ) : (
           <div className="space-y-4">
