@@ -778,7 +778,16 @@ export function buildSystemInstruction(ctx: {
   today: string
   monthLabel: string
   monthKey: string
-  cards: Array<{ id: string; name: string; owner: string; closingDay: number; dueDay: number }>
+  cards: Array<{
+    id: string
+    name: string
+    owner: string
+    closingDay: number
+    dueDay: number
+    cardType?: string
+    isVaVr?: boolean
+    isMine?: boolean
+  }>
   friends: Array<{ uid: string; name: string; email: string }>
   learnedRules?: string[]
   pendingTransactions?: PendingBatchTransaction[]
@@ -822,7 +831,13 @@ export function buildSystemInstruction(ctx: {
   }>
 }) {
   const cardsDesc = ctx.cards
-    .map((c) => `${c.name} (titular: ${c.owner}, fecha dia ${c.closingDay}, vence dia ${c.dueDay})`)
+    .map((c) => {
+      const tipoLabel = c.isVaVr
+        ? 'Cartão Vale VA/VR Pré-Pago'
+        : `Cartão de Crédito Pós-Pago (fecha dia ${c.closingDay}, vence dia ${c.dueDay})`
+      const ownerLabel = c.isMine === false ? `TERCEIRO/PARCEIRO (${c.owner})` : `Você (${c.owner})`
+      return `${c.name} [tipo: ${tipoLabel}, titular: ${ownerLabel}]`
+    })
     .join('; ') || 'nenhum'
 
   const friendsDesc = ctx.friends
@@ -940,16 +955,16 @@ REGRA DE OURO INVIOLÁVEL: TOLERÂNCIA ZERO A PRESUNÇÕES — TRABALHE APENAS C
 ======================================================================
 O Copiloto Saldo Livre opera sob o princípio da CERTEZA ABSOLUTA. Você NUNCA presume, supõe, deduz ou preenche silenciosamente parâmetros cruciais para um lançamento financeiro. Se qualquer dado essencial estiver nulo, ausente ou for ambíguo, você NÃO CHAMA A FERRAMENTA DE LANÇAMENTO. Você responde diretamente com uma pergunta clara, objetiva e acolhedora ao usuário para esclarecer a dúvida.
 
-1. FORMA DE PAGAMENTO NÃO ESPECIFICADA:
-   - Se o usuário disser que fez um gasto ou comprou algo (ex: "gastei 50 no almoço", "comprei remédio de 30 reais", "anota 100 de mercado"), mas NÃO especificou se pagou no Pix, Débito, Cartão de Crédito, Boleto ou Dinheiro:
-   - 🛑 NUNCA presuma cartão de crédito, débito ou pix silenciosamente!
-   - ❓ PERGUNTE: "Qual foi a forma de pagamento desse gasto de R$ [valor]? (Pix, Débito, Cartão de Crédito ou Boleto?)"
+1. FORMA DE PAGAMENTO NÃO ESPECIFICADA (TEXTO OU IMAGEM/PRINT):
+   - Se o usuário disser que fez um gasto ou enviar uma IMAGEM/PRINT/LISTA de compras (ex: "gastei 50 no almoço", "anota 100 de mercado", ou print com vários itens sem explicitar se foi Crédito, Débito, Pix ou Vale VA/VR):
+   - 🛑 NUNCA presuma cartão de crédito (especialmente de TERCEIRO/PARCEIRO), Vale Alimentação/Refeição (VA/VR), débito ou pix silenciosamente! Só use "va_vr" se o usuário mencionar explicitamente vale/VA/VR/alimentação/refeição ou o nome do cartão Vale, e só use "credit_card" se o usuário mencionar crédito/fatura/parcelado ou o comprovante identificar claramente cartão de crédito.
+   - ❓ PERGUNTE antes de chamar qualquer ferramenta de lançamento: "Qual foi a forma de pagamento desse(s) gasto(s)? (Débito, Pix, Cartão de Crédito, Vale VA/VR ou Dinheiro?)"
 
-2. QUAL CARTÃO DE CRÉDITO (QUANDO HOUVER MÚLTIPLOS CARTÕES):
-   - Se a compra foi feita no cartão de crédito (ou o usuário disser "no cartão"), e o usuário possuir MAIS DE UM cartão de crédito cadastrado (consulte "Cartões cadastrados" acima):
-   - 🛑 NUNCA escolha o primeiro cartão da lista nem presuma o cartão padrão!
-   - ❓ PERGUNTE listando nominalmente os cartões dele: "Em qual dos seus cartões de crédito você passou essa compra de R$ [valor]? ([Nome do Cartão A], [Nome do Cartão B]...)"
-   - (Exceção única: se o usuário tiver apenas 1 único cartão cadastrado na conta, é inequívoco e você pode vinculá-lo, confirmando o nome do cartão na resposta).
+2. QUAL CARTÃO DE CRÉDITO (MÚLTIPLOS CARTÕES OU CARTÃO DE TERCEIRO):
+   - Se a compra foi no cartão de crédito e houver MAIS DE UM cartão de crédito cadastrado, OU se o cartão disponível pertencer a TERCEIRO/PARCEIRO (consulte "Cartões cadastrados" acima — nunca escolha um Cartão Vale VA/VR nem um cartão de TERCEIRO por presunção):
+   - 🛑 NUNCA escolha automaticamente o cartão de terceiro nem o primeiro cartão da lista!
+   - ❓ PERGUNTE listando nominalmente os cartões elegíveis: "Em qual cartão de crédito você passou essa compra de R$ [valor]? ([Nome do Cartão A], [Nome do Cartão B]...)"
+   - (Exceção única: se o usuário tiver apenas 1 cartão de crédito PRÓPRIO ("titular: Você", não VA/VR) e já tiver dito explicitamente que foi no crédito).
 
 3. DIVISÃO / RATEIO DE DESPESA INCOMPLETO OU AMBÍGUO:
    - Se o usuário disser que um gasto foi "dividido", "rachado", "meio a meio", "comprei com fulano", "não foi só meu", mas NÃO definiu com clareza quem é o participante (se parceiro, amigo da plataforma ou terceiro) e/ou qual a porcentagem/valor de cada um:
@@ -1102,10 +1117,14 @@ REGRAS DE FUNCIONAMENTO:
   * Chame a ferramenta "estornarCompraParcelada" informando termoBusca e mesDestino (cancela obrigações futuras e reembolsa o total já pago).
 
 5. REGISTRO EM LOTE:
-- Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE a ferramenta "registrarTransacoesLote". Isso processa todas as despesas em uma única chamada rápida!
+- Quando o usuário enviar uma lista, print ou extrato com vários gastos de uma vez, use SEMPRE a ferramenta "registrarTransacoesLote". Isso processa todas as despesas em uma única chamada rápida!
+- REGRA CRÍTICA DE PAGAMENTO E COMPETÊNCIA NO LOTE:
+  * Se nem a mensagem nem a imagem/comprovante deixarem claro qual foi a forma de pagamento (Débito, Pix, Cartão de Crédito, Vale VA/VR ou Dinheiro), NÃO chame "registrarTransacoesLote": PERGUNTE antes ao usuário!
+  * Para compras no DÉBITO, PIX ou DINHEIRO: defina origemDocumento: "extrato_conta", metodoPagamentoPadrao: "debit" (ou "pix"), NÃO preencha cartaoPadrao nem cartao nos itens, NUNCA envie va_vr nem cartão de crédito de terceiro, e defina mesFatura / mesFaturaPadrao igual ao mês real da data de cada transação (ex: data "2026-11-17" -> mesFatura: "2026-11", NUNCA jogue débito/pix para outro mês apenas por causa do mês selecionado na tela!).
+  * Só use "va_vr" se o usuário pedir explicitamente vale / VA / VR / vale-alimentação / vale-refeição ou informar o nome do cartão VA/VR. Se pedir DÉBITO ("no débito"), use ESTRITAMENTE "debit"!
 - Para compras em cartão de crédito no lote:
-  * Passe sempre cartaoPadrao: "NomeDoCartao" no objeto raiz (ou cartao: "NomeDoCartao" em cada item).
-  * Defina metodoPagamentoPadrao: "credit_card" (ou metodoPagamento: "credit_card" em cada item). Isso garante que entrem na Fatura do Cartão e NÃO soltas no extrato da conta!
+  * Passe sempre cartaoPadrao: "NomeDoCartao" no objeto raiz (ou cartao: "NomeDoCartao" em cada item) apenas após ter certeza do cartão.
+  * Defina origemDocumento: "fatura_cartao" e metodoPagamentoPadrao: "credit_card" (ou metodoPagamento: "credit_card" em cada item). Isso garante que entrem na Fatura do Cartão e NÃO soltas no extrato da conta!
 - Para despesas divididas/rateadas no lote (registrarTransacoesLote):
   * Preencha diretamente no item da lista os dados da divisão:
     - Se for dividida com amigo/terceiro (ex: "50% para Kayo Araujo"): defina nomeAmigo: "Kayo Araujo", porcentagemAmigo: 50.0 (porcentagem da cota do amigo, ex: 50.0 para 50%) e tipoDivisao: "AMIGO".
@@ -1113,7 +1132,10 @@ REGRAS DE FUNCIONAMENTO:
     - Se for pessoa externa: tipoDivisao: "TERCEIRO" e nomeTerceiro: "Nome".
   * Limpe a descricao de cada item para remover textos de rateio (ex: use "99food - Club" em vez de "99food - club; 50% para Kayo Araujo").
 
-6. EDIÇÃO E EXCLUSÃO CIRÚRGICA DE TRANSAÇÕES (NUNCA EXCLUA EM LOTE SEM PEDIDO EXPLÍCITO):
+6. EDIÇÃO E EXCLUSÃO CIRÚRGICA DE TRANSAÇÕES (NUNCA EXCLUA OU DUPLIQUE EM LOTE):
+- Para corrigir a forma de pagamento, cartão ou mês/competência de lançamentos JÁ CONFIRMADOS anteriormente (ex: "você lançou errado no vale, muda pro débito", "lançou no cartão errado, troca para débito/pix", "estão aparecendo em dezembro mas são de novembro"):
+  * Use EXCLUSIVAMENTE a ferramenta "editarTransacoes" (NUNCA chame "registrarTransacoesLote" de novo para corrigir itens já confirmados, pois isso duplica lançamentos!).
+  * Passe os ids conhecidos OU termoBusca + valorFiltro + mesOrigem (mês da data real YYYY-MM) + novoMetodoPagamento (ex: "debit" / "pix") + novoMesFatura (se também precisar corrigir o mês de competência)!
 - Para alterar categoria ou subcategoria de uma despesa (avulsa ou parcelada):
   Chame "editarTransacoes" passando termoBusca, novaCategoria e novaSubcategoria (NUNCA passe novoMesFatura nem novaDataVencimento a menos que o usuário peça expressamente para mudar o vencimento!).
 - Para excluir um lançamento específico que o usuário pediu (ex: "exclua o almoço de R$ 30", "apague o Supermercado", "delete a compra X"):
@@ -1229,21 +1251,22 @@ F) APRESENTAÇÃO DESCRITIVA SUPERIOR ("MOSTRAR DESCRITIVAMENTE MELHOR"):
      - Extraia rigorosamente cada linha com: data, descricao/contraparte, valorTotal, tipo ("income" ou "expense"), metodoPagamento e categoria.
      - IGNORE movimentações internas de reserva (Aplicações RDB, Resgates RDB, Guardar Dinheiro) e pagamentos de fatura de cartão já existentes, marcando-as como categoria_filtro: "ignorada" para que não distorçam os totais de receitas nem despesas.
 
-  2. IDENTIFIQUE COM PRECISÃO O TIPO DE DOCUMENTO:
-     A) SE FOR EXTRATO DE CONTA BANCÁRIA (CONTA CORRENTE / POUPANÇA / NUCONTA / INTER CONTA / ITAÚ EXTRATO / BRADESCO):
-        - Defina obrigatoriamente: origemDocumento = "extrato_conta" e metodoPagamentoPadrao = "pix" ou "debit"!
-        - TODAS as ENTRADAS / CRÉDITOS / VALORES POSITIVOS (identificados com +, C, Crédito, Pix Recebido, Salário, Depósito, TED Recebida, Transferência Recebida, Rendimento):
+  2. IDENTIFIQUE COM PRECISÃO O TIPO DE DOCUMENTO (OU PERGUNTE SE AMBÍGUO):
+     - Se o documento ou imagem (print) NÃO identificar com clareza se é conta corrente (Débito/Pix), fatura de cartão de crédito ou cartão Vale VA/VR e o usuário não informou na mensagem: PARE e pergunte a forma de pagamento antes de chamar "registrarTransacoesLote"!
+     A) SE FOR EXTRATO DE CONTA BANCÁRIA (CONTA CORRENTE / POUPANÇA / NUCONTA / INTER CONTA / ITAÚ EXTRATO / BRADESCO) OU COMPRAS NO DÉBITO / PIX:
+        - Defina obrigatoriamente: origemDocumento = "extrato_conta" e metodoPagamentoPadrao = "pix" ou "debit"! NUNCA preencha cartaoPadrao nem cartao nos itens, e NUNCA use va_vr quando o usuário pediu débito!
+        - TODAS as ENTRADAS / CRÉDITOS / VALORES POSITIVOS (identificados com +, C, Crédito, Pix Recebido, Salário, Depósito, TED Recebida, Transferência Recebida, Rendimento, Reembolso):
           * tipo: "income"
           * categoria: "Receita"
           * metodoPagamento: "pix" (ou "debit")
           * status: "paid"
-          * NUNCA marque como despesa de cartão de crédito! Entradas AUMENTAM o Saldo Livre!
+          * NUNCA marque como despesa de cartão de crédito nem VA/VR! Entradas AUMENTAM o Saldo Livre!
         - TODAS as SAÍDAS / DÉBITOS / GASTOS DE CONTA (identificados com -, D, Débito, Pix Enviado, Transferência Enviada, Compra Débito, Pagamento de Boleto):
           * tipo: "expense"
           * metodoPagamento: "pix" (para Pix), "debit" (para débito) ou "bill" (para boletos)
           * status: "paid"
-          * NUNCA marque como cartão de crédito (credit_card) a menos que a linha do extrato diga expressamente "Compra Cartão de Crédito"!
-        - mesFaturaPadrao: mês em que as transações ocorreram (ex: "2026-10").
+          * NUNCA marque como cartão de crédito (credit_card) nem VA/VR a menos que o usuário ou extrato diga expressamente!
+        - mesFaturaPadrao / mesFatura: mês real da data de cada transação (ex: data "2026-11-17" -> mesFatura: "2026-11"), NUNCA movendo para outro mês por conta do mês visualizado!
         - dataVencimentoPadrao: a data de cada movimentação.
 
      B) SE FOR FATURA DE CARTÃO DE CRÉDITO (FATURA NUBANK, FATURA ITAÚ CARTÕES, C6, SANTANDER, BRADESCO, ETC.):
@@ -1397,17 +1420,40 @@ Respostas da IA:
  * 2. Os turnos devem alternar rigorosamente entre 'user' e 'model'.
  * 3. A mensagem atual do usuário é incluída como o turno final de 'user'.
  */
+function resolveAttachmentMimeType(att: ChatAttachment): string {
+  const isAudio =
+    att.type?.startsWith('audio/') ||
+    /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(att.name || '')
+  if (att.type && att.type !== 'application/pdf') return att.type
+  if (isAudio) return att.name.endsWith('.mp4') ? 'audio/mp4' : 'audio/webm'
+  if (/\.(png)$/i.test(att.name || '')) return 'image/png'
+  if (/\.(jpe?g)$/i.test(att.name || '')) return 'image/jpeg'
+  if (/\.(webp)$/i.test(att.name || '')) return 'image/webp'
+  return 'application/pdf'
+}
+
 export function buildChatContents(
   history: ChatMessage[],
   newUserText: string,
   newAttachment?: ChatAttachment,
 ): Content[] {
   const filtered = history.filter(
-    (m) => m.id !== 'msg_welcome' && !m.pending && !m.error && m.content && m.content.trim(),
+    (m) => m.id !== 'msg_welcome' && !m.pending && !m.error && ((m.content && m.content.trim()) || Boolean(m.attachment)),
+  )
+
+  const recentHistory = filtered.slice(-20)
+  const preserveAttachmentIndices = new Set(
+    recentHistory
+      .map((m, idx) =>
+        m.role === 'user' && m.attachment?.base64 && !m.attachment?.extractedText ? idx : -1,
+      )
+      .filter((idx) => idx >= 0)
+      .slice(-2),
   )
 
   const turns: Content[] = []
-  for (const m of filtered.slice(-20)) {
+  for (let idx = 0; idx < recentHistory.length; idx++) {
+    const m = recentHistory[idx]
     const role: 'user' | 'model' = m.role === 'user' ? 'user' : 'model'
     if (turns.length === 0 && role !== 'user') continue
 
@@ -1421,9 +1467,11 @@ export function buildChatContents(
             )
             .join('\n')
         : ''
-    const pendingTxs =
-      m.pending_transactions ||
-      m.actions?.flatMap((a) => a.pending_transactions || (a.pendingAction?.args?.pending_transactions as any) || []).filter(Boolean)
+    const hasPendingAction = Boolean(m.actions?.some((a) => a.pendingAction?.status === 'pending'))
+    const pendingTxs = hasPendingAction
+      ? m.pending_transactions ||
+        m.actions?.flatMap((a) => a.pending_transactions || (a.pendingAction?.args?.pending_transactions as any) || []).filter(Boolean)
+      : undefined
     const pendingTxsDetail =
       pendingTxs && pendingTxs.length > 0
         ? '\n[Transações exatas extraídas salvas no estado (' +
@@ -1431,8 +1479,8 @@ export function buildChatContents(
           ' itens):\n' +
           pendingTxs
             .map(
-              (t: any, idx: number) =>
-                `• ${idx + 1}. Data: ${t.data} | Tipo: ${t.tipo} | Valor: R$ ${Number(t.valor_exato || t.valorTotal || 0).toFixed(2)} | Contraparte: ${t.contraparte || t.descricao} | Filtro: ${t.categoria_filtro || 'valida'}`,
+              (t: any, tIdx: number) =>
+                `• ${tIdx + 1}. Data: ${t.data} | Tipo: ${t.tipo} | Valor: R$ ${Number(t.valor_exato || t.valorTotal || 0).toFixed(2)} | Contraparte: ${t.contraparte || t.descricao} | Filtro: ${t.categoria_filtro || 'valida'}`,
             )
             .join('\n') +
           '\n]'
@@ -1440,19 +1488,33 @@ export function buildChatContents(
     const isAudio =
       m.attachment?.type?.startsWith('audio/') ||
       /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(m.attachment?.name || '')
+    const isImage =
+      m.attachment?.type?.startsWith('image/') ||
+      /\.(png|jpe?g|webp|gif|heic)$/i.test(m.attachment?.name || '')
     const attachmentNote = m.attachment
       ? isAudio
         ? `\n[Mensagem de áudio anexada: ${m.attachment.name}]`
-        : `\n[Arquivo PDF anexado: ${m.attachment.name}]`
+        : isImage
+          ? `\n[Imagem/Comprovante anexado: ${m.attachment.name}]`
+          : `\n[Arquivo PDF anexado: ${m.attachment.name}]`
       : ''
-    const text = m.content + attachmentNote + actionDetails + pendingTxsDetail
+    const text = (m.content || '') + attachmentNote + actionDetails + pendingTxsDetail
+    const msgParts: Part[] = [{ text }]
+    if (preserveAttachmentIndices.has(idx) && m.attachment?.base64) {
+      msgParts.push({
+        inlineData: {
+          mimeType: resolveAttachmentMimeType(m.attachment),
+          data: m.attachment.base64,
+        },
+      })
+    }
 
     const lastTurn = turns[turns.length - 1]
     if (lastTurn && lastTurn.role === role) {
       if (!lastTurn.parts) lastTurn.parts = []
-      lastTurn.parts.push({ text })
+      lastTurn.parts.push(...msgParts)
     } else {
-      turns.push({ role, parts: [{ text }] })
+      turns.push({ role, parts: msgParts })
     }
   }
 
@@ -1464,20 +1526,9 @@ export function buildChatContents(
 
   const userParts: Part[] = [{ text: promptText }]
   if (newAttachment?.base64) {
-    const isAudio =
-      newAttachment.type?.startsWith('audio/') ||
-      /\.(webm|mp4|m4a|wav|ogg|aac)$/i.test(newAttachment.name || '')
-    let detectedMime = newAttachment.type
-    if (!detectedMime || detectedMime === 'application/pdf') {
-      if (isAudio) {
-        detectedMime = newAttachment.name.endsWith('.mp4') ? 'audio/mp4' : 'audio/webm'
-      } else {
-        detectedMime = 'application/pdf'
-      }
-    }
     userParts.push({
       inlineData: {
-        mimeType: detectedMime,
+        mimeType: resolveAttachmentMimeType(newAttachment),
         data: newAttachment.base64,
       },
     })

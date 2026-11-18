@@ -74,6 +74,7 @@ fun AppNavHost(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val chatViewModel: GeminiChatViewModel = viewModel { GeminiChatViewModel(repository) }
 
     LaunchedEffect(pendingExpenseDraft?.id) {
         if (pendingExpenseDraft != null) {
@@ -289,7 +290,6 @@ fun AppNavHost(
                         scaleOut(targetScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing))
                 }
             ) {
-                val chatViewModel: GeminiChatViewModel = viewModel { GeminiChatViewModel(repository) }
                 GeminiChatScreen(
                     viewModel = chatViewModel,
                     onNavigateBack = { navController.popBackStack() }

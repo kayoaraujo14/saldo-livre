@@ -31,8 +31,11 @@ import com.saldolivre.app.data.parser.StatementParser
 import com.saldolivre.app.data.repository.FinanceRepository
 import com.saldolivre.app.ui.util.NetworkMonitor
 import com.saldolivre.app.ui.theme.Emerald500
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -394,13 +397,18 @@ class GeminiChatViewModel(
                         title = if (clean.length > 32) clean.take(30) + "..." else clean
                     }
                     val latestPendingTxs = newMessages.lastOrNull { msg ->
-                        msg.allActionCards().any { !it.pendingTransactions.isNullOrEmpty() }
-                    }?.allActionCards()?.flatMap { it.pendingTransactions.orEmpty() }.orEmpty()
+                        msg.allActionCards().any {
+                            it.pendingAction?.status == PendingActionStatus.PENDING && !it.pendingTransactions.isNullOrEmpty()
+                        }
+                    }?.allActionCards()
+                        ?.filter { it.pendingAction?.status == PendingActionStatus.PENDING }
+                        ?.flatMap { it.pendingTransactions.orEmpty() }
+                        .orEmpty()
                     val updatedSession = s.copy(
                         title = title,
                         updatedAt = System.currentTimeMillis(),
                         messages = newMessages,
-                        pendingTransactions = if (latestPendingTxs.isNotEmpty()) latestPendingTxs else s.pendingTransactions,
+                        pendingTransactions = latestPendingTxs,
                         activeExpenseDraft = state.activeExpenseDraft
                     )
                     sessionManager.saveSession(userUid, updatedSession)
@@ -1844,15 +1852,18 @@ class GeminiChatViewModel(
         }
 
         viewModelScope.launch {
-            val responseResult = executeGemini(promptText, attachment, historyForAgent)
-            val assistantMsg = ChatMessage(
-                sender = MessageSender.ASSISTANT,
-                text = responseResult.text,
-                actions = responseResult.actions, actionCard = responseResult.actions?.firstOrNull(),
-                chartPayload = responseResult.chartPayload
-            )
-            updateActiveSessionMessages(_uiState.value.messages + assistantMsg)
-            _uiState.update { it.copy(isTyping = false) }
+            try {
+                val responseResult = executeGemini(promptText, attachment, historyForAgent)
+                val assistantMsg = ChatMessage(
+                    sender = MessageSender.ASSISTANT,
+                    text = responseResult.text,
+                    actions = responseResult.actions, actionCard = responseResult.actions?.firstOrNull(),
+                    chartPayload = responseResult.chartPayload
+                )
+                updateActiveSessionMessages(_uiState.value.messages + assistantMsg)
+            } finally {
+                _uiState.update { it.copy(isTyping = false) }
+            }
         }
     }
 
@@ -1933,6 +1944,9 @@ class GeminiChatViewModel(
                 throw IllegalStateException("Resposta vazia retornada pelo modelo Gemini.")
             }
         } catch (e: Exception) {
+            if (e is CancellationException && !currentCoroutineContext().isActive) {
+                throw e
+            }
             android.util.Log.e("GeminiChat", "executeGemini falhou após todas as tentativas: ${e.message}", e)
             _uiState.update { it.copy(connectionStatus = "Erro nos Servidores do Gemini") }
             val errorMsg = e.message ?: "Instabilidade nos servidores do Google"
@@ -1956,7 +1970,9 @@ class GeminiChatViewModel(
         val cardsMap = cards.associateBy { it.id }
         val cardsDesc = if (cards.isEmpty()) "nenhum"
         else cards.joinToString("; ") {
-            "${it.cardName} (titular: ${it.ownerName}, fecha dia ${it.closingDay}, vence dia ${it.dueDay}, id: ${it.id})"
+            val tipoLabel = if (it.isVaVrCard) "Cartão Vale VA/VR Pré-Pago" else "Cartão de Crédito Pós-Pago"
+            val ownerLabel = if (it.ownerUid == user.uid) "titular: Você (${it.ownerName.ifBlank { user.displayName }})" else "titular: TERCEIRO/PARCEIRO (${it.ownerName})"
+            "${it.cardName} [$tipoLabel, $ownerLabel, fecha dia ${it.closingDay}, vence dia ${it.dueDay}, id: ${it.id}]"
         }
 
         val friendsDesc = if (friendships.isEmpty()) "nenhum"
@@ -1971,16 +1987,21 @@ class GeminiChatViewModel(
             "${it.description} [MOLDE / PREVISÃO TEÓRICA: R$ ${FinanceEngine.round2(it.defaultAmount)}, vence dia ${it.dueDay}, categoria: ${it.category}]"
         }
 
+        val nowMs = System.currentTimeMillis()
+        val recentOtherMonthTxs = transactions.filter {
+            it.competenceMonth != selectedMonth && (nowMs - it.createdAt) <= 30 * 60 * 1000L
+        }.sortedByDescending { it.createdAt }.take(15)
         val currentMonthTxs = transactions.filter { it.competenceMonth == selectedMonth }
-        val recentTxsDesc = if (currentMonthTxs.isEmpty()) {
+        val displayTxs = (recentOtherMonthTxs + currentMonthTxs.sortedByDescending { it.dueDate }.take(40)).distinctBy { it.id }
+        val recentTxsDesc = if (displayTxs.isEmpty()) {
             "LANÇAMENTOS REAIS REGISTRADOS NO MÊS VIGENTE (${FinanceEngine.monthLabel(selectedMonth).uppercase()} / $selectedMonth): Nenhum lançamento real registrado neste mês até o momento."
         } else {
-            val sorted = currentMonthTxs.sortedByDescending { it.dueDate }.take(40)
-            "LANÇAMENTOS REAIS REGISTRADOS NO MÊS VIGENTE (${FinanceEngine.monthLabel(selectedMonth).uppercase()} / $selectedMonth - ${sorted.size} de ${currentMonthTxs.size} itens):\n" +
-                    sorted.joinToString("\n") {
+            "LANÇAMENTOS REAIS REGISTRADOS NO MÊS VIGENTE (${FinanceEngine.monthLabel(selectedMonth).uppercase()} / $selectedMonth e recentes — ${displayTxs.size} itens):\n" +
+                    displayTxs.joinToString("\n") {
                         val subText = if (!it.subcategory.isNullOrBlank()) "${it.category} › ${it.subcategory}" else it.category
                         val cName = it.cardId?.let { cid -> cardsMap[cid]?.cardName }
-                        val methodOrCard = if (!cName.isNullOrBlank()) "Cartão $cName" else it.paymentMethod.label
+                        val methodOrCard = if (!cName.isNullOrBlank()) "${it.paymentMethod.label} (Cartão $cName)" else it.paymentMethod.label
+                        val compTag = if (it.competenceMonth != selectedMonth) " [competência: ${it.competenceMonth}]" else ""
                         val myImpact = it.userImpact[user.uid] ?: it.effectiveAmount
                         val isSplit = kotlin.math.abs(myImpact - it.effectiveAmount) > 0.01 || (it.splitType != null && it.splitType != SplitType.MINE)
                         val splitNote = if (isSplit) {
@@ -1989,7 +2010,7 @@ class GeminiChatViewModel(
                             val who = if (!friendName.isNullOrBlank()) "com $friendName" else it.splitType?.label ?: "dividido"
                             " [DIVISÃO: Sua cota: R$ ${FinanceEngine.round2(myImpact)} de R$ ${FinanceEngine.round2(it.effectiveAmount)} ($who)]"
                         } else ""
-                        "• [ID: ${it.id}] ${it.dueDate} — **${it.description}**: R$ ${FinanceEngine.round2(it.effectiveAmount)}$splitNote • $subText • ${it.status.label} • $methodOrCard"
+                        "• [ID: ${it.id}] ${it.dueDate}$compTag — **${it.description}**: R$ ${FinanceEngine.round2(it.effectiveAmount)}$splitNote • $subText • ${it.status.label} • $methodOrCard"
                     }
         }
 
@@ -2099,12 +2120,24 @@ ENVELOPES ORÇAMENTÁRIOS INTELIGENTES (TETOS POR CATEGORIA):
 
         // Lote pendente de confirmação (memória estruturada de estado — paridade com `pendingTxsDesc` da Web)
         val currentSession = _uiState.value.sessions.find { it.id == _uiState.value.currentSessionId }
-        val pendingTxs: List<Map<String, Any?>> = currentSession?.pendingTransactions?.takeIf { it.isNotEmpty() }
-            ?: _uiState.value.messages
-                .lastOrNull { msg -> msg.allActionCards().any { !it.pendingTransactions.isNullOrEmpty() } }
-                ?.allActionCards()
-                ?.flatMap { it.pendingTransactions.orEmpty() }
-                .orEmpty()
+        val pendingMsgTxs = _uiState.value.messages
+            .lastOrNull { msg ->
+                msg.allActionCards().any {
+                    it.pendingAction?.status == PendingActionStatus.PENDING && !it.pendingTransactions.isNullOrEmpty()
+                }
+            }
+            ?.allActionCards()
+            ?.filter { it.pendingAction?.status == PendingActionStatus.PENDING }
+            ?.flatMap { it.pendingTransactions.orEmpty() }
+            .orEmpty()
+        val hasPendingConfirmationCard = _uiState.value.messages.any { msg ->
+            msg.allActionCards().any { it.pendingAction?.status == PendingActionStatus.PENDING }
+        }
+        val pendingTxs: List<Map<String, Any?>> = if (hasPendingConfirmationCard) {
+            pendingMsgTxs.ifEmpty { currentSession?.pendingTransactions.orEmpty() }
+        } else {
+            emptyList()
+        }
 
         fun pendingStr(m: Map<String, Any?>, vararg keys: String): String =
             keys.firstNotNullOfOrNull { k -> m[k]?.toString()?.takeIf { it.isNotBlank() } }.orEmpty()
@@ -2211,10 +2244,10 @@ REGRA DE OURO INVIOLÁVEL: TOLERÂNCIA ZERO A PRESUNÇÕES — TRABALHE APENAS C
 ======================================================================
 O Copiloto Saldo Livre opera sob o princípio da CERTEZA ABSOLUTA. Você NUNCA presume, supõe, deduz ou preenche silenciosamente parâmetros cruciais para um lançamento financeiro. Se qualquer dado essencial estiver nulo, ausente ou for ambíguo, você NÃO CHAMA NENHUMA AÇÃO JSON DE LANÇAMENTO. Você responde diretamente com uma pergunta clara, objetiva e acolhedora ao usuário para esclarecer a dúvida.
 
-1. FORMA DE PAGAMENTO NÃO ESPECIFICADA:
-   - Se o usuário disser que fez um gasto ou comprou algo (ex: "gastei 50 no almoço", "comprei remédio de 30 reais", "anota 100 de mercado"), mas NÃO especificou se pagou no Pix, Débito, Cartão de Crédito, Boleto ou Dinheiro:
-   - 🛑 NUNCA presuma cartão de crédito, débito ou pix silenciosamente!
-   - ❓ PERGUNTE: "Qual foi a forma de pagamento desse gasto de R$ [valor]? (Pix, Débito, Cartão de Crédito ou Boleto?)"
+1. FORMA DE PAGAMENTO NÃO ESPECIFICADA (TEXTO OU IMAGEM/PRINT):
+   - Se o usuário disser que fez um gasto ou comprou algo (ex: "gastei 50 no almoço", "comprei remédio de 30 reais", "anota 100 de mercado"), OU enviar uma imagem/print de recibos/corridas/extrato (ex: 99, Uber, iFood) SEM informar a forma de pagamento e sem que a imagem deixe inequívoco se foi Pix, Débito, Cartão de Crédito ou Vale VA/VR:
+   - 🛑 NUNCA presuma cartão de crédito (especialmente de TERCEIRO!), cartão Vale (VA/VR), débito ou pix silenciosamente!
+   - ❓ PERGUNTE listando os itens identificados: "Identifiquei esses lançamentos, mas qual foi a forma de pagamento? (Pix, Débito, Cartão de Crédito ou Vale VA/VR?)"
 
 2. QUAL CARTÃO DE CRÉDITO (QUANDO HOUVER MÚLTIPLOS CARTÕES):
    - Se a compra foi feita no cartão de crédito (ou o usuário disser "no cartão"), e o usuário possuir MAIS DE UM cartão de crédito cadastrado (consulte "Cartões cadastrados" acima):
@@ -2405,14 +2438,19 @@ Atenção para datas:
 
 2. Cadastrar em Lote (Múltiplos Lançamentos / Imagem de Fatura ou Extrato):
 Quando o usuário enviar uma imagem, extrato, fatura ou lista de compras para lançar:
+- Se NÃO ficar claro qual foi a forma de pagamento (nem pelo texto do usuário nem pela imagem): PARE e PERGUNTE antes de emitir `BATCH_TRANSACTIONS`!
+- Se o usuário pediu DÉBITO / PIX / CONTA CORRENTE (ou for extrato bancário de conta corrente):
+  * Defina OBRIGATORIAMENTE `"origemDocumento": "extrato_conta"`
+  * Defina `"metodoPagamentoPadrao": "debit"` (ou `"pix"`) e `"paymentMethod": "debit"` (ou `"pix"`) em cada item
+  * NUNCA preencha `"cartaoPadrao"` nem use `"va_vr"` quando o usuário pediu débito/pix!
+  * Para `debit`, `pix` e `va_vr`, `"competenceMonth"` DEVE ser sempre o mês da própria `"date"` (`YYYY-MM`, ex.: `"2026-11-17"` -> `"2026-11"`), NUNCA deslocado por dia de fechamento de cartão!
 - Se for FATURA DE CARTÃO DE CRÉDITO (compras no cartão, fatura Nubank/Itaú/Inter, etc.):
   * Defina OBRIGATORIAMENTE `"origemDocumento": "fatura_cartao"`
   * Defina OBRIGATORIAMENTE `"metodoPagamentoPadrao": "credit_card"`
-  * Se o usuário citar o cartão ou se for identificado na imagem/contexto, informe `"cartaoPadrao": "NomeDoCartao"`
+  * Se o usuário citar o cartão ou se for identificado na imagem/contexto, informe `"cartaoPadrao": "NomeDoCartao"`. NUNCA presuma cartão de TERCEIRO sem confirmação explícita!
   * Em cada transação de despesa, coloque `"paymentMethod": "credit_card"`. Isso garante que as compras entrem diretamente na Fatura do Cartão e NÃO soltas no extrato da conta corrente!
-- Se for EXTRATO BANCÁRIO DE CONTA CORRENTE (Pix, transferências, boletos, salário):
-  * Defina `"origemDocumento": "extrato_conta"`
-  * Defina `"metodoPagamentoPadrao": "pix"` (ou "debit")
+- Se for CARTÃO VALE (VA/VR: Alelo, Flash, Caju, Pluxee, Ticket, Sodexo):
+  * Somente use `"va_vr"` quando o usuário pedir explicitamente Vale/VA/VR ou a imagem/extrato for claramente de um cartão de benefícios!
 
 Exemplo de Lote de Fatura de Cartão:
 ```json
@@ -2696,11 +2734,15 @@ REGRAS DE FUNCIONAMENTO:
 - ESTORNO INTEGRAL DE COMPRA PARCELADA ("estorne a compra completa", "devolvi o produto parcelado", "cancelei a compra em 10x"):
   * Chame a ferramenta "estornarCompraParcelada" ou emita a ação "REFUND_FULL_INSTALLMENTS" informando searchTerm e mesDestino (cancela obrigações futuras e reembolsa o total já pago).
 
-6. REGISTRO EM LOTE:
-- Quando o usuário enviar uma lista com vários gastos de uma vez, use SEMPRE BATCH_TRANSACTIONS (uma única ação com todos os itens).
+6. REGISTRO EM LOTE E CORREÇÃO PÓS-CONFIRMAÇÃO:
+- Quando o usuário enviar uma lista com vários gastos de uma vez (com forma de pagamento conhecida), use SEMPRE `BATCH_TRANSACTIONS` (uma única ação com todos os itens).
+- Se o lote JÁ FOI CONFIRMADO e salvo no banco (consta em `LANÇAMENTOS REAIS`) e o usuário pedir para corrigir forma de pagamento, categoria ou mês (ex: "você lançou tudo como vale", "mude para débito", "coloque em dezembro"):
+  * Use OBRIGATORIAMENTE `EDIT_TRANSACTION` com `targetIds` dos lançamentos já criados (NUNCA reemita `BATCH_TRANSACTIONS`, pois isso duplicaria os lançamentos!).
 - Para compras em cartão de crédito no lote:
   * Passe sempre "cartaoPadrao": "NomeDoCartao" no objeto raiz (ou "cartao": "NomeDoCartao" em cada item).
   * Defina "metodoPagamentoPadrao": "credit_card" (ou "paymentMethod": "credit_card" em cada item). Isso garante que entrem na Fatura do Cartão e NÃO soltas no extrato!
+- Para compras no débito/pix no lote:
+  * Defina `"origemDocumento": "extrato_conta"`, `"metodoPagamentoPadrao": "debit"` (ou `"pix"`) e NÃO envie `"cartaoPadrao"`.
 - Para despesas divididas/rateadas no lote (BATCH_TRANSACTIONS):
   * Preencha diretamente no item da lista os dados da divisão:
     - Se for dividida com amigo/terceiro (ex: "50% para Kayo Araujo"): defina "splitType": "FRIEND", "friendName": "Kayo Araujo", "friendSharePct": 50.0 (porcentagem da cota do amigo, ex: 50.0 para 50%).
@@ -2841,6 +2883,87 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
         val jsonContent: String
     )
 
+    private fun balanceTruncatedJson(raw: String): String? {
+        val trimmed = raw.trimEnd()
+        if (trimmed.isEmpty()) return null
+        val sb = StringBuilder(trimmed)
+        var inString = false
+        var escape = false
+        for (c in trimmed) {
+            if (escape) { escape = false; continue }
+            if (c == '\\') { escape = true; continue }
+            if (c == '"') { inString = !inString }
+        }
+        if (inString) sb.append('"')
+        while (sb.isNotEmpty() && (sb.last() == ',' || sb.last() == ':' || sb.last().isWhitespace())) {
+            sb.deleteCharAt(sb.length - 1)
+        }
+        val stack = ArrayDeque<Char>()
+        inString = false
+        escape = false
+        for (i in 0 until sb.length) {
+            val c = sb[i]
+            if (escape) { escape = false; continue }
+            if (c == '\\') { escape = true; continue }
+            if (c == '"') { inString = !inString; continue }
+            if (!inString) {
+                when (c) {
+                    '{', '[' -> stack.addLast(c)
+                    '}' -> if (stack.lastOrNull() == '{') stack.removeLast()
+                    ']' -> if (stack.lastOrNull() == '[') stack.removeLast()
+                }
+            }
+        }
+        while (stack.isNotEmpty()) {
+            sb.append(if (stack.removeLast() == '{') '}' else ']')
+        }
+        return sb.toString()
+    }
+
+    private fun extractBalancedOrTruncatedJsonObjects(text: String): List<Pair<String, JsonObject>> {
+        val results = mutableListOf<Pair<String, JsonObject>>()
+        val actionPattern = Regex("""\{\s*"(?:action|toolName)"\s*:""")
+        var cursor = 0
+        while (cursor < text.length) {
+            val match = actionPattern.find(text, cursor) ?: break
+            val startIndex = match.range.first
+            var depth = 0
+            var inString = false
+            var escape = false
+            var endIndex = -1
+            for (i in startIndex until text.length) {
+                val c = text[i]
+                if (escape) { escape = false; continue }
+                if (c == '\\') { escape = true; continue }
+                if (c == '"') { inString = !inString; continue }
+                if (!inString) {
+                    if (c == '{') depth++
+                    else if (c == '}') {
+                        depth--
+                        if (depth == 0) { endIndex = i + 1; break }
+                    }
+                }
+            }
+            if (endIndex != -1) {
+                val rawSlice = text.substring(startIndex, endIndex)
+                val parsed = runCatching { gson.fromJson(rawSlice, JsonObject::class.java) }.getOrNull()
+                if (parsed != null && (parsed.has("action") || parsed.has("toolName"))) {
+                    results.add(rawSlice to parsed)
+                }
+                cursor = endIndex
+            } else {
+                val rawSlice = text.substring(startIndex)
+                val repaired = balanceTruncatedJson(rawSlice)
+                val parsed = repaired?.let { runCatching { gson.fromJson(it, JsonObject::class.java) }.getOrNull() }
+                if (parsed != null && (parsed.has("action") || parsed.has("toolName"))) {
+                    results.add(rawSlice to parsed)
+                }
+                break
+            }
+        }
+        return results
+    }
+
     private fun parseJsonObjectsFromText(text: String): List<JsonObject> {
         val list = mutableListOf<JsonObject>()
         try {
@@ -2857,36 +2980,7 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
                 }
             }
         } catch (_: Exception) {
-            try {
-                val actionPattern = Regex("""\{\s*"(?:action|toolName)"\s*:""")
-                val startIndices = actionPattern.findAll(text).map { it.range.first }.toList()
-                for (startIndex in startIndices) {
-                    var depth = 0
-                    var inString = false
-                    var escape = false
-                    var endIndex = -1
-                    for (i in startIndex until text.length) {
-                        val c = text[i]
-                        if (escape) { escape = false; continue }
-                        if (c == '\\') { escape = true; continue }
-                        if (c == '"') { inString = !inString; continue }
-                        if (!inString) {
-                            if (c == '{') depth++
-                            else if (c == '}') {
-                                depth--
-                                if (depth == 0) { endIndex = i + 1; break }
-                            }
-                        }
-                    }
-                    if (endIndex != -1) {
-                        val candidate = text.substring(startIndex, endIndex)
-                        val parsed = runCatching { gson.fromJson(candidate, JsonObject::class.java) }.getOrNull()
-                        if (parsed != null && (parsed.has("action") || parsed.has("toolName"))) {
-                            list.add(parsed)
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
+            list.addAll(extractBalancedOrTruncatedJsonObjects(text).map { it.second })
         }
         return list
     }
@@ -2896,7 +2990,9 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
 
         // 1. Procura blocos cercados por ```json ... ``` ou ``` ... ```
         val fenceRegex = Regex("""```(?:json)?\s*([\s\S]*?)\s*```""", RegexOption.IGNORE_CASE)
+        var lastFenceEnd = 0
         for (match in fenceRegex.findAll(content)) {
+            lastFenceEnd = match.range.last + 1
             val rawBlock = match.groupValues[1].trim()
             if (!rawBlock.contains("\"action\"") && !rawBlock.contains("\"toolName\"")) {
                 continue
@@ -2913,14 +3009,27 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
             }
         }
 
-        // 2. Se não encontrou blocos com fences, procura blocos JSON crus contendo "action" ou "toolName"
-        if (results.isEmpty()) {
-            val parsed = parseJsonObjectsFromText(content)
-            for (obj in parsed) {
-                if (obj.has("action") || obj.has("toolName")) {
-                    val fullJson = obj.toString()
-                    results.add(ExtractedJsonBlock(fullJson, fullJson))
+        // 2. Procura bloco ```json truncado / sem fechamento no final da resposta
+        val tail = content.substring(lastFenceEnd)
+        val unclosedFenceRegex = Regex("""```(?:json)?\s*([\s\S]+)$""", RegexOption.IGNORE_CASE)
+        val unclosedMatch = unclosedFenceRegex.find(tail)
+        if (unclosedMatch != null) {
+            val rawBlock = unclosedMatch.groupValues[1].trim()
+            if (rawBlock.contains("\"action\"") || rawBlock.contains("\"toolName\"")) {
+                val parsed = parseJsonObjectsFromText(rawBlock)
+                for (obj in parsed) {
+                    if (obj.has("action") || obj.has("toolName")) {
+                        results.add(ExtractedJsonBlock(unclosedMatch.value, obj.toString()))
+                    }
                 }
+            }
+        }
+
+        // 3. Se não encontrou blocos com fences, procura blocos JSON crus contendo "action" ou "toolName"
+        if (results.isEmpty()) {
+            val rawPairs = extractBalancedOrTruncatedJsonObjects(content)
+            for ((rawSlice, obj) in rawPairs) {
+                results.add(ExtractedJsonBlock(rawSlice, obj.toString()))
             }
         }
 
@@ -2941,9 +3050,12 @@ F) APRESENTAÇÃO DESCRITIVA E TABELAS NATIVAS NO APP MOBILE:
         for (block in extractedBlocks) {
             cleanText = cleanText.replace(block.fullMatchedText, "")
         }
-        // Limpeza adicional defensiva de qualquer bloco de código json residual com action/toolName
+        // Limpeza adicional defensiva de qualquer bloco de código json residual (fechado ou truncado) com action/toolName
         cleanText = cleanText.replace(
             Regex("""```(?:json)?\s*\{[\s\S]*?"(?:action|toolName)"[\s\S]*?\}\s*```""", RegexOption.IGNORE_CASE),
+            ""
+        ).replace(
+            Regex("""```(?:json)?\s*\{[\s\S]*?"(?:action|toolName)"[\s\S]*$""", RegexOption.IGNORE_CASE),
             ""
         ).trim()
 

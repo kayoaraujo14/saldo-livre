@@ -180,14 +180,17 @@ class AndroidAgentToolsEngine(
         val valeCards = cards.filter { it.isVaVrCard }
         val creditCards = cards.filter { !it.isVaVrCard }
 
+        val isExplicitNonValeMethod = paymentMethod in setOf(PaymentMethod.DEBIT, PaymentMethod.PIX, PaymentMethod.BILL)
         val cardMatchesVale = !cardName.isNullOrBlank() && valeCards.any {
             it.cardName.contains(cardName, ignoreCase = true) || cardName.contains(it.cardName, ignoreCase = true)
         }
         val isVaVrKeywordOrMethod = paymentMethod == PaymentMethod.VA_VR ||
             cardMatchesVale ||
-            CategoryRegistry.isVaVrCategory(category, subcategory) ||
-            (cardName.isNullOrBlank() && paymentMethod != PaymentMethod.CREDIT_CARD &&
-                Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(description))
+            (!isExplicitNonValeMethod && (
+                CategoryRegistry.isVaVrCategory(category, subcategory) ||
+                (cardName.isNullOrBlank() && paymentMethod != PaymentMethod.CREDIT_CARD &&
+                    Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(description))
+            ))
 
         val requestedCreditCard = !isVaVrKeywordOrMethod && (paymentMethod == PaymentMethod.CREDIT_CARD || !cardName.isNullOrBlank())
         val rawMatchedCard = if (isVaVrKeywordOrMethod) {
@@ -207,6 +210,10 @@ class AndroidAgentToolsEngine(
         } else if (requestedCreditCard) {
             if (creditCards.size > 1) {
                 return ToolExecutionResult(text = "⚠️ Você possui múltiplos cartões cadastrados (${creditCards.joinToString { it.cardName }}). Em qual deles foi realizada a compra de R$ ${FinanceEngine.round2(absAmount)} em $description?")
+            }
+            if (creditCards.size == 1 && creditCards.first().ownerUid != user.uid) {
+                val thirdCard = creditCards.first()
+                return ToolExecutionResult(text = "⚠️ O único cartão de crédito cadastrado pertence a ${thirdCard.ownerName.ifBlank { "terceiro" }} (${thirdCard.cardName}). A compra de R$ ${FinanceEngine.round2(absAmount)} em $description foi realmente realizada no cartão ${thirdCard.cardName} ou em outra forma de pagamento (Pix, Débito ou Vale VA/VR)?")
             }
             creditCards.firstOrNull()
         } else null
@@ -230,7 +237,7 @@ class AndroidAgentToolsEngine(
         val isVaVrFinal = isVaVrKeywordOrMethod ||
             paymentMethod == PaymentMethod.VA_VR ||
             rawMatchedCard?.isVaVrCard == true ||
-            CategoryRegistry.isVaVrCategory(category, subcategory)
+            (!isExplicitNonValeMethod && CategoryRegistry.isVaVrCategory(category, subcategory))
         val matchedCard = rawMatchedCard
         val isCreditCard = !isVaVrFinal && (requestedCreditCard || (matchedCard != null && !matchedCard.isVaVrCard))
         val effectiveMethod = when {
@@ -666,9 +673,12 @@ class AndroidAgentToolsEngine(
             amount
         }
 
-        val hasVaVrSignal = CategoryRegistry.isVaVrCategory(category, subcategory) ||
-            PaymentMethod.from(rawPayMethod) == PaymentMethod.VA_VR ||
+        val explicitParsedMethod = PaymentMethod.fromOrNull(rawPayMethod)
+        val isExplicitNonValeMethod = explicitParsedMethod in setOf(PaymentMethod.DEBIT, PaymentMethod.PIX, PaymentMethod.BILL)
+        val hasVaVrSignal = explicitParsedMethod == PaymentMethod.VA_VR || (!isExplicitNonValeMethod && (
+            CategoryRegistry.isVaVrCategory(category, subcategory) ||
             Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc)
+        ))
         val isVaVrRechargeSignal = hasVaVrSignal && explicitTypeStr == null &&
             (subcategory in listOf("Recarga VA/VR", "Vale Alimentação (VA)", "Vale Refeição (VR)", "Saldo Inicial / Ajuste") ||
                 Regex("""\b(recarga|dep[oó]sito|cr[eé]dito|receb|caiu|entrou|saldo inicial|ajuste)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc))
@@ -687,9 +697,8 @@ class AndroidAgentToolsEngine(
         }
 
         val inferredPayMethod = when {
-            !rawPayMethod.isNullOrBlank() -> {
-                val parsed = PaymentMethod.from(rawPayMethod)
-                if (hasVaVrSignal && parsed == PaymentMethod.CREDIT_CARD) PaymentMethod.VA_VR else parsed
+            explicitParsedMethod != null -> {
+                if (hasVaVrSignal && explicitParsedMethod == PaymentMethod.CREDIT_CARD) PaymentMethod.VA_VR else explicitParsedMethod
             }
             hasVaVrSignal -> PaymentMethod.VA_VR
             Regex("""\bpix\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.PIX
@@ -752,41 +761,83 @@ class AndroidAgentToolsEngine(
 
         val user = repository.currentUser.value
         val defaultMonth = jsonObj.getStringOrNull("mesFaturaPadrao")
+            ?: jsonObj.getStringOrNull("competenceMonth")
             ?: repository.selectedMonth.value.ifBlank { FinanceEngine.currentMonthKey() }
-        val defaultPayMethod = jsonObj.getStringOrNull("metodoPagamentoPadrao") ?: "pix"
+        val rawDefaultPayMethod = jsonObj.getStringOrNull("metodoPagamentoPadrao")
+            ?: jsonObj.getStringOrNull("paymentMethod")
         val cardParam = jsonObj.getStringOrNull("cartao")
             ?: jsonObj.getStringOrNull("cartaoPadrao")
             ?: jsonObj.getStringOrNull("cardName")
             ?: jsonObj.getStringOrNull("cardId")
         val origemDoc = jsonObj.getStringOrNull("origemDocumento") ?: jsonObj.getStringOrNull("documentOrigin")
         val isFaturaDoc = origemDoc?.contains("fatura", ignoreCase = true) == true ||
-            defaultPayMethod.equals("credit_card", ignoreCase = true) ||
-            defaultPayMethod.equals("cartao_credito", ignoreCase = true)
+            rawDefaultPayMethod?.equals("credit_card", ignoreCase = true) == true ||
+            rawDefaultPayMethod?.equals("cartao_credito", ignoreCase = true) == true
+        val isExtratoDoc = origemDoc?.contains("extrato", ignoreCase = true) == true
 
         val allCards = repository.getCards().first()
+        val valeCardsBatch = allCards.filter { it.isVaVrCard }
+        val creditCardsBatch = allCards.filter { !it.isVaVrCard }
+        val myCreditCards = creditCardsBatch.filter { it.ownerUid == user.uid }
+
+        if (rawDefaultPayMethod.isNullOrBlank() && !isFaturaDoc && !isExtratoDoc && cardParam.isNullOrBlank()) {
+            val hasMissingPayMethod = array.any { elem ->
+                if (!elem.isJsonObject) return@any false
+                val obj = elem.asJsonObject
+                val filterStatus = obj.getStringOrNull("categoria_filtro") ?: "valida"
+                if (filterStatus.equals("ignorada", ignoreCase = true)) return@any false
+                val rawAmt = obj.getDoubleOrNull("amount")
+                    ?: obj.getDoubleOrNull("valorTotal")
+                    ?: obj.getDoubleOrNull("valor_exato")
+                    ?: obj.getDoubleOrNull("valor")
+                    ?: 0.0
+                val typeStr = obj.getStringOrNull("type") ?: obj.getStringOrNull("tipo") ?: if (rawAmt < 0) "income" else "expense"
+                val isInc = typeStr.equals("income", ignoreCase = true) || typeStr.equals("receita", ignoreCase = true) || rawAmt < 0
+                if (isInc) return@any false
+                val pm = obj.getStringOrNull("paymentMethod") ?: obj.getStringOrNull("metodoPagamento")
+                val card = obj.getStringOrNull("cartao") ?: obj.getStringOrNull("cardName") ?: obj.getStringOrNull("cardId")
+                val d = obj.getStringOrNull("description") ?: obj.getStringOrNull("descricao") ?: obj.getStringOrNull("contraparte") ?: ""
+                val hasKw = Regex("""\b(pix|d[eé]bito|boleto|darf|va|vr|va/vr|vale)\b""", RegexOption.IGNORE_CASE).containsMatchIn(d)
+                PaymentMethod.fromOrNull(pm) == null && card.isNullOrBlank() && !hasKw
+            }
+            if (hasMissingPayMethod) {
+                return ToolExecutionResult(text = "⚠️ Qual foi a forma de pagamento desses lançamentos? (Pix, Débito, Cartão de Crédito ou Vale VA/VR?)")
+            }
+        }
+
         val hasBatchCardItems = isFaturaDoc || array.any { elem ->
             if (!elem.isJsonObject) return@any false
             val obj = elem.asJsonObject
             val pm = obj.getStringOrNull("paymentMethod") ?: obj.getStringOrNull("metodoPagamento")
-            pm?.equals("credit_card", ignoreCase = true) == true
+            PaymentMethod.fromOrNull(pm) == PaymentMethod.CREDIT_CARD
         }
         val hasBatchExplicitCard = !cardParam.isNullOrBlank() || array.any { elem ->
             if (!elem.isJsonObject) return@any false
             val obj = elem.asJsonObject
             !obj.getStringOrNull("cartao").isNullOrBlank() || !obj.getStringOrNull("cardName").isNullOrBlank() || !obj.getStringOrNull("cardId").isNullOrBlank()
         }
-        if (hasBatchCardItems && !hasBatchExplicitCard && allCards.size > 1) {
-            return ToolExecutionResult(text = "⚠️ Identifiquei compras de cartão de crédito no lote, mas você possui múltiplos cartões cadastrados (${allCards.joinToString { it.cardName }}). Em qual deles essas compras foram realizadas?")
+        if (hasBatchCardItems && !hasBatchExplicitCard) {
+            if (creditCardsBatch.size > 1) {
+                return ToolExecutionResult(text = "⚠️ Identifiquei compras de cartão de crédito no lote, mas você possui múltiplos cartões cadastrados (${creditCardsBatch.joinToString { it.cardName }}). Em qual deles essas compras foram realizadas?")
+            }
+            if (creditCardsBatch.size == 1 && creditCardsBatch.first().ownerUid != user.uid) {
+                val thirdCard = creditCardsBatch.first()
+                return ToolExecutionResult(text = "⚠️ O único cartão de crédito cadastrado pertence a ${thirdCard.ownerName.ifBlank { "terceiro" }} (${thirdCard.cardName}). Essas compras foram realmente realizadas no cartão ${thirdCard.cardName} ou em outra forma de pagamento (Pix, Débito ou Vale VA/VR)?")
+            }
         }
 
         val defaultCard: Card? = if (!cardParam.isNullOrBlank()) {
-            allCards.find { it.id == cardParam || it.cardName.contains(cardParam, ignoreCase = true) || cardParam.contains(it.cardName, ignoreCase = true) }
-                ?: allCards.firstOrNull { it.ownerUid == user.uid }
-                ?: allCards.firstOrNull()
-        } else if (isFaturaDoc) {
-            allCards.firstOrNull { it.ownerUid == user.uid } ?: allCards.firstOrNull()
+            val found = allCards.find {
+                it.id == cardParam || it.cardName.contains(cardParam, ignoreCase = true) || cardParam.contains(it.cardName, ignoreCase = true)
+            }
+            if (found == null && creditCardsBatch.isNotEmpty()) {
+                return ToolExecutionResult(text = "⚠️ Não encontrei o cartão \"$cardParam\". Seus cartões cadastrados são: ${allCards.joinToString { it.cardName }}. Em qual deles deseja lançar?")
+            }
+            found
+        } else if (isFaturaDoc && creditCardsBatch.size == 1) {
+            myCreditCards.singleOrNull()
         } else {
-            allCards.firstOrNull { it.ownerUid == user.uid } ?: allCards.firstOrNull()
+            null
         }
 
         val friendships = repository.getFriendships().first()
@@ -796,6 +847,8 @@ class AndroidAgentToolsEngine(
         val pendingTxMaps = mutableListOf<Map<String, Any?>>()
         var totalExpenses = 0.0
         var totalIncomes = 0.0
+        var freeBalanceExpenses = 0.0
+        var freeBalanceIncomes = 0.0
 
         for (elem in array) {
             if (!elem.isJsonObject) continue
@@ -827,7 +880,6 @@ class AndroidAgentToolsEngine(
                     Pair(guess.category, guess.subcategory)
                 }
             )
-            val payMethodStr = item.getStringOrNull("paymentMethod") ?: item.getStringOrNull("metodoPagamento") ?: defaultPayMethod
             val dt = item.getStringOrNull("date") ?: item.getStringOrNull("data") ?: item.getStringOrNull("dataVencimento") ?: FinanceEngine.todayKey()
             val comp = item.getStringOrNull("competenceMonth") ?: item.getStringOrNull("mesFatura") ?: defaultMonth
 
@@ -847,50 +899,62 @@ class AndroidAgentToolsEngine(
             val finalTot = if (itemTot > 1) itemTot else (detectedBatchInst?.second ?: itemTot)
 
             val itemCardParam = item.getStringOrNull("cartao") ?: item.getStringOrNull("cardId") ?: item.getStringOrNull("cardName")
-            val itemCard = if (!itemCardParam.isNullOrBlank()) {
+            val explicitItemCard = if (!itemCardParam.isNullOrBlank()) {
                 allCards.find { it.id == itemCardParam || it.cardName.contains(itemCardParam, ignoreCase = true) || itemCardParam.contains(it.cardName, ignoreCase = true) }
-            } else defaultCard
+            } else null
 
-            val valeCardsBatch = allCards.filter { it.isVaVrCard }
-            val creditCardsBatch = allCards.filter { !it.isVaVrCard }
-            val isVaVrBatch = payMethodStr.equals("va_vr", ignoreCase = true) ||
-                itemCard?.isVaVrCard == true ||
-                CategoryRegistry.isVaVrCategory(cat, subcat) ||
-                Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc)
-            val isCardPayment = !isVaVrBatch && (
-                (itemCard != null && !itemCard.isVaVrCard && !isIncome) ||
-                    payMethodStr.equals("credit_card", ignoreCase = true) ||
-                    payMethodStr.equals("cartao_credito", ignoreCase = true) ||
-                    (isFaturaDoc && !isIncome)
-                )
-
-            val resolvedPayMethod = if (isVaVrBatch) {
-                PaymentMethod.VA_VR
-            } else if (isIncome) {
-                PaymentMethod.PIX
-            } else if (isCardPayment) {
+            val itemPayMethodRaw = item.getStringOrNull("paymentMethod") ?: item.getStringOrNull("metodoPagamento") ?: rawDefaultPayMethod
+            val parsedExplicitMethod = PaymentMethod.fromOrNull(itemPayMethodRaw)
+            val isExplicitNonVale = parsedExplicitMethod in setOf(
+                PaymentMethod.DEBIT,
+                PaymentMethod.PIX,
+                PaymentMethod.BILL,
                 PaymentMethod.CREDIT_CARD
-            } else {
-                PaymentMethod.from(payMethodStr)
+            )
+
+            val isVaVrBatch = parsedExplicitMethod == PaymentMethod.VA_VR ||
+                explicitItemCard?.isVaVrCard == true ||
+                (explicitItemCard == null && defaultCard?.isVaVrCard == true && !isExplicitNonVale) ||
+                (!isExplicitNonVale && (
+                    CategoryRegistry.isVaVrCategory(rawCat, rawSubcat) ||
+                    Regex("""\b(va|vr|va/vr|vale[- ]?alimenta[cç][aã]o|vale[- ]?refei[cç][aã]o|ifood[- ]?benef[ií]cios|alelo|flash|caju|ticket|pluxee|sodexo|swile|cart[aã]o[- ]?(de[- ]?)?benef[ií]cios?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc)
+                ))
+            val isCardPayment = !isVaVrBatch && !isIncome && (
+                parsedExplicitMethod == PaymentMethod.CREDIT_CARD ||
+                (explicitItemCard != null && !explicitItemCard.isVaVrCard) ||
+                (parsedExplicitMethod == null && isFaturaDoc)
+            )
+
+            val resolvedPayMethod = when {
+                isVaVrBatch -> PaymentMethod.VA_VR
+                isIncome -> if (parsedExplicitMethod == PaymentMethod.DEBIT) PaymentMethod.DEBIT else PaymentMethod.PIX
+                isCardPayment -> PaymentMethod.CREDIT_CARD
+                parsedExplicitMethod != null -> parsedExplicitMethod
+                isExtratoDoc -> when {
+                    Regex("""\bpix\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.PIX
+                    Regex("""\b(boleto|darf)\b""", RegexOption.IGNORE_CASE).containsMatchIn(desc) -> PaymentMethod.BILL
+                    else -> PaymentMethod.DEBIT
+                }
+                else -> PaymentMethod.PIX
             }
 
             val targetCard = when {
                 resolvedPayMethod == PaymentMethod.VA_VR -> {
-                    itemCard?.takeIf { it.isVaVrCard }
+                    explicitItemCard?.takeIf { it.isVaVrCard }
+                        ?: defaultCard?.takeIf { it.isVaVrCard }
                         ?: valeCardsBatch.firstOrNull { it.ownerUid == user.uid }
                         ?: valeCardsBatch.firstOrNull()
                 }
                 resolvedPayMethod == PaymentMethod.CREDIT_CARD -> {
-                    itemCard?.takeIf { !it.isVaVrCard }
+                    explicitItemCard?.takeIf { !it.isVaVrCard }
                         ?: defaultCard?.takeIf { !it.isVaVrCard }
-                        ?: creditCardsBatch.firstOrNull { it.ownerUid == user.uid }
-                        ?: creditCardsBatch.firstOrNull()
+                        ?: myCreditCards.firstOrNull()
                 }
                 else -> null
             }
             val targetCardId = targetCard?.id
 
-            val (resolvedDueDate, resolvedComp) = if (targetCard != null) {
+            val (resolvedDueDate, resolvedComp) = if (resolvedPayMethod == PaymentMethod.CREDIT_CARD && targetCard != null) {
                 val dates = FinanceEngine.calculateCardInvoiceDates(dt, targetCard)
                 val compMonth = item.getStringOrNull("competenceMonth")
                     ?: item.getStringOrNull("mesFatura")
@@ -898,8 +962,14 @@ class AndroidAgentToolsEngine(
                 // Para cartão de crédito, a data da transação é a data da compra (dt).
                 // O mês de competência da fatura do cartão é compMonth.
                 Pair(dt, compMonth)
+            } else if (resolvedPayMethod == PaymentMethod.DEBIT || resolvedPayMethod == PaymentMethod.PIX || resolvedPayMethod == PaymentMethod.VA_VR) {
+                val dateMonth = if (dt.length >= 7 && Regex("""^\d{4}-\d{2}""").containsMatchIn(dt)) dt.substring(0, 7) else null
+                val itemExplicitComp = item.getStringOrNull("competenceMonth") ?: item.getStringOrNull("mesFatura")
+                Pair(dt, dateMonth ?: itemExplicitComp ?: comp)
             } else {
-                Pair(dt, comp)
+                val dateMonth = if (dt.length >= 7 && Regex("""^\d{4}-\d{2}""").containsMatchIn(dt)) dt.substring(0, 7) else null
+                val itemExplicitComp = item.getStringOrNull("competenceMonth") ?: item.getStringOrNull("mesFatura")
+                Pair(dt, itemExplicitComp ?: dateMonth ?: comp)
             }
 
             // Split / Rateio detection and resolution
@@ -1014,15 +1084,16 @@ class AndroidAgentToolsEngine(
 
             pendingTxMaps.add(
                 mapOf(
-                    "data" to dt,
+                    "data" to resolvedDueDate,
+                    "competenceMonth" to resolvedComp,
                     "tipo" to if (isIncome) "income" else "expense",
                     "valor_exato" to amt,
                     "contraparte" to cleanDesc,
                     "categoria_filtro" to filterStatus,
                     "categoria" to cat,
                     "subcategoria" to subcat,
-                    "metodoPagamento" to payMethodStr,
-                    "cartao" to (targetCard?.cardName ?: itemCardParam ?: cardParam),
+                    "metodoPagamento" to resolvedPayMethod.value,
+                    "cartao" to targetCard?.cardName,
                     "cardId" to targetCardId,
                     "splitType" to effectiveSplitType.name,
                     "friendName" to assignedFriendName,
@@ -1071,6 +1142,9 @@ class AndroidAgentToolsEngine(
                     createdList.add(tx)
                 }
                 totalExpenses += myImpact
+                if (resolvedPayMethod != PaymentMethod.VA_VR) {
+                    freeBalanceExpenses += myImpact
+                }
             } else {
                 val tx = Transaction(
                     id = "tx_" + UUID.randomUUID().toString().take(8),
@@ -1098,7 +1172,13 @@ class AndroidAgentToolsEngine(
                     acceptanceStatus = acceptanceStatus
                 )
                 createdList.add(tx)
-                if (isIncome) totalIncomes += amt else totalExpenses += myImpact
+                if (isIncome) {
+                    totalIncomes += amt
+                    if (resolvedPayMethod != PaymentMethod.VA_VR) freeBalanceIncomes += amt
+                } else {
+                    totalExpenses += myImpact
+                    if (resolvedPayMethod != PaymentMethod.VA_VR) freeBalanceExpenses += myImpact
+                }
             }
         }
 
@@ -1106,27 +1186,37 @@ class AndroidAgentToolsEngine(
             return ToolExecutionResult(text = "⚠️ Não foi possível processar as transações do lote.")
         }
 
+        val distinctMethods = createdList.map { it.paymentMethod.label }.distinct().joinToString("/")
+        val distinctMonths = createdList.map { FinanceEngine.monthLabel(it.competenceMonth) }.distinct().joinToString(", ")
+        val amountsSummary = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}"
+        val batchDetail = listOfNotNull(amountsSummary, distinctMethods.takeIf { it.isNotBlank() }, distinctMonths.takeIf { it.isNotBlank() }).joinToString(" • ")
+
         if (!confirmed) {
             val before = repository.getMonthSummary().first()
-            val netDiff = totalIncomes - totalExpenses
+            val netDiff = freeBalanceIncomes - freeBalanceExpenses
             val estimatedAfter = FinanceEngine.round2(before.freeBalance + netDiff)
+            val batchCardNameForArgs = cardParam ?: if (isFaturaDoc) defaultCard?.cardName else null
+            val batchCardIdForArgs = if (!cardParam.isNullOrBlank() || isFaturaDoc) defaultCard?.id else null
+            val batchMethodForArgs = rawDefaultPayMethod ?: createdList.map { it.paymentMethod }.distinct().singleOrNull()?.value
+            val batchOriginForArgs = origemDoc ?: if (isFaturaDoc) "fatura_cartao" else if (createdList.none { it.paymentMethod == PaymentMethod.CREDIT_CARD }) "extrato_conta" else null
+            val batchMonthForArgs = createdList.map { it.competenceMonth }.distinct().singleOrNull() ?: defaultMonth
 
             val pendingAction = PendingAction(
                 id = "act_" + UUID.randomUUID().toString().take(8),
                 toolName = "BATCH_TRANSACTIONS",
                 title = "Confirmar Lote (${createdList.size} itens)",
                 description = "${createdList.size} transações prontas para lançamento",
-                detail = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
+                detail = batchDetail,
                 args = mapOf(
                     "transactionsJson" to array.toString(),
                     "pending_transactions" to pendingTxMaps,
-                    "cartaoPadrao" to (cardParam ?: defaultCard?.cardName),
-                    "cartao" to (cardParam ?: defaultCard?.cardName),
-                    "cardName" to (cardParam ?: defaultCard?.cardName),
-                    "cardId" to defaultCard?.id,
-                    "metodoPagamentoPadrao" to defaultPayMethod,
-                    "origemDocumento" to (origemDoc ?: if (isFaturaDoc) "fatura_cartao" else null),
-                    "mesFaturaPadrao" to defaultMonth,
+                    "cartaoPadrao" to batchCardNameForArgs,
+                    "cartao" to batchCardNameForArgs,
+                    "cardName" to batchCardNameForArgs,
+                    "cardId" to batchCardIdForArgs,
+                    "metodoPagamentoPadrao" to batchMethodForArgs,
+                    "origemDocumento" to batchOriginForArgs,
+                    "mesFaturaPadrao" to batchMonthForArgs,
                     "confirmed" to true
                 ),
                 status = PendingActionStatus.PENDING
@@ -1136,12 +1226,13 @@ class AndroidAgentToolsEngine(
                 text = "Identifiquei **${createdList.size} lançamentos** para cadastro em lote:\n\n" +
                         (if (totalIncomes > 0) "• 🟢 **Receitas**: ${FinanceEngine.formatCurrency(totalIncomes)}\n" else "") +
                         (if (totalExpenses > 0) "• 🔴 **Despesas**: ${FinanceEngine.formatCurrency(totalExpenses)}\n" else "") +
+                        (if (distinctMethods.isNotBlank()) "• 💳 **Pagamento**: $distinctMethods ($distinctMonths)\n" else "") +
                         "• **Saldo Livre previsto**: ${FinanceEngine.formatCurrency(before.freeBalance)} → **${FinanceEngine.formatCurrency(estimatedAfter)}**\n\n" +
                         "Por favor, confirme se deseja registrar todos esses lançamentos no seu Saldo Livre.",
                 actionCard = ActionCardData(
                     title = "Confirmar Lote (${createdList.size} lançamentos)",
                     description = "${createdList.size} itens preparados",
-                    detail = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
+                    detail = batchDetail,
                     newFreeBalance = "Saldo Livre previsto: ${FinanceEngine.formatCurrency(before.freeBalance)} → ${FinanceEngine.formatCurrency(estimatedAfter)}",
                     pendingAction = pendingAction,
                     pendingTransactions = pendingTxMaps
@@ -1156,11 +1247,12 @@ class AndroidAgentToolsEngine(
             text = "✅ **Lote de ${createdList.size} lançamentos registrado com sucesso!**\n\n" +
                     (if (totalIncomes > 0) "• 🟢 **Receitas**: ${FinanceEngine.formatCurrency(totalIncomes)}\n" else "") +
                     (if (totalExpenses > 0) "• 🔴 **Despesas**: ${FinanceEngine.formatCurrency(totalExpenses)}\n" else "") +
+                    (if (distinctMethods.isNotBlank()) "• 💳 **Pagamento**: $distinctMethods ($distinctMonths)\n" else "") +
                     "• **Saldo Livre Atual**: ${FinanceEngine.formatCurrency(summaryNow.freeBalance)}",
             actionCard = ActionCardData(
                 title = "Lote de Lançamentos Registrado",
                 description = "${createdList.size} itens adicionados ao Saldo Livre",
-                detail = "Receitas: ${FinanceEngine.formatCurrency(totalIncomes)} | Despesas: ${FinanceEngine.formatCurrency(totalExpenses)}",
+                detail = batchDetail,
                 newFreeBalance = "Saldo Livre: ${FinanceEngine.formatCurrency(summaryNow.freeBalance)}"
             )
         )
@@ -1213,7 +1305,7 @@ class AndroidAgentToolsEngine(
             for (term in effectiveTerms) {
                 val candidates = all.filter { t ->
                     if (t.id in selectedIds) return@filter false
-                    if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
+                    if (!month.isNullOrBlank() && t.competenceMonth != month && !t.dueDate.startsWith(month)) return@filter false
                     if (!originDate.isNullOrBlank() && t.dueDate != originDate) return@filter false
                     if (filterAmount != null && kotlin.math.abs(kotlin.math.abs(t.effectiveAmount) - kotlin.math.abs(filterAmount)) > 0.05) return@filter false
                     matchesSearch(t.description, term) || matchesSearch(t.category, term) || (t.subcategory != null && matchesSearch(t.subcategory, term))
@@ -1223,15 +1315,33 @@ class AndroidAgentToolsEngine(
                     selected.addAll(candidates)
                     selectedIds.addAll(candidates.map { it.id })
                 } else {
-                    // Seleção cirúrgica: escolhe apenas o item mais recente correspondente a este termo específico
+                    // Seleção cirúrgica: escolhe o item mais recente correspondente e irmãos idênticos criados no mesmo lote
                     val best = candidates.maxByOrNull { it.createdAt }
                     if (best != null) {
+                        val sameBatchSiblings = if (filterAmount == null) {
+                            candidates.filter {
+                                it.id != best.id &&
+                                    it.description.equals(best.description, ignoreCase = true) &&
+                                    (kotlin.math.abs(it.createdAt - best.createdAt) <= 60_000L || it.dueDate == best.dueDate)
+                            }
+                        } else emptyList()
                         selected.add(best)
                         selectedIds.add(best.id)
+                        for (sib in sameBatchSiblings) {
+                            selected.add(sib)
+                            selectedIds.add(sib.id)
+                        }
                     }
                 }
             }
             selected
+        } else if (!month.isNullOrBlank() || !originDate.isNullOrBlank()) {
+            all.filter { t ->
+                if (!month.isNullOrBlank() && t.competenceMonth != month && !t.dueDate.startsWith(month)) return@filter false
+                if (!originDate.isNullOrBlank() && t.dueDate != originDate) return@filter false
+                if (filterAmount != null && kotlin.math.abs(kotlin.math.abs(t.effectiveAmount) - kotlin.math.abs(filterAmount)) > 0.05) return@filter false
+                true
+            }
         } else emptyList()
 
         if (targets.isEmpty()) {
@@ -1446,11 +1556,55 @@ class AndroidAgentToolsEngine(
                     newPaymentMethod == PaymentMethod.CREDIT_CARD -> {
                         val existingCard = updated.cardId?.let { cid -> allCards.find { it.id == cid } }
                         if (existingCard != null && !existingCard.isVaVrCard) existingCard.id
-                        else allCards.firstOrNull { !it.isVaVrCard }?.id
+                        else allCards.firstOrNull { !it.isVaVrCard && it.ownerUid == user.uid }?.id
+                            ?: allCards.firstOrNull { !it.isVaVrCard }?.id
                     }
                     else -> null
                 }
-                updated = updated.copy(paymentMethod = newPaymentMethod, cardId = nextCardId)
+                val isNonCardAccountMethod = newPaymentMethod in setOf(PaymentMethod.DEBIT, PaymentMethod.PIX, PaymentMethod.BILL)
+                val nextPayerUid = if (isNonCardAccountMethod) user.uid else updated.paidByUid
+                val nextStatus = newStatus ?: if (newPaymentMethod == PaymentMethod.DEBIT || newPaymentMethod == PaymentMethod.PIX || newPaymentMethod == PaymentMethod.VA_VR) {
+                    TransactionStatus.PAID
+                } else {
+                    updated.status
+                }
+                val nextCompMonth = if (isNonCardAccountMethod &&
+                    newCompetenceMonth.isNullOrBlank() &&
+                    newDueDate.isNullOrBlank() &&
+                    updated.dueDate.matches(Regex("""^\d{4}-\d{2}-\d{2}$"""))
+                ) {
+                    updated.dueDate.take(7)
+                } else {
+                    updated.competenceMonth
+                }
+                updated = updated.copy(
+                    paymentMethod = newPaymentMethod,
+                    cardId = nextCardId,
+                    paidByUid = nextPayerUid,
+                    status = nextStatus,
+                    competenceMonth = nextCompMonth
+                )
+                if (isNonCardAccountMethod && newSplitType == null) {
+                    val partner = FinanceEngine.resolvePartner(user.uid, allCards, repository.allUsers)
+                    val rebuiltSplit = FinanceEngine.buildSplit(
+                        splitType = updated.splitType ?: SplitType.MINE,
+                        total = updated.totalAmount,
+                        myUid = user.uid,
+                        myName = user.displayName,
+                        partnerUid = partner?.uid,
+                        partnerName = partner?.displayName,
+                        payerUid = user.uid,
+                        externalName = updated.externalName,
+                        assignedFriendUid = updated.assignedFriendUid,
+                        assignedFriendName = updated.assignedFriendName,
+                        friendSharePct = updated.friendSharePct
+                    )
+                    updated = updated.copy(
+                        userImpact = rebuiltSplit.userImpact,
+                        allocations = rebuiltSplit.allocations,
+                        visibleToUids = rebuiltSplit.visibleToUids
+                    )
+                }
             }
 
             if (newCompetenceMonth != null && newCompetenceMonth.matches(Regex("""^\d{4}-\d{2}$"""))) {
@@ -1542,7 +1696,10 @@ class AndroidAgentToolsEngine(
         val rawSearchTerms = jsonObj.getAsJsonArrayOrNull("searchTerms") ?: jsonObj.getAsJsonArrayOrNull("termosBusca")
         val searchTermsList = rawSearchTerms?.mapNotNull { it.asString }
 
-        val month = jsonObj.getStringOrNull("month") ?: jsonObj.getStringOrNull("mes")
+        val month = jsonObj.getStringOrNull("month")
+            ?: jsonObj.getStringOrNull("mes")
+            ?: jsonObj.getStringOrNull("mesOrigem")
+            ?: jsonObj.getStringOrNull("originMonth")
         val newAmount = jsonObj.getDoubleOrNull("newAmount") ?: jsonObj.getDoubleOrNull("novoValor")
         val newDescription = jsonObj.getStringOrNull("newDescription") ?: jsonObj.getStringOrNull("novaDescricao")
         val newCategory = jsonObj.getStringOrNull("newCategory") ?: jsonObj.getStringOrNull("novaCategoria")
@@ -1579,7 +1736,7 @@ class AndroidAgentToolsEngine(
             ?: false
 
         val newStatus = newStatusStr?.let { TransactionStatus.from(it) }
-        val newPayMethod = newPayMethodStr?.let { PaymentMethod.from(it) }
+        val newPayMethod = newPayMethodStr?.let { PaymentMethod.fromOrNull(it) }
         val newSplitType = newSplitTypeStr?.let {
             when (it.uppercase()) {
                 "SPLIT_50", "CASAL_50_50" -> SplitType.SPLIT_50
@@ -1592,23 +1749,59 @@ class AndroidAgentToolsEngine(
 
         // Se houver uma lista de transações explícita dentro do JSON (batch edit):
         if (transactionsArray != null && transactionsArray.size() > 0) {
+            val arrayObjs = transactionsArray.mapNotNull { if (it.isJsonObject) it.asJsonObject else null }
+            val effNewAmount = newAmount ?: arrayObjs.firstNotNullOfOrNull { it.getDoubleOrNull("newAmount") ?: it.getDoubleOrNull("novoValor") }
+            val effNewDescription = newDescription ?: arrayObjs.firstNotNullOfOrNull { it.getStringOrNull("newDescription") ?: it.getStringOrNull("novaDescricao") }
+            val effNewCategory = newCategory ?: arrayObjs.firstNotNullOfOrNull { it.getStringOrNull("newCategory") ?: it.getStringOrNull("novaCategoria") }
+            val effNewSubcategory = newSubcategory ?: arrayObjs.firstNotNullOfOrNull { it.getStringOrNull("newSubcategory") ?: it.getStringOrNull("novaSubcategoria") }
+            val effNewStatus = newStatus ?: arrayObjs.firstNotNullOfOrNull { (it.getStringOrNull("newStatus") ?: it.getStringOrNull("novoStatus"))?.let { s -> TransactionStatus.from(s) } }
+            val effNewPayMethod = newPayMethod ?: arrayObjs.firstNotNullOfOrNull {
+                (it.getStringOrNull("newPaymentMethod") ?: it.getStringOrNull("novoMetodoPagamento") ?: it.getStringOrNull("paymentMethod") ?: it.getStringOrNull("metodoPagamento"))
+                    ?.let { s -> PaymentMethod.fromOrNull(s) }
+            }
+            val effNewCompetenceMonth = newCompetenceMonth ?: arrayObjs.firstNotNullOfOrNull {
+                it.getStringOrNull("newCompetenceMonth") ?: it.getStringOrNull("novoMesFatura") ?: it.getStringOrNull("competenceMonth")
+            }
+            val effNewDueDate = newDueDate ?: arrayObjs.firstNotNullOfOrNull {
+                it.getStringOrNull("newDueDate") ?: it.getStringOrNull("novaDataVencimento") ?: it.getStringOrNull("newDate") ?: it.getStringOrNull("novaData")
+            }
+            val effNewSplitType = newSplitType ?: arrayObjs.firstNotNullOfOrNull { item ->
+                (item.getStringOrNull("newSplitType") ?: item.getStringOrNull("novoTipoDivisao"))?.let { st ->
+                    when (st.uppercase()) {
+                        "SPLIT_50", "CASAL_50_50" -> SplitType.SPLIT_50
+                        "PARTNER", "PARCEIRO" -> SplitType.PARTNER
+                        "FRIEND", "AMIGO" -> SplitType.FRIEND
+                        "EXTERNAL", "TERCEIRO" -> SplitType.EXTERNAL
+                        else -> SplitType.MINE
+                    }
+                }
+            }
+
             val all = repository.getTransactions().first()
             val resolvedTargetIds = mutableListOf<String>()
-            for (elem in transactionsArray) {
-                if (!elem.isJsonObject) continue
-                val item = elem.asJsonObject
+            for (item in arrayObjs) {
                 val itemTerm = item.getStringOrNull("searchTerm") ?: item.getStringOrNull("termoBusca")
                     ?: item.getStringOrNull("description") ?: item.getStringOrNull("descricao")
                 val itemId = item.getStringOrNull("transactionId") ?: item.getStringOrNull("id")
+                val itemAmount = item.getDoubleOrNull("amount") ?: item.getDoubleOrNull("valor") ?: item.getDoubleOrNull("filterAmount") ?: filterAmount
+                val itemOriginDate = item.getStringOrNull("originDate")
+                    ?: item.getStringOrNull("currentDate")
+                    ?: item.getStringOrNull("dataOriginal")
+                    ?: (item.getStringOrNull("date")?.takeIf { it != effNewDueDate })
+                    ?: (item.getStringOrNull("data")?.takeIf { it != effNewDueDate })
+                    ?: originDate
+                val itemMonth = item.getStringOrNull("month") ?: item.getStringOrNull("mes") ?: item.getStringOrNull("mesOrigem") ?: month
                 val matched = if (!itemId.isNullOrBlank()) {
                     all.filter { it.id == itemId }
-                } else if (!itemTerm.isNullOrBlank()) {
+                } else if (!itemTerm.isNullOrBlank() || !itemOriginDate.isNullOrBlank() || itemAmount != null) {
                     val candidates = all.filter { t ->
                         if (t.id in resolvedTargetIds) return@filter false
-                        if (!month.isNullOrBlank() && t.competenceMonth != month) return@filter false
-                        if (!originDate.isNullOrBlank() && t.dueDate != originDate) return@filter false
-                        if (filterAmount != null && kotlin.math.abs(kotlin.math.abs(t.effectiveAmount) - kotlin.math.abs(filterAmount)) > 0.05) return@filter false
-                        matchesSearch(t.description, itemTerm) || matchesSearch(t.category, itemTerm) || (t.subcategory != null && matchesSearch(t.subcategory, itemTerm))
+                        if (!itemMonth.isNullOrBlank() && t.competenceMonth != itemMonth && !t.dueDate.startsWith(itemMonth)) return@filter false
+                        if (!itemOriginDate.isNullOrBlank() && t.dueDate != itemOriginDate) return@filter false
+                        if (itemAmount != null && kotlin.math.abs(kotlin.math.abs(t.effectiveAmount) - kotlin.math.abs(itemAmount)) > 0.05) return@filter false
+                        if (!itemTerm.isNullOrBlank()) {
+                            matchesSearch(t.description, itemTerm) || matchesSearch(t.category, itemTerm) || (t.subcategory != null && matchesSearch(t.subcategory, itemTerm))
+                        } else true
                     }
                     if (editAllMatches) {
                         candidates
@@ -1625,15 +1818,15 @@ class AndroidAgentToolsEngine(
                     originDate = originDate,
                     filterAmount = filterAmount,
                     editAllMatches = editAllMatches,
-                    newAmount = newAmount,
-                    newDescription = newDescription,
-                    newCategory = newCategory,
-                    newSubcategory = newSubcategory,
-                    newStatus = newStatus,
-                    newPaymentMethod = newPayMethod,
-                    newCompetenceMonth = newCompetenceMonth,
-                    newDueDate = newDueDate,
-                    newSplitType = newSplitType,
+                    newAmount = effNewAmount,
+                    newDescription = effNewDescription,
+                    newCategory = effNewCategory,
+                    newSubcategory = effNewSubcategory,
+                    newStatus = effNewStatus,
+                    newPaymentMethod = effNewPayMethod,
+                    newCompetenceMonth = effNewCompetenceMonth,
+                    newDueDate = effNewDueDate,
+                    newSplitType = effNewSplitType,
                     confirmed = confirmed
                 )
             }
@@ -3881,7 +4074,7 @@ class AndroidAgentToolsEngine(
                 val newCat = args["newCategory"] as? String ?: args["novaCategoria"] as? String
                 val newSub = args["newSubcategory"] as? String ?: args["novaSubcategoria"] as? String
                 val newStatus = (args["newStatus"] as? String ?: args["novoStatus"] as? String)?.let { TransactionStatus.from(it) }
-                val newPayMethod = (args["newPaymentMethod"] as? String ?: args["novoMetodoPagamento"] as? String)?.let { PaymentMethod.from(it) }
+                val newPayMethod = (args["newPaymentMethod"] as? String ?: args["novoMetodoPagamento"] as? String)?.let { PaymentMethod.fromOrNull(it) }
                 val newCompMonth = args["newCompetenceMonth"] as? String ?: args["novoMesFatura"] as? String
                 val newDueDate = args["newDueDate"] as? String
                     ?: args["novaDataVencimento"] as? String

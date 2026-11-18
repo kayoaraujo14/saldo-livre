@@ -36,17 +36,20 @@ enum class PaymentMethod(val value: String, val label: String) {
         val CREDIT: PaymentMethod
             get() = CREDIT_CARD
 
-        fun from(value: String?): PaymentMethod {
-            if (value.isNullOrBlank()) return PIX
-            return when (value.trim().lowercase()) {
-                "credit", "credit_card", "credito", "crédito", "cartao", "cartão" -> CREDIT_CARD
-                "debit", "debito", "débito" -> DEBIT
+        fun fromOrNull(value: String?): PaymentMethod? {
+            if (value.isNullOrBlank()) return null
+            val trimmed = value.trim()
+            return when (trimmed.lowercase()) {
+                "credit", "credit_card", "credito", "crédito", "cartao", "cartão", "cartao_credito", "cartão de crédito", "cartao de credito" -> CREDIT_CARD
+                "debit", "debito", "débito", "cartao de debito", "cartão de débito", "debito em conta", "débito em conta" -> DEBIT
                 "pix" -> PIX
                 "bill", "boleto" -> BILL
                 "va_vr", "vavr", "va/vr", "vale", "va", "vr", "vale alimentacao", "vale alimentação", "vale refeicao", "vale refeição", "cartao vale", "cartão vale" -> VA_VR
-                else -> entries.find { it.value.equals(value.trim(), ignoreCase = true) || it.name.equals(value.trim(), ignoreCase = true) } ?: PIX
+                else -> entries.find { it.value.equals(trimmed, ignoreCase = true) || it.name.equals(trimmed, ignoreCase = true) }
             }
         }
+
+        fun from(value: String?): PaymentMethod = fromOrNull(value) ?: PIX
     }
 }
 

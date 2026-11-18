@@ -19,7 +19,10 @@ import com.saldolivre.app.data.model.FinancialHealthAiDiagnosis
 import com.saldolivre.app.data.model.FinancialHealthScore
 import com.saldolivre.app.data.model.PaymentMethod
 import com.saldolivre.app.data.model.TransactionType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -203,6 +206,9 @@ class GeminiLoadBalancer(
                                 throw IllegalStateException("Resposta vazia retornada pelo modelo $candidateModel.")
                             }
                         } catch (e: Exception) {
+                            if (e is CancellationException && !currentCoroutineContext().isActive) {
+                                throw e
+                            }
                             lastException = e
                             android.util.Log.e("GeminiLB", "Tentativa com modelo $candidateModel falhou: ${e.message}")
                             val errLower = (e.message ?: "").lowercase()
@@ -217,7 +223,8 @@ class GeminiLoadBalancer(
                                     errLower.contains("spikes in demand") ||
                                     errLower.contains("timeout") ||
                                     errLower.contains("socket") ||
-                                    errLower.contains("connect")
+                                    errLower.contains("connect") ||
+                                    ((errLower.contains("cancelled") || errLower.contains("canceled")) && currentCoroutineContext().isActive)
 
                             if (isRateLimit) {
                                 if (numKeys > 1) {
@@ -265,17 +272,30 @@ class GeminiLoadBalancer(
         attachmentBytes: ByteArray? = null,
         mimeType: String? = null
     ): List<Content> {
-        data class SimpleTurn(val role: String, var text: String)
+        data class SimpleTurn(
+            val role: String,
+            var text: String,
+            var mediaBytes: ByteArray? = null,
+            var mediaMime: String? = null
+        )
 
         val turns = mutableListOf<SimpleTurn>()
 
         val filtered = history.filter {
-            it.text.isNotBlank() &&
+            (it.text.isNotBlank() || !it.attachment?.base64.isNullOrBlank()) &&
             !it.text.contains("Olá! Sou o **Copiloto Saldo Livre**") &&
+            !it.text.contains("Olá! Sou o Copiloto Saldo Livre") &&
             !it.text.startsWith("🔑 *[Chave de API")
         }
 
-        for (msg in filtered.takeLast(20)) {
+        val recentHistory = filtered.takeLast(20)
+        val recentMediaMsgIds = recentHistory
+            .filter { it.sender == MessageSender.USER && !it.attachment?.base64.isNullOrBlank() && !it.attachment?.type.isNullOrBlank() }
+            .takeLast(2)
+            .map { it.id }
+            .toSet()
+
+        for (msg in recentHistory) {
             val role = if (msg.sender == MessageSender.USER) "user" else "model"
             if (turns.isEmpty() && role != "user") continue
 
@@ -287,29 +307,45 @@ class GeminiLoadBalancer(
             } else ""
 
             val fullText = (msg.text + actionDetails).trim()
-            if (fullText.isBlank()) continue
+            if (fullText.isBlank() && msg.id !in recentMediaMsgIds) continue
+
+            val msgBytes = if (msg.id in recentMediaMsgIds) {
+                runCatching { android.util.Base64.decode(msg.attachment!!.base64!!, android.util.Base64.DEFAULT) }.getOrNull()
+                    ?.takeIf { it.isNotEmpty() }
+            } else null
+            val msgMime = if (msgBytes != null) msg.attachment?.type else null
 
             val last = turns.lastOrNull()
             if (last != null && last.role == role) {
-                last.text = "${last.text}\n$fullText"
+                last.text = "${last.text}\n$fullText".trim()
+                if (msgBytes != null && !msgMime.isNullOrBlank()) {
+                    last.mediaBytes = msgBytes
+                    last.mediaMime = msgMime
+                }
             } else {
-                turns.add(SimpleTurn(role, fullText))
+                turns.add(SimpleTurn(role, fullText.ifBlank { "[Anexo enviado]" }, msgBytes, msgMime))
             }
         }
 
         val last = turns.lastOrNull()
         if (last != null && last.role == "user") {
             last.text = "${last.text}\n$currentQuery"
+            if (attachmentBytes != null && !mimeType.isNullOrBlank()) {
+                last.mediaBytes = attachmentBytes
+                last.mediaMime = mimeType
+            }
         } else {
-            turns.add(SimpleTurn("user", currentQuery))
+            turns.add(SimpleTurn("user", currentQuery, attachmentBytes, mimeType))
         }
 
         return turns.mapIndexed { index, turn ->
             val isLast = index == turns.size - 1
+            val finalBytes = if (isLast && attachmentBytes != null && !mimeType.isNullOrBlank()) attachmentBytes else turn.mediaBytes
+            val finalMime = if (isLast && attachmentBytes != null && !mimeType.isNullOrBlank()) mimeType else turn.mediaMime
             content(turn.role) {
                 text(turn.text)
-                if (isLast && attachmentBytes != null && !mimeType.isNullOrBlank()) {
-                    blob(mimeType, attachmentBytes)
+                if (finalBytes != null && !finalMime.isNullOrBlank()) {
+                    blob(finalMime, finalBytes)
                 }
             }
         }

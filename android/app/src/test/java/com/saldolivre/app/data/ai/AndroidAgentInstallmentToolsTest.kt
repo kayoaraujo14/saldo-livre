@@ -1,5 +1,6 @@
 package com.saldolivre.app.data.ai
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.saldolivre.app.data.model.Card
 import com.saldolivre.app.data.model.PaymentMethod
@@ -10,6 +11,7 @@ import com.saldolivre.app.testutil.FakeFinanceRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -253,5 +255,173 @@ class AndroidAgentInstallmentToolsTest {
         assertEquals("2026-11-20", p1?.dueDate)
         assertEquals("2026-12-10", p2?.dueDate)
         assertEquals("2026-13-10", p3?.dueDate)
+    }
+
+    @Test
+    fun `BATCH_TRANSACTIONS no debito com VA_VR cadastrado e mes selecionado dezembro grava DEBIT em novembro sem cartao`() = runBlocking {
+        repository.setSelectedMonth("2026-12")
+        repository.cardsFlow.value = listOf(
+            Card(id = "card_vavr", ownerUid = "user_test", ownerName = "Usuário Teste", cardName = "Flash Vale", cardType = "va_vr", dueDay = 1, closingDay = 1),
+            Card(id = "card_terceiro", ownerUid = "friend_terceiro", ownerName = "Lucas", cardName = "Nubank Terceiro", cardType = "credit", dueDay = 10, closingDay = 3)
+        )
+
+        val items = JsonArray().apply {
+            add(JsonObject().apply {
+                addProperty("description", "99")
+                addProperty("amount", 7.39)
+                addProperty("type", "expense")
+                addProperty("date", "2026-11-17")
+                addProperty("competenceMonth", "2026-12")
+            })
+            add(JsonObject().apply {
+                addProperty("description", "99")
+                addProperty("amount", 7.14)
+                addProperty("type", "expense")
+                addProperty("date", "2026-11-17")
+                addProperty("competenceMonth", "2026-12")
+            })
+            add(JsonObject().apply {
+                addProperty("description", "Reembolso 99Food")
+                addProperty("amount", 58.25)
+                addProperty("type", "income")
+                addProperty("date", "2026-11-16")
+                addProperty("competenceMonth", "2026-12")
+            })
+            add(JsonObject().apply {
+                addProperty("description", "Uber")
+                addProperty("amount", 6.91)
+                addProperty("type", "expense")
+                addProperty("date", "2026-11-16")
+                addProperty("competenceMonth", "2026-12")
+            })
+        }
+
+        val json = JsonObject().apply {
+            addProperty("action", "BATCH_TRANSACTIONS")
+            addProperty("paymentMethod", "debit")
+            addProperty("confirmed", true)
+            add("transactions", items)
+        }
+
+        engine.executeFromJson(json)
+        val txs = repository.getTransactions().first()
+        assertEquals(4, txs.size)
+        for (tx in txs) {
+            assertEquals(PaymentMethod.DEBIT, tx.paymentMethod)
+            assertNull(tx.cardId)
+            assertEquals("2026-11", tx.competenceMonth)
+        }
+        val refund = txs.find { it.description == "Reembolso 99Food" }
+        assertEquals(TransactionType.INCOME, refund?.type)
+        assertEquals(PaymentMethod.DEBIT, refund?.paymentMethod)
+    }
+
+    @Test
+    fun `BATCH_TRANSACTIONS sem forma de pagamento pede clarificacao e nao usa cartao de terceiro`() = runBlocking {
+        repository.cardsFlow.value = listOf(
+            Card(id = "card_terceiro", ownerUid = "friend_terceiro", ownerName = "Lucas", cardName = "Nubank Terceiro", cardType = "credit")
+        )
+
+        val items = JsonArray().apply {
+            add(JsonObject().apply {
+                addProperty("description", "99")
+                addProperty("amount", 7.39)
+                addProperty("date", "2026-11-17")
+            })
+        }
+
+        val json = JsonObject().apply {
+            addProperty("action", "BATCH_TRANSACTIONS")
+            add("transactions", items)
+        }
+
+        val result = engine.executeFromJson(json)
+        val txs = repository.getTransactions().first()
+        assertTrue(txs.isEmpty())
+        assertNull(result.actionCard)
+        assertTrue(result.text.lowercase().contains("pagamento") || result.text.lowercase().contains("débito"))
+    }
+
+    @Test
+    fun `CREATE_TRANSACTION no credito com apenas cartao de terceiro sem especificar pede clarificacao`() = runBlocking {
+        repository.cardsFlow.value = listOf(
+            Card(id = "card_terceiro", ownerUid = "friend_terceiro", ownerName = "Lucas", cardName = "Nubank Terceiro", cardType = "credit")
+        )
+
+        val json = JsonObject().apply {
+            addProperty("action", "CREATE_TRANSACTION")
+            addProperty("description", "Mercado")
+            addProperty("amount", 50.0)
+            addProperty("paymentMethod", "credit_card")
+        }
+
+        val result = engine.executeFromJson(json)
+        val txs = repository.getTransactions().first()
+        assertTrue(txs.isEmpty())
+        assertNull(result.actionCard)
+    }
+
+    @Test
+    fun `EDIT_TRANSACTION corrige lote errado de VA_VR e cartao de terceiro para DEBIT atualizando duplicadas`() = runBlocking {
+        repository.setSelectedMonth("2026-12")
+        repository.addTransaction(
+            Transaction(
+                id = "tx_batch_1",
+                description = "99",
+                totalAmount = 7.39,
+                actualAmount = 7.39,
+                category = "Transporte",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.VA_VR,
+                status = TransactionStatus.PAID,
+                dueDate = "2026-11-17",
+                competenceMonth = "2026-12",
+                visibleToUids = listOf("user_test"),
+                userImpact = mapOf("user_test" to 7.39),
+                createdByUid = "user_test",
+                paidByUid = "user_test",
+                cardId = "card_vavr",
+                createdAt = 1700000000000L
+            )
+        )
+        repository.addTransaction(
+            Transaction(
+                id = "tx_batch_2",
+                description = "99",
+                totalAmount = 7.14,
+                actualAmount = 7.14,
+                category = "Transporte",
+                type = TransactionType.EXPENSE,
+                paymentMethod = PaymentMethod.CREDIT_CARD,
+                status = TransactionStatus.PENDING,
+                dueDate = "2026-11-17",
+                competenceMonth = "2026-12",
+                visibleToUids = listOf("user_test"),
+                userImpact = mapOf("user_test" to 7.14),
+                createdByUid = "user_test",
+                paidByUid = "friend_terceiro",
+                cardId = "card_terceiro",
+                createdAt = 1700000001000L
+            )
+        )
+
+        val json = JsonObject().apply {
+            addProperty("action", "EDIT_TRANSACTION")
+            addProperty("searchTerm", "99")
+            addProperty("mesOrigem", "2026-11")
+            addProperty("newPaymentMethod", "debit")
+            addProperty("confirmed", true)
+        }
+
+        engine.executeFromJson(json)
+        val txsAfter = repository.getTransactions().first()
+        assertEquals(2, txsAfter.size)
+        for (tx in txsAfter) {
+            assertEquals(PaymentMethod.DEBIT, tx.paymentMethod)
+            assertNull(tx.cardId)
+            assertEquals("user_test", tx.paidByUid)
+            assertEquals(TransactionStatus.PAID, tx.status)
+            assertEquals("2026-11", tx.competenceMonth)
+        }
     }
 }

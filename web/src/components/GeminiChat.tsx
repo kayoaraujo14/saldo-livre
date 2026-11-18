@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/input'
 import { useFinance } from '@/store/FinanceContext'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import type { ChatMessage, ChatSession, ChatAttachment, PendingAction, PendingBatchTransaction } from '@/types'
+import { isVaVrCard, type ChatMessage, type ChatSession, type ChatAttachment, type PendingAction, type PendingBatchTransaction } from '@/types'
 import {
   getGeminiApiKeys,
   setGeminiApiKey,
@@ -795,10 +795,12 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
         if (msg.id !== messageId || !msg.actions) return msg
         return {
           ...msg,
+          pending_transactions: undefined,
           actions: msg.actions.map((act) => {
             if (act.pendingAction?.id === pendingAction.id) {
               return {
                 ...act,
+                pending_transactions: undefined,
                 pendingAction: { ...act.pendingAction, status: 'confirmed' as const },
               }
             }
@@ -846,10 +848,12 @@ export function GeminiChat({ onOpenApiKey, onToggleExpand, isExpanded }: GeminiC
         if (msg.id !== messageId || !msg.actions) return msg
         return {
           ...msg,
+          pending_transactions: undefined,
           actions: msg.actions.map((act) => {
             if (act.pendingAction?.id === pendingAction.id) {
               return {
                 ...act,
+                pending_transactions: undefined,
                 pendingAction: { ...act.pendingAction, status: 'cancelled' as const },
               }
             }
@@ -1047,6 +1051,9 @@ Atenção crítica:
           owner: c.ownerName,
           closingDay: c.closingDay,
           dueDay: c.dueDay,
+          cardType: c.cardType,
+          isVaVr: isVaVrCard(c),
+          isMine: c.ownerUid === (me?.uid ?? currentUid),
         })),
         friends: (friends || []).map((f) => ({
           uid: f.uid,
